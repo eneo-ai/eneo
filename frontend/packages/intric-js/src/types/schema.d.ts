@@ -5941,10 +5941,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get All Users */
+    /**
+     * Get All Users
+     * @description List all users across all tenants.
+     */
     get: operations["get_all_users_api_v1_sysadmin_users__get"];
     put?: never;
-    /** Register New User */
+    /**
+     * Register New User
+     * @description Register a new user as sysadmin and return the created user with an access token.
+     */
     post: operations["register_new_user_api_v1_sysadmin_users__post"];
     delete?: never;
     options?: never;
@@ -5959,15 +5965,21 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get User */
+    /**
+     * Get User
+     * @description Get a single user by id.
+     */
     get: operations["get_user_api_v1_sysadmin_users__user_id___get"];
     put?: never;
     /**
      * Update User
-     * @description Omitted fields are not updated.
+     * @description Update a user by id; omitted fields are left unchanged.
      */
     post: operations["update_user_api_v1_sysadmin_users__user_id___post"];
-    /** Delete User */
+    /**
+     * Delete User
+     * @description Delete a user by id.
+     */
     delete: operations["delete_user_api_v1_sysadmin_users__user_id___delete"];
     options?: never;
     head?: never;
@@ -5983,21 +5995,14 @@ export interface paths {
     };
     /**
      * Get Tenants
-     * @description Get all tenants with masked API credentials.
-     *
-     *     Returns tenant information with API keys masked to show only last 4 characters.
-     *     This prevents exposing full API keys through the API endpoint.
-     *
-     *     Args:
-     *         domain: Optional domain filter
-     *         container: Dependency injection container
-     *
-     *     Returns:
-     *         Paginated list of tenants with masked credentials
+     * @description List all tenants with API credentials masked, optionally filtered by domain.
      */
     get: operations["get_tenants_api_v1_sysadmin_tenants__get"];
     put?: never;
-    /** Create Tenant */
+    /**
+     * Create Tenant
+     * @description Create a new tenant and return it with masked credentials.
+     */
     post: operations["create_tenant_api_v1_sysadmin_tenants__post"];
     delete?: never;
     options?: never;
@@ -6014,9 +6019,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Tenant */
+    /**
+     * Update Tenant
+     * @description Update a tenant by id and return it with masked credentials.
+     */
     post: operations["update_tenant_api_v1_sysadmin_tenants__id___post"];
-    /** Delete Tenant By Id */
+    /**
+     * Delete Tenant By Id
+     * @description Delete a tenant by id and return it with masked credentials.
+     */
     delete: operations["delete_tenant_by_id_api_v1_sysadmin_tenants__id___delete"];
     options?: never;
     head?: never;
@@ -6030,7 +6041,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Predefined Roles */
+    /**
+     * Get Predefined Roles
+     * @description List the predefined roles loaded from configuration.
+     */
     get: operations["get_predefined_roles_api_v1_sysadmin_predefined_roles__get"];
     put?: never;
     post?: never;
@@ -6049,7 +6063,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Crawl All Weekly Websites */
+    /**
+     * Crawl All Weekly Websites
+     * @description Trigger crawls for all websites scheduled to run weekly.
+     */
     post: operations["crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post"];
     delete?: never;
     options?: never;
@@ -6124,7 +6141,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Enable Completion Model */
+    /**
+     * Enable Completion Model
+     * @description Enable or disable a completion model for a specific tenant.
+     */
     post: operations["enable_completion_model_api_v1_sysadmin_tenants__id__completion_models__completion_model_id___post"];
     delete?: never;
     options?: never;
@@ -6141,7 +6161,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Enable Embedding Model */
+    /**
+     * Enable Embedding Model
+     * @description Enable or disable an embedding model for a specific tenant.
+     */
     post: operations["enable_embedding_model_api_v1_sysadmin_tenants__id__embedding_models__embedding_model_id___post"];
     delete?: never;
     options?: never;
@@ -6156,10 +6179,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Origins */
+    /**
+     * Get Origins
+     * @description List allowed CORS origins, optionally filtered by tenant.
+     */
     get: operations["get_origins_api_v1_sysadmin_allowed_origins__get"];
     put?: never;
-    /** Add Origin */
+    /**
+     * Add Origin
+     * @description Add an allowed CORS origin for a tenant.
+     */
     post: operations["add_origin_api_v1_sysadmin_allowed_origins__post"];
     delete?: never;
     options?: never;
@@ -6177,7 +6206,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete Origin */
+    /**
+     * Delete Origin
+     * @description Delete an allowed CORS origin by id (idempotent).
+     */
     delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
     options?: never;
     head?: never;
@@ -6196,9 +6228,6 @@ export interface paths {
     /**
      * Recalculate Tenant Usage Statistics
      * @description Recalculate usage statistics for a specific tenant.
-     *
-     *     This endpoint is intended for tenant-specific administrative operations,
-     *     such as fixing usage statistics for a particular tenant.
      */
     post: operations["recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post"];
     delete?: never;
@@ -6219,9 +6248,6 @@ export interface paths {
     /**
      * Recalculate All Tenants Usage Statistics
      * @description Recalculate usage statistics for all active tenants.
-     *
-     *     This endpoint is intended for system-wide administrative operations,
-     *     such as bulk recalculation of usage statistics across all tenants.
      */
     post: operations["recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post"];
     delete?: never;
@@ -6241,18 +6267,7 @@ export interface paths {
     put?: never;
     /**
      * Migrate Completion Model For Tenant
-     * @description Migrate completion model usage for a specific tenant.
-     *
-     *     This endpoint allows system administrators to migrate all usage from one
-     *     completion model to another for a specific tenant. This is useful for:
-     *     - Migrating tenants away from deprecated models
-     *     - Consolidating model usage
-     *     - Fixing model configurations for specific tenants
-     *
-     *     Args:
-     *         tenant_id: UUID of the tenant to migrate
-     *         model_id: UUID of the source model to migrate from
-     *         migration_request: Details of the migration (target model, entity types, etc.)
+     * @description Migrate completion model usage from one model to another for a specific tenant.
      */
     post: operations["migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post"];
     delete?: never;
@@ -6272,17 +6287,7 @@ export interface paths {
     put?: never;
     /**
      * Migrate Completion Model For All Tenants
-     * @description Migrate completion model usage for all active tenants.
-     *
-     *     This endpoint allows system administrators to migrate all usage from one
-     *     completion model to another across all active tenants. This is useful for:
-     *     - Deprecating models system-wide
-     *     - Migrating to newer model versions
-     *     - Consolidating model usage across the entire system
-     *
-     *     Args:
-     *         model_id: UUID of the source model to migrate from
-     *         migration_request: Details of the migration (target model, entity types, etc.)
+     * @description Migrate completion model usage from one model to another across all active tenants.
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
     delete?: never;
@@ -6302,12 +6307,7 @@ export interface paths {
     put?: never;
     /**
      * Create Completion Model
-     * @description Create a new completion model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     This creates the model metadata only. To enable it for a tenant,
-     *     use POST /api/v1/completion-models/{id}/ with tenant credentials.
+     * @description Create global completion model metadata (system-wide operation).
      */
     post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
     delete?: never;
@@ -6326,11 +6326,7 @@ export interface paths {
     get?: never;
     /**
      * Update Completion Model Metadata
-     * @description Update completion model metadata (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     Updates global model metadata. Does not affect tenant-specific settings.
+     * @description Update global completion model metadata (system-wide operation).
      */
     put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
     post?: never;
@@ -6352,12 +6348,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Completion Model
-     * @description Soft-delete a completion model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     WARNING: Affects all tenants. Use with caution.
-     *     Set force=true to hard-delete (may break references).
+     * @description Soft-delete global completion model metadata (system-wide operation).
      */
     delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
     options?: never;
@@ -6376,12 +6367,7 @@ export interface paths {
     put?: never;
     /**
      * Create Embedding Model
-     * @description Create a new embedding model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     This creates the model metadata only. To enable it for a tenant,
-     *     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+     * @description Create global embedding model metadata (system-wide operation).
      */
     post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
     delete?: never;
@@ -6400,11 +6386,7 @@ export interface paths {
     get?: never;
     /**
      * Update Embedding Model Metadata
-     * @description Update embedding model metadata (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     Updates global model metadata. Does not affect tenant-specific settings.
+     * @description Update global embedding model metadata (system-wide operation).
      */
     put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
     post?: never;
@@ -6426,12 +6408,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Embedding Model
-     * @description Delete an embedding model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     WARNING: Deletion affects all tenants. Use with caution.
-     *     Set force=true to hard-delete (may erase historical info_blob attribution).
+     * @description Soft-delete global embedding model metadata (system-wide operation).
      */
     delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
     options?: never;
@@ -34459,6 +34436,15 @@ export interface operations {
           "application/json": components["schemas"]["UserInDB"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34494,6 +34480,15 @@ export interface operations {
           "application/json": components["schemas"]["UserInDB"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34523,6 +34518,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
