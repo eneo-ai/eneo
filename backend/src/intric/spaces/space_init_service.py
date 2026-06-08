@@ -69,10 +69,7 @@ class SpaceInitService:
     async def get_space(self, space_id: "UUID"):
         space = await self.space_service.get_space(space_id)
 
-        if (
-            space.default_assistant is None
-            and not space.default_assistant_load_failed
-        ):
+        if space.default_assistant is None and not space.default_assistant_load_failed:
             space = await self._update_space_with_default_assistant(space)
 
         return space
