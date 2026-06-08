@@ -293,6 +293,22 @@ jobs:
         working-directory: frontend/apps/web
         run: bun x playwright@1.58.2 install --with-deps chromium
 
+      # Build the production app up front so the Playwright webServer only has to
+      # start `preview`. A full `vite build` inside the webServer's 180s timeout
+      # is the root cause of the flaky "Timed out waiting from config.webServer":
+      # its wall-clock straddles 180s on shared runners. SVELTE_KIT_OUT_DIR must
+      # match playwright.config.ts so `preview` serves exactly this build; the
+      # backend URLs are read at runtime (via $env/dynamic) so they don't affect
+      # the artifact, but we set them to mirror the previous build environment.
+      - name: Build web app for E2E
+        working-directory: frontend/apps/web
+        env:
+          SVELTE_KIT_OUT_DIR: .svelte-kit-e2e
+          NODE_OPTIONS: --max-old-space-size=6144
+          ENEO_BACKEND_URL: http://localhost:8124
+          PUBLIC_ENEO_BACKEND_URL: http://localhost:8124
+        run: bun run build
+
       - name: Run E2E tests
         working-directory: frontend/apps/web
         env:

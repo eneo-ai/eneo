@@ -44,7 +44,15 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: `bun run build && bun run preview --port ${PORT} --strictPort`,
+    // In CI the build runs as its own workflow step (see ci.yml "Build web app
+    // for E2E"), so the webServer only has to start `preview`. Keeping the build
+    // out of this timeout budget is what makes it reliable: a full production
+    // build whose wall-clock straddles 180s on shared runners is the root cause
+    // of the intermittent "Timed out waiting from config.webServer" failures.
+    // Locally we still build+preview so `bun run test:e2e` works out of the box.
+    command: process.env.CI
+      ? `bun run preview --port ${PORT} --strictPort`
+      : `bun run build && bun run preview --port ${PORT} --strictPort`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
