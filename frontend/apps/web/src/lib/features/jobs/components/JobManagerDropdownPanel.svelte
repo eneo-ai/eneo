@@ -7,6 +7,7 @@
   import { m } from "$lib/paraglide/messages";
   import ExpiringKeysNotification from "$lib/features/api-keys/ExpiringKeysNotification.svelte";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
+  import ExpandableErrorRow from "./ExpandableErrorRow.svelte";
   const jobManager = getJobManager();
   const {
     state: { uploads, jobs, currentlyRunningJobs }
@@ -14,8 +15,6 @@
   const {
     state: { displayItems: expiringDisplayItems }
   } = getExpiringKeysStore();
-
-  let expandedUploads: Record<string, boolean> = {};
 
   const jobsUploadingBlob = derived(jobs, (jobs) => {
     return jobs.filter((job) => job.task === "upload_info_blob");
@@ -47,20 +46,7 @@
       >
         {#each $uploads as upload (upload.id)}
           {#if upload.status === "failed" && upload.errorMessage}
-            <button
-              class="border-default hover:bg-hover-default flex w-full cursor-pointer flex-col border-b px-2 py-1.5 text-left last-of-type:border-b-0"
-              onclick={() => (expandedUploads[upload.id] = !expandedUploads[upload.id])}
-            >
-              <div class="flex w-full items-center justify-between gap-x-3 whitespace-nowrap">
-                <div class="flex-shrink truncate pr-4">{upload.file.name}</div>
-                <div class="text-negative-default min-w-fit font-medium">{m.failed()}</div>
-              </div>
-              {#if expandedUploads[upload.id]}
-                <div class="text-secondary mt-1 w-full text-xs break-words whitespace-normal">
-                  {upload.errorMessage}
-                </div>
-              {/if}
-            </button>
+            <ExpandableErrorRow label={upload.file.name} message={upload.errorMessage} />
           {:else}
             <div
               class="border-default flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0"
@@ -68,6 +54,10 @@
               <div class="flex-shrink truncate pr-4">{upload.file.name}</div>
               {#if upload.status === "queued"}
                 <div class="text-secondary w-48 min-w-48 text-right">{m.waiting()}</div>
+              {:else if upload.status === "failed"}
+                <div class="text-negative-default w-48 min-w-48 text-right font-medium">
+                  {m.failed()}
+                </div>
               {:else if upload.status === "completed"}
                 <div class="text-positive-default w-48 min-w-48 text-right font-medium">
                   {m.done()}
