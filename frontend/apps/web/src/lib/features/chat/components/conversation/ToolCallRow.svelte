@@ -136,10 +136,11 @@
   );
 
   // An ask-the-user elicitation (free-text/choice question) renders the question
-  // and options in its own card, so the args panel would just echo them — hide it.
-  // A pure-confirm elicitation has no answer field, and its args ARE the change
-  // being confirmed, so those stay visible.
-  const hideArgs = $derived(isElicitationPending && !!call.elicitation?.answerField);
+  // and options in its own card, so the args panel would just echo them — hide it
+  // both while pending and after it resolves (the card persists the question +
+  // answer). A pure-confirm elicitation has no answer field, and its args ARE the
+  // change being confirmed, so those stay visible.
+  const hideArgs = $derived(!!call.elicitation?.answerField);
   const showArgs = $derived(hasArgs && !hideArgs);
 
   // While confirming a change, preview just the new content (the prompt/name);
@@ -149,6 +150,18 @@
       ? formatToolChangePreview(call.arguments ?? {})
       : formatToolArgs(call.arguments ?? {})
   );
+
+  // The change preview is clamped while pending. Only clamp + offer the expand
+  // toggle when the rendered content actually overflows the clamp; a short value
+  // (a name, say) fits and needs no fade or "show full change" button. We measure
+  // the preview against the clamp limit whenever the value changes.
+  let argsPreEl = $state<HTMLPreElement>();
+  let argsOverflows = $state(false);
+  const ARGS_CLAMP_PX = 128; // matches max-h-32 (8rem)
+  $effect(() => {
+    void argsText; // re-measure when the previewed value changes
+    argsOverflows = !!argsPreEl && argsPreEl.scrollHeight > ARGS_CLAMP_PX;
+  });
 
   const hasContent = $derived(
     showArgs || isPending || hasResult || canLoadResult || !!call.elicitation
@@ -233,9 +246,9 @@
   <Collapsible.Content>
     <div class="space-y-3 px-3 pt-1 pb-3">
       {#if showArgs}
-        {@const clampArgs = isElicitationPending && !argsExpanded}
+        {@const clampArgs = isElicitationPending && !argsExpanded && argsOverflows}
         <div class="space-y-1.5">
-          <div class="bg-muted/50 rounded-md p-3">
+          <div class="bg-muted/30 rounded-md p-3">
             <div
               class={clampArgs
                 ? "max-h-32 overflow-hidden [mask-image:linear-gradient(to_bottom,black_55%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
@@ -244,10 +257,11 @@
                   : ""}
             >
               <pre
+                bind:this={argsPreEl}
                 class="text-foreground overflow-x-auto font-mono text-xs leading-snug break-words whitespace-pre-wrap">{argsText}</pre>
             </div>
           </div>
-          {#if isElicitationPending}
+          {#if isElicitationPending && argsOverflows}
             <button
               type="button"
               class="text-muted-foreground hover:text-foreground flex w-full items-center justify-center gap-1 text-[11px] font-medium transition-colors"
@@ -265,7 +279,7 @@
         </div>
       {/if}
 
-      {#if hasResult || canLoadResult}
+      {#if (hasResult || canLoadResult) && !call.elicitation}
         <Collapsible.Root bind:open={responseOpen} onOpenChange={onResponseToggle}>
           <Collapsible.Trigger
             class="group/result text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 text-[10px] font-semibold tracking-wider uppercase transition-colors"
