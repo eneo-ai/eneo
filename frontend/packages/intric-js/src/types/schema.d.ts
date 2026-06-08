@@ -32849,6 +32849,15 @@ export interface operations {
           "application/json": components["schemas"]["TenantIntegration"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -34041,13 +34050,24 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Microsoft Graph validation token echoed as plain text. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "text/plain": string;
+        };
+      };
+      /** @description SharePoint notifications accepted for processing. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            status: string;
+          };
         };
       };
       /** @description Validation Error */

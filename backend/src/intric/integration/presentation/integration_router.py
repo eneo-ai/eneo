@@ -71,7 +71,7 @@ async def get_tenant_integrations(
     response_model=TenantIntegration,
     status_code=200,
     description="Add an integration to the tenant.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def add_tenant_integration(
     integration_id: UUID,

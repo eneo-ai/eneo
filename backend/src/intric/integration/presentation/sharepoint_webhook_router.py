@@ -1,7 +1,7 @@
 from typing import Annotated, Optional, cast
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from intric.integration.infrastructure.content_service.types import (
     SharePointWebhookPayload,
@@ -38,7 +38,25 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
         "Handle SharePoint change notifications; echo the Graph validation token "
         "(plain text) during the subscription handshake."
     ),
-    responses=responses.get_responses([]),
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Microsoft Graph validation token echoed as plain text.",
+            "content": {"text/plain": {"schema": {"type": "string"}}},
+        },
+        202: {
+            "description": "SharePoint notifications accepted for processing.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"status": {"type": "string"}},
+                        "required": ["status"],
+                    }
+                }
+            },
+        },
+    },
     response_model=None,
 )
 async def sharepoint_webhook(
