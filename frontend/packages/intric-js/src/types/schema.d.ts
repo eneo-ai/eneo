@@ -32,11 +32,17 @@ export interface paths {
     get: operations["get_app_api_v1_apps__id___get"];
     put?: never;
     post?: never;
-    /** Delete App */
+    /**
+     * Delete App
+     * @description Delete an app by id.
+     */
     delete: operations["delete_app_api_v1_apps__id___delete"];
     options?: never;
     head?: never;
-    /** Update App */
+    /**
+     * Update App
+     * @description Update an app by id.
+     */
     patch: operations["update_app_api_v1_apps__id___patch"];
     trace?: never;
   };
@@ -50,7 +56,10 @@ export interface paths {
     /** Get App Runs */
     get: operations["get_app_runs_api_v1_apps__id__runs__get"];
     put?: never;
-    /** Run App */
+    /**
+     * Run App
+     * @description Queue a run for an app by id.
+     */
     post: operations["run_app_api_v1_apps__id__runs__post"];
     delete?: never;
     options?: never;
@@ -84,7 +93,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish App */
+    /**
+     * Publish App
+     * @description Publish or unpublish an app by id.
+     */
     post: operations["publish_app_api_v1_apps__id__publish__post"];
     delete?: never;
     options?: never;
@@ -99,11 +111,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get App Run */
+    /**
+     * Get App Run
+     * @description Get an app run by id.
+     */
     get: operations["get_app_run_api_v1_app_runs__id___get"];
     put?: never;
     post?: never;
-    /** Delete App Run */
+    /**
+     * Delete App Run
+     * @description Delete an app run by id.
+     */
     delete: operations["delete_app_run_api_v1_app_runs__id___delete"];
     options?: never;
     head?: never;
@@ -1026,11 +1044,14 @@ export interface paths {
     };
     /**
      * Get Assistants
-     * @description Requires Admin permission if `for_tenant` is `true`.
+     * @description List assistants. Requires Admin permission if `for_tenant` is `true`.
      */
     get: operations["get_assistants_api_v1_assistants__get"];
     put?: never;
-    /** Create Assistant */
+    /**
+     * Create Assistant
+     * @description Create a new assistant in a space.
+     */
     post: operations["create_assistant_api_v1_assistants__post"];
     delete?: never;
     options?: never;
@@ -1050,10 +1071,13 @@ export interface paths {
     put?: never;
     /**
      * Update Assistant
-     * @description Omitted fields are not updated
+     * @description Update an assistant. Omitted fields are not updated.
      */
     post: operations["update_assistant_api_v1_assistants__id___post"];
-    /** Delete Assistant */
+    /**
+     * Delete Assistant
+     * @description Delete an assistant.
+     */
     delete: operations["delete_assistant_api_v1_assistants__id___delete"];
     options?: never;
     head?: never;
@@ -1072,7 +1096,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Assistant
-     * @description Streams the response as Server-Sent Events if stream == true
+     * @description Ask an assistant and start a new session. Streams the response as Server-Sent Events if `stream` is `true`.
      */
     post: operations["ask_assistant_api_v1_assistants__id__sessions__post"];
     delete?: never;
@@ -1093,10 +1117,13 @@ export interface paths {
     put?: never;
     /**
      * Ask Followup
-     * @description Streams the response as Server-Sent Events if stream == true
+     * @description Ask a follow-up question in an existing session. Streams the response as Server-Sent Events if `stream` is `true`.
      */
     post: operations["ask_followup_api_v1_assistants__id__sessions__session_id___post"];
-    /** Delete Assistant Session */
+    /**
+     * Delete Assistant Session
+     * @description Delete a session belonging to an assistant.
+     */
     delete: operations["delete_assistant_session_api_v1_assistants__id__sessions__session_id___delete"];
     options?: never;
     head?: never;
@@ -1112,7 +1139,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Leave Feedback */
+    /**
+     * Leave Feedback
+     * @description Leave feedback on a session.
+     */
     post: operations["leave_feedback_api_v1_assistants__id__sessions__session_id__feedback__post"];
     delete?: never;
     options?: never;
@@ -1150,7 +1180,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Transfer Assistant To Space */
+    /**
+     * Transfer Assistant To Space
+     * @description Transfer an assistant to another space.
+     */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
     delete?: never;
     options?: never;
@@ -1167,7 +1200,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish Assistant */
+    /**
+     * Publish Assistant
+     * @description Publish or unpublish an assistant.
+     */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
     delete?: never;
     options?: never;
@@ -1256,7 +1292,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish Group Chat */
+    /**
+     * Publish Group Chat
+     * @description Publishes or unpublishes an existing group chat by its ID.
+     */
     post: operations["publish_group_chat_api_v1_group_chats__id__publish__post"];
     delete?: never;
     options?: never;
@@ -1282,31 +1321,7 @@ export interface paths {
     put?: never;
     /**
      * Chat
-     * @description Unified endpoint for communicating with an assistant or a group chat.
-     *
-     *     If request.session_id is provided: continues an existing conversation.
-     *     Otherwise: starts a new conversation with the specified assistant or group chat.
-     *
-     *     Either request.session_id, request.assistant_id, or request.group_chat_id must be provided.
-     *
-     *     For group chats:
-     *     - Specify the group_chat_id to chat with a group chat
-     *     - If tools.assistants contains an assistant, that specific assistant will be targeted
-     *       (requires the group chat to have allow_mentions=True).
-     *     - If no assistant is targeted, the most appropriate assistant will be selected.
-     *     - When multiple assistants could answer a question, the system will choose the most relevant one
-     *       or select the first matching assistant if relevance scores are similar.
-     *
-     *     For regular assistants:
-     *     - The tools.assistants field can be used for directing the request to a tool assistant.
-     *
-     *     Streams the response as Server-Sent Events if stream == true.
-     *     The following SSE response models are supported in the stream:
-     *     - SSEText: Text completion chunks
-     *     - SSEIntricEvent: Internal events like generating an image
-     *     - SSEFiles: Generated files/images responses
-     *     - SSEFirstChunk: Initial response with metadata
-     *     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
+     * @description Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.
      */
     post: operations["chat_api_v1_conversations__post"];
     delete?: never;
@@ -1326,15 +1341,7 @@ export interface paths {
     put?: never;
     /**
      * Preflight Tokens
-     * @description Returns the exact token cost the next chat request will add.
-     *
-     *     Excludes knowledge/RAG and web-search content (selected at request time
-     *     and unknowable up-front). Designed to be called debounced from the input
-     *     field — the cost is dominated by tokenization (~5-20ms).
-     *
-     *     Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
-     *     ~150 req/min, so the limit catches scripted abuse while leaving multiple
-     *     tabs and fast input untouched.
+     * @description Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).
      */
     post: operations["preflight_tokens_api_v1_conversations_preflight_post"];
     delete?: never;
@@ -1359,7 +1366,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Conversation
-     * @description Deletes a specific conversation
+     * @description Deletes a specific conversation (session).
      */
     delete: operations["delete_conversation_api_v1_conversations__session_id___delete"];
     options?: never;
@@ -1378,7 +1385,7 @@ export interface paths {
     put?: never;
     /**
      * Leave Feedback
-     * @description Leave feedback for a conversation
+     * @description Leave feedback for a conversation.
      */
     post: operations["leave_feedback_api_v1_conversations__session_id__feedback__post"];
     delete?: never;
@@ -1398,7 +1405,7 @@ export interface paths {
     put?: never;
     /**
      * Set Title Of Conversation
-     * @description Set the title of a conversation
+     * @description Generate and set the title of a conversation.
      */
     post: operations["set_title_of_conversation_api_v1_conversations__session_id__title__post"];
     delete?: never;
@@ -1418,14 +1425,7 @@ export interface paths {
     put?: never;
     /**
      * Approve Tools
-     * @description Submit approval decisions for pending tool calls.
-     *
-     *     When a chat request is made with require_tool_approval=true, the stream will emit
-     *     a tool_approval_required event with an approval_id and list of pending tools.
-     *     Use this endpoint to approve or reject each tool call.
-     *
-     *     The decisions list should contain one entry per tool_call_id from the event.
-     *     If a tool_call_id is omitted, it will be treated as rejected.
+     * @description Submit approval decisions for pending tool calls from a tool_approval_required event.
      */
     post: operations["approve_tools_api_v1_conversations_approve_tools__post"];
     delete?: never;
@@ -1567,7 +1567,7 @@ export interface paths {
     };
     /**
      * Get Counts
-     * @description Total counts.
+     * @description Get total tenant counts.
      */
     get: operations["get_counts_api_v1_analysis_counts__get"];
     put?: never;
@@ -1587,10 +1587,7 @@ export interface paths {
     };
     /**
      * Get Metadata
-     * @description Data for analytics.
-     *
-     *     Note on datetime parameters:
-     *     - If no time is provided in the datetime, time components default to 00:00:00
+     * @description Get metadata statistics for analytics.
      */
     get: operations["get_metadata_api_v1_analysis_metadata_statistics__get"];
     put?: never;
@@ -1611,16 +1608,6 @@ export interface paths {
     /**
      * Get Assistant Activity
      * @description Get assistant activity statistics for the tenant.
-     *
-     *     Returns:
-     *     - active_assistant_count: Number of assistants with sessions in the period
-     *     - total_trackable_assistants: Number of published assistants with insights enabled
-     *     - active_assistant_pct: Percentage of trackable assistants that are active
-     *     - active_user_count: Number of unique users with sessions (excluding service sessions
-     *       and deleted users)
-     *
-     *     Note on datetime parameters:
-     *     - If no time is provided in the datetime, time components default to 00:00:00
      */
     get: operations["get_assistant_activity_api_v1_analysis_assistant_activity__get"];
     put?: never;
@@ -1640,7 +1627,7 @@ export interface paths {
     };
     /**
      * Get Metadata Aggregated
-     * @description Aggregated data for analytics (hourly buckets).
+     * @description Get aggregated analytics data in hourly buckets.
      */
     get: operations["get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get"];
     put?: never;
@@ -1660,38 +1647,13 @@ export interface paths {
     };
     /**
      * Get Most Recent Questions
-     * @description Get all the questions asked to an assistant in the last `days_since` days.
-     *
-     *     `days_since`: How long back in time to get the questions.
-     *
-     *     `from_date`: Start date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `to_date`: End date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `include_followups`: If not selected, only the first question of a session is returned.
-     *         Order is by date ascending, but if followups are included they are grouped together
-     *         with their original question.
+     * @description Get the questions asked to an assistant within a time range.
      */
     get: operations["get_most_recent_questions_api_v1_analysis_assistants__assistant_id___get"];
     put?: never;
     /**
      * Ask Question About Questions
-     * @description Ask a question with the questions asked to an assistant in the last
-     *       `days_since` days as the context.
-     *
-     *     `days_since`: How long back in time to get the questions.
-     *
-     *     `from_date`: Start date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `to_date`: End date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `include_followups`: If not selected, only the first question of a session is returned.
-     *         Order is by date ascending, but if followups are included they are grouped together
-     *         with their original question.
+     * @description Ask a question using an assistant's recent questions as context.
      */
     post: operations["ask_question_about_questions_api_v1_analysis_assistants__assistant_id___post"];
     delete?: never;
@@ -1710,8 +1672,6 @@ export interface paths {
     /**
      * Get Most Recent Questions Paginated
      * @description Get paginated question history for an assistant.
-     *
-     *     Optimized for admin insights history view and large datasets.
      */
     get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
     put?: never;
@@ -1741,24 +1701,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Unified Questions About Questions
-     * @description Ask a question about the questions asked to an assistant or group chat.
-     *
-     *     This unified endpoint works with both assistants and group chats.
-     *     Either assistant_id or group_chat_id must be provided, but not both.
-     *
-     *     Args:
-     *         ask_analysis: Contains the question and streaming preference
-     *         days_since: How long back in time to get the questions
-     *         from_date: Start date to filter questions (overrides days_since).
-     *             If no time is provided, time components default to 00:00:00.
-     *         to_date: End date to filter questions (overrides days_since).
-     *             If no time is provided, time components default to 00:00:00.
-     *         include_followups: If False, only returns first question of each session
-     *         assistant_id: UUID of assistant to analyze questions for
-     *         group_chat_id: UUID of group chat to analyze questions for
-     *
-     *     Returns:
-     *         AnalysisAnswer containing the AI response
+     * @description Ask a question about an assistant's or group chat's conversations.
      */
     post: operations["ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post"];
     delete?: never;
@@ -1774,7 +1717,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Conversation Insight Job */
+    /**
+     * Get Conversation Insight Job
+     * @description Get the status of a conversation insights analysis job.
+     */
     get: operations["get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get"];
     put?: never;
     post?: never;
@@ -4518,15 +4464,24 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Prompt */
+    /**
+     * Get Prompt
+     * @description Get a prompt by id.
+     */
     get: operations["get_prompt_api_v1_prompts__id___get"];
     put?: never;
     post?: never;
-    /** Delete Prompt */
+    /**
+     * Delete Prompt
+     * @description Delete a prompt by id.
+     */
     delete: operations["delete_prompt_api_v1_prompts__id___delete"];
     options?: never;
     head?: never;
-    /** Update Prompt Description */
+    /**
+     * Update Prompt Description
+     * @description Update a prompt's description by id.
+     */
     patch: operations["update_prompt_description_api_v1_prompts__id___patch"];
     trace?: never;
   };
@@ -20614,6 +20569,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AssistantPublic_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -21727,6 +21691,24 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -23503,6 +23485,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_Message_"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23543,6 +23534,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23580,6 +23580,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_AssistantInsightQuestion_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23664,6 +23673,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23693,6 +23711,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AnalysisJobStatusResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

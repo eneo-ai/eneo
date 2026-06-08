@@ -59,6 +59,7 @@ async def get_app(
 
 @router.patch(
     "/{id}/",
+    description="Update an app by id.",
     response_model=AppPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -340,6 +341,7 @@ async def update_app(
 
 @router.delete(
     "/{id}/",
+    description="Delete an app by id.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
@@ -393,6 +395,7 @@ async def delete_app(
 
 @router.post(
     "/{id}/runs/",
+    description="Queue a run for an app by id.",
     status_code=203,
     response_model=AppRunPublic,
     responses=responses.get_responses([400, 403]),
@@ -489,6 +492,7 @@ async def get_prompts(
 
 @router.post(
     "/{id}/publish/",
+    description="Publish or unpublish an app by id.",
     response_model=AppPublic,
     responses=responses.get_responses([403, 404]),
 )

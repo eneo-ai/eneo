@@ -107,6 +107,7 @@ async def delete_group_chat(
 @router.post(
     "/{id}/publish/",
     response_model=GroupChatPublic,
+    description="Publishes or unpublishes an existing group chat by its ID.",
     responses=responses.get_responses([403, 404]),
 )
 async def publish_group_chat(
