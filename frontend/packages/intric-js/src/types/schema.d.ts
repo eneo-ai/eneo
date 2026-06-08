@@ -14846,7 +14846,9 @@ export interface components {
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
       | "update_model_usage_stats"
-      | "analyze_conversation_insights";
+      | "analyze_conversation_insights"
+      | "export_audit_logs"
+      | "log_audit_event";
     /** TemplateCreate */
     TemplateCreate: {
       /**
