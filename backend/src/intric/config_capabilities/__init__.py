@@ -10,7 +10,11 @@ from intric.config_capabilities.capability import (
     ConfigCapability,
     Scope,
 )
-from intric.config_capabilities.context import capability_context, run_capability
+from intric.config_capabilities.context import (
+    capability_context,
+    capability_context_from_container,
+    run_capability,
+)
 from intric.config_capabilities.registry import (
     CAPABILITY_REGISTRY,
     get_capability,
@@ -24,6 +28,7 @@ __all__ = [
     "ConfigCapability",
     "Scope",
     "capability_context",
+    "capability_context_from_container",
     "get_capability",
     "register",
     "run_capability",
