@@ -105,6 +105,7 @@ def add_tenant_user(
         if role is None:
             owner_permissions = [
                 "admin",
+                "personal_chat",
                 "assistants",
                 "group_chats",
                 "apps",
