@@ -1765,6 +1765,8 @@
   "enable_audit_logging_description": "Track user actions and system events for compliance and security monitoring",
   "enable_provisioning": "Auto-provision Users (SSO)",
   "enable_provisioning_description": "Automatically create accounts for new users on their first SSO login",
+  "enable_edit_mode": "Edit mode (configure by chat)",
+  "enable_edit_mode_description": "Let editors configure an assistant by chatting with it, in addition to the settings page",
   "delete_template_confirmation": "Are you sure you want to delete this template?",
   "permanent_action": "This action cannot be undone",
   "template_in_use": "Template currently in use",

@@ -31,6 +31,7 @@ class SettingsPublic(SettingsBase):
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
     )
+    edit_mode_enabled: bool = False  # Configure-an-assistant-by-chatting feature
 
 
 class GetModelsResponse(BaseModel):

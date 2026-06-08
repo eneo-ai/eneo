@@ -71,6 +71,20 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Toggle the edit-mode (configure-by-chat) feature for the tenant.
+     * @param {boolean} enabled Whether to enable edit mode
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateEditMode: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/edit-mode", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
     }
   };
 }

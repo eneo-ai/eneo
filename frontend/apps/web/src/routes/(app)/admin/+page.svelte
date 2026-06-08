@@ -20,11 +20,26 @@
   let usingTemplates = $state<boolean | undefined>(undefined);
   let auditLoggingEnabled = $state<boolean | undefined>(undefined);
   let provisioningEnabled = $state(false);
+  let editModeEnabled = $state(false);
   $effect.pre(() => {
     usingTemplates = data.settings.using_templates;
     auditLoggingEnabled = data.settings.audit_logging_enabled;
     provisioningEnabled = data.settings.provisioning ?? false;
+    editModeEnabled = data.settings.edit_mode_enabled ?? false;
   });
+
+  async function handleToggleEditMode({ next }: { current: boolean; next: boolean }) {
+    const previousValue = editModeEnabled;
+    editModeEnabled = next; // Optimistic UI update
+    try {
+      const updated = await intric.settings.updateEditMode(next);
+      editModeEnabled = updated.edit_mode_enabled ?? false;
+      await invalidateAll();
+    } catch (error) {
+      console.error("[Admin] Error updating edit-mode setting:", error);
+      editModeEnabled = previousValue; // Revert on error
+    }
+  }
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -127,6 +142,9 @@
           description={m.enable_provisioning_description()}
         >
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
+        </Settings.Row>
+        <Settings.Row title={m.enable_edit_mode()} description={m.enable_edit_mode_description()}>
+          <Input.Switch bind:value={editModeEnabled} sideEffect={handleToggleEditMode} />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

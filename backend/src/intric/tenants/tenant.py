@@ -250,6 +250,7 @@ class TenantUpdatePublic(BaseModel):
     state: Optional[TenantState] = None
     security_enabled: Optional[bool] = None
     default_role_id: Optional[UUID] = None
+    edit_mode_enabled: Optional[bool] = None
 
 
 class TenantUpdate(TenantUpdatePublic):

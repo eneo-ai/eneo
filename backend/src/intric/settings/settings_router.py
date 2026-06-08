@@ -235,3 +235,27 @@ async def update_api_key_expiry_notifications_setting(
     return await service.update_api_key_expiry_notifications_setting(
         enabled=data.enabled
     )
+
+
+@settings_admin_router.patch(
+    "/edit-mode",
+    response_model=SettingsPublic,
+    summary="Toggle the edit-mode (configure-by-chat) feature",
+    description="""
+Enable or disable edit mode for your tenant — configuring an assistant by chatting
+with it (and the in-chat edit toggle).
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Toggles `edit_mode_enabled` on the tenant.
+- While enabled, edit mode runs with the built-in config persona until a
+  materialized "edit assistant" is provisioned.
+    """,
+)
+async def update_edit_mode_setting(
+    data: ToggleSettingUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.settings_service()
+    return await service.update_edit_mode_setting(enabled=data.enabled)

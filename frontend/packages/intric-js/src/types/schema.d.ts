@@ -1017,6 +1017,34 @@ export interface paths {
     patch: operations["update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch"];
     trace?: never;
   };
+  "/api/v1/settings/edit-mode": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle the edit-mode (configure-by-chat) feature
+     * @description Enable or disable edit mode for your tenant — configuring an assistant by chatting
+     *     with it (and the in-chat edit toggle).
+     *
+     *     **Admin Only:** Requires admin permissions.
+     *
+     *     **Behavior:**
+     *     - Toggles `edit_mode_enabled` on the tenant.
+     *     - While enabled, edit mode runs with the built-in config persona until a
+     *       materialized "edit assistant" is provisioned.
+     */
+    patch: operations["update_edit_mode_setting_api_v1_settings_edit_mode_patch"];
+    trace?: never;
+  };
   "/api/v1/assistants/": {
     parameters: {
       query?: never;
@@ -14343,6 +14371,11 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      /**
+       * Edit Mode Enabled
+       * @default false
+       */
+      edit_mode_enabled?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -15537,6 +15570,8 @@ export interface components {
       security_enabled?: boolean | null;
       /** Default Role Id */
       default_role_id?: string | null;
+      /** Edit Mode Enabled */
+      edit_mode_enabled?: boolean | null;
     };
     /**
      * TenantWithMaskedCredentials
@@ -20552,6 +20587,39 @@ export interface operations {
     };
   };
   update_api_key_expiry_notifications_setting_api_v1_settings_api_key_expiry_notifications_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_edit_mode_setting_api_v1_settings_edit_mode_patch: {
     parameters: {
       query?: never;
       header?: never;

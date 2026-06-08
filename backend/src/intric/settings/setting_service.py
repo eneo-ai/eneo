@@ -112,6 +112,13 @@ class SettingService:
             if tenant
             else False
         )
+        edit_mode_enabled = (
+            overrides["edit_mode_enabled"]
+            if "edit_mode_enabled" in overrides
+            else tenant.edit_mode_enabled
+            if tenant
+            else False
+        )
 
         app_settings = get_app_settings()
 
@@ -123,6 +130,7 @@ class SettingService:
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
+            edit_mode_enabled=edit_mode_enabled,
         )
 
     async def get_settings(self) -> SettingsPublic:
@@ -279,6 +287,47 @@ class SettingService:
         return await self._build_settings_public(
             settings_in_db=settings,
             overrides={"provisioning": enabled},
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_edit_mode_setting(self, enabled: bool) -> SettingsPublic:
+        """Enable or disable the edit-mode (configure-by-chat) feature for the tenant.
+
+        Note: this toggles availability only. Provisioning the materialized "edit
+        assistant" is a separate step; until then, edit mode runs with the built-in
+        config persona + the target's own model.
+        """
+        logger.info(
+            "Admin %s toggling edit mode to %s for tenant %s",
+            self.user.username,
+            enabled,
+            self.user.tenant_id,
+        )
+
+        tenant_before = await self.tenant_repo.get(self.user.tenant_id)
+        old_enabled = tenant_before.edit_mode_enabled if tenant_before else False
+
+        await self.tenant_repo.update_tenant(
+            TenantUpdate(id=self.user.tenant_id, edit_mode_enabled=enabled)
+        )
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled edit_mode_enabled to {enabled}",
+            metadata={
+                "setting": "edit_mode_enabled",
+                "changes": {"edit_mode_enabled": {"old": old_enabled, "new": enabled}},
+            },
+        )
+
+        settings = await self.repo.get(self.user.id)
+        return await self._build_settings_public(
+            settings_in_db=settings,
+            overrides={"edit_mode_enabled": enabled},
         )
 
     @validate_permissions(Permission.ADMIN)
