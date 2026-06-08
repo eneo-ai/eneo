@@ -44,7 +44,7 @@ class OutputValidation(BaseModel):
 class ServiceBase(OutputValidation):
     name: str
     prompt: str
-    completion_model_kwargs: ModelKwargs | None = Field(default_factory=ModelKwargs)
+    completion_model_kwargs: ModelKwargs = Field(default_factory=ModelKwargs)
 
     @field_validator("completion_model_kwargs", mode="before")
     @classmethod
