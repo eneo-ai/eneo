@@ -39,7 +39,10 @@ EndDateQuery = Annotated[
 @router.get(
     "/",
     response_model=TokenUsageSummary,
-    description="Get aggregate token usage statistics for the specified date range.",
+    description=(
+        "Get aggregate token usage statistics for the specified date range. "
+        "If no dates are provided, the last 30 days are used."
+    ),
     responses=responses.get_responses([]),
 )
 async def get_token_usage(
@@ -64,7 +67,10 @@ async def get_token_usage(
 @router.get(
     "/users",
     response_model=UserTokenUsageSummary,
-    description="Get token usage statistics aggregated by user for the specified date range.",
+    description=(
+        "Get token usage statistics aggregated by user for the specified date "
+        "range. If no dates are provided, the last 30 days are used."
+    ),
     responses=responses.get_responses([]),
 )
 async def get_user_token_usage(
@@ -100,7 +106,10 @@ async def get_user_token_usage(
 @router.get(
     "/users/{user_id}/summary",
     response_model=UserTokenUsageSummaryDetail,
-    description="Get token usage summary for a specific user without fetching all users.",
+    description=(
+        "Get token usage summary for a specific user without fetching all users. "
+        "If no dates are provided, the last 30 days are used."
+    ),
     responses=responses.get_responses([404]),
 )
 async def get_user_summary(
@@ -132,7 +141,10 @@ async def get_user_summary(
 @router.get(
     "/users/{user_id}",
     response_model=TokenUsageSummary,
-    description="Get model breakdown for a specific user within the specified date range.",
+    description=(
+        "Get model breakdown for a specific user within the specified date range. "
+        "If no dates are provided, the last 30 days are used."
+    ),
     responses=responses.get_responses([404]),
 )
 async def get_user_model_breakdown(

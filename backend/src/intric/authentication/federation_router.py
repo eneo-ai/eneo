@@ -909,7 +909,7 @@ async def initiate_auth(
 
 @router.post(
     "/callback",
-    response_model=None,
+    response_model=AccessTokenResponse,
     summary="OIDC callback handler",
     description=(
         "Handle OIDC callback, validate token, lookup user. "

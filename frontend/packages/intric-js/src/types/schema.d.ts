@@ -4667,7 +4667,7 @@ export interface paths {
     };
     /**
      * Get Token Usage
-     * @description Get aggregate token usage statistics for the specified date range.
+     * @description Get aggregate token usage statistics for the specified date range. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_token_usage_api_v1_token_usage__get"];
     put?: never;
@@ -4687,7 +4687,7 @@ export interface paths {
     };
     /**
      * Get User Token Usage
-     * @description Get token usage statistics aggregated by user for the specified date range.
+     * @description Get token usage statistics aggregated by user for the specified date range. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_user_token_usage_api_v1_token_usage_users_get"];
     put?: never;
@@ -4707,7 +4707,7 @@ export interface paths {
     };
     /**
      * Get User Summary
-     * @description Get token usage summary for a specific user without fetching all users.
+     * @description Get token usage summary for a specific user without fetching all users. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_user_summary_api_v1_token_usage_users__user_id__summary_get"];
     put?: never;
@@ -4727,7 +4727,7 @@ export interface paths {
     };
     /**
      * Get User Model Breakdown
-     * @description Get model breakdown for a specific user within the specified date range.
+     * @description Get model breakdown for a specific user within the specified date range. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_user_model_breakdown_api_v1_token_usage_users__user_id__get"];
     put?: never;
@@ -6952,6 +6952,11 @@ export interface components {
       access_token: string;
       /** Token Type */
       token_type: string;
+    };
+    /** AccessTokenResponse */
+    AccessTokenResponse: {
+      /** Access Token */
+      access_token: string;
     };
     /**
      * ActionConfig
@@ -36468,7 +36473,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["AccessTokenResponse"];
         };
       };
       /** @description Invalid or expired state */
