@@ -3031,6 +3031,8 @@
   "template_role_tooltip": "Mallroll — kan återställas till \"{name}\"",
   "permission_assistants": "Assistenter",
   "permission_assistants_description": "Hantering av assistenter. Skapa, uppdatera och radera assistenter.",
+  "permission_personal_chat": "Personlig chatt",
+  "permission_personal_chat_description": "Använd den personliga chatten. Utan denna behörighet är den personliga chatten otillgänglig; övrig åtkomst påverkas inte.",
   "permission_group_chats": "Gruppchattar",
   "permission_group_chats_description": "Hantering av gruppchattar. Skapa, uppdatera och radera gruppchattar.",
   "permission_apps": "Appar",

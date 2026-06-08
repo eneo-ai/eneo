@@ -2997,6 +2997,8 @@
   "template_role_tooltip": "Template role — can be reset to \"{name}\"",
   "permission_assistants": "Assistants",
   "permission_assistants_description": "Management of Assistants. Create, update, and delete Assistants.",
+  "permission_personal_chat": "Personal chat",
+  "permission_personal_chat_description": "Use the personal chat. Without this permission the personal chat is unavailable; all other access is unaffected.",
   "permission_group_chats": "Group chats",
   "permission_group_chats_description": "Management of group chats. Create, update, and delete group chats.",
   "permission_apps": "Apps",

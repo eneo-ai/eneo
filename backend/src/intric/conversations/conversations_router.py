@@ -37,6 +37,7 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
     SessionFeedback,
+    SessionInDB,
     SessionMetadataPublic,
     SessionPublic,
     SessionUpdate,
@@ -232,6 +233,25 @@ async def _validate_conversation_scope(
                         f"The requested resource belongs to a different scope."
                     ),
                 )
+
+
+async def _authorize_session_access(container: Container, session: SessionInDB) -> None:
+    """Authorize the caller against the session's underlying chat partner.
+
+    Session ownership alone is not sufficient: a permission can be revoked after
+    a session is created (e.g. personal_chat), and the historical session must
+    then become unreachable. Re-check the current permission by resolving the
+    session's assistant or group chat — get_assistant/get_group_chat raise
+    UnauthorizedException when access is no longer allowed, and get_assistant is
+    default-assistant-aware so the personal chat is gated by personal_chat.
+    """
+    if session.group_chat_id:
+        group_chat_service = container.group_chat_service()
+        await group_chat_service.get_group_chat(group_chat_id=session.group_chat_id)
+    else:
+        assert session.assistant is not None
+        assistant_service = container.assistant_service()
+        await assistant_service.get_assistant(session.assistant.id)
 
 
 @router.post(
@@ -514,6 +534,8 @@ async def get_conversation(
     session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
 
+    await _authorize_session_access(container, session)
+
     return to_session_public(session)
 
 
@@ -534,6 +556,8 @@ async def delete_conversation(
     # Note: We'll need to determine if this is an assistant or group chat session
     session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
+
+    await _authorize_session_access(container, session)
 
     if session.group_chat_id:
         await session_service.delete(session_id, group_chat_id=session.group_chat_id)
@@ -565,6 +589,8 @@ async def leave_feedback(
     session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
 
+    await _authorize_session_access(container, session)
+
     if session.group_chat_id:
         updated_session = await session_service.leave_feedback(
             session_id=session_id,
@@ -591,10 +617,18 @@ async def set_title_of_conversation(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Set the title of a conversation"""
-    conversation_service = container.conversation_service()
-    session = await conversation_service.set_title_of_conversation(session_id)
+    # Authorize before generating the title — set_title invokes the model, so
+    # the permission check must run first to keep a revoked user from triggering
+    # inference on a historical session.
+    session_service = container.session_service()
+    session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
-    return to_session_public(session)
+    await _authorize_session_access(container, session)
+
+    conversation_service = container.conversation_service()
+    updated_session = await conversation_service.set_title_of_conversation(session_id)
+    assert updated_session is not None
+    return to_session_public(updated_session)
 
 
 @router.post(
@@ -788,7 +822,11 @@ async def rename_conversation(
 ):
     """Rename a conversation (session)"""
     session_service = container.session_service()
-    session = await session_service.update_session(
+    session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
+    await _authorize_session_access(container, session)
+
+    updated_session = await session_service.update_session(
         SessionUpdate(id=session_id, name=payload.name)
     )
-    return to_session_public(session)
+    return to_session_public(updated_session)
