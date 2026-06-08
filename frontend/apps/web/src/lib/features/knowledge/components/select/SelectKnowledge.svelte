@@ -101,7 +101,7 @@
   websites: WebsiteSparse[],
   integration: IntegrationEntry[]
 )}
-  <section class="mt-6">
+  <section class="mt-6 space-y-2">
     {#each collections as collection (`group:${collection.id}`)}
       <SelectedKnowledgeItem
         kind="collection"
@@ -125,7 +125,7 @@
 {/snippet}
 
 {#snippet comboboxSection(origin: "personal" | "organization")}
-  <section class="mt-6">
+  <section class="mt-4">
     <KnowledgeCombobox
       {origin}
       space={$currentSpace}

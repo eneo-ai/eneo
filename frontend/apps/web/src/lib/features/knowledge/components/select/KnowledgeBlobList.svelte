@@ -41,14 +41,14 @@
   }
 </script>
 
-<div class="border-default bg-secondary flex flex-col border-t px-4 py-2">
+<div class="border-default flex flex-col gap-0.5 border-t px-2 py-1.5">
   {#if loading}
-    <div class="text-muted flex items-center gap-2 py-2 text-sm">{m.loading()}</div>
+    <div class="text-muted flex items-center gap-2 px-2 py-2 text-sm">{m.loading()}</div>
   {:else if blobs && blobs.length > 0}
     {#each pagedBlobs as blob (blob.id)}
       <BlobPreview {blob} let:showBlob>
         <button
-          class="hover:bg-hover-dimmer flex w-full cursor-pointer items-center justify-between gap-2 py-2 text-left text-sm transition-colors"
+          class="hover:bg-hover-dimmer focus-visible:ring-stronger flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
           onclick={showBlob}
         >
           <span class="flex-grow truncate">

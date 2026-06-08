@@ -132,9 +132,9 @@
         {...aria}
         bind:this={triggerRef}
         type="button"
-        class="border-default hover:bg-hover-default mt-2 flex h-12 w-full items-center justify-center gap-1 rounded-lg border"
+        class="border-default text-secondary hover:border-stronger hover:bg-hover-dimmer hover:text-primary focus-visible:ring-stronger flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
       >
-        <IconPlus class="min-w-7" />
+        <IconPlus class="size-4" />
         {triggerLabel}
       </button>
     {/snippet}

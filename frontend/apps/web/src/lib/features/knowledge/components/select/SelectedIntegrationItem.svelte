@@ -36,12 +36,13 @@
 
 {#if entry.type === "wrapper"}
   {@const wrapper = entry.wrapper}
-  <Collapsible.Root bind:open={expanded} class="w-full">
-    <div
-      class="border-default hover:bg-hover-dimmer flex h-16 w-full items-center gap-2 border-b px-4"
-    >
+  <Collapsible.Root
+    bind:open={expanded}
+    class="border-default bg-primary w-full overflow-hidden rounded-xl border transition-shadow duration-150 hover:shadow-sm"
+  >
+    <div class="flex h-14 w-full items-center gap-2 px-3">
       <Collapsible.Trigger
-        class="flex size-6 cursor-pointer items-center justify-center transition-opacity hover:opacity-70"
+        class="text-secondary hover:bg-hover-dimmer hover:text-primary focus-visible:ring-stronger flex size-7 cursor-pointer items-center justify-center rounded-lg transition-colors focus-visible:ring-2 focus-visible:outline-none"
         aria-label={expanded ? m.aria_collapse() : m.aria_expand()}
       >
         {#if expanded}<IconChevronDown />{:else}<IconChevronRight />{/if}
@@ -53,14 +54,19 @@
         <IconCancel />
       {/if}
 
-      <span class="truncate px-2">{wrapper.name}</span>
+      <Collapsible.Trigger
+        class="focus-visible:ring-stronger hover:text-primary flex-grow cursor-pointer truncate rounded-md px-1 text-left text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {wrapper.name}
+      </Collapsible.Trigger>
       <WrapperBadges items={wrapper.items} />
-      {#if !modelEnabled}<span>({m.model_disabled()})</span>{/if}
-      <div class="flex-grow"></div>
+      {#if !modelEnabled}<span class="text-negative-default text-sm">({m.model_disabled()})</span
+        >{/if}
 
       <Button
-        variant="destructive"
+        variant="ghost"
         size="icon"
+        class="text-muted hover:text-negative-default hover:bg-negative-dimmer shrink-0"
         aria-label={m.remove()}
         onclick={() => onRemove(wrapper.items.map((item) => item.id))}
       >
@@ -69,9 +75,9 @@
     </div>
 
     <Collapsible.Content>
-      <div class="border-default bg-secondary flex flex-col border-t px-4 py-2">
+      <div class="border-default flex flex-col gap-0.5 border-t px-2 py-1.5">
         {#each getSortedWrapperItems(wrapper.items) as wrapperItem (wrapperItem.id)}
-          <div class="flex items-center justify-between gap-2 py-2 text-sm">
+          <div class="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm">
             <span class="flex min-w-0 flex-1 items-center gap-2">
               {#if isWrapperFolderItem(wrapperItem)}
                 <IconFolder class="text-secondary h-4 w-4 flex-shrink-0" />
@@ -93,20 +99,22 @@
 {:else}
   {@const knowledge = entry.knowledge}
   <div
-    class="border-default hover:bg-hover-dimmer flex h-16 w-full items-center gap-2 border-b px-4"
+    class="border-default bg-primary flex h-14 w-full items-center gap-2 overflow-hidden rounded-xl border px-3 transition-shadow duration-150 hover:shadow-sm"
   >
-    <div class="size-6"></div>
+    <div class="size-7"></div>
     {#if modelEnabled}
       <IntegrationVendorIcon size="sm" type={knowledge.integration_type} />
     {:else}
       <IconCancel />
     {/if}
-    <span class="flex-grow truncate px-2">{knowledge.name}</span>
-    {#if !modelEnabled}<span>({m.model_disabled()})</span>{/if}
+    <span class="flex-grow truncate px-1 text-sm font-medium">{knowledge.name}</span>
+    {#if !modelEnabled}<span class="text-negative-default text-sm">({m.model_disabled()})</span
+      >{/if}
 
     <Button
-      variant="destructive"
+      variant="ghost"
       size="icon"
+      class="text-muted hover:text-negative-default hover:bg-negative-dimmer shrink-0"
       aria-label={m.remove()}
       onclick={() => onRemove([knowledge.id])}
     >

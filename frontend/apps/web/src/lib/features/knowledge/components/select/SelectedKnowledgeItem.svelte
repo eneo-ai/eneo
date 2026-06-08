@@ -70,22 +70,26 @@
   }
 </script>
 
-<Collapsible.Root open={expanded} {onOpenChange} class="w-full">
+<Collapsible.Root
+  open={expanded}
+  {onOpenChange}
+  class="border-default bg-primary w-full overflow-hidden rounded-xl border transition-shadow duration-150 hover:shadow-sm"
+>
   <div
-    class="border-default hover:bg-hover-dimmer flex h-16 w-full items-center gap-2 border-b px-4"
+    class="flex h-14 w-full items-center gap-2 px-3"
     class:text-negative-default={!modelEnabled}
     class:bg-orange-50={hasFailures}
     class:dark:bg-orange-950={hasFailures}
   >
     {#if expandable}
       <Collapsible.Trigger
-        class="flex size-6 cursor-pointer items-center justify-center transition-opacity hover:opacity-70"
+        class="text-secondary hover:bg-hover-dimmer hover:text-primary focus-visible:ring-stronger flex size-7 cursor-pointer items-center justify-center rounded-lg transition-colors focus-visible:ring-2 focus-visible:outline-none"
         aria-label={expanded ? m.aria_collapse() : m.aria_expand()}
       >
         {#if expanded}<IconChevronDown />{:else}<IconChevronRight />{/if}
       </Collapsible.Trigger>
     {:else}
-      <div class="size-6"></div>
+      <div class="size-7"></div>
     {/if}
 
     {#if !modelEnabled}
@@ -97,7 +101,7 @@
     {/if}
 
     <Collapsible.Trigger
-      class="flex-grow cursor-pointer truncate px-2 text-left hover:underline"
+      class="focus-visible:ring-stronger hover:text-primary flex-grow cursor-pointer truncate rounded-md px-1 text-left text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default"
       disabled={!expandable}
     >
       {title}
@@ -128,7 +132,13 @@
       <Badge variant="outline" class="text-muted font-normal">{m.empty()}</Badge>
     {/if}
 
-    <Button variant="destructive" size="icon" aria-label={m.remove()} onclick={onRemove}>
+    <Button
+      variant="ghost"
+      size="icon"
+      class="text-muted hover:text-negative-default hover:bg-negative-dimmer shrink-0"
+      aria-label={m.remove()}
+      onclick={onRemove}
+    >
       <IconTrash />
     </Button>
   </div>
