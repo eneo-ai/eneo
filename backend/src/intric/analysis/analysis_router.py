@@ -193,7 +193,7 @@ async def get_metadata_aggregated(
     "/assistants/{assistant_id}/",
     response_model=PaginatedResponse[Message],
     description="Get the questions asked to an assistant within a time range.",
-    responses=responses.get_responses([400]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_most_recent_questions(
     assistant_id: UUID,
@@ -240,7 +240,7 @@ async def get_most_recent_questions(
     "/assistants/{assistant_id}/questions/",
     response_model=CursorPaginatedResponse[AssistantInsightQuestion],
     description="Get paginated question history for an assistant.",
-    responses=responses.get_responses([400]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_most_recent_questions_paginated(
     assistant_id: UUID,
@@ -289,7 +289,7 @@ async def get_most_recent_questions_paginated(
     "/assistants/{assistant_id}/",
     response_model=None,
     description="Ask a question using an assistant's recent questions as context.",
-    responses=responses.get_responses([400]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def ask_question_about_questions(
     assistant_id: UUID,
@@ -352,7 +352,7 @@ async def ask_question_about_questions(
     "/conversation-insights/",
     response_model=None,
     description="Ask a question about an assistant's or group chat's conversations.",
-    responses=responses.get_responses([400]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def ask_unified_questions_about_questions(
     ask_analysis: AskAnalysis,
