@@ -89,6 +89,7 @@ async def get_tenant_mcp_settings(
 
 @router.post(
     "/settings/{mcp_server_id}/",
+    description="Enable an MCP server for the current tenant with optional credentials.",
     response_model=MCPServerSettingsPublic,
     responses=responses.get_responses([400, 404]),
 )
@@ -125,6 +126,7 @@ async def enable_mcp_for_tenant(
 
 @router.put(
     "/settings/{mcp_server_id}/",
+    description="Update MCP server settings for the current tenant.",
     response_model=MCPServerSettingsPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -147,6 +149,7 @@ async def update_mcp_settings(
 
 @router.delete(
     "/settings/{mcp_server_id}/",
+    description="Disable an MCP server for the current tenant.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
@@ -182,6 +185,7 @@ async def disable_mcp_for_tenant(
 
 @router.put(
     "/settings/tools/{tool_id}/",
+    description="Update tenant-level enablement for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([403, 404]),
 )
@@ -253,6 +257,7 @@ async def get_mcp_server(
 
 @router.post(
     "/",
+    description="Create a new MCP server in global catalog (admin only).",
     response_model=MCPServerCreateResponse,
     responses=responses.get_responses([400, 403]),
 )
@@ -321,6 +326,7 @@ async def create_mcp_server(
 
 @router.post(
     "/{id}/",
+    description="Update an MCP server in global catalog (admin only).",
     response_model=MCPServerPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -413,6 +419,7 @@ async def update_mcp_server(
 
 @router.delete(
     "/{id}/",
+    description="Delete an MCP server from global catalog (admin only).",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
@@ -467,6 +474,7 @@ async def get_mcp_server_tools(
 
 @router.post(
     "/{id}/tools/sync/",
+    description="Sync tools from remote MCP server (admin only).",
     response_model=MCPServerToolSyncResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -518,6 +526,7 @@ async def sync_mcp_server_tools(
 
 @router.post(
     "/{id}/tools/review/approve/",
+    description="Approve pending tool changes (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -562,6 +571,7 @@ async def approve_tool_changes(
 
 @router.post(
     "/{id}/tools/review/reject/",
+    description="Reject pending tool changes (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -607,6 +617,7 @@ async def reject_tool_changes(
 
 @router.post(
     "/{id}/tools/review/approve-all/",
+    description="Approve all pending tool changes for an MCP server (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -641,6 +652,7 @@ async def approve_all_tool_changes(
 
 @router.put(
     "/{id}/tools/{tool_id}/",
+    description="Update global default enabled status for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([403, 404]),
 )
