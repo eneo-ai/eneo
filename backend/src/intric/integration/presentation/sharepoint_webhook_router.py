@@ -9,7 +9,6 @@ from intric.integration.infrastructure.content_service.types import (
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
 
 logger = get_logger(__name__)
 
@@ -22,7 +21,23 @@ router = APIRouter()
         "Echo the Microsoft Graph validation token (plain text) when present, "
         "otherwise report webhook endpoint health."
     ),
-    responses=responses.get_responses([]),
+    responses={
+        200: {
+            "description": (
+                "Validation token echoed as plain text, or webhook health status."
+            ),
+            "content": {
+                "text/plain": {"schema": {"type": "string"}},
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"status": {"type": "string"}},
+                        "required": ["status"],
+                    }
+                },
+            },
+        },
+    },
     response_model=None,
 )
 async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
