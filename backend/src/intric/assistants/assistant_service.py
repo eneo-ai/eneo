@@ -1151,7 +1151,10 @@ class AssistantService:
                 )
             else:
                 session = await self.session_service.create_session(
-                    name=name, assistant_id=active_assistant.id
+                    name=name,
+                    assistant_id=active_assistant.id,
+                    # Keep edit-mode (configure-the-assistant) chats out of history.
+                    edit_mode=edit_mode,
                 )
 
         assert session is not None

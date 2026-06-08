@@ -171,9 +171,27 @@ def _cancelled(ctx: Context) -> str:
     return _t(_lang_from_ctx(ctx), "cancelled")
 
 
-async def _ask(ctx: Context, question: str, suggestions: list[str]) -> str:
-    """Ask the user a free-text question (with optional suggestions) via elicitation."""
-    extra: dict[str, Any] = {"suggestions": suggestions} if suggestions else {}
+async def _ask(
+    ctx: Context,
+    question: str,
+    suggestions: list[str],
+    options: list[str],
+    multiple: bool,
+) -> str:
+    """Ask the user a question via elicitation.
+
+    The elicited field is always a single string; the client joins multi-select
+    picks back into it. ``suggestions`` are quick-fill chips for a free-text
+    answer, while ``options`` present a fixed choice list (radio when
+    ``multiple`` is False, checkboxes when True) — both non-standard schema
+    extensions the client renders.
+    """
+    extra: dict[str, Any] = {}
+    if suggestions:
+        extra["suggestions"] = suggestions
+    if options:
+        extra["options"] = options
+        extra["multiple"] = multiple
     answer_field = Field(
         default="",
         description="The user's answer.",
@@ -197,9 +215,17 @@ async def ask_user(
     question: str,
     ctx: Context,
     suggestions: list[str] | None = None,
+    options: list[str] | None = None,
+    multiple: bool = False,
 ) -> str:
-    """Ask the user a clarifying question when their request is ambiguous."""
-    return await _ask(ctx, question, suggestions or [])
+    """Ask the user a clarifying question when their request is ambiguous.
+
+    - ``suggestions``: a free-text question with optional quick-fill chips.
+    - ``options``: a fixed list to choose from. With ``multiple=False`` the user
+      picks exactly one; with ``multiple=True`` they may pick several (returned
+      comma-separated).
+    """
+    return await _ask(ctx, question, suggestions or [], options or [], multiple)
 
 
 def _register_capability_tool(capability: "ConfigCapability") -> None:

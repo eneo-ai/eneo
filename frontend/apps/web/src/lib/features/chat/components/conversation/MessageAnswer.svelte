@@ -3,7 +3,6 @@
   import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ToolCallRow from "./ToolCallRow.svelte";
-  import MessageElicitation from "./MessageElicitation.svelte";
   import type { ElicitationState } from "../../ChatService.svelte";
   import * as Separator from "$lib/components/ui/separator/index.js";
   import { dynamicColour } from "$lib/core/colours";
@@ -156,7 +155,7 @@
   {#if mcpToolCalls && mcpToolCalls.length > 0}
     <div class="mb-3 flex flex-col gap-1.5">
       {#each toolCallGroups as group, groupIdx (groupIdx)}
-        <div class="border-default overflow-hidden rounded-md border">
+        <div class="border-dimmer overflow-hidden rounded-md border">
           {#each group.calls as call, callIdx (call.tool_call_id ?? `${groupIdx}-${callIdx}`)}
             {@const isLastInMessage =
               groupIdx === toolCallGroups.length - 1 && callIdx === group.calls.length - 1}
@@ -181,9 +180,6 @@
               onApprove={handleApproveTool}
               onDeny={handleDenyTool}
             />
-            {#if call.elicitation}
-              <MessageElicitation elicitation={call.elicitation} />
-            {/if}
           {/each}
         </div>
       {/each}

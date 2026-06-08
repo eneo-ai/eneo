@@ -37,6 +37,8 @@ class SessionAdd(SessionBase):
     api_key_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
     group_chat_id: Optional[UUID] = None
+    # Edit-mode (configure-the-assistant) sessions are hidden from history.
+    edit_mode: bool = False
 
 
 class SessionUpdate(SessionBase):

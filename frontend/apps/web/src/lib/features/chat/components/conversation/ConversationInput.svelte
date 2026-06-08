@@ -9,6 +9,7 @@
   import MentionInput from "../mentions/MentionInput.svelte";
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
+  import ElicitationPrompt from "./ElicitationPrompt.svelte";
   import { getChatService } from "../../ChatService.svelte";
   import { IconWeb } from "@intric/icons/web";
   import { track } from "$lib/core/helpers/track";
@@ -107,16 +108,6 @@
       (chat.partner.permissions?.includes("edit") ?? false)
   );
   let editMode = $state(false);
-
-  // Free-text answer for a standalone ask_user elicitation prompt.
-  let elicitAnswer = $state("");
-
-  function submitElicitAnswer() {
-    if (!elicitAnswer.trim()) return;
-    const answer = elicitAnswer;
-    elicitAnswer = "";
-    chat.submitElicitation("accept", answer);
-  }
 
   function toggleEditMode(next: boolean) {
     editMode = next;
@@ -298,55 +289,15 @@
 
   {#if chat.pendingElicitation && !chat.pendingElicitation.toolCallId}
     {@const elicitation = chat.pendingElicitation}
-    <div
-      class="border-default bg-secondary mb-1.5 flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm"
-    >
-      <p class="whitespace-pre-line">{elicitation.message}</p>
-      {#if elicitation.answerField}
-        {#if elicitation.suggestions.length > 0}
-          <div class="flex flex-wrap gap-1.5">
-            {#each elicitation.suggestions as suggestion (suggestion)}
-              <button
-                type="button"
-                class="border-default hover:bg-hover-default rounded-full border px-3 py-1"
-                onclick={() => chat.submitElicitation("accept", suggestion)}
-              >
-                {suggestion}
-              </button>
-            {/each}
-          </div>
-        {/if}
-        <div class="flex gap-2">
-          <input
-            type="text"
-            bind:value={elicitAnswer}
-            placeholder={m.elicitation_answer_placeholder()}
-            class="border-default bg-primary flex-1 rounded-lg border px-3 py-1.5"
-            onkeydown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submitElicitAnswer();
-              }
-            }}
-          />
-          <Button variant="primary" disabled={!elicitAnswer.trim()} onclick={submitElicitAnswer}>
-            {m.send()}
-          </Button>
-          <Button variant="outlined" onclick={() => chat.submitElicitation("decline")}>
-            {m.decline()}
-          </Button>
-        </div>
-      {:else}
-        <div class="flex gap-2">
-          <Button variant="primary" onclick={() => chat.submitElicitation("accept")}>
-            {m.confirm()}
-          </Button>
-          <Button variant="outlined" onclick={() => chat.submitElicitation("decline")}>
-            {m.decline()}
-          </Button>
-        </div>
-      {/if}
-    </div>
+    <ElicitationPrompt
+      variant="standalone"
+      isActive
+      message={elicitation.message}
+      answerField={elicitation.answerField}
+      suggestions={elicitation.suggestions}
+      options={elicitation.options}
+      multiple={elicitation.multiple}
+    />
   {/if}
 
   <div class="relative">

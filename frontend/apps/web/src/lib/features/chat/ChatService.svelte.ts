@@ -31,6 +31,10 @@ export type ElicitationState = {
   // free-text answer (vs an empty schema = pure confirm/decline).
   answerField: string | null;
   suggestions: string[];
+  // Fixed choice list (non-standard schema extension). When present the user
+  // picks from `options`; `multiple` => checkboxes (joined on submit) vs radios.
+  options: string[];
+  multiple: boolean;
   status: "pending" | "answered" | "declined";
   answer: string | null;
 };
@@ -40,6 +44,8 @@ export type PendingElicitation = {
   message: string;
   answerField: string | null;
   suggestions: string[];
+  options: string[];
+  multiple: boolean;
   // The tool call this elicitation belongs to, when the backend could correlate
   // it. Null -> render the standalone prompt above the input instead.
   toolCallId: string | null;
@@ -662,11 +668,22 @@ export class ChatService {
               // property means a free-text answer (with optional suggestions).
               const props =
                 (event.requested_schema?.properties as
-                  | Record<string, { type?: string; suggestions?: string[] }>
+                  | Record<
+                      string,
+                      {
+                        type?: string;
+                        suggestions?: string[];
+                        options?: string[];
+                        multiple?: boolean;
+                      }
+                    >
                   | undefined) ?? {};
               const answerField =
                 Object.keys(props).find((k) => props[k]?.type === "string") ?? null;
-              const suggestions = answerField ? (props[answerField]?.suggestions ?? []) : [];
+              const field = answerField ? props[answerField] : undefined;
+              const suggestions = field?.suggestions ?? [];
+              const options = field?.options ?? [];
+              const multiple = field?.multiple ?? false;
               const toolCallId = event.tool_call_id || null;
 
               // Attach to the originating tool call so the prompt renders in its
@@ -678,6 +695,8 @@ export class ChatService {
                   message: event.message,
                   answerField,
                   suggestions,
+                  options,
+                  multiple,
                   status: "pending",
                   answer: null
                 };
@@ -688,6 +707,8 @@ export class ChatService {
                 message: event.message,
                 answerField,
                 suggestions,
+                options,
+                multiple,
                 toolCallId: call ? toolCallId : null
               };
             }

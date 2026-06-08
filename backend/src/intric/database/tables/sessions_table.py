@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index
+from sqlalchemy import CheckConstraint, ForeignKey, Index, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.api_keys_v2_table import ApiKeysV2
@@ -28,6 +28,9 @@ class Sessions(BasePublic):
     name: Mapped[str] = mapped_column()
     feedback_value: Mapped[Optional[int]] = mapped_column()
     feedback_text: Mapped[Optional[str]] = mapped_column()
+    # Edit-mode (configure-the-assistant) sessions are persisted so the chat
+    # works, but excluded from the history list queries in sessions_repo.
+    edit_mode: Mapped[bool] = mapped_column(server_default=false(), nullable=False)
 
     # Foreign keys
     assistant_id: Mapped[Optional[UUID]] = mapped_column(

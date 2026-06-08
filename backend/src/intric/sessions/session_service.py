@@ -268,6 +268,7 @@ class SessionService:
         name: str,
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
+        edit_mode: bool = False,
     ) -> SessionInDB:
         user_id, api_key_id = self._principal_columns()
         session_add = SessionAdd(
@@ -276,6 +277,7 @@ class SessionService:
             api_key_id=api_key_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
+            edit_mode=edit_mode,
         )
         async with self._write_transaction():
             return await self.session_repo.add(session_add)

@@ -159,7 +159,12 @@ class SessionRepository:
         tenant_id: UUID | None = None,
     ) -> tuple[list[SessionInDB], int]:
         normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(Sessions).where(Sessions.assistant_id == assistant_id)
+        query = (
+            sa.select(Sessions)
+            .where(Sessions.assistant_id == assistant_id)
+            # Edit-mode (configure-the-assistant) sessions are hidden from history.
+            .where(Sessions.edit_mode.is_(False))
+        )
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
@@ -241,9 +246,14 @@ class SessionRepository:
         tenant_id: UUID | None = None,
     ) -> tuple[list[SessionMetadataPublic], int]:
         normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(
-            Sessions.id, Sessions.name, Sessions.created_at, Sessions.updated_at
-        ).where(Sessions.assistant_id == assistant_id)
+        query = (
+            sa.select(
+                Sessions.id, Sessions.name, Sessions.created_at, Sessions.updated_at
+            )
+            .where(Sessions.assistant_id == assistant_id)
+            # Edit-mode (configure-the-assistant) sessions are hidden from history.
+            .where(Sessions.edit_mode.is_(False))
+        )
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
