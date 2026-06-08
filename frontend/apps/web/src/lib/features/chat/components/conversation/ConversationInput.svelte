@@ -18,7 +18,7 @@
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   const chat = getChatService();
-  const { featureFlags } = getAppContext();
+  const { featureFlags, settings } = getAppContext();
 
   const {
     state: { attachments, isUploading },
@@ -98,9 +98,11 @@
     else chat.newConversation();
   };
 
-  // Edit mode: only assistants the user may edit can be configured from chat.
+  // Edit mode: only when the tenant has enabled it, and only for assistants the
+  // user may edit.
   const canEditAssistant = $derived(
-    chat.partner.type === "assistant" &&
+    (settings?.edit_mode_enabled ?? false) &&
+      chat.partner.type === "assistant" &&
       "permissions" in chat.partner &&
       (chat.partner.permissions?.includes("edit") ?? false)
   );
