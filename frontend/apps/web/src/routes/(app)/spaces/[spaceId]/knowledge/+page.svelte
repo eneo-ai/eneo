@@ -136,10 +136,6 @@
     <Page.Flex>
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
-      {:else if $selectedTab === "collections" && !$currentSpace.hasPermission("create", "collection")}
-        <Alert class="max-w-80">
-          {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
-        </Alert>
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
           <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
@@ -149,10 +145,6 @@
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
-      {:else if $selectedTab === "websites" && !$currentSpace.hasPermission("create", "website")}
-        <Alert class="max-w-80">
-          {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
-        </Alert>
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
@@ -177,26 +169,37 @@
               : m.shared_integrations_require_admin()}
           </p>
         {/if}
-      {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}
-        <Alert class="max-w-80">
-          {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
-        </Alert>
       {/if}
     </Page.Flex>
   </Page.Header>
   <Page.Main>
     {#if userCanSeeCollections}
       <Page.Tab id="collections">
+        {#if !$currentSpace.hasPermission("create", "collection")}
+          <Alert class="mt-4 mr-3 w-fit max-w-xl">
+            {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
+          </Alert>
+        {/if}
         <CollectionTable></CollectionTable>
       </Page.Tab>
     {/if}
     {#if userCanSeeWebsites}
       <Page.Tab id="websites">
+        {#if !$currentSpace.hasPermission("create", "website")}
+          <Alert class="mt-4 mr-3 w-fit max-w-xl">
+            {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
+          </Alert>
+        {/if}
         <WebsiteTable bind:selectedWebsiteIds></WebsiteTable>
       </Page.Tab>
     {/if}
     {#if userCanSeeIntegrations}
       <Page.Tab id="integrations">
+        {#if !$currentSpace.hasPermission("create", "integrationKnowledge")}
+          <Alert class="mt-4 mr-3 w-fit max-w-xl">
+            {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
+          </Alert>
+        {/if}
         {#if showIntegrationsNotice}
           <div class="border-dimmer hidden border-b py-3 pr-3 lg:block">
             <div
