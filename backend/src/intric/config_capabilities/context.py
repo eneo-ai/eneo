@@ -5,13 +5,13 @@ the token, inside a single write transaction. ``run_capability`` checks the
 capability's permission against the space actor, runs the handler, and emits the
 audit row for mutating capabilities. The MCP layer handles confirmation
 (elicitation) before calling ``run_capability`` because that needs the live MCP
-context; everything else is MCP-agnostic so the form plane can reuse it.
+context.
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import Any, AsyncIterator
 from uuid import UUID
 
 import jwt
@@ -28,13 +28,6 @@ from intric.config_capabilities.capability import (
 from intric.database.database import sessionmanager
 from intric.main.config import get_settings
 from intric.main.exceptions import UnauthorizedException
-
-if TYPE_CHECKING:
-    from intric.main.container.container import Container
-
-
-def _normalize_lang(raw: Any) -> str:
-    return "sv" if str(raw or "").lower().startswith("sv") else "en"
 
 
 def decode_config_claims(token: str) -> dict[str, Any]:
@@ -82,32 +75,6 @@ async def capability_context(token: str) -> AsyncIterator[CapabilityContext]:
                 assistant_id=assistant_id,
                 lang=lang,
             )
-
-
-async def capability_context_from_container(
-    container: "Container",
-    assistant_id: UUID,
-    lang: str | None = None,
-) -> CapabilityContext:
-    """Build a CapabilityContext from an already user-bound request container.
-
-    The form/page plane (a REST endpoint) runs inside the request's own transaction
-    with the user already authenticated and overridden on ``container``, so unlike
-    the chat plane it neither decodes a token nor opens a new session. The mutations
-    and their audit rows commit when the request transaction commits, and
-    ``run_capability`` enforces the same permission path.
-    """
-    user = container.user()
-    space = await container.space_repo().get_space_by_assistant(
-        assistant_id=assistant_id
-    )
-    return CapabilityContext(
-        container=container,
-        user=user,
-        space=space,
-        assistant_id=assistant_id,
-        lang=_normalize_lang(lang),
-    )
 
 
 async def run_capability(

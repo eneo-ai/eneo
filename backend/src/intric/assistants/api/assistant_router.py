@@ -5,7 +5,6 @@ from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, ValidationError
 
 from intric.assistants.api import assistant_protocol
 from intric.assistants.api.assistant_models import (
@@ -35,12 +34,6 @@ from intric.authentication.auth_models import (
     ApiKey,
     ApiKeyNotificationTargetType,
     audit_actor_for,
-)
-from intric.config_capabilities import (
-    CAPABILITY_REGISTRY,
-    ConfigCapability,
-    capability_context_from_container,
-    run_capability,
 )
 from intric.database.database import AsyncSession
 from intric.main.config import get_settings
@@ -663,74 +656,6 @@ async def update_assistant(
     )
 
     return assembler.from_assistant_to_model(updated_assistant, permissions=permissions)
-
-
-class ConfigCapabilityItem(BaseModel):
-    capability_id: str = Field(
-        description="Dotted capability id, e.g. assistant.set_name."
-    )
-    input: dict[str, object] = Field(
-        default_factory=dict, description="Arguments for the capability's input model."
-    )
-
-
-class ConfigCapabilityBatch(BaseModel):
-    items: list[ConfigCapabilityItem]
-    language: str | None = Field(
-        default=None, description="UI locale (e.g. 'sv'/'en')."
-    )
-
-
-@router.post(
-    "/{id}/config/capabilities/batch/",
-    response_model=AssistantPublic,
-    responses=responses.get_responses([400, 403, 404]),
-    summary="Commit assistant-config capabilities atomically",
-    description=(
-        "Apply several form-renderable config capabilities in one transaction "
-        "(shared permission + audit with the chat plane); any failure rolls back "
-        "the whole batch. Returns the assistant after all changes are applied."
-    ),
-)
-async def commit_config_capabilities(
-    id: UUID,
-    body: ConfigCapabilityBatch,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    """Apply several assistant-config capabilities atomically.
-
-    Every item routes through the SAME ``run_capability`` path the chat plane uses
-    via the loopback config-MCP (shared permission + audit). They run in the
-    request's single transaction, so any failure rolls back the whole batch — the
-    page's multi-field Save stays atomic. Only ``form_renderable`` capabilities are
-    reachable. Returns the assistant after all changes are applied.
-    """
-    # Resolve + validate every item up front so a bad request fails before any work.
-    parsed: list[tuple[ConfigCapability, BaseModel]] = []
-    for item in body.items:
-        capability = CAPABILITY_REGISTRY.get(item.capability_id)
-        if capability is None or not capability.form_renderable:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Unknown config capability '{item.capability_id}'.",
-            )
-        try:
-            parsed.append(
-                (capability, capability.input_model.model_validate(item.input))
-            )
-        except ValidationError as exc:
-            raise HTTPException(status_code=400, detail=exc.errors())
-
-    ctx = await capability_context_from_container(
-        container=container, assistant_id=id, lang=body.language
-    )
-    for capability, parsed_input in parsed:
-        await run_capability(capability, ctx, parsed_input)
-
-    service = container.assistant_service()
-    assembler = container.assistant_assembler()
-    assistant, permissions = await service.get_assistant(assistant_id=id)
-    return assembler.from_assistant_to_model(assistant, permissions=permissions)
 
 
 @router.delete(

@@ -1088,32 +1088,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/assistants/{id}/config/capabilities/batch/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Commit Config Capabilities
-     * @description Apply several assistant-config capabilities atomically.
-     *
-     *     Every item routes through the SAME ``run_capability`` path the chat plane uses
-     *     via the loopback config-MCP (shared permission + audit). They run in the
-     *     request's single transaction, so any failure rolls back the whole batch — the
-     *     page's multi-field Save stays atomic. Only ``form_renderable`` capabilities are
-     *     reachable. Returns the assistant after all changes are applied.
-     */
-    post: operations["commit_config_capabilities_api_v1_assistants__id__config_capabilities_batch__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/assistants/{id}/sessions/": {
     parameters: {
       query?: never;
@@ -9462,31 +9436,6 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
-    /** ConfigCapabilityBatch */
-    ConfigCapabilityBatch: {
-      /** Items */
-      items: components["schemas"]["ConfigCapabilityItem"][];
-      /**
-       * Language
-       * @description UI locale (e.g. 'sv'/'en').
-       */
-      language?: string | null;
-    };
-    /** ConfigCapabilityItem */
-    ConfigCapabilityItem: {
-      /**
-       * Capability Id
-       * @description Dotted capability id, e.g. assistant.set_name.
-       */
-      capability_id: string;
-      /**
-       * Input
-       * @description Arguments for the capability's input model.
-       */
-      input?: {
-        [key: string]: unknown;
-      };
-    };
     /**
      * ContentDisposition
      * @enum {string}
@@ -15572,6 +15521,8 @@ export interface components {
       default_role_id?: string | null;
       /** Edit Mode Enabled */
       edit_mode_enabled?: boolean | null;
+      /** Edit Assistant Id */
+      edit_assistant_id?: string | null;
     };
     /**
      * TenantWithMaskedCredentials
@@ -20641,6 +20592,15 @@ export interface operations {
           "application/json": components["schemas"]["SettingsPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -20845,68 +20805,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  commit_config_capabilities_api_v1_assistants__id__config_capabilities_batch__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConfigCapabilityBatch"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AssistantPublic"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
       };
       /** @description Forbidden */
       403: {
