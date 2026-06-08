@@ -42,6 +42,7 @@ from intric.spaces.space_service import SpaceService
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
+from intric.tenants.tenant import TenantUpdate
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
 
@@ -75,6 +76,7 @@ if TYPE_CHECKING:
     from intric.spaces.api.space_models import TemplateCreate
     from intric.spaces.space import Space
     from intric.spaces.space_repo import SpaceRepository
+    from intric.tenants.tenant_repo import TenantRepository
 
 logger = get_logger(__name__)
 
@@ -139,6 +141,7 @@ class AssistantService:
         completion_service: "CompletionService",
         references_service: "ReferencesService",
         icon_repo: IconRepository,
+        tenant_repo: "TenantRepository",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -160,6 +163,7 @@ class AssistantService:
         self.completion_service = completion_service
         self.references_service = references_service
         self.icon_repo = icon_repo
+        self.tenant_repo = tenant_repo
         self.api_key_scope_revoker = api_key_scope_revoker
 
     @property
@@ -349,6 +353,47 @@ class AssistantService:
                 edit_assistant_id,
             )
             return None
+
+    async def ensure_edit_assistant(self) -> Optional[Assistant]:
+        """Provision the tenant's materialized edit assistant if it's missing.
+
+        Creates a "Configuration Assistant" in the enabling admin's personal space,
+        seeds its prompt with the built-in config persona, and stores its id on the
+        tenant. Idempotent: returns the existing assistant when already provisioned.
+        Returns None if there's no personal space to create it in.
+        """
+        existing_id = self.user.tenant.edit_assistant_id
+        if existing_id is not None:
+            try:
+                space = await self.space_repo.get_space_by_assistant(
+                    assistant_id=existing_id
+                )
+                return space.get_assistant(existing_id)
+            except Exception:
+                # Stale reference (assistant deleted) — fall through and re-provision.
+                pass
+
+        personal_space = await self.space_service.get_personal_space()
+        if personal_space is None or personal_space.id is None:
+            logger.warning(
+                "No personal space for user %s; cannot provision edit assistant.",
+                self.user.id,
+            )
+            return None
+
+        from intric.assistant_config_mcp import CONFIG_PERSONA_PROMPT
+
+        assistant, _ = await self.create_assistant(
+            name="Configuration Assistant", space_id=personal_space.id
+        )
+        assistant, _ = await self.update_assistant(
+            assistant_id=assistant.id,
+            prompt=PromptCreate(text=CONFIG_PERSONA_PROMPT),
+        )
+        await self.tenant_repo.update_tenant(
+            TenantUpdate(id=self.user.tenant_id, edit_assistant_id=assistant.id)
+        )
+        return assistant
 
     async def update_assistant(
         self,

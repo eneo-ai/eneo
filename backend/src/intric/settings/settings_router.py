@@ -258,4 +258,9 @@ async def update_edit_mode_setting(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
-    return await service.update_edit_mode_setting(enabled=data.enabled)
+    result = await service.update_edit_mode_setting(enabled=data.enabled)
+    # Provision the materialized edit assistant on enable (idempotent). Runs in the
+    # same request transaction, so the toggle + provisioning commit together.
+    if data.enabled:
+        await container.assistant_service().ensure_edit_assistant()
+    return result

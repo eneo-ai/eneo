@@ -1072,6 +1072,7 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         references_service=references_service,
         icon_repo=icon_repo,
+        tenant_repo=tenant_repo,
         api_key_scope_revoker=api_key_scope_revoker,
     )
     group_chat_service = providers.Factory(
