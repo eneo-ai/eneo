@@ -1163,3 +1163,61 @@ def test_owner_without_websites_cannot_create_website_in_personal_space(
     personal_space.user_id = owner.id
     actor = SpaceActor(owner, personal_space)
     assert actor.can_create_websites() is False
+
+
+# --- Personal chat (default assistant) permission ------------------------------
+# The personal chat is the personal space's default assistant. It is gated by
+# its own PERSONAL_CHAT permission, decoupled from ASSISTANTS, so a baseline role
+# can grant the chat without granting management of assistants — and vice versa.
+
+
+def test_owner_cannot_read_personal_default_assistant_without_personal_chat(
+    personal_space: MockSpace,
+):
+    owner = MockUser(id=60, permissions={Permission.ASSISTANTS})
+    personal_space.user_id = owner.id
+    actor = SpaceActor(owner, personal_space)
+    assert actor.can_read_default_assistant() is False
+    assert actor.can_edit_default_assistant() is False
+
+
+def test_owner_can_read_personal_default_assistant_with_personal_chat(
+    personal_space: MockSpace,
+):
+    owner = MockUser(id=61, permissions={Permission.PERSONAL_CHAT})
+    personal_space.user_id = owner.id
+    actor = SpaceActor(owner, personal_space)
+    assert actor.can_read_default_assistant() is True
+    assert actor.can_edit_default_assistant() is True
+
+
+def test_personal_chat_is_decoupled_from_assistants(personal_space: MockSpace):
+    """PERSONAL_CHAT alone unlocks the chat; ASSISTANTS is not required."""
+    owner = MockUser(id=62, permissions={Permission.PERSONAL_CHAT})
+    personal_space.user_id = owner.id
+    actor = SpaceActor(owner, personal_space)
+    assert actor.can_read_default_assistant() is True
+    assert actor.can_read_assistants() is False
+
+
+def test_assistants_permission_does_not_grant_personal_chat(
+    personal_space: MockSpace,
+):
+    """ASSISTANTS manages assistants but does not unlock the personal chat."""
+    owner = MockUser(id=63, permissions={Permission.ASSISTANTS})
+    personal_space.user_id = owner.id
+    actor = SpaceActor(owner, personal_space)
+    assert actor.can_read_assistants() is True
+    assert actor.can_read_default_assistant() is False
+
+
+def test_personal_chat_does_not_gate_shared_space_default_assistant(
+    shared_space: MockSpace,
+):
+    """The PERSONAL_CHAT gate applies only to the personal space. A shared-space
+    member reads that space's default assistant via space membership, regardless
+    of the PERSONAL_CHAT permission."""
+    member = MockUser(id=64, role=MockSpaceRole.EDITOR, permissions=set())
+    shared_space.members = {member.id: member}
+    actor = SpaceActor(member, shared_space)
+    assert actor.can_read_default_assistant() is True

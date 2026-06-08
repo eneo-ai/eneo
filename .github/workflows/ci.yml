@@ -86,7 +86,19 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.11
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
 
       - name: Verify lockfile consistency
         run: uv lock --check
@@ -131,7 +143,19 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.11
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
 
       - name: Verify lockfile consistency
         run: uv lock --check
@@ -316,7 +340,19 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.11
+        # uv downloads a prebuilt CPython from GitHub releases; that CDN
+        # occasionally returns 504s. Retry with backoff so a transient
+        # blip doesn't fail the whole run.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if uv python install 3.11; then
+              exit 0
+            fi
+            echo "::warning::uv python install failed (attempt $attempt/5); retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::uv python install failed after 5 attempts"
+          exit 1
         working-directory: backend
 
       - name: Install backend dependencies

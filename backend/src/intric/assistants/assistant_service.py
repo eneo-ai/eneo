@@ -24,7 +24,12 @@ from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
-from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
+from intric.main.models import (
+    NOT_PROVIDED,
+    NotProvided,
+    ResourcePermission,
+    is_provided,
+)
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_service import PromptService
@@ -359,9 +364,62 @@ class AssistantService:
 
         assistant = space.get_assistant(assistant_id=assistant_id)
 
-        if not actor.can_edit_assistants():
+        # Access to the personal default assistant requires PERSONAL_CHAT.
+        # That permission permits model selection only; broader configuration
+        # changes additionally require ASSISTANTS below.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and assistant.id == space.default_assistant.id
+        )
+
+        can_edit_default = (
+            actor.can_edit_default_assistant() if is_personal_default else False
+        )
+        can_edit_assistants = actor.can_edit_assistants()
+        if not (can_edit_default if is_personal_default else can_edit_assistants):
             raise UnauthorizedException(
                 "You do not have permission to edit assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        extended_update_requested = any(
+            value is not None
+            for value in (
+                name,
+                prompt,
+                completion_model_kwargs,
+                logging_enabled,
+                groups,
+                websites,
+                integration_knowledge_ids,
+                mcp_server_ids,
+                mcp_tools,
+                attachment_ids,
+                insight_enabled,
+            )
+        ) or any(
+            is_provided(value)
+            for value in (
+                description,
+                data_retention_days,
+                metadata_json,
+                icon_id,
+            )
+        )
+        if (
+            is_personal_default
+            and extended_update_requested
+            and not can_edit_assistants
+        ):
+            raise UnauthorizedException(
+                "The personal_chat permission only allows changing the "
+                "personal assistant's completion model.",
                 code="forbidden_action",
                 context={
                     "resource_type": "assistant",
@@ -534,7 +592,20 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
+        # The personal chat is the personal space's default assistant — it is
+        # gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
+        # so a baseline role can use the chat without managing assistants.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and assistant.id == space.default_assistant.id
+        )
+        can_read = (
+            actor.can_read_default_assistant()
+            if is_personal_default
+            else actor.can_read_assistants()
+        )
+        if not can_read:
             raise UnauthorizedException(
                 "You do not have permission to read assistants in this space.",
                 code="forbidden_action",
@@ -1014,7 +1085,20 @@ class AssistantService:
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistant(assistant=active_assistant):
+        # The personal chat is the personal space's default assistant — gated by
+        # PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS, so a
+        # baseline role can chat without managing assistants.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and active_assistant.id == space.default_assistant.id
+        )
+        can_use = (
+            actor.can_read_default_assistant()
+            if is_personal_default
+            else actor.can_read_assistant(assistant=active_assistant)
+        )
+        if not can_use:
             raise UnauthorizedException(
                 "You do not have permission to use this assistant.",
                 code="forbidden_action",
