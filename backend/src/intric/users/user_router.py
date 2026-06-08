@@ -233,7 +233,7 @@ async def _resolve_single_tenant_redirect_uri(
     response_model=AccessToken,
     name="Login",
     description="Authenticate with email and password (OAuth2 password flow).",
-    responses=responses.get_responses([401]),
+    responses=responses.get_responses([401, 500]),
 )
 async def user_login_with_email_and_password(
     request: Request,
@@ -347,7 +347,7 @@ async def user_login_with_email_and_password(
     "/login/openid-connect/mobilityguard/",
     response_model=AccessToken,
     description="Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).",
-    responses=responses.get_responses([401]),
+    responses=responses.get_responses([400, 401, 500, 502]),
 )
 async def login_with_mobilityguard(
     request: Request,
@@ -691,7 +691,10 @@ async def login_with_mobilityguard(
 @router.get(
     "/",
     response_model=CursorPaginatedResponse[UserSparse],
-    description="List users in the current tenant (admin).",
+    description=(
+        "List users in the current tenant. Available to authenticated tenant "
+        "members; API keys require admin scope and permission."
+    ),
     responses=responses.get_responses([403]),
     dependencies=[
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
@@ -1123,7 +1126,7 @@ async def update_user(
     "/admin/{id}/",
     status_code=204,
     description="Delete a user from the tenant (admin).",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def delete_user(

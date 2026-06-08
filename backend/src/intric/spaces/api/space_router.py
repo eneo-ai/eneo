@@ -305,7 +305,7 @@ async def update_space(
     response_model=UpdateSpaceDryRunResponse,
     status_code=200,
     description="Get a preview of the impact of changing the security classification of a space.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_security_classification_impact_analysis(
     id: UUID,
