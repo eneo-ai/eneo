@@ -4288,7 +4288,7 @@ export interface paths {
     post?: never;
     /**
      * Remove Space Group Member
-     * @description Remove a user group from a space.
+     * @description Remove a user group from a space. Members lose access granted via this group, but may still have access through direct membership or other groups.
      */
     delete: operations["remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete"];
     options?: never;
@@ -29775,15 +29775,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SpacePublic"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

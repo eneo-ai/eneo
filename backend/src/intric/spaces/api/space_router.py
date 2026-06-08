@@ -87,7 +87,7 @@ async def forbid_org_space(
     response_model=SpacePublic,
     status_code=201,
     description="Create a new shared space.",
-    responses=responses.get_responses([400, 403]),
+    responses=responses.get_responses([403]),
 )
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -1439,7 +1439,10 @@ async def change_group_member_role(
 @router.delete(
     "/{id}/group-members/{group_id}/",
     status_code=204,
-    description="Remove a user group from a space.",
+    description=(
+        "Remove a user group from a space. Members lose access granted via this "
+        "group, but may still have access through direct membership or other groups."
+    ),
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
