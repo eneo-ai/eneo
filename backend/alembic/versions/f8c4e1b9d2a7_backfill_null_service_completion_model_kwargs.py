@@ -17,7 +17,7 @@ for, so a single UPDATE is fine — no batching or lock-management is
 needed.
 
 Revision ID: f8c4e1b9d2a7
-Revises: 202604101000
+Revises: 92cfef80384c
 Create Date: 2026-04-27 09:00:00.000000
 
 """
@@ -26,7 +26,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "f8c4e1b9d2a7"
-down_revision = "202604101000"
+down_revision = "92cfef80384c"
 branch_labels = None
 depends_on = None
 
