@@ -2,6 +2,7 @@
   import { Pagination as PaginationPrimitive } from "bits-ui";
 
   import { cn } from "$lib/utils.js";
+  import { m } from "$lib/paraglide/messages";
 
   let {
     ref = $bindable(null),
@@ -14,13 +15,11 @@
   }: PaginationPrimitive.RootProps = $props();
 </script>
 
-<!-- eslint-disable intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
-
 <PaginationPrimitive.Root
   bind:ref
   bind:page
   role="navigation"
-  aria-label="pagination"
+  aria-label={m.aria_pagination()}
   data-slot="pagination"
   {count}
   {perPage}

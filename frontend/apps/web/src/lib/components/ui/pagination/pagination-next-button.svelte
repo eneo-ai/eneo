@@ -3,6 +3,7 @@
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import { cn } from "$lib/utils.js";
   import { buttonVariants } from "../button/index.js";
+  import { m } from "$lib/paraglide/messages";
 
   let {
     ref = $bindable(null),
@@ -12,16 +13,14 @@
   }: PaginationPrimitive.NextButtonProps = $props();
 </script>
 
-<!-- eslint-disable intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
-
 {#snippet Fallback()}
-  <span>Next</span>
+  <span>{m.next()}</span>
   <ChevronRightIcon class={cn("size-4", className)} />
 {/snippet}
 
 <PaginationPrimitive.NextButton
   bind:ref
-  aria-label="Go to next page"
+  aria-label={m.aria_go_to_next_page()}
   class={cn(buttonVariants({ variant: "ghost" }), "pr-1.5!", className)}
   {...restProps}
 >
