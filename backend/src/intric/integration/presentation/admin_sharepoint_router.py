@@ -491,6 +491,7 @@ async def test_sharepoint_app_credentials(
 @router.delete(
     "/sharepoint/app",
     status_code=200,
+    response_model=dict[str, str],
     summary="Permanently delete SharePoint app",
     description=(
         "Permanently delete the tenant's SharePoint app configuration and all associated data. "

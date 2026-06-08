@@ -17,6 +17,7 @@ _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))
 @router.get(
     "/{id}/",
     response_class=Response,
+    response_model=None,
     summary="Get icon image",
     description="Returns icon as binary data. Public endpoint for img tags. Cached for 1 year.",
     responses={

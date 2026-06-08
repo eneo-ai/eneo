@@ -642,12 +642,12 @@ export interface paths {
     put?: never;
     /**
      * Update Info Blob
-     * @description Omitted fields are not updated.
+     * @description Updates an info-blob by id. Omitted fields are not updated.
      */
     post: operations["update_info_blob_api_v1_info_blobs__id___post"];
     /**
      * Delete Info Blob
-     * @description Returns the deleted object.
+     * @description Deletes an info-blob by id. Returns the deleted object.
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
     options?: never;
@@ -662,7 +662,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Space Info Blobs */
+    /**
+     * Get Space Info Blobs
+     * @description Returns the info-blobs of a space (without text).
+     */
     get: operations["get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get"];
     put?: never;
     post?: never;
@@ -2872,7 +2875,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Running Jobs */
+    /**
+     * Get Running Jobs
+     * @description List the current user's running jobs.
+     */
     get: operations["get_running_jobs_api_v1_jobs__get"];
     put?: never;
     post?: never;
@@ -2889,7 +2895,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Job */
+    /**
+     * Get Job
+     * @description Get a single job owned by the current user by id.
+     */
     get: operations["get_job_api_v1_jobs__id___get"];
     put?: never;
     post?: never;
@@ -3706,10 +3715,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Files */
+    /**
+     * Get Files
+     * @description List the current user's uploaded files.
+     */
     get: operations["get_files_api_v1_files__get"];
     put?: never;
-    /** Upload File */
+    /**
+     * Upload File
+     * @description Upload a file; rejects unsupported media types and oversized files.
+     */
     post: operations["upload_file_api_v1_files__post"];
     delete?: never;
     options?: never;
@@ -3724,11 +3739,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get File */
+    /**
+     * Get File
+     * @description Fetch a single file's metadata by id.
+     */
     get: operations["get_file_api_v1_files__id___get"];
     put?: never;
     post?: never;
-    /** Delete File */
+    /**
+     * Delete File
+     * @description Delete a file owned by the current user.
+     */
     delete: operations["delete_file_api_v1_files__id___delete"];
     options?: never;
     head?: never;
@@ -4288,7 +4309,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Dashboard */
+    /**
+     * Get Dashboard
+     * @description Get the current user's dashboard (spaces and published applications).
+     */
     get: operations["get_dashboard_api_v1_dashboard__get"];
     put?: never;
     post?: never;
@@ -4308,12 +4332,14 @@ export interface paths {
     /**
      * Get Websites
      * @deprecated
+     * @description Deprecated: list websites. Always returns 410 Gone.
      */
     get: operations["get_websites_api_v1_websites__get"];
     put?: never;
     /**
      * Create Website
      * @deprecated
+     * @description Deprecated: create a website. Always returns 410 Gone.
      */
     post: operations["create_website_api_v1_websites__post"];
     delete?: never;
@@ -4418,9 +4444,15 @@ export interface paths {
     /** Get Website */
     get: operations["get_website_api_v1_websites__id___get"];
     put?: never;
-    /** Update Website */
+    /**
+     * Update Website
+     * @description Update a website's configuration by id.
+     */
     post: operations["update_website_api_v1_websites__id___post"];
-    /** Delete Website */
+    /**
+     * Delete Website
+     * @description Delete a website by id.
+     */
     delete: operations["delete_website_api_v1_websites__id___delete"];
     options?: never;
     head?: never;
@@ -4467,7 +4499,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Crawl Runs */
+    /**
+     * Get Crawl Runs
+     * @description List crawl runs for a website by id.
+     */
     get: operations["get_crawl_runs_api_v1_websites__id__runs__get"];
     put?: never;
     post?: never;
@@ -4486,7 +4521,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Transfer Website To Space */
+    /**
+     * Transfer Website To Space
+     * @description Transfer a website to another space by id.
+     */
     post: operations["transfer_website_to_space_api_v1_websites__id__transfer__post"];
     delete?: never;
     options?: never;
@@ -4601,7 +4639,7 @@ export interface paths {
     };
     /**
      * Get Templates
-     * @description Get all types of templates
+     * @description List all available templates (assistants and apps).
      */
     get: operations["get_templates_api_v1_templates__get"];
     put?: never;
@@ -4619,7 +4657,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Storage */
+    /**
+     * Get Storage
+     * @description Get aggregated storage usage for the tenant.
+     */
     get: operations["get_storage_api_v1_storage__get"];
     put?: never;
     post?: never;
@@ -4636,7 +4677,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Spaces */
+    /**
+     * Get Spaces
+     * @description Get per-space storage usage breakdown for the tenant.
+     */
     get: operations["get_spaces_api_v1_storage_spaces__get"];
     put?: never;
     post?: never;
@@ -5245,7 +5289,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Integrations */
+    /**
+     * Get Integrations
+     * @description List all available integrations.
+     */
     get: operations["get_integrations_api_v1_integrations__get"];
     put?: never;
     post?: never;
@@ -5262,7 +5309,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Tenant Integrations */
+    /**
+     * Get Tenant Integrations
+     * @description List the tenant's integrations, optionally filtered.
+     */
     get: operations["get_tenant_integrations_api_v1_integrations_tenant__get"];
     put?: never;
     post?: never;
@@ -5281,7 +5331,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Add Tenant Integration */
+    /**
+     * Add Tenant Integration
+     * @description Add an integration to the tenant.
+     */
     post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
     delete?: never;
     options?: never;
@@ -5299,7 +5352,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Remove Tenant Integration */
+    /**
+     * Remove Tenant Integration
+     * @description Remove an integration from the tenant.
+     */
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
     options?: never;
     head?: never;
@@ -5315,10 +5371,7 @@ export interface paths {
     };
     /**
      * Get User Integrations
-     * @description Get user's personal integrations.
-     *
-     *     Only returns user_oauth integrations (personal account connections).
-     *     Tenant app integrations are managed in admin panel and not shown here.
+     * @description List the current user's personal integrations.
      */
     get: operations["get_user_integrations_api_v1_integrations_me__get"];
     put?: never;
@@ -5338,10 +5391,7 @@ export interface paths {
     };
     /**
      * Get Available Integrations For Space
-     * @description Get integrations available for a specific space, filtered by space type and auth type.
-     *
-     *     - Personal spaces: Only user OAuth integrations
-     *     - Shared/Organization spaces: Both tenant app and user OAuth integrations
+     * @description List integrations available for a specific space.
      */
     get: operations["get_available_integrations_for_space_api_v1_integrations_spaces__space_id__available__get"];
     put?: never;
@@ -5362,7 +5412,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Disconnect User Integration */
+    /**
+     * Disconnect User Integration
+     * @description Disconnect the current user's integration.
+     */
     delete: operations["disconnect_user_integration_api_v1_integrations_users__user_integration_id___delete"];
     options?: never;
     head?: never;
@@ -5396,7 +5449,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Integration Preview */
+    /**
+     * Get Integration Preview
+     * @description Get preview data for a user integration.
+     */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
     put?: never;
     post?: never;
@@ -5415,14 +5471,7 @@ export interface paths {
     };
     /**
      * Get Sharepoint Folder Tree
-     * @description Get SharePoint/OneDrive folder tree with hybrid authentication support.
-     *
-     *     Authentication is determined by space type:
-     *     - Personal space: Uses user OAuth
-     *     - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
-     *     - Shared/Org space without tenant app: Falls back to user OAuth
-     *
-     *     Provide site_id for SharePoint sites, or drive_id for OneDrive.
+     * @description Get SharePoint/OneDrive folder tree for a user integration.
      */
     get: operations["get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get"];
     put?: never;
@@ -5440,7 +5489,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Integration By Id */
+    /**
+     * Get Integration By Id
+     * @description Get a single integration by ID.
+     */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
     put?: never;
     post?: never;
@@ -5712,10 +5764,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Sharepoint Webhook Validation */
+    /**
+     * Sharepoint Webhook Validation
+     * @description Echo the Microsoft Graph validation token (plain text) when present, otherwise report webhook endpoint health.
+     */
     get: operations["sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get"];
     put?: never;
-    /** Sharepoint Webhook */
+    /**
+     * Sharepoint Webhook
+     * @description Handle SharePoint change notifications; echo the Graph validation token (plain text) during the subscription handshake.
+     */
     post: operations["sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post"];
     delete?: never;
     options?: never;
@@ -5907,7 +5965,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Gen Url */
+    /**
+     * Gen Url
+     * @description Generate the OAuth2 authorization URL for a tenant integration.
+     */
     get: operations["gen_url_api_v1_integrations_auth__tenant_integration_id__url__get"];
     put?: never;
     post?: never;
@@ -5926,7 +5987,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** On Auth Callback */
+    /**
+     * On Auth Callback
+     * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
+     */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
     delete?: never;
     options?: never;
@@ -27070,6 +27134,15 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29220,6 +29293,15 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29300,6 +29382,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31293,6 +31384,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31326,6 +31426,24 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -32713,6 +32831,15 @@ export interface operations {
           "application/json": components["schemas"]["TenantIntegration"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32741,6 +32868,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -32793,6 +32929,15 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegrationList"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32821,6 +32966,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -32889,6 +33043,15 @@ export interface operations {
           "application/json": components["schemas"]["IntegrationPreviewDataList"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32931,6 +33094,24 @@ export interface operations {
           "application/json": components["schemas"]["SharePointTreeResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32960,6 +33141,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Integration"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -34324,6 +34514,15 @@ export interface operations {
           "application/json": components["schemas"]["AuthUrlPublic"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34355,6 +34554,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserIntegration"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

@@ -9,13 +9,22 @@ from intric.integration.infrastructure.content_service.types import (
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/sharepoint/webhook/")
+@router.get(
+    "/sharepoint/webhook/",
+    description=(
+        "Echo the Microsoft Graph validation token (plain text) when present, "
+        "otherwise report webhook endpoint health."
+    ),
+    responses=responses.get_responses([]),
+    response_model=None,
+)
 async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
     if validationToken:
         logger.debug("SharePoint webhook validation token received via GET")
@@ -23,7 +32,15 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
     return {"status": "ok"}
 
 
-@router.post("/sharepoint/webhook/")
+@router.post(
+    "/sharepoint/webhook/",
+    description=(
+        "Handle SharePoint change notifications; echo the Graph validation token "
+        "(plain text) during the subscription handshake."
+    ),
+    responses=responses.get_responses([]),
+    response_model=None,
+)
 async def sharepoint_webhook(
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=False))],
