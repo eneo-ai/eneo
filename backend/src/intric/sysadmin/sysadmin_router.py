@@ -842,19 +842,18 @@ async def recalculate_tenant_usage_statistics(
                 "success": True,
             }
         else:
-            from fastapi import HTTPException
-
             raise HTTPException(
                 status_code=404, detail=f"Tenant {tenant_id} not found or not active"
             )
 
+    except HTTPException:
+        # Preserve the explicit 404 above; only unexpected errors become 500.
+        raise
     except Exception as e:
         logger.error(
             f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
             exc_info=True,
         )
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=500,
             detail=f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
