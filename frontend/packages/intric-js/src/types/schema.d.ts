@@ -461,7 +461,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Invite User */
+    /**
+     * Invite User
+     * @description Invite a new user to the tenant (admin).
+     */
     post: operations["invite_user_api_v1_users_admin_invite__post"];
     delete?: never;
     options?: never;
@@ -479,11 +482,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete User */
+    /**
+     * Delete User
+     * @description Delete a user from the tenant (admin).
+     */
     delete: operations["delete_user_api_v1_users_admin__id___delete"];
     options?: never;
     head?: never;
-    /** Update User */
+    /**
+     * Update User
+     * @description Update a user in the tenant (admin).
+     */
     patch: operations["update_user_api_v1_users_admin__id___patch"];
     trace?: never;
   };
@@ -498,7 +507,7 @@ export interface paths {
     put?: never;
     /**
      * Login
-     * @description OAuth2 Login with comprehensive error handling and logging
+     * @description Authenticate with email and password (OAuth2 password flow).
      */
     post: operations["Login_api_v1_users_login_token__post"];
     delete?: never;
@@ -518,7 +527,7 @@ export interface paths {
     put?: never;
     /**
      * Login With Mobilityguard
-     * @description OpenID Connect Login (generic OIDC provider).
+     * @description Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
     delete?: never;
@@ -536,17 +545,7 @@ export interface paths {
     };
     /**
      * Get Tenant Users
-     * @description List tenant members for member/group pickers.
-     *
-     *     Returns `UserSparse` (id, email, username, timestamps) — a strict subset
-     *     of the information any authenticated tenant member can retrieve via
-     *     Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
-     *     on /users/admin/* remain gated on Permission.ADMIN.
-     *
-     *     Bearer tokens: any authenticated tenant member may list. API keys: must
-     *     be tenant-scoped with admin permission — the route-level guards above
-     *     stash deferred-enforcement state consumed by `_resolve_api_key`, which
-     *     is a no-op for bearer auth where `request.state.api_key` is unset.
+     * @description List users in the current tenant (admin).
      */
     get: operations["get_tenant_users_api_v1_users__get"];
     put?: never;
@@ -600,7 +599,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Provision User */
+    /**
+     * Provision User
+     * @description Provision a user from a Zitadel access token.
+     */
     post: operations["provision_user_api_v1_users_provision__post"];
     delete?: never;
     options?: never;
@@ -3847,10 +3849,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Spaces */
+    /**
+     * Get Spaces
+     * @description List spaces the current user can access.
+     */
     get: operations["get_spaces_api_v1_spaces__get"];
     put?: never;
-    /** Create Space */
+    /**
+     * Create Space
+     * @description Create a new shared space.
+     */
     post: operations["create_space_api_v1_spaces__post"];
     delete?: never;
     options?: never;
@@ -3869,11 +3877,17 @@ export interface paths {
     get: operations["get_space_api_v1_spaces__id___get"];
     put?: never;
     post?: never;
-    /** Delete Space */
+    /**
+     * Delete Space
+     * @description Delete a space. Organization spaces cannot be deleted.
+     */
     delete: operations["delete_space_api_v1_spaces__id___delete"];
     options?: never;
     head?: never;
-    /** Update Space */
+    /**
+     * Update Space
+     * @description Update a space's settings (name, description, models, MCP servers, security classification, data retention).
+     */
     patch: operations["update_space_api_v1_spaces__id___patch"];
     trace?: never;
   };
@@ -3923,7 +3937,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Assistant */
+    /**
+     * Create Space Assistant
+     * @description Create an assistant in a space, optionally from a template.
+     */
     post: operations["create_space_assistant_api_v1_spaces__id__applications_assistants__post"];
     delete?: never;
     options?: never;
@@ -3960,7 +3977,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create App */
+    /**
+     * Create App
+     * @description Create an app in a space, optionally from a template.
+     */
     post: operations["create_app_api_v1_spaces__id__applications_apps__post"];
     delete?: never;
     options?: never;
@@ -3977,7 +3997,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Services */
+    /**
+     * Create Space Services
+     * @description Create a service in a space.
+     */
     post: operations["create_space_services_api_v1_spaces__id__applications_services__post"];
     delete?: never;
     options?: never;
@@ -4011,7 +4034,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Groups */
+    /**
+     * Create Space Groups
+     * @description Create a knowledge collection in a space.
+     */
     post: operations["create_space_groups_api_v1_spaces__id__knowledge_groups__post"];
     delete?: never;
     options?: never;
@@ -4067,7 +4093,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Integration Knowledge */
+    /**
+     * Create Space Integration Knowledge
+     * @description Add integration knowledge to a space. Returns a job to track import progress.
+     */
     post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post"];
     delete?: never;
     options?: never;
@@ -4084,7 +4113,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Integration Knowledge Batch */
+    /**
+     * Create Space Integration Knowledge Batch
+     * @description Add multiple integration knowledge items to a space in a single batch.
+     */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
     delete?: never;
     options?: never;
@@ -4102,7 +4134,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete Space Integration Knowledge */
+    /**
+     * Delete Space Integration Knowledge
+     * @description Remove integration knowledge from a space.
+     */
     delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
     options?: never;
     head?: never;
@@ -4119,11 +4154,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete Integration Knowledge Wrapper */
+    /**
+     * Delete Integration Knowledge Wrapper
+     * @description Remove an integration knowledge wrapper and its items from a space.
+     */
     delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
     options?: never;
     head?: never;
-    /** Update Integration Knowledge Wrapper */
+    /**
+     * Update Integration Knowledge Wrapper
+     * @description Rename an integration knowledge wrapper in a space.
+     */
     patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
     trace?: never;
   };
@@ -4140,7 +4181,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update Integration Knowledge */
+    /**
+     * Update Integration Knowledge
+     * @description Rename integration knowledge in a space.
+     */
     patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
     trace?: never;
   };
@@ -4153,7 +4197,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Trigger Integration Full Sync */
+    /**
+     * Trigger Integration Full Sync
+     * @description Trigger a full re-sync of integration knowledge. Returns a job to track progress.
+     */
     post: operations["trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post"];
     delete?: never;
     options?: never;
@@ -4170,7 +4217,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Add Space Member */
+    /**
+     * Add Space Member
+     * @description Add a user as a member of a space with a given role.
+     */
     post: operations["add_space_member_api_v1_spaces__id__members__post"];
     delete?: never;
     options?: never;
@@ -4188,11 +4238,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Remove Space Member */
+    /**
+     * Remove Space Member
+     * @description Remove a member from a space.
+     */
     delete: operations["remove_space_member_api_v1_spaces__id__members__user_id___delete"];
     options?: never;
     head?: never;
-    /** Change Role Of Member */
+    /**
+     * Change Role Of Member
+     * @description Change a space member's role.
+     */
     patch: operations["change_role_of_member_api_v1_spaces__id__members__user_id___patch"];
     trace?: never;
   };
@@ -4233,9 +4289,6 @@ export interface paths {
     /**
      * Remove Space Group Member
      * @description Remove a user group from a space.
-     *
-     *     All members of the group will lose access through this group membership.
-     *     Note: Users may still have access through direct membership or other groups.
      */
     delete: operations["remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete"];
     options?: never;
@@ -4254,7 +4307,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Personal Space */
+    /**
+     * Get Personal Space
+     * @description Get the current user's personal space.
+     */
     get: operations["get_personal_space_api_v1_spaces_type_personal__get"];
     put?: never;
     post?: never;
@@ -4271,7 +4327,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Organization Space */
+    /**
+     * Get Organization Space
+     * @description Get the organization (tenant) space. Requires admin permission.
+     */
     get: operations["get_organization_space_api_v1_spaces_type_organization__get"];
     put?: never;
     post?: never;
@@ -19487,6 +19546,24 @@ export interface operations {
           "application/json": components["schemas"]["UserAdminView"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -19515,6 +19592,24 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -19549,6 +19644,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserAdminView"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -19626,6 +19748,15 @@ export interface operations {
           "application/json": components["schemas"]["AccessToken"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -19662,6 +19793,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_UserSparse_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -29592,6 +29732,24 @@ export interface operations {
           "application/json": components["schemas"]["SpacePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29771,6 +29929,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UpdateSpaceDryRunResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30261,6 +30428,33 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30297,6 +30491,33 @@ export interface operations {
           "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30327,6 +30548,24 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30356,6 +30595,24 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -30391,6 +30648,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IntegrationKnowledgePublic"][];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30429,6 +30713,33 @@ export interface operations {
           "application/json": components["schemas"]["IntegrationKnowledgePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30459,6 +30770,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["JobPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30912,6 +31250,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
