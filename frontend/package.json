@@ -7,6 +7,13 @@
     "lint": "FORCE_COLOR=1 bun run --filter '*' lint",
     "check": "NODE_ENV=production FORCE_COLOR=1 bun run --filter '*' check",
     "format": "FORCE_COLOR=1 bun run --filter '*' format",
+    "test": "cd apps/web && bun run test:unit",
+    "test:watch": "cd apps/web && bun run test:unit:watch",
+    "test:e2e": "cd apps/web && bun run test:e2e",
+    "test:e2e:ui": "cd apps/web && bun run test:e2e:ui",
+    "test:e2e:report": "cd apps/web && bun run test:e2e:report",
+    "test:all": "cd apps/web && bun run test:all",
+    "knip": "knip-bun",
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
   },
@@ -24,8 +31,15 @@
     "packages/*"
   ],
   "devDependencies": {
+    "knip": "^6.15.0",
     "prettier": "3.5.3",
     "prettier-plugin-svelte": "^3.3.3",
     "prettier-plugin-tailwindcss": "^0.6.11"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-node": "^5.5.4",
+    "@sveltejs/kit": "^2.63.0",
+    "devalue": "^5.8.1",
+    "svelte": "^5.56.1"
   }
 }

@@ -1,7 +1,12 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from intric.main.exceptions import NotFoundException, UnauthorizedException
+from intric.main.exceptions import (
+    ErrorCodes,
+    NotFoundException,
+    OpenAIException,
+    UnauthorizedException,
+)
 from intric.server.exception_handlers import add_exception_handlers
 
 
@@ -74,3 +79,27 @@ def test_error_handler_sets_request_id_from_headers():
     assert response.status_code == 403
     payload = response.json()
     assert payload["request_id"] == request_id
+
+
+def test_openai_exception_preserves_structured_provider_error_for_api_clients():
+    client = _make_client(
+        OpenAIException(
+            "AI service is temporarily unavailable. Please try again later.",
+            code="provider_unavailable",
+            details={"reason": "provider_unavailable", "retryable": True},
+        )
+    )
+
+    response = client.get("/boom")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["message"] == (
+        "AI service is temporarily unavailable. Please try again later."
+    )
+    assert payload["intric_error_code"] == ErrorCodes.OPENAI_ERROR
+    assert payload["code"] == "provider_unavailable"
+    assert payload["details"] == {
+        "reason": "provider_unavailable",
+        "retryable": True,
+    }

@@ -8,14 +8,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.database.tables.tenant_table import Tenants
-from intric.database.tables.users_table import Users
+from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.integration_table import (
     Integration,
     TenantIntegration,
     UserIntegration,
 )
-from intric.database.tables.ai_models_table import EmbeddingModels
+from intric.database.tables.tenant_table import Tenants
+from intric.database.tables.users_table import Users
 
 
 @pytest.fixture
@@ -104,9 +104,13 @@ def user_factory(admin_user):
         )
         session.add(user)
         await session.flush()
-        # SpaceActor expects user_groups_ids (domain property not on DB model)
+        # SpaceActor expects domain properties not present on the DB model
         if not hasattr(user, "user_groups_ids"):
             user.user_groups_ids = set()
+        if not hasattr(user, "permissions"):
+            user.permissions = set()
+        if not hasattr(user, "modules"):
+            user.modules = []
         return user
 
     return _create_user

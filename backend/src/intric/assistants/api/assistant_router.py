@@ -24,8 +24,17 @@ from intric.authentication.api_key_notification_auto_follow import (
 from intric.authentication.api_key_router_helpers import (
     error_responses as api_key_error_responses,
 )
-from intric.authentication.auth_dependencies import get_scope_filter
-from intric.authentication.auth_models import ApiKey, ApiKeyNotificationTargetType
+from intric.authentication.auth_dependencies import (
+    get_scope_filter,
+    require_resource_permission_for_method,
+    require_user_for_creation,
+    require_user_identity,
+)
+from intric.authentication.auth_models import (
+    ApiKey,
+    ApiKeyNotificationTargetType,
+    audit_actor_for,
+)
 from intric.database.database import AsyncSession
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -69,6 +78,7 @@ async def create_assistant(
     request: Request,
     assistant: AssistantCreatePublic,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     # Scope validation: scoped keys cannot create assistants outside their scope
     scope_filter = get_scope_filter(request)
@@ -130,7 +140,7 @@ async def create_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_CREATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=created_assistant_id,
@@ -631,7 +641,7 @@ async def update_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_UPDATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -710,7 +720,7 @@ async def delete_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_DELETED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -778,9 +788,11 @@ async def ask_assistant(
     }
 
     audit_service = container.audit_service()
+    actor_id, actor_type = audit_actor_for(user)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        actor_id=actor_id,
+        actor_type=actor_type,
         action=ActionType.SESSION_STARTED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -800,6 +812,7 @@ async def ask_assistant(
     "/{id}/sessions/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_assistant_sessions(
     id: UUID,
@@ -833,6 +846,7 @@ async def get_assistant_sessions(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_assistant_session(
     id: UUID,
@@ -848,6 +862,7 @@ async def get_assistant_session(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_assistant_session(
     id: UUID,
@@ -881,9 +896,11 @@ async def delete_assistant_session(
     }
 
     audit_service = container.audit_service()
+    actor_id, actor_type = audit_actor_for(user)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        actor_id=actor_id,
+        actor_type=actor_type,
         action=ActionType.SESSION_ENDED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -938,6 +955,7 @@ async def ask_followup(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(
     id: UUID,
@@ -990,6 +1008,7 @@ async def leave_feedback(
 async def generate_read_only_assistant_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generates a read-only api key for this assistant.
 
@@ -1031,7 +1050,7 @@ async def generate_read_only_assistant_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.API_KEY_GENERATED,
         entity_type=EntityType.API_KEY,
         entity_id=id,  # Use assistant ID as entity ID for assistant API keys
@@ -1099,7 +1118,7 @@ async def transfer_assistant_to_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_TRANSFERRED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1167,7 +1186,7 @@ async def publish_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_PUBLISHED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1250,7 +1269,7 @@ async def add_mcp_to_assistant(
     mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_UPDATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1297,7 +1316,7 @@ async def remove_mcp_from_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_UPDATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,

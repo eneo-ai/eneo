@@ -22,13 +22,13 @@ from uuid import UUID, uuid4
 
 import jwt
 import pytest
-from httpx import AsyncClient
 import sqlalchemy as sa
+from httpx import AsyncClient
 
 from intric.authentication.auth_service import AuthService
-from intric.tenants.tenant_repo import TenantRepository
-from intric.database.tables.tenant_table import Tenants
 from intric.database.database import sessionmanager
+from intric.database.tables.tenant_table import Tenants
+from intric.tenants.tenant_repo import TenantRepository
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -208,15 +208,21 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    # Store original settings
-    original_grace = test_settings.oidc_redirect_grace_period_seconds
-    original_strict = test_settings.strict_oidc_redirect_validation
+    # Swap in a settings copy with the strict drift configuration.
+    # set_settings() is needed (rather than mutating test_settings directly)
+    # because FastAPI's Depends(get_settings) resolves from the _settings
+    # singleton, which other modules may have replaced earlier in the worker.
+    from intric.main.config import set_settings
+
+    drift_settings = test_settings.model_copy(
+        update={
+            "oidc_redirect_grace_period_seconds": 0,
+            "strict_oidc_redirect_validation": True,
+        }
+    )
+    set_settings(drift_settings)
 
     try:
-        # Set ZERO grace period and strict validation
-        test_settings.oidc_redirect_grace_period_seconds = 0
-        test_settings.strict_oidc_redirect_validation = True
-
         # Configure federation with origin A
         await _configure_federation(
             client,
@@ -263,8 +269,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         )
 
     finally:
-        test_settings.oidc_redirect_grace_period_seconds = original_grace
-        test_settings.strict_oidc_redirect_validation = original_strict
+        set_settings(test_settings)
 
 
 @pytest.mark.integration

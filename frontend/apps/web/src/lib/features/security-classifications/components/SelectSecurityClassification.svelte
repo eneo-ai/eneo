@@ -55,7 +55,7 @@
 <button
   {...$trigger}
   use:trigger
-  class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
+  class="border-default hover:bg-hover-default flex h-16 w-full items-center justify-between border-b px-4"
 >
   <span class="truncate capitalize">{$selected?.value?.name ?? m.no_classification()}</span>
   <IconChevronDown />

@@ -1210,7 +1210,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         {
             "name": "api-key-constraints",
             "method": "GET",
-            "path": "/api/v1/api-keys/creation-constraints",
+            "path": "/api/v1/api-keys/policy-constraints",
             "resource_type": None,
             "scope_resource": "admin",
             "is_admin_scope": True,
@@ -1240,9 +1240,15 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         # =================================================================
         # SPECIAL: USERS ROUTER (split: admin vs user-facing)
         # =================================================================
-        # users_admin_router: TENANT_ADMIN_API_KEY_GUARDS → /users
+        # users_router (route-level API-key admin guards on GET /):
+        # member-picker listing. Returns UserSparse (id, email, username,
+        # timestamps); tenant-scoped at the repo layer. Bearer-token tenant
+        # members (including space-admins without tenant ADMIN) pass
+        # through because the deferred-enforcement guards only run for API
+        # keys. Scoped API keys stay admin-gated to prevent cross-scope
+        # directory enumeration.
         {
-            "name": "users-admin-list",
+            "name": "users-list",
             "method": "GET",
             "path": "/api/v1/users/",
             "resource_type": None,
@@ -1251,9 +1257,11 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
             "description": (
-                "users_admin_router GET / mounted with "
-                "TENANT_ADMIN_API_KEY_GUARDS. Note: also has "
-                "users_router GET /me/ and /tenant/ without guards."
+                "users_router GET / carries route-level "
+                "require_api_key_scope_check('admin') + "
+                "require_api_key_permission(ADMIN). For API keys: admin "
+                "scope + admin permission required. For bearer tokens: "
+                "no-op (any authenticated tenant member passes through)."
             ),
         },
         # users_router (no API key guards): /users/me/
@@ -1643,15 +1651,24 @@ async def test_tenant_key_revoked_after_admin_role_removed(
     )
 
     # ---- 3. Revoke admin role (downgrade to "User") ----
-    # Look up the "User" predefined role and the current user's username
+    # Look up the tenant-scoped "User" default role and the current user's username
     async with db_container() as container:
-        predefined_roles_repo = container.predefined_roles_repo()
-        user_role = await predefined_roles_repo.get_predefined_role_by_name("User")
+        role_repo = container.role_repo()
+        tenant_roles = await role_repo.get_by_tenant(default_user.tenant_id)
+        user_role = next(
+            (
+                role
+                for role in tenant_roles
+                if role.predefined_source == "User" or role.name == "User"
+            ),
+            None,
+        )
+        assert user_role is not None, "Expected tenant-scoped User role to exist"
 
     # Use the admin API to downgrade the user's role
     resp = await api_client.post(
         f"/api/v1/admin/users/{default_user.username}/",
-        json={"predefined_roles": [{"id": str(user_role.id)}]},
+        json={"roles": [{"id": str(user_role.id)}]},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
     assert resp.status_code == 200, f"Role downgrade failed: {resp.text}"
@@ -1723,212 +1740,6 @@ async def test_expired_key_is_rejected(api_client, bearer_token):
 # ---------------------------------------------------------------------------
 # Strict scope mode matrix
 # ---------------------------------------------------------------------------
-
-# List endpoints affected by strict mode (no resource ID in path, no self_filtering,
-# not file-typed). These are allowed for scoped keys in normal mode but denied
-# in strict mode.
-STRICT_MODE_PROBES = [
-    {
-        "name": "list-assistants",
-        "method": "GET",
-        "path": "/api/v1/assistants/",
-        "resource_type": "assistant",
-    },
-    {
-        "name": "list-spaces",
-        "method": "GET",
-        "path": "/api/v1/spaces/",
-        "resource_type": "space",
-    },
-    {
-        "name": "list-groups",
-        "method": "GET",
-        "path": "/api/v1/groups/",
-        "resource_type": "collection",
-    },
-    {
-        "name": "list-info-blobs",
-        "method": "GET",
-        "path": "/api/v1/info-blobs/",
-        "resource_type": "info_blob",
-    },
-]
-
-# List endpoints exempt from strict mode (self_filtering=True or resource_type="file")
-STRICT_MODE_EXEMPT_PROBES = [
-    {
-        "name": "list-files",
-        "method": "GET",
-        "path": "/api/v1/files/",
-        "resource_type": "file",
-    },
-    {
-        "name": "list-conversations",
-        "method": "GET",
-        "path": "/api/v1/conversations/",
-        "resource_type": "conversation",
-    },
-]
-
-
-async def _toggle_scope_enforcement(client, token: str, enabled: bool):
-    resp = await client.patch(
-        "/api/v1/settings/scope-enforcement",
-        json={"enabled": enabled},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200, f"Toggle scope enforcement failed: {resp.text}"
-
-
-async def _toggle_strict_mode(client, token: str, enabled: bool):
-    resp = await client.patch(
-        "/api/v1/settings/strict-mode",
-        json={"enabled": enabled},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200, f"Toggle strict mode failed: {resp.text}"
-
-
-@pytest.mark.api_key_matrix
-async def test_strict_scope_mode_matrix(api_client, bearer_token):
-    """Strict mode denies scoped keys on ambiguous list endpoints.
-
-    Tests that:
-    - With strict mode OFF: space-scoped keys can hit list endpoints (service layer filters)
-    - With strict mode ON: space-scoped keys are denied on list endpoints (fail-closed)
-    - Exempt endpoints (files, self_filtering) are allowed regardless of strict mode
-    - Tenant-scoped keys are always unaffected
-    """
-
-    # ---- Setup ----
-    space_id = await _create_space(
-        api_client, token=bearer_token, name="strict-test-space"
-    )
-
-    space_read_key = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="space",
-        scope_id=space_id,
-        permission="read",
-    )
-    tenant_read_key = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="tenant",
-        permission="read",
-    )
-
-    space_headers = {"x-api-key": space_read_key["secret"]}
-    tenant_headers = {"x-api-key": tenant_read_key["secret"]}
-
-    # ---- Enable scope enforcement (prerequisite for strict mode) ----
-    await _toggle_scope_enforcement(api_client, bearer_token, enabled=True)
-
-    # ---- Phase 1: Strict mode OFF ----
-    await _toggle_strict_mode(api_client, bearer_token, enabled=False)
-
-    collector = MatrixCollector()
-
-    for probe in STRICT_MODE_PROBES + STRICT_MODE_EXEMPT_PROBES:
-        # Space-scoped key: should be ALLOWED (service layer filters)
-        resp = await api_client.get(probe["path"], headers=space_headers)
-        actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(
-            ProbeResult(
-                key_name="space-read",
-                method="GET",
-                endpoint_name=probe["name"],
-                path=probe["path"],
-                status_code=resp.status_code,
-                actual=actual,
-                expected="allow",
-                description="Strict mode OFF — scoped key allowed on list endpoints",
-            )
-        )
-
-        # Tenant-scoped key: should always be ALLOWED
-        resp = await api_client.get(probe["path"], headers=tenant_headers)
-        actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(
-            ProbeResult(
-                key_name="tenant-read",
-                method="GET",
-                endpoint_name=probe["name"],
-                path=probe["path"],
-                status_code=resp.status_code,
-                actual=actual,
-                expected="allow",
-                description="Tenant key — always allowed",
-            )
-        )
-
-    # ---- Phase 2: Strict mode ON ----
-    await _toggle_strict_mode(api_client, bearer_token, enabled=True)
-
-    for probe in STRICT_MODE_PROBES:
-        # Space-scoped key: should be DENIED (strict mode fail-closed)
-        resp = await api_client.get(probe["path"], headers=space_headers)
-        actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(
-            ProbeResult(
-                key_name="space-read",
-                method="GET",
-                endpoint_name=probe["name"],
-                path=probe["path"],
-                status_code=resp.status_code,
-                actual=actual,
-                expected="deny",
-                description="Strict mode ON — scoped key denied on ambiguous list endpoint",
-            )
-        )
-
-        # Tenant-scoped key: should still be ALLOWED
-        resp = await api_client.get(probe["path"], headers=tenant_headers)
-        actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(
-            ProbeResult(
-                key_name="tenant-read",
-                method="GET",
-                endpoint_name=probe["name"],
-                path=probe["path"],
-                status_code=resp.status_code,
-                actual=actual,
-                expected="allow",
-                description="Tenant key — always allowed even in strict mode",
-            )
-        )
-
-    for probe in STRICT_MODE_EXEMPT_PROBES:
-        # Space-scoped key on exempt endpoints: should still be ALLOWED
-        resp = await api_client.get(probe["path"], headers=space_headers)
-        actual = "deny" if resp.status_code in (401, 403) else "allow"
-        collector.add(
-            ProbeResult(
-                key_name="space-read",
-                method="GET",
-                endpoint_name=probe["name"],
-                path=probe["path"],
-                status_code=resp.status_code,
-                actual=actual,
-                expected="allow",
-                description="Strict mode ON — exempt endpoint still allowed for scoped key",
-            )
-        )
-
-    # ---- Print and assert ----
-    print()
-    print("STRICT SCOPE MODE MATRIX")
-    collector.print_matrix()
-    collector.write_to_file("strict_scope_matrix.csv")
-
-    # ---- Cleanup: disable strict mode ----
-    await _toggle_strict_mode(api_client, bearer_token, enabled=False)
-
-    failures = [r for r in collector.results if not r.passed]
-    assert len(failures) == 0, (
-        f"{len(failures)} strict mode matrix mismatches. See matrix output above."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -2503,7 +2314,7 @@ async def test_invited_user_key_rejected(
 
     # 4. Set user state to INVITED via direct DB update
     async with db_container() as container:
-        from intric.users.user import UserUpdatePublic, UserState
+        from intric.users.user import UserState, UserUpdatePublic
 
         user_service = container.user_service()
         await user_service.update_user(

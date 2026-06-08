@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { writable } from "svelte/store";
   import type { ApiKeyCreatedResponse, ApiKeyScopeType, ApiKeyV2 } from "@intric/intric-js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
@@ -12,12 +11,14 @@
     ExternalLink,
     RefreshCw,
     Bell,
-    BellOff
+    BellOff,
+    ShieldAlert
   } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import ApiKeyTable from "../../../routes/(app)/account/api-keys/ApiKeyTable.svelte";
-  import CreateApiKeyDialog from "../../../routes/(app)/account/api-keys/CreateApiKeyDialog.svelte";
-  import ApiKeySecretDialog from "../../../routes/(app)/account/api-keys/ApiKeySecretDialog.svelte";
+  import CreateApiKeyDialog from "$lib/features/api-keys/CreateApiKeyDialog.svelte";
+  import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import ExpiringKeysBanner from "./ExpiringKeysBanner.svelte";
   import { getExpiringKeys, toDisplayItems } from "./expirationUtils";
   import { getAppContext } from "$lib/core/AppContext";
@@ -33,6 +34,7 @@
   const intric = getIntric();
   const { user, tenant } = getAppContext();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
+  const canCreateApiKeys = user.hasPermission("api_keys");
 
   let {
     scopeType,
@@ -50,7 +52,7 @@
   let expanded = $state(false);
 
   // Secret dialog state
-  const secretDialogOpen = writable(false);
+  let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
   let isScopeFollowed = $state(false);
@@ -121,12 +123,12 @@
   function handleSecret(response: ApiKeyCreatedResponse) {
     latestSecret = response.secret;
     secretSource = "rotated";
-    secretDialogOpen.set(true);
+    secretDialogOpen = true;
     void loadKeys();
   }
 
   function handleCreated() {
-    secretDialogOpen.set(false);
+    secretDialogOpen = false;
     latestSecret = null;
     void loadKeys();
   }
@@ -173,20 +175,30 @@
     </div>
   {:else if keys.length === 0}
     <!-- Empty state -->
-    <div class="border-default flex items-start gap-4 rounded-lg border px-5 py-5">
-      <Key class="text-muted mt-0.5 h-5 w-5 flex-shrink-0" />
-      <div class="flex flex-col gap-3">
-        <p class="text-secondary text-sm leading-relaxed">{getEmptyMessage()}</p>
-        <div>
-          <CreateApiKeyDialog
-            onCreated={handleCreated}
-            lockedScopeType={scopeType}
-            lockedScopeId={scopeId}
-            lockedScopeName={scopeName}
-            triggerVariant="outlined"
-          />
+    <div class="flex flex-col gap-3">
+      <div class="border-default flex items-start gap-4 rounded-lg border px-5 py-5">
+        <Key class="text-muted mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div class="flex flex-col gap-3">
+          <p class="text-secondary text-sm leading-relaxed">{getEmptyMessage()}</p>
+          {#if canCreateApiKeys}
+            <div>
+              <CreateApiKeyDialog
+                onCreated={handleCreated}
+                lockedScopeType={scopeType}
+                lockedScopeId={scopeId}
+                lockedScopeName={scopeName}
+                triggerVariant="outlined"
+              />
+            </div>
+          {/if}
         </div>
       </div>
+      {#if !canCreateApiKeys}
+        <Alert.Root>
+          <ShieldAlert />
+          <Alert.Description>{m.api_keys_no_create_permission()}</Alert.Description>
+        </Alert.Root>
+      {/if}
     </div>
   {:else}
     <!-- Collapsible key list -->
@@ -259,6 +271,8 @@
                 await loadScopeFollowState();
                 await forceRefreshExpiringStore();
               }}
+              scopeNames={{ [scopeId]: scopeName }}
+              currentUserId={user.id}
             />
           </div>
         </div>
@@ -266,13 +280,23 @@
 
       <!-- Footer actions -->
       <div class="border-dimmer flex items-center justify-between border-t px-5 py-3">
-        <CreateApiKeyDialog
-          onCreated={handleCreated}
-          lockedScopeType={scopeType}
-          lockedScopeId={scopeId}
-          lockedScopeName={scopeName}
-          triggerVariant="outlined"
-        />
+        {#if canCreateApiKeys}
+          <CreateApiKeyDialog
+            onCreated={handleCreated}
+            lockedScopeType={scopeType}
+            lockedScopeId={scopeId}
+            lockedScopeName={scopeName}
+            triggerVariant="outlined"
+          />
+        {:else}
+          <span
+            class="text-secondary inline-flex items-center gap-1.5 text-xs"
+            title={m.api_keys_no_create_permission()}
+          >
+            <ShieldAlert class="h-3.5 w-3.5" />
+            {m.api_keys_no_create_permission_short()}
+          </span>
+        {/if}
         <!-- eslint-disable svelte/no-navigation-without-resolve -- linked from settings module -->
         <a
           href="/account/api-keys"
@@ -287,4 +311,4 @@
   {/if}
 </div>
 
-<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />
+<ApiKeySecretDialog bind:open={secretDialogOpen} secret={latestSecret} source={secretSource} />

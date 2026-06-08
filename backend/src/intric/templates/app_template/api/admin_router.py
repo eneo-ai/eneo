@@ -153,7 +153,7 @@ async def create_template(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TEMPLATE_CREATED,
         entity_type=EntityType.TEMPLATE,
         entity_id=template.id,
@@ -240,7 +240,7 @@ async def update_template(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TEMPLATE_UPDATED,
         entity_type=EntityType.TEMPLATE,
         entity_id=template_id,
@@ -383,7 +383,7 @@ async def delete_template(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TEMPLATE_DELETED,
         entity_type=EntityType.TEMPLATE,
         entity_id=template_id,

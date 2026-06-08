@@ -94,10 +94,9 @@ async def test_api_key_tenant_isolation_for_management_endpoints(
         headers={"Authorization": f"Bearer {second_tenant_token}"},
     )
     assert get_response.status_code == 404
-    assert get_response.json() == {
-        "code": "resource_not_found",
-        "message": "API key not found.",
-    }
+    get_body = get_response.json()
+    assert get_body["code"] == "resource_not_found"
+    assert get_body["message"] == "API key not found."
 
     patch_response = await client.patch(
         f"/api/v1/api-keys/{key_id}",
@@ -105,10 +104,9 @@ async def test_api_key_tenant_isolation_for_management_endpoints(
         headers={"Authorization": f"Bearer {second_tenant_token}"},
     )
     assert patch_response.status_code == 404
-    assert patch_response.json() == {
-        "code": "resource_not_found",
-        "message": "API key not found.",
-    }
+    patch_body = patch_response.json()
+    assert patch_body["code"] == "resource_not_found"
+    assert patch_body["message"] == "API key not found."
 
     revoke_response = await client.post(
         f"/api/v1/api-keys/{key_id}/revoke",
@@ -116,7 +114,6 @@ async def test_api_key_tenant_isolation_for_management_endpoints(
         headers={"Authorization": f"Bearer {second_tenant_token}"},
     )
     assert revoke_response.status_code == 404
-    assert revoke_response.json() == {
-        "code": "resource_not_found",
-        "message": "API key not found.",
-    }
+    revoke_body = revoke_response.json()
+    assert revoke_body["code"] == "resource_not_found"
+    assert revoke_body["message"] == "API key not found."

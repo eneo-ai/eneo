@@ -262,8 +262,7 @@
       // Dynamic import to avoid SSR issues
       const { intric } = await import("$lib/api/client");
 
-      const redirectUri = `${window.location.origin}/auth/callback`;
-      const response = await intric.auth.initiateAuth({ tenant: slug, redirectUri });
+      const response = await intric.auth.initiateAuth({ tenant: slug });
 
       // Allow natural browser history navigation - back button returns to tenant selector
       window.location.href = response.authorization_url;
@@ -272,6 +271,7 @@
       console.error("Failed to initiate federation auth:", err);
       federationError = m.failed_to_start_authentication();
       isAwaitingLoginResponse = false;
+      showTenantSelector = preloadedTenants.length > 0;
       return false;
     }
   }

@@ -36,7 +36,16 @@ class CompletionModelCRUDService:
 
         available_models: list["CompletionModel"] = []
         for model in models:
-            if model.family == "azure" and not get_settings().using_azure_models:
+            # `using_azure_models` gates the *predefined global* Azure models
+            # (tenant_id is None) that ship with Eneo. A tenant that explicitly
+            # configures an Azure provider gets family="azure" too, but those
+            # models are deliberate config and must never be hidden by a global
+            # deployment flag — otherwise they 200 on create yet vanish here.
+            if (
+                model.family == "azure"
+                and model.tenant_id is None
+                and not get_settings().using_azure_models
+            ):
                 continue
 
             available_models.append(model)

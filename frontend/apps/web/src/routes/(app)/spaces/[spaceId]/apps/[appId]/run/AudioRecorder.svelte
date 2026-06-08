@@ -494,9 +494,11 @@
         </div>
         {#if maxSizeLabel}
           <div class="size-row">
+            <!-- eslint-disable intric/no-hardcoded-text -->
             <span class="size-display"
               >{formatMegabytes(recordingStats.totalBytes)} / {maxSizeLabel} MB</span
             >
+            <!-- eslint-enable intric/no-hardcoded-text -->
             <div class="size-progress-track">
               <div class="size-progress-bar" style="width: {sizePercent}%"></div>
             </div>

@@ -19,6 +19,63 @@ Useful variants:
 ./scripts/run_pyright_in_devcontainer.sh src/intric/files/file_router.py
 ```
 
+## Per-branch database snapshots
+
+Switching git branches when a feature branch has applied Alembic migrations normally forces a manual downgrade or a wipe. Two helper scripts at the repo root turn this into a `git stash`-like workflow against the devcontainer Postgres.
+
+The active database (`backend/.env`'s `POSTGRES_DB`, typically `postgres`) is never renamed. Instead, branch state lives in side databases named `eneo_<sanitized-branch>`, plus a baseline `eneo_develop`.
+
+### Scripts
+
+- `./scripts/dev-db-init.sh` — bring the active DB to the right state for the current branch. Restores `eneo_<branch>` if a snapshot exists, otherwise clones from `eneo_develop`. Runs `alembic upgrade head` at the end. On first run it offers to bootstrap `eneo_develop` from the current active DB.
+- `./scripts/dev-db-commit.sh` — save the current active DB as `eneo_<branch>`. Overwrites any prior snapshot for that branch. Run before switching away if you want to come back to this exact state.
+
+Both scripts kick the backend's Postgres connection during the clone/drop; restart the backend (and worker, if running) afterwards. The exact restart command is printed by `dev-db-init.sh`.
+
+### Typical loop
+
+```bash
+git checkout new-feature
+./scripts/dev-db-init.sh         # clones from eneo_develop (first time on this branch)
+# ...work, add a migration, mutate data...
+./scripts/dev-db-commit.sh       # snapshot before switching away
+
+git checkout other-feature
+./scripts/dev-db-init.sh         # restores eneo_other_feature (or clones develop if none yet)
+```
+
+### One-off: bootstrap `eneo_develop` when you're already on a feature branch
+
+If the branch has migrations beyond `develop` and you want to seed the baseline without losing work:
+
+```bash
+# 1. Save current branch state
+./scripts/dev-db-commit.sh
+
+# 2. Find develop's alembic head by reading the down_revision of the branch's
+#    first new migration:
+git diff develop...HEAD --name-only -- alembic/versions/ | head -1
+# then: grep down_revision <that-file>
+
+# 3. Still on the branch (so alembic sees branch migrations), downgrade active to develop's head
+docker exec -u vscode eneo_devcontainer-eneo-1 bash -i -c \
+  "cd /workspace/backend && uv run alembic downgrade <develop-head-rev>"
+
+# 4. Switch git, then bootstrap
+git checkout develop
+./scripts/dev-db-init.sh         # answer 'y' to the bootstrap prompt
+```
+
+The branch snapshot from step 1 is untouched by step 3, so `git checkout <branch> && ./scripts/dev-db-init.sh` restores it later.
+
+### Inspecting state
+
+```bash
+docker exec -i eneo_devcontainer-db-1 psql -U postgres -c "\l" | grep eneo_
+docker exec -i eneo_devcontainer-db-1 psql -U postgres -d eneo_<branch> \
+  -c "select version_num from alembic_version;"
+```
+
 ## Environment variables
 
 | Variable                         | Required | Explanation                                              |

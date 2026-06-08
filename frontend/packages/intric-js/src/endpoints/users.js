@@ -87,7 +87,11 @@ export function initUser(client) {
       const res = await client.fetch("/api/v1/users/", {
         method: "get",
         params: {
-          query: { email: options?.filter, limit: options?.limit, cursor: options?.cursor }
+          query: {
+            email: options?.filter,
+            limit: options?.limit,
+            cursor: options?.cursor
+          }
         }
       });
       return res;

@@ -4,8 +4,7 @@ export const load = async (event) => {
   const [roles, userGroups] = await Promise.all([intric.roles.list(), intric.userGroups.list()]);
 
   return {
-    customRoles: roles.roles,
-    defaultRoles: roles.predefined_roles,
+    roles: [...roles.roles, ...roles.predefined_roles],
     userGroups
   };
 };

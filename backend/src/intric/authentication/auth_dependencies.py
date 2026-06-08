@@ -154,6 +154,85 @@ def require_api_key_permission(
     return _api_key_permission_dep
 
 
+async def require_session_auth(
+    _: Annotated[UserInDB, Depends(get_current_active_user)],
+    request: Request,
+) -> None:
+    """Reject API-key-authenticated callers; require a session token.
+
+    Depends on ``get_current_active_user`` so authentication has run and
+    populated ``request.state.api_key`` (when applicable) by the time we
+    inspect it.
+    """
+    if getattr(request.state, "api_key", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint requires a session token.",
+        )
+
+
+async def require_user_identity(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Reject service-key callers; require a real user identity.
+
+    Service keys resolve to a synthetic ``UserInDB`` with no row in the
+    ``users`` table. Endpoints that operate on the caller's personal data
+    (``/me``, "my keys", endpoints that write ``user_id`` columns) cannot
+    serve them meaningfully — the synthetic uuid would either match nothing
+    or violate FK constraints.
+
+    Bearer-token users and user-owned API keys both pass.
+    """
+    from intric.authentication.auth_models import is_service_api_key
+
+    if is_service_api_key(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "user_identity_required",
+                "message": (
+                    "This endpoint requires a user identity. "
+                    "Service API keys cannot access endpoints scoped to a "
+                    "specific user."
+                ),
+            },
+        )
+
+
+async def require_user_for_creation(
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+) -> None:
+    """Reject service-key callers on resource-creation endpoints.
+
+    Service keys are automation principals: they read, update, and delete
+    existing resources via their scope, but they do not author new ones.
+    Concretely, most resource tables carry a NOT NULL ``user_id`` FK to
+    ``users.id`` — service keys resolve to a synthetic UserInDB whose id
+    has no matching row, so the INSERT would FK-violate. Beyond the FK
+    mechanics, "service account owns this resource" has no product meaning
+    today; ownership of authored resources belongs to humans.
+
+    Apply this guard to every POST endpoint that creates a new resource
+    whose ownership column is ``user_id``. Bearer-token users and
+    user-owned API keys pass.
+    """
+    from intric.authentication.auth_models import is_service_api_key
+
+    if is_service_api_key(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "service_key_cannot_create_resources",
+                "message": (
+                    "Service API keys cannot create new resources. "
+                    "Create the resource with a user account; the service "
+                    "key can then operate on supported endpoints via its scope."
+                ),
+            },
+        )
+
+
 ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "ask_assistant",
@@ -187,19 +266,24 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
 def require_resource_permission_for_method(
     resource_type: str, read_override_endpoints: frozenset[str] | None = None
 ) -> Callable[..., Awaitable[None]]:
-    """Router-level dependency: stores method→permission config for post-auth check.
+    """Dependency: stores method→permission config for post-auth check.
 
     The actual permission check runs in ``_resolve_api_key`` (user_service)
-    after authentication has set ``request.state.api_key``.  Router-level
-    dependencies execute *before* route-level ``Depends()``, so we cannot
-    inspect ``request.state.api_key`` here.
+    after authentication has set ``request.state.api_key``.  Multiple guards may
+    be attached to one route, e.g. a conversation endpoint can require both the
+    assistant read capability and the conversation history capability.
     """
 
     async def _resource_permission_dep(request: Request) -> None:
-        request.state._resource_perm_config = {
+        config = {
             "resource_type": resource_type,
             "read_override_endpoints": read_override_endpoints,
         }
+        configs = list(getattr(request.state, "_resource_perm_configs", []))
+        configs.append(config)
+        request.state._resource_perm_configs = configs
+        if not hasattr(request.state, "_resource_perm_config"):
+            request.state._resource_perm_config = config
 
     return _resource_permission_dep
 
@@ -272,11 +356,12 @@ def require_resource_permission(
     return _resource_check_dep
 
 
-def require_tenant_scope_for_delete() -> Callable[..., Awaitable[None]]:
-    """Block DELETE requests for non-tenant-scoped API keys.
+def require_file_delete_scope_guard() -> Callable[..., Awaitable[None]]:
+    """Mark file DELETE requests for post-auth scope/ownership handling.
 
-    Files are user-scoped (no space_id column). GET/POST are safe for scoped keys,
-    but DELETE could affect files attached to conversations in other spaces.
+    Files are user-scoped (no space_id column). User-owned scoped keys may
+    delete through the FileService owner-bound SQL predicate, but service keys
+    do not have a real ``users.id`` owner and cannot delete user-owned files.
 
     Uses the deferred-enforcement pattern: stashes a marker on ``request.state``
     so the actual check runs inside ``_resolve_api_key`` (after auth has populated
@@ -286,7 +371,7 @@ def require_tenant_scope_for_delete() -> Callable[..., Awaitable[None]]:
 
     async def _stash(request: Request) -> None:
         if request.method == "DELETE":
-            request.state._require_tenant_scope_for_delete = True
+            request.state._require_file_delete_scope_guard = True
 
     return _stash
 
@@ -307,13 +392,9 @@ class ScopeFilter:
 def get_scope_filter(request: Request) -> ScopeFilter:
     """Extract scope filter from request state for scoped API keys.
 
-    Returns an empty ScopeFilter for tenant-scoped keys, bearer auth, or when
-    scope enforcement is disabled via env/tenant kill-switch.
+    Returns an empty ScopeFilter for tenant-scoped keys or bearer auth.
     Called at the router boundary; the result is passed to service methods.
     """
-    if getattr(request.state, "scope_enforcement_enabled", True) is False:
-        return ScopeFilter()
-
     scope_type = getattr(request.state, "api_key_scope_type", None)
     scope_id = getattr(request.state, "api_key_scope_id", None)
 

@@ -1,12 +1,12 @@
 import subprocess
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 import bcrypt
 import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
 
 
 # Configuration
@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     default_user_name: Optional[str] = None
     default_user_email: Optional[str] = None
     default_user_password: Optional[str] = None
+
+    public_origin: Optional[str] = None
 
 
 settings = Settings()
@@ -95,43 +97,52 @@ def add_tenant_user(
             print(f"User {user_email} already exists. Using existing user.")
             user_id = user[0]
 
-        # Check if "Owner" role already exists
-        check_role_query = sql.SQL("SELECT id FROM predefined_roles WHERE name = %s")
-        cur.execute(check_role_query, ("Owner",))
+        # Check if "Owner" role already exists for this tenant
+        check_role_query = sql.SQL(
+            "SELECT id FROM roles WHERE name = %s AND tenant_id = %s"
+        )
+        cur.execute(check_role_query, ("Owner", tenant_id))
         role = cur.fetchone()
 
         if role is None:
             owner_permissions = [
                 "admin",
                 "assistants",
+                "group_chats",
+                "apps",
                 "services",
                 "collections",
                 "insights",
                 "AI",
-                "editor",
                 "websites",
+                "integrations",
+                "shared_spaces",
+                "api_keys",
             ]
             add_role_query = sql.SQL(
-                "INSERT INTO predefined_roles (name, permissions) VALUES (%s, %s) RETURNING id"
+                "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
+                "VALUES (%s, %s, %s, %s) RETURNING id"
             )
-            cur.execute(add_role_query, ("Owner", owner_permissions))
-            predefined_role_id = cur.fetchone()[0]
+            cur.execute(
+                add_role_query, ("Owner", owner_permissions, tenant_id, "Owner")
+            )
+            role_id = cur.fetchone()[0]
         else:
-            predefined_role_id = role[0]
+            role_id = role[0]
 
         # Check if user already has the "Owner" role
         check_user_role_query = sql.SQL(
-            "SELECT 1 FROM users_predefined_roles WHERE user_id = %s AND predefined_role_id = %s"
+            "SELECT 1 FROM users_roles WHERE user_id = %s AND role_id = %s"
         )
-        cur.execute(check_user_role_query, (user_id, predefined_role_id))
+        cur.execute(check_user_role_query, (user_id, role_id))
         user_role = cur.fetchone()
 
         if user_role is None:
             # Assign the "Owner" role to the user
             assign_role_to_user_query = sql.SQL(
-                "INSERT INTO users_predefined_roles (user_id, predefined_role_id) VALUES (%s, %s)"
+                "INSERT INTO users_roles (user_id, role_id) VALUES (%s, %s)"
             )
-            cur.execute(assign_role_to_user_query, (user_id, predefined_role_id))
+            cur.execute(assign_role_to_user_query, (user_id, role_id))
 
         # Create organization space for the tenant (if not already exists)
         check_org_space_query = sql.SQL(
@@ -168,6 +179,67 @@ def add_tenant_user(
         conn.rollback()
 
 
+def _normalize_origin(raw_origin: Optional[str]) -> Optional[str]:
+    """Return a normalized http(s) origin, or None. Mirrors the seed migration."""
+    if not raw_origin:
+        return None
+    origin = raw_origin.strip().rstrip("/")
+    if origin.startswith(("http://", "https://")):
+        return origin
+    return None
+
+
+# Seed the configured PUBLIC_ORIGIN into allowed_origins so CORS works out of the
+# box on fresh installs. Idempotent: safe to run on every container start. The
+# unique constraint is (tenant_id, url), so ON CONFLICT must match it.
+def seed_allowed_origin(conn, public_origin, default_tenant_name):
+    origin = _normalize_origin(public_origin)
+    if origin is None:
+        print(
+            "Note! PUBLIC_ORIGIN not set or invalid. Skipping allowed_origins seed. "
+            "Frontend origins must be registered via the sysadmin allowed-origins API."
+        )
+        return
+
+    try:
+        cur = conn.cursor()
+
+        tenant = None
+        if default_tenant_name:
+            cur.execute(
+                sql.SQL("SELECT id, name FROM tenants WHERE name = %s"),
+                (default_tenant_name,),
+            )
+            tenant = cur.fetchone()
+
+        if tenant is None:
+            cur.execute(
+                sql.SQL("SELECT id, name FROM tenants ORDER BY name ASC LIMIT 1")
+            )
+            tenant = cur.fetchone()
+
+        if tenant is None:
+            print("No tenants found; skipping allowed_origins seed.")
+            cur.close()
+            return
+
+        tenant_id, tenant_name = tenant
+
+        cur.execute(
+            sql.SQL(
+                "INSERT INTO allowed_origins (url, tenant_id) VALUES (%s, %s) "
+                "ON CONFLICT (tenant_id, url) DO NOTHING"
+            ),
+            (origin, tenant_id),
+        )
+        conn.commit()
+        cur.close()
+        print(f"Allowed origin '{origin}' is registered for tenant '{tenant_name}'.")
+    except Exception as e:
+        print(f"Error seeding allowed origin: {e}")
+        conn.rollback()
+
+
 # Main script
 if __name__ == "__main__":
     # Run alembic migrations
@@ -201,6 +273,10 @@ if __name__ == "__main__":
             settings.default_user_email,
             settings.default_user_password,
         )
+
+    # Register PUBLIC_ORIGIN for CORS (idempotent; runs even when the default
+    # tenant/user block above is skipped, e.g. on upgrades of existing installs).
+    seed_allowed_origin(conn, settings.public_origin, settings.default_tenant_name)
 
     # Close the connection
     conn.close()

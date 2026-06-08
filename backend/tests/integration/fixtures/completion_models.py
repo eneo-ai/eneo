@@ -7,7 +7,6 @@ These fixtures create completion models with settings stored directly on the mod
 import pytest
 from sqlalchemy import select
 
-from intric.ai_models.model_enums import ModelOrg
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.model_providers_table import ModelProviders
 
@@ -111,12 +110,14 @@ def completion_model_factory(admin_user):
         if nickname is None:
             nickname = name
 
-        # Determine org based on provider
+        # Determine org label based on provider. The DB column is plain
+        # text, so any string is valid — admins can set this freely when
+        # creating tenant-specific models.
         org_map = {
-            "openai": ModelOrg.OPENAI,
-            "anthropic": ModelOrg.ANTHROPIC,
-            "meta": ModelOrg.META,
-            "google": ModelOrg.GOOGLE,
+            "openai": "OpenAI",
+            "anthropic": "Anthropic",
+            "meta": "Meta",
+            "google": "Google",
         }
         org = org_map.get(provider)
 
@@ -137,7 +138,7 @@ def completion_model_factory(admin_user):
             reasoning=reasoning,
             family=family,
             hosting=kwargs.get("hosting", "usa"),
-            org=org.value if org else None,
+            org=org,
             stability=kwargs.get("stability", "stable"),
             open_source=kwargs.get("open_source", False),
             description=kwargs.get("description"),

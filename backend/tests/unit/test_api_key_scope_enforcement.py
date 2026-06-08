@@ -13,24 +13,24 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
 from starlette.datastructures import State
 
+from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_dependencies import require_api_key_scope_check
 from intric.authentication.auth_models import (
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
 )
-from intric.authentication.api_key_resolver import ApiKeyValidationError
+from intric.conversations.conversations_router import _validate_conversation_scope
 from intric.roles.permissions import Permission
 from intric.users.user import UserState
-from intric.conversations.conversations_router import _validate_conversation_scope
 from tests.unit.api_key_test_utils import make_api_key
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -395,10 +395,10 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"id": str(blob_id)})
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+        await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
-    async def test_space_key_space_scoped_info_blob_listing_route_passes_in_strict_mode(
+    async def test_space_key_space_scoped_info_blob_listing_route_passes(
         self,
     ):
         """Space-scoped key + /info-blobs/spaces/{space_id} is deterministic and allowed."""
@@ -408,7 +408,7 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"space_id": str(space_id)})
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+        await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
     async def test_space_key_space_scoped_info_blob_listing_route_wrong_space_denied(
@@ -423,32 +423,12 @@ class TestScopeEnforcementUnit:
         scope_config = {"resource_type": "info_blob", "path_param": None}
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
+            await svc._enforce_api_key_scope(request, key, scope_config)
         assert exc_info.value.code == "insufficient_scope"
 
     @pytest.mark.asyncio
-    async def test_info_blob_route_ignores_non_deterministic_session_id_in_strict_mode(
-        self,
-    ):
-        """info_blob fallback only supports id/space_id; session_id must not be inferred."""
-        space_id = uuid4()
-        svc = _make_user_service()
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=space_id)
-        request = _scope_request(path_params={"session_id": str(uuid4())})
-        scope_config = {"resource_type": "info_blob", "path_param": None}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
-        assert exc_info.value.code == "insufficient_scope"
-        assert "path parameter 'id' or 'space_id'" in exc_info.value.message
-
-    @pytest.mark.asyncio
-    async def test_space_key_file_detail_route_strict_mode_allowed(self):
-        """File routes are intentionally allowed in strict mode (user-scoped policy)."""
+    async def test_space_key_file_detail_route_allowed(self):
+        """File routes are allowed (user-scoped policy)."""
         space_id = uuid4()
         file_id = uuid4()
         svc = _make_user_service()
@@ -456,10 +436,10 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"id": str(file_id)})
         scope_config = {"resource_type": "file", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
+        await svc._enforce_api_key_scope(request, key, scope_config)
 
     @pytest.mark.asyncio
-    async def test_space_key_file_detail_route_non_strict_mode_stays_list_path(self):
+    async def test_space_key_file_detail_route_stays_list_path(self):
         """File detail route should not reinterpret file id as space id."""
         space_id = uuid4()
         svc = _make_user_service(session_scalar_return=space_id)
@@ -467,7 +447,7 @@ class TestScopeEnforcementUnit:
         request = _scope_request(path_params={"id": str(uuid4())})
         scope_config = {"resource_type": "file", "path_param": None}
 
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=False)
+        await svc._enforce_api_key_scope(request, key, scope_config)
         svc.repo.session.scalar.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -632,151 +612,14 @@ class TestScopeListEndpoints:
 
         await svc._enforce_api_key_scope(request, key, scope_config)
 
-    @pytest.mark.asyncio
-    async def test_space_key_list_denied_in_strict_mode(self):
-        """Strict mode denies non-tenant scoped list endpoints when scope cannot be proven."""
-        svc = _make_user_service()
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
-        request = _scope_request(path_params={})  # list endpoint (no resource id)
-        scope_config = {"resource_type": "assistant", "path_param": "id"}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
-        assert exc_info.value.code == "insufficient_scope"
-        assert (
-            "Strict mode requires deterministic scope filtering"
-            in exc_info.value.message
-        )
-        assert "path parameter 'id'" in exc_info.value.message
-
-    @pytest.mark.asyncio
-    async def test_assistant_key_list_denied_in_strict_mode(self):
-        """Strict mode denies assistant-scoped list endpoints as well."""
-        svc = _make_user_service()
-        key = _make_key(scope_type=ApiKeyScopeType.ASSISTANT, scope_id=uuid4())
-        request = _scope_request(path_params={})  # list endpoint (no resource id)
-        scope_config = {"resource_type": "assistant", "path_param": "id"}
-
-        with pytest.raises(ApiKeyValidationError) as exc_info:
-            await svc._enforce_api_key_scope(
-                request, key, scope_config, strict_mode=True
-            )
-        assert exc_info.value.code == "insufficient_scope"
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "scope_type",
-        [ApiKeyScopeType.SPACE, ApiKeyScopeType.ASSISTANT, ApiKeyScopeType.APP],
-    )
-    async def test_file_list_allowed_in_strict_mode_for_scoped_keys(self, scope_type):
-        """Strict mode keeps intentionally-allowed file routes working for scoped keys."""
-        svc = _make_user_service()
-        key = _make_key(scope_type=scope_type, scope_id=uuid4())
-        request = _scope_request(path_params={})
-        scope_config = {"resource_type": "file", "path_param": None}
-
-        await svc._enforce_api_key_scope(request, key, scope_config, strict_mode=True)
-
 
 # ---------------------------------------------------------------------------
-# TestScopeToggle — env flag + tenant feature flag
+# TestResolveApiKeyScopeWiring — runtime scope enforcement checks
 # ---------------------------------------------------------------------------
 
 
-class TestScopeToggle:
-    """Scope enforcement toggle: env flag and tenant feature flag."""
-
-    @pytest.mark.asyncio
-    async def test_env_flag_off_skips_enforcement(self):
-        """When api_key_enforce_scope is False, scope enforcement is skipped entirely."""
-        # The env flag check is in _resolve_api_key:
-        # if get_settings().api_key_enforce_scope: ...
-        # We test by verifying the config flag exists and its effect.
-        from intric.main.config import get_settings
-
-        settings = get_settings()
-        assert hasattr(settings, "api_key_enforce_scope")
-
-    @pytest.mark.asyncio
-    async def test_tenant_flag_off_skips_enforcement(self):
-        """When tenant feature flag is disabled, enforcement is skipped."""
-        feature_flag_service = MagicMock()
-        feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
-            return_value=False
-        )
-
-        svc = _make_user_service(feature_flag_service=feature_flag_service)
-        result = await svc._is_scope_enforcement_enabled(uuid4())
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_tenant_flag_on_enables_enforcement(self):
-        """When tenant feature flag is enabled, enforcement is active."""
-        feature_flag_service = MagicMock()
-        feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
-            return_value=True
-        )
-
-        svc = _make_user_service(feature_flag_service=feature_flag_service)
-        result = await svc._is_scope_enforcement_enabled(uuid4())
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_missing_flag_row_defaults_enforced(self):
-        """Missing feature flag row → enforcement ON (fail-closed for security)."""
-        feature_flag_service = MagicMock()
-        feature_flag_service.check_is_feature_enabled_fail_closed = AsyncMock(
-            return_value=True
-        )
-
-        svc = _make_user_service(feature_flag_service=feature_flag_service)
-        result = await svc._is_scope_enforcement_enabled(uuid4())
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_missing_feature_flag_service_defaults_enforced(self):
-        """No feature_flag_service injected → enforcement ON (fail-closed)."""
-        svc = _make_user_service(feature_flag_service=None)
-        result = await svc._is_scope_enforcement_enabled(uuid4())
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_strict_mode_flag_on_enables_strict_mode(self):
-        """Tenant strict mode flag enabled -> strict mode active."""
-        feature_flag_service = MagicMock()
-        feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=True)
-
-        svc = _make_user_service(feature_flag_service=feature_flag_service)
-        result = await svc._is_strict_mode_enabled(uuid4())
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_missing_strict_mode_flag_defaults_disabled(self):
-        """Missing strict mode row defaults OFF for staged rollout."""
-        feature_flag_service = MagicMock()
-        feature_flag_service.check_is_feature_enabled = AsyncMock(return_value=False)
-
-        svc = _make_user_service(feature_flag_service=feature_flag_service)
-        result = await svc._is_strict_mode_enabled(uuid4())
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_missing_feature_flag_service_defaults_strict_mode_disabled(self):
-        """No feature_flag_service injected -> strict mode disabled."""
-        svc = _make_user_service(feature_flag_service=None)
-        result = await svc._is_strict_mode_enabled(uuid4())
-        assert result is False
-
-
-# ---------------------------------------------------------------------------
-# TestResolveApiKeyStrictModeWiring — runtime strict-mode forwarding checks
-# ---------------------------------------------------------------------------
-
-
-class TestResolveApiKeyStrictModeWiring:
-    """Ensure _resolve_api_key forwards strict-mode runtime state to scope checks."""
+class TestResolveApiKeyScopeWiring:
+    """Ensure _resolve_api_key calls scope enforcement for non-tenant keys."""
 
     @staticmethod
     def _build_request() -> SimpleNamespace:
@@ -812,7 +655,6 @@ class TestResolveApiKeyStrictModeWiring:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None
@@ -820,12 +662,11 @@ class TestResolveApiKeyStrictModeWiring:
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
         svc._enforce_api_key_scope = AsyncMock()
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=True)
-        svc._is_strict_mode_enabled = AsyncMock(return_value=False)
         return svc
 
     @pytest.mark.asyncio
-    async def test_resolve_api_key_forwards_strict_mode_true(self, monkeypatch):
+    async def test_resolve_api_key_enforces_scope_for_non_tenant_key(self, monkeypatch):
+        """Scope enforcement is called for non-tenant scoped keys."""
         key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
         svc = self._build_service(key)
         request = self._build_request()
@@ -844,119 +685,19 @@ class TestResolveApiKeyStrictModeWiring:
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
                 api_key_enforce_resource_permissions=False,
-                api_key_enforce_scope=True,
                 api_key_last_used_min_interval_seconds=0,
             ),
         )
-        svc._is_strict_mode_enabled = AsyncMock(return_value=True)
 
         await svc._resolve_api_key("sk_test_key", request=request)
 
         svc._enforce_api_key_scope.assert_awaited_once()
-        assert svc._enforce_api_key_scope.await_args.kwargs["strict_mode"] is True
-
-    @pytest.mark.asyncio
-    async def test_resolve_api_key_forwards_strict_mode_false(self, monkeypatch):
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
-        svc = self._build_service(key)
-        request = self._build_request()
-
-        class _PolicyServiceStub:
-            def __init__(self, **kwargs):
-                pass
-
-            async def enforce_guardrails(self, *, key, origin, client_ip):
-                return None
-
-        monkeypatch.setattr(
-            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
-        )
-        monkeypatch.setattr(
-            "intric.users.user_service.get_settings",
-            lambda: SimpleNamespace(
-                api_key_enforce_resource_permissions=False,
-                api_key_enforce_scope=True,
-                api_key_last_used_min_interval_seconds=0,
-            ),
-        )
-        svc._is_strict_mode_enabled = AsyncMock(return_value=False)
-
-        await svc._resolve_api_key("sk_test_key", request=request)
-
-        svc._enforce_api_key_scope.assert_awaited_once()
-        assert svc._enforce_api_key_scope.await_args.kwargs["strict_mode"] is False
-
-    @pytest.mark.asyncio
-    async def test_resolve_api_key_skips_scope_check_when_env_toggle_off(
-        self, monkeypatch
-    ):
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
-        svc = self._build_service(key)
-        request = self._build_request()
-
-        class _PolicyServiceStub:
-            def __init__(self, **kwargs):
-                pass
-
-            async def enforce_guardrails(self, *, key, origin, client_ip):
-                return None
-
-        monkeypatch.setattr(
-            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
-        )
-        monkeypatch.setattr(
-            "intric.users.user_service.get_settings",
-            lambda: SimpleNamespace(
-                api_key_enforce_resource_permissions=False,
-                api_key_enforce_scope=False,
-                api_key_last_used_min_interval_seconds=0,
-            ),
-        )
-
-        await svc._resolve_api_key("sk_test_key", request=request)
-
-        svc._is_scope_enforcement_enabled.assert_not_awaited()
-        svc._is_strict_mode_enabled.assert_not_awaited()
-        svc._enforce_api_key_scope.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_resolve_api_key_skips_scope_check_when_tenant_flag_off(
-        self, monkeypatch
-    ):
-        key = _make_key(scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4())
-        svc = self._build_service(key)
-        request = self._build_request()
-
-        class _PolicyServiceStub:
-            def __init__(self, **kwargs):
-                pass
-
-            async def enforce_guardrails(self, *, key, origin, client_ip):
-                return None
-
-        monkeypatch.setattr(
-            "intric.users.user_service.ApiKeyPolicyService", _PolicyServiceStub
-        )
-        monkeypatch.setattr(
-            "intric.users.user_service.get_settings",
-            lambda: SimpleNamespace(
-                api_key_enforce_resource_permissions=False,
-                api_key_enforce_scope=True,
-                api_key_last_used_min_interval_seconds=0,
-            ),
-        )
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=False)
-
-        await svc._resolve_api_key("sk_test_key", request=request)
-
-        svc._is_scope_enforcement_enabled.assert_awaited_once()
-        svc._is_strict_mode_enabled.assert_not_awaited()
-        svc._enforce_api_key_scope.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_resolve_api_key_tenant_scoped_key_skips_scope_enforcement(
         self, monkeypatch
     ):
+        """Tenant-scoped keys bypass scope enforcement (they have full access)."""
         key = _make_key(scope_type=ApiKeyScopeType.TENANT, scope_id=None)
         svc = self._build_service(key)
         request = self._build_request()
@@ -975,16 +716,12 @@ class TestResolveApiKeyStrictModeWiring:
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
                 api_key_enforce_resource_permissions=False,
-                api_key_enforce_scope=True,
                 api_key_last_used_min_interval_seconds=0,
             ),
         )
-        svc._is_strict_mode_enabled = AsyncMock(return_value=True)
 
         await svc._resolve_api_key("sk_test_key", request=request)
 
-        svc._is_scope_enforcement_enabled.assert_awaited_once()
-        svc._is_strict_mode_enabled.assert_awaited_once()
         svc._enforce_api_key_scope.assert_not_awaited()
 
 
@@ -1114,8 +851,8 @@ class TestScopeRouteGuardCoverage:
                 )
                 patch_routes.append((path, has_scope_dep, has_admin_key_dep))
 
-        assert len(patch_routes) >= 5, (
-            f"Expected at least 5 PATCH /settings endpoints, found {len(patch_routes)}"
+        assert len(patch_routes) >= 4, (
+            f"Expected at least 4 PATCH /settings endpoints, found {len(patch_routes)}"
         )
         for path, has_scope_dep, has_admin_key_dep in patch_routes:
             assert has_scope_dep, (
@@ -1150,7 +887,14 @@ class TestScopeRouteGuardCoverage:
         )
 
     def test_user_admin_endpoints_have_router_level_admin_guards(self):
-        """User admin endpoints should have router-level admin scope + key guards."""
+        """User admin-mutation endpoints should have admin guards for API keys.
+
+        Includes GET /users/ (get_tenant_users): mounted on the non-admin
+        `router` but with *route-level* `_scope_check_dep` +
+        `_api_key_permission_dep` so scoped API keys cannot enumerate the
+        tenant directory. Those guards are no-ops for bearer tokens — see
+        TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
+        """
         from intric.server.routers import router
 
         admin_routes = []
@@ -1179,7 +923,7 @@ class TestScopeRouteGuardCoverage:
                 )
 
         assert len(admin_routes) >= 5, (
-            f"Expected at least 5 user admin routes, found {len(admin_routes)}"
+            f"Expected at least 5 user admin-gated routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
             assert has_scope_dep, (
@@ -1606,56 +1350,6 @@ class TestScopeBodyDriven:
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail["code"] == "insufficient_scope"
 
-    @pytest.mark.asyncio
-    async def test_env_flag_off_skips_body_driven_scope(self):
-        """Body-driven scope check respects env kill switch."""
-        assistant_id = uuid4()
-        other_assistant = uuid4()
-        request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
-        container = self._make_container()
-
-        with patch(
-            "intric.conversations.conversations_router.get_settings"
-        ) as mock_settings:
-            mock_settings.return_value = SimpleNamespace(api_key_enforce_scope=False)
-            # Should NOT raise even though assistant doesn't match
-            await _validate_conversation_scope(
-                http_request=request,
-                container=container,
-                assistant_id=other_assistant,
-                group_chat_id=None,
-                session_id=None,
-            )
-
-    @pytest.mark.asyncio
-    async def test_tenant_flag_off_skips_body_driven_scope(self):
-        """Body-driven scope check respects tenant feature flag."""
-        assistant_id = uuid4()
-        other_assistant = uuid4()
-        request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
-        container = self._make_container()
-
-        # Override feature flag to disabled
-        flag = MagicMock()
-        flag.is_enabled = MagicMock(return_value=False)
-        ff_service = MagicMock()
-        ff_service.feature_flag_repo = MagicMock()
-        ff_service.feature_flag_repo.one_or_none = AsyncMock(return_value=flag)
-        container.feature_flag_service = MagicMock(return_value=ff_service)
-
-        with patch(
-            "intric.conversations.conversations_router.get_settings"
-        ) as mock_settings:
-            mock_settings.return_value = SimpleNamespace(api_key_enforce_scope=True)
-            # Should NOT raise even though assistant doesn't match
-            await _validate_conversation_scope(
-                http_request=request,
-                container=container,
-                assistant_id=other_assistant,
-                group_chat_id=None,
-                session_id=None,
-            )
-
 
 # ---------------------------------------------------------------------------
 # TestScopeConfigStashPattern — require_api_key_scope_check factory
@@ -1849,15 +1543,15 @@ class TestPromptScopeResolver:
 
 
 # ---------------------------------------------------------------------------
-# TestRequireTenantScopeForDelete — file DELETE restriction
+# TestRequireFileDeleteScopeGuard — file DELETE restriction
 # ---------------------------------------------------------------------------
 
 
-class TestRequireTenantScopeForDelete:
-    """Tests for require_tenant_scope_for_delete() config-stashing dependency.
+class TestRequireFileDeleteScopeGuard:
+    """Tests for require_file_delete_scope_guard() config-stashing dependency.
 
     The dependency uses deferred enforcement: it stashes a marker on
-    ``request.state._require_tenant_scope_for_delete`` for DELETE requests.
+    ``request.state._require_file_delete_scope_guard`` for DELETE requests.
     The actual enforcement runs inside ``_resolve_api_key`` after auth populates
     ``api_key_scope_type``.
     """
@@ -1866,51 +1560,51 @@ class TestRequireTenantScopeForDelete:
     async def test_stashes_marker_on_delete_request(self):
         """DELETE request → marker stashed on request.state."""
         from intric.authentication.auth_dependencies import (
-            require_tenant_scope_for_delete,
+            require_file_delete_scope_guard,
         )
 
-        dep = require_tenant_scope_for_delete()
+        dep = require_file_delete_scope_guard()
         state = State()
         request = SimpleNamespace(method="DELETE", state=state)
         await dep(request)
-        assert getattr(request.state, "_require_tenant_scope_for_delete", False) is True
+        assert getattr(request.state, "_require_file_delete_scope_guard", False) is True
 
     @pytest.mark.asyncio
     async def test_no_marker_on_get_request(self):
         """GET request → no marker stashed."""
         from intric.authentication.auth_dependencies import (
-            require_tenant_scope_for_delete,
+            require_file_delete_scope_guard,
         )
 
-        dep = require_tenant_scope_for_delete()
+        dep = require_file_delete_scope_guard()
         state = State()
         request = SimpleNamespace(method="GET", state=state)
         await dep(request)
         assert (
-            getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+            getattr(request.state, "_require_file_delete_scope_guard", False) is False
         )
 
     @pytest.mark.asyncio
     async def test_no_marker_on_post_request(self):
         """POST request → no marker stashed."""
         from intric.authentication.auth_dependencies import (
-            require_tenant_scope_for_delete,
+            require_file_delete_scope_guard,
         )
 
-        dep = require_tenant_scope_for_delete()
+        dep = require_file_delete_scope_guard()
         state = State()
         request = SimpleNamespace(method="POST", state=state)
         await dep(request)
         assert (
-            getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+            getattr(request.state, "_require_file_delete_scope_guard", False) is False
         )
 
 
-class TestTenantScopeForDeleteEnforcement:
-    """Tests for the deferred enforcement of tenant-scope-for-delete.
+class TestFileDeleteScopeEnforcement:
+    """Tests for the deferred enforcement of file DELETE scope handling.
 
     Exercises the enforcement path inside ``_resolve_api_key`` that checks
-    ``_require_tenant_scope_for_delete`` after auth has set scope_type.
+    ``_require_file_delete_scope_guard`` after auth has set scope_type.
     Uses the full ``_resolve_api_key`` flow with mocked dependencies.
     """
 
@@ -1925,7 +1619,7 @@ class TestTenantScopeForDeleteEnforcement:
             url=SimpleNamespace(path="/api/v1/files/some-id"),
         )
         if marker:
-            request.state._require_tenant_scope_for_delete = True
+            request.state._require_file_delete_scope_guard = True
         return request
 
     @staticmethod
@@ -1946,16 +1640,22 @@ class TestTenantScopeForDeleteEnforcement:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None
         svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
+        svc._build_service_user = AsyncMock(
+            return_value=SimpleNamespace(
+                id=key.id,
+                tenant_id=key.tenant_id,
+                permissions={Permission.ADMIN},
+                state=UserState.ACTIVE,
+                active_api_key=key,
+            )
+        )
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
         svc._enforce_api_key_scope = AsyncMock()
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=False)
-        svc._is_strict_mode_enabled = AsyncMock(return_value=False)
         return svc
 
     @staticmethod
@@ -1972,74 +1672,78 @@ class TestTenantScopeForDeleteEnforcement:
         )
 
     @staticmethod
-    def _patch_settings(monkeypatch, *, enforce_scope: bool):
+    def _patch_settings(monkeypatch):
         monkeypatch.setattr(
             "intric.users.user_service.get_settings",
             lambda: SimpleNamespace(
                 api_key_enforce_resource_permissions=False,
-                api_key_enforce_scope=enforce_scope,
                 api_key_last_used_min_interval_seconds=0,
             ),
         )
 
     @pytest.mark.asyncio
-    async def test_space_scoped_key_delete_not_blocked_when_env_scope_flag_off(
-        self, monkeypatch
-    ):
-        """Env kill-switch OFF: delete guard must not scope-block non-tenant keys."""
+    async def test_non_tenant_user_owned_key_delete_allowed(self, monkeypatch):
+        """User-owned scoped keys may reach FileService owner-bound DELETE."""
         key = _make_key(
-            scope_type="space",
+            scope_type="assistant",
             scope_id=uuid4(),
             permission=ApiKeyPermission.ADMIN,
         )
         svc = self._build_service(key)
         self._patch_policy(monkeypatch)
-        self._patch_settings(monkeypatch, enforce_scope=False)
+        self._patch_settings(monkeypatch)
         request = self._build_request(marker=True)
 
         _, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
-        assert request.state.scope_enforcement_enabled is False
         svc._log_api_key_auth_failed.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_space_scoped_key_delete_not_blocked_when_tenant_flag_off(
-        self, monkeypatch
-    ):
-        """Tenant feature flag OFF: delete guard must not scope-block non-tenant keys."""
+    async def test_non_tenant_service_key_delete_blocked(self, monkeypatch):
+        """Service keys cannot delete user-owned files."""
         key = _make_key(
-            scope_type="space",
+            ownership=ApiKeyOwnership.SERVICE,
+            owner_user_id=None,
+            scope_type="assistant",
             scope_id=uuid4(),
             permission=ApiKeyPermission.ADMIN,
         )
         svc = self._build_service(key)
         self._patch_policy(monkeypatch)
-        self._patch_settings(monkeypatch, enforce_scope=True)
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=False)
-        request = self._build_request(marker=True)
-
-        _, returned_key = await svc._resolve_api_key("sk_test", request=request)
-        assert returned_key is key
-        assert request.state.scope_enforcement_enabled is False
-        svc._log_api_key_auth_failed.assert_not_awaited()
-        svc._is_scope_enforcement_enabled.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_non_tenant_scoped_key_delete_blocked_when_scope_enforcement_enabled(
-        self, monkeypatch
-    ):
-        """Env ON + tenant flag ON: non-tenant keys should be blocked for DELETE."""
-        key = _make_key(scope_type="assistant", scope_id=uuid4())
-        svc = self._build_service(key)
-        self._patch_policy(monkeypatch)
-        self._patch_settings(monkeypatch, enforce_scope=True)
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=True)
+        self._patch_settings(monkeypatch)
         request = self._build_request(marker=True)
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._resolve_api_key("sk_test", request=request)
-        assert exc_info.value.code == "insufficient_scope"
-        assert request.state.scope_enforcement_enabled is True
+        assert exc_info.value.code == "service_key_cannot_delete_files"
+        assert "Use a user-owned API key" in exc_info.value.message
+        assert exc_info.value.context == {
+            "resource_type": "file",
+            "action": "delete",
+            "auth_layer": "api_key_scope",
+            "required_capability": "user_owned_api_key",
+            "scope_type": "assistant",
+            "ownership": "service",
+        }
+        svc._log_api_key_auth_failed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_tenant_service_key_delete_blocked(self, monkeypatch):
+        """Tenant scope does not make service keys owners of user-owned files."""
+        key = _make_key(
+            ownership=ApiKeyOwnership.SERVICE,
+            owner_user_id=None,
+            scope_type="tenant",
+            permission=ApiKeyPermission.ADMIN,
+        )
+        svc = self._build_service(key)
+        self._patch_policy(monkeypatch)
+        self._patch_settings(monkeypatch)
+        request = self._build_request(marker=True)
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._resolve_api_key("sk_test", request=request)
+        assert exc_info.value.code == "service_key_cannot_delete_files"
         svc._log_api_key_auth_failed.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -2048,13 +1752,11 @@ class TestTenantScopeForDeleteEnforcement:
         key = _make_key(scope_type="tenant", permission=ApiKeyPermission.ADMIN)
         svc = self._build_service(key)
         self._patch_policy(monkeypatch)
-        self._patch_settings(monkeypatch, enforce_scope=True)
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=True)
+        self._patch_settings(monkeypatch)
         request = self._build_request(marker=True)
 
         _, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
-        assert request.state.scope_enforcement_enabled is True
 
     @pytest.mark.asyncio
     async def test_no_marker_space_scoped_key_allowed(self, monkeypatch):
@@ -2064,8 +1766,7 @@ class TestTenantScopeForDeleteEnforcement:
         )
         svc = self._build_service(key)
         self._patch_policy(monkeypatch)
-        self._patch_settings(monkeypatch, enforce_scope=True)
-        svc._is_scope_enforcement_enabled = AsyncMock(return_value=True)
+        self._patch_settings(monkeypatch)
         request = self._build_request(marker=False)
 
         _, returned_key = await svc._resolve_api_key("sk_test", request=request)

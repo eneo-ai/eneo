@@ -15,9 +15,16 @@ from intric.audit.infrastructure.rate_limiting import (
     RateLimitServiceUnavailableError,
     enforce_rate_limit,
 )
-from intric.conversations.conversation_models import ConversationRequest
+from intric.authentication.auth_dependencies import (
+    require_resource_permission_for_method,
+)
+from intric.conversations.conversation_models import (
+    ConversationRenameRequest,
+    ConversationRequest,
+    PreflightRequest,
+    PreflightResponse,
+)
 from intric.database.database import AsyncSession
-from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
@@ -32,6 +39,7 @@ from intric.sessions.session import (
     SessionFeedback,
     SessionMetadataPublic,
     SessionPublic,
+    SessionUpdate,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -85,34 +93,12 @@ async def _validate_conversation_scope(
     """Validate body-driven fields against API key scope.
 
     Runs after auth (request.state has scope info) but before service call.
-    Only validates when scope enforcement is active and key is non-tenant.
-    Gated by the same env flag + tenant feature flag as _enforce_api_key_scope().
+    Only validates when key is non-tenant scoped.
     """
-    # Check env-level kill switch
-    if not get_settings().api_key_enforce_scope:
-        return
-
     scope_type = getattr(http_request.state, "api_key_scope_type", None)
     scope_id = getattr(http_request.state, "api_key_scope_id", None)
     if scope_type is None or scope_type == "tenant":
         return
-
-    # Check tenant-level feature flag
-    try:
-        feature_flag_service = container.feature_flag_service()
-        flag = await feature_flag_service.feature_flag_repo.one_or_none(
-            name="api_key_scope_enforcement"
-        )
-        if flag is not None:
-            user = container.user()
-            if not flag.is_enabled(tenant_id=user.tenant_id):
-                return
-    except Exception as exc:
-        # Fail-closed: if we can't check the flag, enforce scope
-        logger.warning(
-            "Could not check scope enforcement feature flag, defaulting to enforced",
-            extra={"error_type": type(exc).__name__},
-        )
 
     scope_id = UUID(str(scope_id)) if scope_id is not None else None
 
@@ -350,10 +336,86 @@ async def chat(
     return await to_conversation_response(response=response, stream=request.stream)
 
 
+@router.post(
+    "/preflight",
+    response_model=PreflightResponse,
+    responses=responses.get_responses([400, 403, 404, 422, 429]),
+)
+async def preflight_tokens(
+    request: PreflightRequest,
+    http_request: Request,
+    container: Container = Depends(
+        get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+    ),
+):
+    """Returns the exact token cost the next chat request will add.
+
+    Excludes knowledge/RAG and web-search content (selected at request time
+    and unknowable up-front). Designed to be called debounced from the input
+    field — the cost is dominated by tokenization (~5-20ms).
+
+    Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
+    ~150 req/min, so the limit catches scripted abuse while leaving multiple
+    tabs and fast input untouched.
+    """
+    current_user = container.user()
+    redis_client = container.redis_client()
+    try:
+        await enforce_rate_limit(
+            redis_client=redis_client,
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            config=RateLimitConfig(
+                max_requests=600,
+                window_seconds=60,
+                key_prefix="rate_limit:preflight",
+            ),
+        )
+    except RateLimitExceededError as exc:
+        retry_after = exc.result.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "rate_limit_exceeded",
+                "message": "Too many preflight requests. Please retry shortly.",
+                "retry_after_seconds": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+    except RateLimitServiceUnavailableError:
+        # Fail-open: preflight is best-effort UX, not a security-critical path.
+        logger.warning("Preflight rate limiter unavailable", exc_info=True)
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await _validate_conversation_scope(
+            http_request=http_request,
+            container=container,
+            assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
+            session_id=request.session_id,
+        )
+
+        conversation_service = container.conversation_service()
+        tool_assistant_id = None
+        if request.tools is not None and request.tools.assistants:
+            tool_assistant_id = request.tools.assistants[0].id
+
+        return await conversation_service.preflight_tokens(
+            question=request.question,
+            file_ids=request.file_ids,
+            session_id=request.session_id,
+            assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
+            tool_assistant_id=tool_assistant_id,
+        )
+
+
 @router.get(
     "/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def list_conversations(
     http_request: Request,
@@ -439,6 +501,7 @@ async def list_conversations(
     "/{session_id}/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_conversation(
     session_id: Annotated[
@@ -458,6 +521,7 @@ async def get_conversation(
     "/{session_id}/",
     status_code=204,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_conversation(
     session_id: Annotated[
@@ -485,6 +549,7 @@ async def delete_conversation(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(
     feedback: SessionFeedback,
@@ -519,6 +584,7 @@ async def leave_feedback(
     "/{session_id}/title/",
     response_model=SessionPublic,
     responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def set_title_of_conversation(
     session_id: UUID,
@@ -667,7 +733,7 @@ async def approve_tools(
         audit_service = container.audit_service()
         await audit_service.log_async(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.TOOL_APPROVAL_SUBMITTED,
             entity_type=entity_type,
             entity_id=entity_id,
@@ -704,3 +770,25 @@ async def approve_tools(
         decisions_remaining=submit_result.decisions_remaining,
         unrecognized_tool_call_ids=submit_result.unrecognized_tool_call_ids,
     )
+
+
+@router.patch(
+    "/{session_id}/name/",
+    response_model=SessionPublic,
+    responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+    description="Rename a conversation (session).",
+)
+async def rename_conversation(
+    payload: ConversationRenameRequest,
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Rename a conversation (session)"""
+    session_service = container.session_service()
+    session = await session_service.update_session(
+        SessionUpdate(id=session_id, name=payload.name)
+    )
+    return to_session_public(session)

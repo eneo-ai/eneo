@@ -131,14 +131,16 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{file.name}</Dialog.Title>
-    <Dialog.Description hidden>File preview for {file.name}</Dialog.Description>
+    <Dialog.Description hidden
+      >{m.attachment_file_preview_for({ name: file.name })}</Dialog.Description
+    >
 
     <Dialog.Section scrollable>
       <div class="p-4">
         {#if loadingFile}
-          <pre>Loading...</pre>
+          <pre>{m.loading()}</pre>
         {:else if loadError}
-          <pre>Error loading content. Please try again.</pre>
+          <pre>{m.attachment_error_loading_content()}</pre>
         {:else if isTextFile && loadedContent}
           <Markdown source={loadedContent}></Markdown>
         {:else if isImageFile && signedUrl}
@@ -146,7 +148,7 @@
         {:else if isAudioFile && signedUrl}
           <audio controls class="w-full">
             <source src={signedUrl} type={file.mimetype} />
-            Your browser does not support the audio element.
+            {m.attachment_audio_not_supported()}
           </audio>
         {:else}
           <div class="text-center">

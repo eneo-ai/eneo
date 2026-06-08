@@ -19,7 +19,9 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
-  const { data } = $props();
+  const { data: rawData } = $props();
+  // +page.ts throws when partnerId is missing, so chatPartner is always set here.
+  const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
     state: { userInfo }
@@ -32,6 +34,17 @@
   const chat = untrack(() => initChatService(data));
 
   let currentTab = writable("chat");
+
+  function startNewConversation() {
+    chat.newConversation();
+    const tab = "chat";
+    const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+    pushState(nextUrl, {
+      conversation: undefined,
+      tab
+    });
+  }
 
   $effect(() => {
     chat.init(data);
@@ -97,19 +110,7 @@
           )}>{m.edit()}</Button
         >
       {/if}
-      <Button
-        variant="primary"
-        on:click={() => {
-          chat.newConversation();
-          const tab = "chat";
-          const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
-          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
-          pushState(nextUrl, {
-            conversation: undefined,
-            tab
-          });
-        }}
-        class="!line-clamp-1"
+      <Button variant="primary" on:click={startNewConversation} class="!line-clamp-1"
         >{m.new_conversation()}
       </Button>
     </Page.Flex>
@@ -118,11 +119,13 @@
   <Page.Main>
     <Page.Tab id="chat">
       <ConversationView
+        onNewConversation={startNewConversation}
         children={chat.partner.type === "default-assistant"
           ? defaultAssistantWelcomeMessage
           : undefined}
       ></ConversationView>
     </Page.Tab>
+
     <Page.Tab id="history">
       {#await data.initialHistory}
         <!-- TODO: This has some delay on it as the underlying table is delayed in updating its rows, so we cover it up during that time. -->
@@ -133,6 +136,7 @@
           <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
         </div>
       {/await}
+
       <HistoryTable
         onConversationLoaded={(conversation) => {
           const tab = "chat";

@@ -706,21 +706,6 @@ class SpaceService:
     async def add_group_member(
         self, space_id: UUID, group_id: UUID, role: SpaceRoleValue
     ) -> SpaceGroupMember:
-        """Add a user group to a space with the specified role.
-
-        Args:
-            space_id: ID of the space
-            group_id: ID of the user group to add
-            role: Role to assign to the group (admin, editor, viewer)
-
-        Returns:
-            The created SpaceGroupMember
-
-        Raises:
-            UnauthorizedException: If user doesn't have permission to add group members
-            BadRequestException: If trying to add to a personal space or group already exists
-            NotFoundException: If group not found or not in same tenant
-        """
         space = await self.get_space(space_id)
         actor = self._get_actor(space)
 
@@ -732,7 +717,6 @@ class SpaceService:
         if space.is_personal():
             raise BadRequestException("Cannot add group members to personal spaces")
 
-        # Fetch the user group and validate it belongs to same tenant
         user_group = await self.user_groups_repo.get_user_group(group_id)
         if user_group is None or user_group.tenant_id != self.user.tenant_id:
             raise NotFoundException(f"User group {group_id} not found")

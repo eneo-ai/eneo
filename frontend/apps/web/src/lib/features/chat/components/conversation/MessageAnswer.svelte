@@ -229,7 +229,7 @@
           <!-- Approval actions -->
           {#if isPendingTool && toolCall.tool_call_id}
             <div class="border-dimmer flex items-center gap-2 border-t px-3 py-2.5">
-              <span class="text-muted mr-auto text-xs">Väntar på godkännande</span>
+              <span class="text-muted mr-auto text-xs">{m.chat_tool_awaiting_approval()}</span>
               <button
                 type="button"
                 class="bg-positive-default text-on-fill hover:bg-positive-stronger inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
@@ -258,7 +258,9 @@
         <div
           class="border-default bg-secondary/50 mt-1 flex items-center justify-end gap-2 rounded-lg border border-dashed px-3 py-2.5"
         >
-          <span class="text-muted mr-auto text-xs">{pendingToolIds.length} verktyg väntar</span>
+          <span class="text-muted mr-auto text-xs"
+            >{m.chat_tools_pending({ count: pendingToolIds.length })}</span
+          >
           <button
             type="button"
             class="bg-positive-default text-on-fill hover:bg-positive-stronger inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"

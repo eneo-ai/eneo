@@ -1,14 +1,25 @@
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        stages: [pre-commit]
+        args: [--maxkb=750]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.3
     hooks:
-      # Lint using project configuration (pyproject.toml)
       - id: ruff-check
         name: ruff
         args: [--fix]
         stages: [pre-commit]
         files: ^backend/
-      # Auto-format Python with ruff format (Python equivalent of prettier).
       # Alembic migrations are excluded — they are historical artifacts that
       # should not change after being deployed (whitespace churn breaks
       # git blame / bisect on schema history).
@@ -18,9 +29,15 @@ repos:
         files: ^backend/.*\.py$
         exclude: ^backend/alembic/
 
-  # Pyright type checking via devcontainer
   - repo: local
     hooks:
+      - id: commit-preflight
+        name: commit-preflight
+        entry: python3 scripts/commit_preflight.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: pyright
         name: pyright
         entry: bash backend/scripts/run_pyright_in_devcontainer.sh
@@ -67,3 +84,25 @@ repos:
         language: system
         files: ^frontend/apps/web/messages/.*\.json$
         pass_filenames: false
+        stages: [pre-commit]
+
+      - id: i18n-key-parity
+        name: i18n-key-parity
+        entry: python3 frontend/apps/web/scripts/check-i18n-parity.py
+        language: system
+        files: ^frontend/apps/web/messages/.*\.json$
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: commit-msg-check
+        name: commit-msg-check
+        entry: python3 scripts/commit_msg_check.py
+        language: system
+        stages: [commit-msg]
+
+      - id: pre-push-check
+        name: pre-push-check
+        entry: python3 scripts/pre_push_check.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

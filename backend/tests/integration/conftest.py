@@ -4,6 +4,7 @@ Integration test fixtures using testcontainers for PostgreSQL and Redis.
 
 import json
 import os
+import socket
 from collections.abc import Callable
 from pathlib import Path
 
@@ -115,16 +116,15 @@ import contextlib
 from typing import AsyncGenerator, Generator
 
 import psycopg2
-from alembic import command
-from alembic.config import Config
+from cryptography.fernet import Fernet
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
-from cryptography.fernet import Fernet
-
+from alembic import command
+from alembic.config import Config
 from init_db import add_tenant_user
 from intric.database.database import sessionmanager
 from intric.main.config import Settings, reset_settings, set_settings
@@ -135,6 +135,29 @@ from intric.server.main import get_application
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
 _IN_DEVCONTAINER = os.getenv("POSTGRES_HOST") == "db"
 _TEST_NETWORK = "eneo" if _IN_DEVCONTAINER else None
+
+
+def _host_resolves(host: str) -> bool:
+    try:
+        socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+
+    return True
+
+
+def _container_network_ip(container, network_name: str | None) -> str | None:
+    if not network_name:
+        return None
+
+    container.reload()
+    network = (
+        container.attrs.get("NetworkSettings", {}).get("Networks", {}).get(network_name)
+    )
+    if not network:
+        return None
+
+    return network.get("IPAddress") or None
 
 
 @pytest.fixture(scope="session")
@@ -184,16 +207,26 @@ def test_settings(
     """
     Create test settings using testcontainer connection strings.
     """
-    # In devcontainer: use container name and internal port (same network)
-    # Outside devcontainer: use host IP and exposed port (bridge network)
-    if _IN_DEVCONTAINER:
-        pg_host = postgres_container._container.name
+    # In devcontainer: prefer container DNS when it is actually reachable.
+    # GitHub Codespaces exposes compose services like "db", but does not always
+    # make ad-hoc testcontainer names resolvable from the Codespaces container.
+    container_name = postgres_container._container.name
+    network_ip = _container_network_ip(postgres_container._container, _TEST_NETWORK)
+    if _IN_DEVCONTAINER and _host_resolves(container_name):
+        pg_host = container_name
         pg_port = 5432
-        redis_host = "redis"  # Use existing Redis service in devcontainer
-        redis_port = 6379
+    elif _IN_DEVCONTAINER and network_ip:
+        pg_host = network_ip
+        pg_port = 5432
     else:
         pg_host = postgres_container.get_container_host_ip()
         pg_port = int(postgres_container.get_exposed_port(5432))
+
+    if _IN_DEVCONTAINER:
+        redis_host = "redis"  # Use existing Redis service in devcontainer
+        redis_port = 6379
+    else:
+        assert redis_container is not None
         redis_host = redis_container.get_container_host_ip()
         redis_port = int(redis_container.get_exposed_port(6379))
 
@@ -355,6 +388,7 @@ async def setup_database(test_settings: Settings):
     backend_dir = Path(__file__).parent.parent.parent
     alembic_ini_path = backend_dir / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini_path))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
 
     try:
@@ -507,25 +541,6 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
         ON CONFLICT (name) DO NOTHING
     """)
     # Add API key scope enforcement feature flags.
-    # These rows are NOT needed for normal scope enforcement (which fail-closed defaults
-    # to True when the row is missing). They ARE needed because the settings API
-    # (PATCH /settings/scope-enforcement, /settings/strict-mode) calls
-    # _require_feature_flag() which raises ValueError if the global row doesn't exist.
-    # The access matrix tests toggle these flags via the settings API.
-    cursor.execute("""
-        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
-        VALUES (gen_random_uuid(), 'api_key_scope_enforcement',
-            'Enforce API key scope restrictions',
-            true, now(), now())
-        ON CONFLICT (name) DO NOTHING
-    """)
-    cursor.execute("""
-        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
-        VALUES (gen_random_uuid(), 'api_key_strict_mode',
-            'Enable strict scope mode for API keys',
-            false, now(), now())
-        ON CONFLICT (name) DO NOTHING
-    """)
     conn.commit()
     cursor.close()
     conn.close()
@@ -761,10 +776,11 @@ def legacy_credentials_mode(test_settings):
             # Test runs with strict mode disabled
             pass
     """
-    from intric.main.config import set_settings, get_settings
+    from dependency_injector import providers
+
+    from intric.main.config import get_settings, set_settings
     from intric.main.container.container import Container
     from intric.settings.encryption_service import EncryptionService
-    from dependency_injector import providers
 
     # Save original settings
     original_settings = get_settings()
@@ -1012,8 +1028,9 @@ async def tenant_user_token(test_tenant, test_settings):
     Creates the JWT directly using jwt.encode() with test_settings values,
     matching the pattern used in patch_auth_service_jwt fixture.
     """
-    import jwt
     from datetime import datetime, timedelta, timezone
+
+    import jwt
 
     now = datetime.now(timezone.utc)
 
@@ -1051,13 +1068,14 @@ async def seed_default_models(setup_database, monkeypatch):
 
     This fixture runs automatically for all integration tests after database setup.
     """
+    import sqlalchemy as sa
+
+    from intric.database.database import sessionmanager
     from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
     from intric.database.tables.model_providers_table import ModelProviders
-    from intric.database.database import sessionmanager
-    from intric.tenants.tenant_service import TenantService
-    from intric.tenants.tenant import TenantBase, TenantInDB
     from intric.database.tables.tenant_table import Tenants
-    import sqlalchemy as sa
+    from intric.tenants.tenant import TenantBase, TenantInDB
+    from intric.tenants.tenant_service import TenantService
 
     # Store IDs of created models for the patch function
     completion_model_ids = {}

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import ipaddress
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
-from intric.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from intric.allowed_origins.origin_matching import origin_matches_pattern
 from intric.authentication.api_key_request_context import resolve_client_ip
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_models import (
-    PERMISSION_LEVEL_ORDER,
+    PK_FORBIDDEN_RESOURCE_FIELDS,
+    RESOURCE_PERMISSION_FIELDS,
     ApiKeyCreateRequest,
     ApiKeyOwnership,
     ApiKeyPermission,
@@ -20,8 +19,11 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    ResourcePermissionLevel,
     ResourcePermissions,
     compute_effective_state,
+    default_public_resource_permissions,
+    derive_permission_from_resource_permissions,
 )
 from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException, UnauthorizedException
@@ -35,30 +37,98 @@ if TYPE_CHECKING:
     from intric.users.user import UserInDB
 
 
-@dataclass(slots=True)
-class _TenantOriginCacheEntry:
-    patterns: list[str]
-    expires_at: datetime
+def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
+    disallowed = [
+        field
+        for field in RESOURCE_PERMISSION_FIELDS
+        if getattr(rp, field)
+        not in (
+            ResourcePermissionLevel.NONE,
+            ResourcePermissionLevel.READ,
+        )
+    ]
+    if disallowed:
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=("pk_ keys only support 'none' or 'read' resource permissions."),
+        )
+
+    forbidden = [
+        field
+        for field in PK_FORBIDDEN_RESOURCE_FIELDS
+        if getattr(rp, field) != ResourcePermissionLevel.NONE
+    ]
+    if forbidden:
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=(
+                "pk_ keys do not support these resource permissions: "
+                f"{', '.join(forbidden)}."
+            ),
+        )
+
+
+_SCOPE_RESOURCE_PERMISSION_FIELDS: dict[ApiKeyScopeType, tuple[str, ...]] = {
+    ApiKeyScopeType.TENANT: RESOURCE_PERMISSION_FIELDS,
+    ApiKeyScopeType.SPACE: RESOURCE_PERMISSION_FIELDS,
+    ApiKeyScopeType.ASSISTANT: ("assistants", "conversations", "files"),
+    ApiKeyScopeType.APP: ("apps", "files"),
+}
+
+_SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD: dict[ApiKeyScopeType, str] = {
+    ApiKeyScopeType.ASSISTANT: "assistants",
+    ApiKeyScopeType.APP: "apps",
+}
+
+
+def _validate_scope_resource_permissions(
+    scope_type: ApiKeyScopeType,
+    rp: ResourcePermissions,
+) -> None:
+    allowed_fields = set(_SCOPE_RESOURCE_PERMISSION_FIELDS[scope_type])
+    disallowed = [
+        field
+        for field in RESOURCE_PERMISSION_FIELDS
+        if field not in allowed_fields
+        and getattr(rp, field) != ResourcePermissionLevel.NONE
+    ]
+    if disallowed:
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=(
+                f"{scope_type.value}-scoped keys do not support these "
+                f"resource permissions: {', '.join(disallowed)}."
+            ),
+        )
+
+    required_field = _SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD.get(scope_type)
+    if (
+        required_field is not None
+        and getattr(rp, required_field) == ResourcePermissionLevel.NONE
+    ):
+        raise ApiKeyValidationError(
+            status_code=400,
+            code="invalid_request",
+            message=(
+                f"{scope_type.value}-scoped keys require "
+                f"'{required_field}' resource permission."
+            ),
+        )
 
 
 class ApiKeyPolicyService:
-    _shared_tenant_origin_cache: dict[UUID, _TenantOriginCacheEntry] = {}
-
     def __init__(
         self,
-        allowed_origin_repo: AllowedOriginRepository,
         space_service: "SpaceService | None" = None,
         user: "UserInDB | None" = None,
     ):
         super().__init__()
-        self.allowed_origin_repo = allowed_origin_repo
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
-        self._tenant_origin_cache = self._shared_tenant_origin_cache
-        self._tenant_origin_cache_ttl_seconds = max(
-            int(self.settings.api_key_origin_cache_ttl_seconds), 0
-        )
 
     def _require_space_service(self) -> "SpaceService":
         if self.space_service is None:
@@ -88,6 +158,20 @@ class ApiKeyPolicyService:
                 message="scope_id must be null for tenant-scoped keys.",
             )
 
+        if request.resource_permissions is not None:
+            _validate_scope_resource_permissions(
+                request.scope_type, request.resource_permissions
+            )
+
+        effective_permission = request.permission
+        if (
+            request.key_type == ApiKeyType.SK
+            and request.resource_permissions is not None
+        ):
+            effective_permission = derive_permission_from_resource_permissions(
+                request.resource_permissions
+            )
+
         # Service key guardrails
         if request.ownership == ApiKeyOwnership.SERVICE:
             user = self._require_user()
@@ -98,7 +182,7 @@ class ApiKeyPolicyService:
                     message="Only tenant admins can create service keys.",
                 )
             # Extra guardrail: service write/admin keys need IP allowlist or expiration
-            if request.permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
+            if effective_permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
                 has_ip = (
                     request.allowed_ips is not None and len(request.allowed_ips) > 0
                 )
@@ -135,20 +219,15 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="pk_ keys do not allow IP restrictions.",
                 )
-            if request.allowed_origins:
-                for origin in request.allowed_origins:
-                    if not self._origin_has_scheme(
-                        origin
-                    ) and not self._is_localhost_origin(origin):
-                        raise ApiKeyValidationError(
-                            status_code=400,
-                            code="invalid_request",
-                            message="Origin entries must include scheme (https://...).",
-                        )
-                await self.validate_allowed_origins_subset(
-                    allowed_origins=request.allowed_origins,
-                    tenant_id=self._require_user().tenant_id,
-                )
+            for origin in request.allowed_origins:
+                self._validate_origin_format(origin)
+            if request.resource_permissions is None and request.scope_type in (
+                ApiKeyScopeType.TENANT,
+                ApiKeyScopeType.SPACE,
+            ):
+                request.resource_permissions = default_public_resource_permissions()
+            elif request.resource_permissions is not None:
+                _validate_public_resource_permissions(request.resource_permissions)
 
         if request.key_type == ApiKeyType.SK and request.allowed_origins is not None:
             raise ApiKeyValidationError(
@@ -163,18 +242,6 @@ class ApiKeyPolicyService:
 
         await self._validate_expiration(request.expires_at)
         await self._validate_rate_limit(request.rate_limit)
-
-        if request.resource_permissions is not None:
-            if request.key_type == ApiKeyType.PK:
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message="Public keys (pk_) do not support fine-grained resource permissions.",
-                )
-            self._validate_resource_permissions_ceiling(
-                resource_permissions=request.resource_permissions,
-                permission=request.permission,
-            )
 
         return await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
@@ -319,27 +386,18 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="allowed_origins is only supported for pk_ keys.",
                 )
-            if key_type == ApiKeyType.PK and allowed_origins is not None:
-                if len(allowed_origins) == 0:
+            if key_type == ApiKeyType.PK:
+                # Mirror create-path: pk_ keys must always carry a non-empty
+                # origin list. NULL is rejected here so the fail-closed check
+                # in _validate_origin never traps a key the admin just edited.
+                if allowed_origins is None or len(allowed_origins) == 0:
                     raise ApiKeyValidationError(
                         status_code=400,
                         code="invalid_request",
                         message="pk_ keys require at least one allowed origin.",
                     )
-                if allowed_origins:
-                    for origin in allowed_origins:
-                        if not self._origin_has_scheme(
-                            origin
-                        ) and not self._is_localhost_origin(origin):
-                            raise ApiKeyValidationError(
-                                status_code=400,
-                                code="invalid_request",
-                                message="Origin entries must include scheme (https://...).",
-                            )
-                await self.validate_allowed_origins_subset(
-                    allowed_origins=allowed_origins,
-                    tenant_id=key.tenant_id,
-                )
+                for origin in allowed_origins:
+                    self._validate_origin_format(origin)
 
         if "allowed_ips" in updates:
             allowed_ips = cast(list[str] | None, updates.get("allowed_ips"))
@@ -362,57 +420,38 @@ class ApiKeyPolicyService:
 
         if "resource_permissions" in updates:
             raw_rp = updates.get("resource_permissions")
-            if raw_rp is not None:
-                if ApiKeyType(key.key_type) == ApiKeyType.PK:
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message="Public keys (pk_) do not support fine-grained resource permissions.",
+            scope_type = ApiKeyScopeType(key.scope_type)
+            if raw_rp is None:
+                if key_type == ApiKeyType.PK and scope_type in (
+                    ApiKeyScopeType.TENANT,
+                    ApiKeyScopeType.SPACE,
+                ):
+                    updates["resource_permissions"] = (
+                        default_public_resource_permissions().model_dump(mode="json")
                     )
-                rp = (
-                    raw_rp
-                    if isinstance(raw_rp, ResourcePermissions)
-                    else ResourcePermissions.model_validate(raw_rp)
-                )
-                # Use incoming permission if both are changing, else key's existing
-                ceiling = new_permission or ApiKeyPermission(key.permission)
-                self._validate_resource_permissions_ceiling(
-                    resource_permissions=rp,
-                    permission=ceiling,
-                )
-        elif new_permission is not None:
-            # Permission is being lowered — check existing resource_permissions still fit
-            if key.resource_permissions is not None:
-                existing_rp = ResourcePermissions.model_validate(
-                    key.resource_permissions
-                )
-                self._validate_resource_permissions_ceiling(
-                    resource_permissions=existing_rp,
-                    permission=new_permission,
-                )
+            else:
+                rp = ResourcePermissions.model_validate(raw_rp)
+                _validate_scope_resource_permissions(scope_type, rp)
+                if key_type == ApiKeyType.PK:
+                    _validate_public_resource_permissions(rp)
+                updates["resource_permissions"] = rp.model_dump(mode="json")
 
-    def _validate_resource_permissions_ceiling(
-        self,
-        *,
-        resource_permissions: ResourcePermissions,
-        permission: ApiKeyPermission,
-    ) -> None:
-        ceiling = PERMISSION_LEVEL_ORDER.get(permission.value, 0)
-        for resource_type in ("assistants", "apps", "spaces", "knowledge"):
-            level: str = getattr(resource_permissions, resource_type).value
-            level_order = PERMISSION_LEVEL_ORDER.get(level, 0)
-            if level_order > ceiling:
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message=(
-                        f"Resource permission '{resource_type}={level}' exceeds "
-                        f"the key permission ceiling '{permission.value}'."
-                    ),
-                )
+    async def ensure_ownership_authorized(self, *, key: ApiKeyV2InDB):
+        """Service keys: any scope-authorized user can manage.
+        User keys: only the owner can manage."""
+        if ApiKeyOwnership(key.ownership) == ApiKeyOwnership.SERVICE:
+            return
+        user = self._require_user()
+        if key.owner_user_id == user.id:
+            return
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_permission",
+            message="You do not have permission to manage another user's personal API key.",
+        )
 
     async def ensure_manage_authorized(self, *, key: ApiKeyV2InDB):
-        return await self.ensure_creator_authorized(
+        await self.ensure_creator_authorized(
             scope_type=ApiKeyScopeType(key.scope_type),
             scope_id=key.scope_id,
         )
@@ -443,50 +482,6 @@ class ApiKeyPolicyService:
             await self._validate_origin(key=key, origin=origin)
         if ApiKeyType(key.key_type) == ApiKeyType.SK:
             self._validate_ip(key=key, client_ip=client_ip)
-
-    async def validate_allowed_origins_subset(
-        self, *, allowed_origins: list[str] | None, tenant_id: UUID
-    ):
-        if allowed_origins is None:
-            return
-
-        tenant_patterns = await self._get_tenant_origin_patterns(tenant_id)
-
-        if not tenant_patterns:
-            for origin in allowed_origins:
-                if not self._is_localhost_origin(origin):
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message="Origin not allowed by tenant policy.",
-                    )
-            return
-
-        for origin in allowed_origins:
-            if self._is_localhost_origin(origin):
-                continue
-            if "*" in origin:
-                if origin in tenant_patterns:
-                    continue
-                if "://" in origin:
-                    host_only = origin.split("://", 1)[1]
-                    if host_only in tenant_patterns:
-                        continue
-                if origin not in tenant_patterns:
-                    raise ApiKeyValidationError(
-                        status_code=400,
-                        code="invalid_request",
-                        message=f"Origin '{origin}' is not allowed by tenant policy.",
-                    )
-                continue
-            if not any(
-                self._origin_matches(origin, pattern) for pattern in tenant_patterns
-            ):
-                raise ApiKeyValidationError(
-                    status_code=400,
-                    code="invalid_request",
-                    message=f"Origin '{origin}' is not allowed by tenant policy.",
-                )
 
     async def _validate_expiration(self, expires_at: datetime | None):
         user = self._require_user()
@@ -573,41 +568,20 @@ class ApiKeyPolicyService:
                 message="Origin header required for pk_ keys.",
             )
 
-        if (
-            self._is_localhost_origin(origin)
-            and self.settings.api_key_allow_localhost_origin
-        ):
-            return
-        # When allow_localhost_origin is off, localhost falls through to
-        # normal tenant/key pattern matching — no free pass.
-
-        tenant_patterns = await self._get_tenant_origin_patterns(key.tenant_id)
-
-        if not tenant_patterns:
-            raise ApiKeyValidationError(
-                status_code=403,
-                code="origin_not_allowed",
-                message="Origin not allowed by tenant policy.",
-            )
-
+        # Per-key allowed_origins is the only authority — trust the key
+        # creator to list exactly the origins their integration needs.
+        # Fail closed: a pk_ key without an allowed_origins list (NULL or
+        # empty) cannot authenticate. Legacy rows that ended up NULL need
+        # explicit remediation (rotate with an origin list).
         key_patterns = key.allowed_origins
-        if key_patterns is None:
-            key_patterns = tenant_patterns
-        elif len(key_patterns) == 0:
+        if not key_patterns:
             raise ApiKeyValidationError(
                 status_code=403,
                 code="origin_not_allowed",
                 message="Origin not allowed by API key policy.",
             )
 
-        matches_tenant = any(
-            self._origin_matches(origin, pattern) for pattern in tenant_patterns
-        )
-        matches_key = any(
-            self._origin_matches(origin, pattern) for pattern in key_patterns
-        )
-
-        if not matches_tenant or not matches_key:
+        if not any(self._origin_matches(origin, pattern) for pattern in key_patterns):
             raise ApiKeyValidationError(
                 status_code=403,
                 code="origin_not_allowed",
@@ -653,15 +627,24 @@ class ApiKeyPolicyService:
                 return True
         return False
 
-    def _origin_has_scheme(self, origin: str) -> bool:
-        parsed = urlparse(origin)
-        return bool(parsed.scheme and parsed.hostname)
+    def _validate_origin_format(self, origin: str) -> None:
+        """Sanity-check a per-key origin entry. Trust the key creator on the
+        value, but reject typos that would silently break their integration.
 
-    def _is_localhost_origin(self, origin: str) -> bool:
+        Required shape: ``<scheme>://<host>[:port]`` with scheme http(s) and
+        a non-empty host. Wildcards in the host are fine (matching is the
+        request-time concern of ``origin_matches_pattern``).
+        """
         parsed = urlparse(origin)
-        if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
-            return True
-        return False
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message=(
+                    f"Invalid origin '{origin}': "
+                    "must include scheme (http:// or https://) and host."
+                ),
+            )
 
     def _origin_matches(self, origin: str, pattern: str) -> bool:
         return origin_matches_pattern(origin, pattern)
@@ -674,26 +657,3 @@ class ApiKeyPolicyService:
                 message="User context required.",
             )
         return self.user
-
-    async def _get_tenant_origin_patterns(self, tenant_id: UUID) -> list[str]:
-        now = datetime.now(timezone.utc)
-        if self._tenant_origin_cache_ttl_seconds > 0:
-            cached = self._tenant_origin_cache.get(tenant_id)
-            if cached is not None and cached.expires_at > now:
-                return cached.patterns
-
-        tenant_origins = await self.allowed_origin_repo.get_by_tenant(tenant_id)
-        patterns = [origin.url for origin in tenant_origins]
-        if self._tenant_origin_cache_ttl_seconds > 0:
-            self._tenant_origin_cache[tenant_id] = _TenantOriginCacheEntry(
-                patterns=patterns,
-                expires_at=now
-                + timedelta(seconds=self._tenant_origin_cache_ttl_seconds),
-            )
-        return patterns
-
-    def invalidate_tenant_origin_cache(self, tenant_id: UUID | None = None) -> None:
-        if tenant_id is None:
-            self._tenant_origin_cache.clear()
-            return
-        self._tenant_origin_cache.pop(tenant_id, None)

@@ -14,14 +14,11 @@
   export let value: Role[];
 
   // Array of all available roles
-  export let defaultRoles: Role[];
-  export let customRoles: Role[];
-
-  const allRoles = [...customRoles, ...defaultRoles];
+  export let roles: Role[];
 
   function getStoreValue() {
     const selectedIds = value.map((role) => role.id);
-    const selectedRoles = allRoles.filter((role) => selectedIds.includes(role.id));
+    const selectedRoles = roles.filter((role) => selectedIds.includes(role.id));
     return selectedRoles.map((role) => {
       return {
         value: role,
@@ -37,9 +34,12 @@
   }
 
   $: setValue($roleSelectStore);
+
+  $: defaultRoles = roles.filter((r) => "predefined_source" in r && r.predefined_source);
+  $: customRoles = roles.filter((r) => !("predefined_source" in r && r.predefined_source));
 </script>
 
-{#if allRoles.length > 0}
+{#if roles.length > 0}
   <Select.Root
     multiple
     customStore={roleSelectStore}
@@ -48,17 +48,19 @@
     <Select.Label>{m.roles_permissions()}</Select.Label>
     <Select.Trigger placeholder={m.select_ellipsis()}></Select.Trigger>
     <Select.Options>
-      <Select.OptionGroup label={m.default_roles()}>
-        {#each defaultRoles as role (role.id)}
-          <Select.Item value={role} label={role.name}>
-            <div class="flex w-full items-center justify-between py-1">
-              <span>
-                {role.name}
-              </span>
-            </div>
-          </Select.Item>
-        {/each}
-      </Select.OptionGroup>
+      {#if defaultRoles.length > 0}
+        <Select.OptionGroup label={m.default_roles()}>
+          {#each defaultRoles as role (role.id)}
+            <Select.Item value={role} label={role.name}>
+              <div class="flex w-full items-center justify-between py-1">
+                <span>
+                  {role.name}
+                </span>
+              </div>
+            </Select.Item>
+          {/each}
+        </Select.OptionGroup>
+      {/if}
       {#if customRoles.length > 0}
         <Select.OptionGroup label={m.custom_roles()}>
           {#each customRoles as role (role.id)}

@@ -460,6 +460,7 @@ def test_action_types_enum():
     assert ActionType.INTEGRATION_CONNECTED == "integration_connected"
     assert ActionType.INTEGRATION_KNOWLEDGE_CREATED == "integration_knowledge_created"
     assert ActionType.COMPLETION_MODEL_UPDATED == "completion_model_updated"
+    assert ActionType.COMPLETION_MODEL_MIGRATED == "completion_model_migrated"
     assert ActionType.EMBEDDING_MODEL_UPDATED == "embedding_model_updated"
     assert ActionType.TRANSCRIPTION_MODEL_UPDATED == "transcription_model_updated"
     assert (

@@ -20,8 +20,8 @@ from intric.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
+    require_file_delete_scope_guard,
     require_resource_permission_for_method,
-    require_tenant_scope_for_delete,
 )
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.federation_router import router as federation_router
@@ -318,7 +318,10 @@ router.include_router(
     jobs_router,
     prefix="/jobs",
     tags=["jobs"],
-    dependencies=TENANT_ADMIN_SCOPE_GUARDS,
+    dependencies=[
+        *TENANT_ADMIN_SCOPE_GUARDS,
+        Depends(require_resource_permission_for_method("jobs")),
+    ],
 )
 router.include_router(
     user_groups_router,
@@ -381,11 +384,11 @@ router.include_router(
     dependencies=[
         Depends(
             require_resource_permission_for_method(
-                "knowledge", read_override_endpoints=FILES_READ_OVERRIDES
+                "files", read_override_endpoints=FILES_READ_OVERRIDES
             )
         ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
-        Depends(require_tenant_scope_for_delete()),
+        Depends(require_file_delete_scope_guard()),
     ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
@@ -422,6 +425,7 @@ router.include_router(
     prefix="/prompts",
     tags=["prompts"],
     dependencies=[
+        Depends(require_resource_permission_for_method("prompts")),
         Depends(require_api_key_scope_check(resource_type="prompt", path_param="id")),
     ],
 )

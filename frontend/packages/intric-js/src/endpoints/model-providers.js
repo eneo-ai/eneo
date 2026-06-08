@@ -100,15 +100,23 @@ export function initModelProviders(client) {
     },
 
     /**
-     * List available models/deployments from the provider's own API.
-     * @param {{id: string}} provider
+     * List available models from the provider's own API.
+     *
+     * Pass ``mode`` to have the server filter the response — preferred over
+     * filtering client-side so consumers (frontend pickers, external API
+     * clients) get only what they need.
+     *
+     * @param {{id: string, mode?: "completion" | "embedding" | "transcription"}} args
      * @returns {Promise<any>}
      * @throws {IntricError}
      * */
-    listModels: async ({ id }) => {
+    listModels: async ({ id, mode }) => {
       const res = await client.fetch("/api/v1/admin/model-providers/{provider_id}/models/", {
         method: "get",
-        params: { path: { provider_id: id } }
+        params: {
+          path: { provider_id: id },
+          query: mode ? { mode } : undefined
+        }
       });
 
       return res;
@@ -181,14 +189,23 @@ export function initModelProviders(client) {
 
     /**
      * Look up recommended default values for a model from LiteLLM.
+     *
+     * Pass `providerType` whenever it is known (wizard step, edit dialog of a
+     * tenant-owned model, etc.). Without it the backend can only return a
+     * defaulted match when exactly one provider prefixes the bare name, so
+     * Azure-served gpt-4o would otherwise resolve to openai/gpt-4o prices.
      * @param {string} modelName The model identifier to look up
+     * @param {string} [providerType] Canonical provider type (e.g. "openai", "azure")
      * @returns {Promise<any>}
      * @throws {IntricError}
      * */
-    getModelDefaults: async (modelName) => {
+    getModelDefaults: async (modelName, providerType) => {
+      /** @type {{ model_name: string; provider_type?: string }} */
+      const query = { model_name: modelName };
+      if (providerType) query.provider_type = providerType;
       const res = await client.fetch("/api/v1/admin/model-providers/model-defaults/", {
         method: "get",
-        params: { query: { model_name: modelName } }
+        params: { query }
       });
 
       return res;

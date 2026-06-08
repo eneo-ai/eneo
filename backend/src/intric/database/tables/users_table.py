@@ -6,7 +6,7 @@ from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Table, t
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import Base, BasePublic
-from intric.database.tables.roles_table import PredefinedRoles, Roles
+from intric.database.tables.roles_table import Roles
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.user_groups_table import UserGroups
 
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 class Users(BasePublic):
     username: Mapped[Optional[str]] = mapped_column()
     email: Mapped[str] = mapped_column(index=True)
+    external_id: Mapped[Optional[str]] = mapped_column(index=True)
     email_verified: Mapped[bool] = mapped_column(server_default="False")
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()
@@ -30,9 +31,6 @@ class Users(BasePublic):
     api_key: Mapped["ApiKeys"] = relationship(cascade="all, delete-orphan")
     roles: Mapped[list[Roles]] = relationship(
         secondary="users_roles", order_by=Roles.created_at
-    )
-    predefined_roles: Mapped[list[PredefinedRoles]] = relationship(
-        secondary="users_predefined_roles", order_by=PredefinedRoles.created_at
     )
     user_groups: Mapped[list[UserGroups]] = relationship(
         secondary="usergroups_users", viewonly=True
@@ -58,18 +56,6 @@ users_roles_table = Table(
     Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
     Column("role_id", ForeignKey(Roles.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
 )
-
-users_predefined_roles_table = Table(
-    "users_predefined_roles",
-    Base.metadata,  # type: ignore[attr-defined]
-    Column("user_id", ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
-    Column(
-        "predefined_role_id",
-        ForeignKey(PredefinedRoles.id, ondelete="CASCADE"),
-        primary_key=True,
-    ),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
-)
-
 
 usergroups_users_table = Table(
     "usergroups_users",

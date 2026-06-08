@@ -29,5 +29,5 @@ async def test_authenticated_user_request(client, admin_user, admin_user_api_key
     assert user_data["email"] == admin_user.email
     assert user_data["username"] == admin_user.username
     assert user_data["id"] == str(admin_user.id)
-    assert "predefined_roles" in user_data
-    assert len(user_data["predefined_roles"]) > 0
+    assert "roles" in user_data
+    assert len(user_data["roles"]) > 0

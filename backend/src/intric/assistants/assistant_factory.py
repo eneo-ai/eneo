@@ -9,7 +9,7 @@ from intric.assistants.assistant import Assistant
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.prompts_table import Prompts
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.main.logging import get_logger
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from intric.prompts.prompt_factory import PromptFactory
@@ -49,7 +49,7 @@ class AssistantFactory:
         completion_model: CompletionModel | None = None,
         completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool = False,
-        attachments: list["FileInfo"] | None = None,
+        attachments: list["File"] | None = None,
         collections: list["Collection"] | None = None,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         template: AssistantTemplate | None = None,
@@ -112,7 +112,7 @@ class AssistantFactory:
             )
 
         attachments = [
-            FileInfo.model_validate(attachment.file)
+            File.model_validate(attachment.file)
             for attachment in assistant_in_db.attachments
         ]
 
@@ -127,6 +127,10 @@ class AssistantFactory:
         completion_model_kwargs = ModelKwargs.model_validate(
             completion_model_kwargs_raw
         )
+        if completion_model is not None:
+            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
 
         source_template = (
             self.assistant_template_factory.create_assistant_template(
@@ -196,7 +200,7 @@ class AssistantFactory:
             )
 
         attachments = [
-            FileInfo.model_validate(attachment.file)
+            File.model_validate(attachment.file)
             for attachment in assistant_in_db.attachments
         ]
 
@@ -236,6 +240,10 @@ class AssistantFactory:
             ),
             None,
         )
+        if completion_model is not None:
+            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
 
         source_template = (
             self.assistant_template_factory.create_assistant_template(

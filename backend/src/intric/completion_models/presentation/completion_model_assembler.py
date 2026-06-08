@@ -32,7 +32,7 @@ class CompletionModelAssembler:
             description=completion_model.description,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
-            is_deprecated=completion_model.is_deprecated,
+            is_deprecated=completion_model.is_effectively_deprecated,
             deployment_name=completion_model.deployment_name,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
@@ -42,6 +42,14 @@ class CompletionModelAssembler:
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             security_classification=SecurityClassificationPublic.from_domain(
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,
@@ -50,6 +58,8 @@ class CompletionModelAssembler:
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=completion_model.litellm_deprecation_date,
+            migrated_to_model_id=completion_model.migrated_to_model_id,
         )
 
     @staticmethod
@@ -83,6 +93,9 @@ class CompletionModelAssembler:
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            provider_type=completion_model.provider_type,
         )
 
     def from_completion_models_to_models(

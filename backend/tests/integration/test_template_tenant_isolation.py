@@ -9,11 +9,12 @@ These tests verify:
 - Authorization: Only admins can manage templates
 """
 
-import pytest
 from uuid import uuid4
-from sqlalchemy import text
-from intric.database.database import sessionmanager
 
+import pytest
+from sqlalchemy import text
+
+from intric.database.database import sessionmanager
 
 # Helper functions for test setup
 
@@ -57,21 +58,25 @@ async def _create_user(
     assert response.status_code == 200, response.text
     user = response.json()
 
-    # Assign Owner predefined role for admin permissions via SQL
+    # Assign Owner role for admin permissions via SQL
     if is_admin:
         async with sessionmanager.session() as session:
             async with session.begin():
-                # Get Owner predefined role ID
+                # Get Owner role for this tenant
                 result = await session.execute(
-                    text("SELECT id FROM predefined_roles WHERE name = 'Owner'")
+                    text(
+                        "SELECT id FROM roles "
+                        "WHERE predefined_source = 'Owner' AND tenant_id = :tenant_id"
+                    ),
+                    {"tenant_id": user["tenant_id"]},
                 )
                 owner_role = result.first()
-                assert owner_role is not None, "Owner predefined role not found"
+                assert owner_role is not None, "Owner role not found for tenant"
 
                 # Assign role to user
                 await session.execute(
                     text(
-                        "INSERT INTO users_predefined_roles (user_id, predefined_role_id) "
+                        "INSERT INTO users_roles (user_id, role_id) "
                         "VALUES (:user_id, :role_id) ON CONFLICT DO NOTHING"
                     ),
                     {"user_id": user["id"], "role_id": owner_role[0]},

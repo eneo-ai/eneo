@@ -39,5 +39,8 @@ def test_add_in_chunks():
 def test_fails_when_the_lengths_dont_match():
     chunk_embedding_list = ChunkEmbeddingList()
 
-    with pytest.raises(ChunkEmbeddingMisMatchException):
-        chunk_embedding_list.add([1, 2], [[1]])
+    try:
+        with pytest.raises(ChunkEmbeddingMisMatchException):
+            chunk_embedding_list.add([1, 2], [[1]])
+    finally:
+        chunk_embedding_list._file.close()

@@ -133,14 +133,14 @@ class AppService:
         if (
             template.completion_model
             and template.completion_model.id
-            and space.is_completion_model_in_space(template.completion_model.id)
+            and space.is_completion_model_available(template.completion_model.id)
         ):
             completion_model = space.get_completion_model(template.completion_model.id)
 
         # Validate incoming data
         template.validate_wizard_data(template_data=template_data)
 
-        attachments = await self.file_service.get_file_infos(
+        attachments = await self.file_service.get_files_by_ids(
             file_ids=template_data.get_ids_by_type(wizard_type=WizardType.attachments)
         )
 
@@ -253,7 +253,7 @@ class AppService:
 
         completion_model = None
         if completion_model_id is not None:
-            if not space.is_completion_model_in_space(
+            if not space.is_completion_model_available(
                 completion_model_id=completion_model_id
             ):
                 raise BadRequestException(
@@ -284,14 +284,20 @@ class AppService:
 
         attachments = None
         if attachment_ids is not None:
-            attachments = await self.file_service.get_file_infos(
+            attachments = await self.file_service.get_files_by_ids(
                 [attachment.id for attachment in attachment_ids]
             )
 
         prompt = None
         if prompt_text is not None:
+            # Attribute the prompt to the app's owner, not the caller.
+            # Keeps service-key edits FK-safe (synthetic id has no `users`
+            # row) and makes admin edits to others' apps attribute
+            # correctly.
             prompt = await self.prompt_service.create_prompt(
-                text=prompt_text, description=prompt_description
+                text=prompt_text,
+                description=prompt_description,
+                owner_user_id=app.user_id,
             )
 
         app.update(

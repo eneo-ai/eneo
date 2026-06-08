@@ -147,7 +147,9 @@ function SpacesManager(data: SpacesManagerParams) {
   }
 
   async function updateDefaultAssistant({ completionModel }: { completionModel: { id: string } }) {
-    const id = get(currentSpace).default_assistant.id;
+    const defaultAssistant = get(currentSpace).default_assistant;
+    if (!defaultAssistant) return;
+    const id = defaultAssistant.id;
     try {
       const updatedAssistant = await intric.assistants.update({
         assistant: { id },
@@ -204,14 +206,14 @@ function derivedCurrentSpace(space: Readable<Space>) {
           : $space.id,
       members: $space.members.items,
       applications: {
-        assistants: $space.applications.assistants.items,
-        groupChats: $space.applications.group_chats.items,
+        assistants: $space.applications?.assistants.items ?? [],
+        groupChats: $space.applications?.group_chats.items ?? [],
         chat: [
-          ...$space.applications.assistants.items,
-          ...$space.applications.group_chats.items
+          ...($space.applications?.assistants.items ?? []),
+          ...($space.applications?.group_chats.items ?? [])
         ].sort((a, b) => a.name.localeCompare(b.name)),
-        apps: $space.applications.apps.items,
-        services: $space.applications.services.items.filter((service) => {
+        apps: $space.applications?.apps.items ?? [],
+        services: ($space.applications?.services.items ?? []).filter((service) => {
           return !service.name.startsWith("_intric");
         })
       },
@@ -225,15 +227,15 @@ function derivedCurrentSpace(space: Readable<Space>) {
           case "space":
             return $space.permissions?.includes(action) ?? false;
           case "assistant":
-            return $space.applications.assistants.permissions?.includes(action) ?? false;
+            return $space.applications?.assistants.permissions?.includes(action) ?? false;
           case "group_chat":
-            return $space.applications.group_chats.permissions?.includes(action) ?? false;
+            return $space.applications?.group_chats.permissions?.includes(action) ?? false;
           case "default_assistant":
-            return $space.default_assistant.permissions?.includes(action) ?? false;
+            return $space.default_assistant?.permissions?.includes(action) ?? false;
           case "app":
-            return $space.applications.apps.permissions?.includes(action) ?? false;
+            return $space.applications?.apps.permissions?.includes(action) ?? false;
           case "service":
-            return $space.applications.services.permissions?.includes(action) ?? false;
+            return $space.applications?.services.permissions?.includes(action) ?? false;
           case "collection":
             return $space.knowledge.groups.permissions?.includes(action) ?? false;
           case "website":

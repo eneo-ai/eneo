@@ -51,7 +51,7 @@
   // Check if user has admin permission
   let isAdmin = untrack(
     () =>
-      data.user?.predefined_roles?.some((role: { permissions?: string[] }) =>
+      data.user?.roles?.some((role: { permissions?: string[] }) =>
         role.permissions?.includes("admin")
       ) ?? false
   );

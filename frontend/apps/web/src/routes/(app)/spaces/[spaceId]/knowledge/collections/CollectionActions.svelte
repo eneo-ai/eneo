@@ -92,7 +92,7 @@
           }}
           padding="icon-leading"
         >
-          <IconMove size="sm" />Move</Button
+          <IconMove size="sm" />{m.move()}</Button
         >
       {/if}
 

@@ -17,6 +17,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { Button } from "@intric/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let page: number;
   export let totalPages: number;
@@ -51,7 +52,7 @@
       </Button>
     </div>
     <span class="text-secondary text-sm">
-      {rangeStart}–{rangeEnd} av {totalCount}
+      {m.pagination_showing_range({ start: rangeStart, end: rangeEnd, total: totalCount })}
     </span>
   </div>
 {/if}

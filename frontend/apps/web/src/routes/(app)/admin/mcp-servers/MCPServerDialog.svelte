@@ -183,7 +183,7 @@
 
         <!-- Server Identity Section -->
         <fieldset class="space-y-4">
-          <legend class="sr-only">Serverinformation</legend>
+          <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
 
           <div>
             <label
@@ -199,7 +199,7 @@
               bind:value={name}
               required
               aria-required="true"
-              placeholder="Min MCP-server"
+              placeholder={m.mcp_name_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             />
           </div>
@@ -207,13 +207,13 @@
           <div>
             <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
               {m.description()}
-              <span class="text-muted ml-1 text-xs font-normal">(valfritt)</span>
+              <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
             </label>
             <textarea
               id="mcp-description"
               bind:value={description}
               rows="2"
-              placeholder="Beskriv vad denna MCP-server gör..."
+              placeholder={m.mcp_description_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             ></textarea>
           </div>
@@ -238,7 +238,7 @@
                 d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
               />
             </svg>
-            Anslutning
+            {m.mcp_connection_legend()}
           </legend>
 
           <div>
@@ -257,7 +257,7 @@
                 required
                 aria-required="true"
                 aria-describedby="url-hint"
-                placeholder="https://example.com/mcp"
+                placeholder={m.mcp_url_placeholder()}
                 class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
               />
               {#if http_url}
@@ -306,7 +306,7 @@
                 d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
               />
             </svg>
-            Autentisering
+            {m.mcp_authentication_legend()}
           </legend>
 
           <Select.Simple
@@ -344,20 +344,20 @@
 
         <!-- Optional Section -->
         <fieldset>
-          <legend class="sr-only">Tillvalsuppgifter</legend>
+          <legend class="sr-only">{m.mcp_optional_details_legend()}</legend>
           <div>
             <label
               for="mcp-documentation_url"
               class="text-default mb-1.5 block text-sm font-medium"
             >
               {m.documentation_url()}
-              <span class="text-muted ml-1 text-xs font-normal">(valfritt)</span>
+              <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
             </label>
             <input
               id="mcp-documentation_url"
               type="url"
               bind:value={documentation_url}
-              placeholder="https://docs.example.com"
+              placeholder={m.mcp_docs_url_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             />
           </div>

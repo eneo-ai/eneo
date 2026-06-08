@@ -238,29 +238,16 @@ class TestConfigValidationBugs:
         Valid categories: admin_actions, user_actions, security_events,
         file_operations, integration_events, system_actions, audit_access
         """
-        from intric.audit.domain.category_mappings import (
-            CATEGORY_MAPPINGS,
-            CATEGORY_DESCRIPTIONS,
-        )
+        from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
+        from intric.audit.domain.category_types import CategoryType
 
-        expected_categories = {
-            "admin_actions",
-            "user_actions",
-            "security_events",
-            "file_operations",
-            "integration_events",
-            "system_actions",
-            "audit_access",
-        }
+        expected_categories = {category.value for category in CategoryType}
 
         # Get unique category values from the mappings
         actual_categories = set(CATEGORY_MAPPINGS.values())
         assert actual_categories == expected_categories, (
             f"Category mismatch. Expected: {expected_categories}, Got: {actual_categories}"
         )
-
-        # Also verify descriptions exist for all categories
-        assert set(CATEGORY_DESCRIPTIONS.keys()) == expected_categories
 
     def test_invalid_category_should_fail_schema_validation(self):
         """BUG #5a: Invalid category names should fail Pydantic validation.

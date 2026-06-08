@@ -87,7 +87,6 @@ class MCPServerSettingsService:
             decrypted[key] = self.encryption_service.decrypt(value)
         return decrypted
 
-    @validate_permissions(Permission.ADMIN)
     async def get_available_mcp_servers(self) -> list[MCPServer]:
         """Get all MCP servers for the current tenant (enabled and disabled)."""
         servers = await self.mcp_server_repo.query_by_tenant(

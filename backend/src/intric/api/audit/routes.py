@@ -277,7 +277,7 @@ async def create_access_session(
     try:
         await audit_service.log(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.AUDIT_SESSION_CREATED,
             entity_type=EntityType.AUDIT_LOG,
             entity_id=current_user.tenant_id,
@@ -506,7 +506,7 @@ async def list_audit_logs(
     # Log the audit access with comprehensive metadata
     await audit_service.log(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_VIEWED,
         entity_type=EntityType.AUDIT_LOG,
         entity_id=current_user.tenant_id,  # Use tenant_id as entity_id for audit logs
@@ -628,7 +628,7 @@ async def get_user_logs(
     # Log the GDPR export access
     await audit_service.log(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_VIEWED,
         entity_type=EntityType.USER,
         entity_id=user_id,
@@ -834,7 +834,7 @@ async def export_audit_logs(
     except ExportTooLargeError as exc:
         await audit_service.log(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.AUDIT_LOG_EXPORTED,
             entity_type=EntityType.AUDIT_LOG,
             entity_id=current_user.tenant_id,
@@ -847,7 +847,7 @@ async def export_audit_logs(
     except Exception as exc:
         await audit_service.log(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.AUDIT_LOG_EXPORTED,
             entity_type=EntityType.AUDIT_LOG,
             entity_id=current_user.tenant_id,
@@ -861,7 +861,7 @@ async def export_audit_logs(
     # Log the export after successful generation
     await audit_service.log(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_EXPORTED,
         entity_type=EntityType.AUDIT_LOG,
         entity_id=current_user.tenant_id,
@@ -976,7 +976,7 @@ async def request_async_export(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_EXPORTED,
         entity_type=EntityType.AUDIT_LOG,
         entity_id=job_id,
@@ -1252,7 +1252,7 @@ async def update_retention_policy(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=current_user.tenant_id,
