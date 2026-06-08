@@ -68,6 +68,10 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
     favorite_providers: list[str] = Field(default_factory=list)
+    # Edit mode: a materialized tenant "Configuration Assistant" drives edit-mode
+    # chat (its prompt = persona, model = helper model, mcp_servers = extra tools).
+    edit_mode_enabled: bool = False
+    edit_assistant_id: Optional[UUID] = None
 
     @field_validator("favorite_providers")
     @classmethod

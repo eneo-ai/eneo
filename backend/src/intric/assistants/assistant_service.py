@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.api.space_models import TemplateCreate
@@ -326,6 +327,28 @@ class AssistantService:
             completion_model=cm,
             is_default=True,
         )
+
+    async def _load_edit_assistant(self, target_id: UUID) -> Optional[Assistant]:
+        """Load the tenant's materialized edit assistant, or None for defaults.
+
+        Returns None when no edit assistant is provisioned, when it cannot be
+        loaded, or when the target IS the edit assistant (recursion guard) — in all
+        cases edit mode falls back to the built-in persona + the target's own model.
+        """
+        edit_assistant_id = self.user.tenant.edit_assistant_id
+        if edit_assistant_id is None or edit_assistant_id == target_id:
+            return None
+        try:
+            edit_space = await self.space_repo.get_space_by_assistant(
+                assistant_id=edit_assistant_id
+            )
+            return edit_space.get_assistant(edit_assistant_id)
+        except Exception:
+            logger.warning(
+                "Tenant edit assistant %s could not be loaded; using built-in persona.",
+                edit_assistant_id,
+            )
+            return None
 
     async def update_assistant(
         self,
@@ -1106,6 +1129,9 @@ class AssistantService:
         # the current user and scopes the tools to this assistant's space; the
         # actual permission check happens when a tool calls update_assistant.
         config_mcp_server = None
+        config_persona: str | None = None
+        config_completion_model: "CompletionModel | None" = None
+        config_mcp_servers: "list[MCPServer] | None" = None
         if edit_mode:
             if not actor.can_edit_assistants():
                 raise UnauthorizedException(
@@ -1132,6 +1158,18 @@ class AssistantService:
                 language=language,
             )
 
+            # The tenant's materialized edit assistant supplies the persona (its
+            # prompt), the helper model (its completion_model) and any extra MCP
+            # tools (its mcp_servers). Absent one, assistant.ask falls back to the
+            # built-in persona + the target's own model.
+            edit_assistant = await self._load_edit_assistant(
+                target_id=assistant_to_ask.id
+            )
+            if edit_assistant is not None:
+                config_persona = edit_assistant.get_prompt_text()
+                config_completion_model = edit_assistant.completion_model
+                config_mcp_servers = list(edit_assistant.mcp_servers)
+
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
             completion_service=self.completion_service,
@@ -1144,6 +1182,9 @@ class AssistantService:
             require_tool_approval=require_tool_approval,
             edit_mode=edit_mode,
             config_mcp_server=config_mcp_server,
+            config_persona=config_persona,
+            config_completion_model=config_completion_model,
+            config_mcp_servers=config_mcp_servers,
         )
 
         # TODO: Separate the response based on stream true or false

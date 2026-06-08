@@ -341,11 +341,15 @@ class Assistant(Entity):
         require_tool_approval: bool = False,
         edit_mode: bool = False,
         config_mcp_server: Optional["MCPServer"] = None,
+        config_persona: Optional[str] = None,
+        config_completion_model: Optional["CompletionModel"] = None,
+        config_mcp_servers: Optional[list["MCPServer"]] = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         if self.completion_model is None:
             raise NoModelSelectedException()
 
         completion_model = cast("AICompletionModel", self.completion_model)
+        model_kwargs = self.completion_model_kwargs
 
         if any(file.file_type == FileType.IMAGE for file in files or []):
             if not self.completion_model.vision:
@@ -362,8 +366,18 @@ class Assistant(Entity):
             datastore_result = DatastoreResult(
                 chunks=[], no_duplicate_chunks=[], info_blobs=[]
             )
-            prompt_text = CONFIG_PERSONA_PROMPT
-            mcp_servers = [config_mcp_server] if config_mcp_server is not None else []
+            # Edit mode is driven by the tenant's materialized edit assistant: its
+            # prompt is the persona, its model the helper model, its mcp_servers the
+            # extra tools (e.g. an external knowledge provider). Fall back to the
+            # built-in persona + the target's own model when none is provisioned.
+            prompt_text = config_persona or CONFIG_PERSONA_PROMPT
+            mcp_servers = list(config_mcp_servers or [])
+            if config_mcp_server is not None:
+                mcp_servers.append(config_mcp_server)
+            if config_completion_model is not None:
+                completion_model = cast("AICompletionModel", config_completion_model)
+                # The edit assistant's model may not accept the target's kwargs.
+                model_kwargs = None
         else:
             # Fill half the context
             num_chunks = (
@@ -399,7 +413,7 @@ class Assistant(Entity):
             session=session,
             stream=stream,
             extended_logging=self.logging_enabled,
-            model_kwargs=self.completion_model_kwargs,
+            model_kwargs=model_kwargs,
             version=version,
             use_image_generation=False if edit_mode else self.is_default,
             web_search_results=list(web_search_results or []),

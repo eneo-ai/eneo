@@ -57,6 +57,12 @@ class Tenants(BasePublic):
     scim_token_hash: Mapped[Optional[str]] = mapped_column(
         String(64), unique=True, index=True
     )
+    edit_mode_enabled: Mapped[bool] = mapped_column(
+        nullable=False, server_default=sa.false()
+    )
+    edit_assistant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("assistants.id", ondelete="SET NULL"), nullable=True
+    )
 
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
     sharepoint_app: Mapped[Optional["TenantSharePointApp"]] = relationship(
