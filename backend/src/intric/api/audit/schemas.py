@@ -1,10 +1,10 @@
 """Pydantic schemas for audit API."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
@@ -94,10 +94,19 @@ class ExportJobRequest(BaseModel):
     action: Optional[ActionType] = Field(None, description="Filter by action type")
     from_date: Optional[datetime] = Field(None, description="Filter from date")
     to_date: Optional[datetime] = Field(None, description="Filter to date")
-    format: str = Field("csv", description="Export format: csv or jsonl")
+    format: Literal["csv", "json", "jsonl"] = Field(
+        "csv", description="Export format: csv, json, or jsonl"
+    )
     max_records: Optional[int] = Field(
         None, ge=1, description="Maximum records to export"
     )
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def normalize_format(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.lower().strip()
+        return value
 
 
 class ExportJobResponse(BaseModel):

@@ -108,7 +108,7 @@ async def create_group(
     "/{id}/",
     response_model=CollectionPublic,
     description="Update a collection (legacy group) by id.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def update_group(
     id: UUID,
@@ -170,7 +170,7 @@ async def update_group(
     "/{id}/",
     response_model=None,
     description="Delete a collection (legacy group) by id.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_group_by_id(
     id: UUID,
@@ -443,7 +443,7 @@ async def run_semantic_search(
     "/{id}/transfer/",
     status_code=204,
     description="Transfer a collection (legacy group) to another space.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def transfer_group_to_space(
     id: UUID,

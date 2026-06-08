@@ -10656,10 +10656,11 @@ export interface components {
       to_date?: string | null;
       /**
        * Format
-       * @description Export format: csv or jsonl
+       * @description Export format: csv, json, or jsonl
        * @default csv
+       * @enum {string}
        */
-      format?: string;
+      format?: "csv" | "json" | "jsonl";
       /**
        * Max Records
        * @description Maximum records to export
@@ -20000,6 +20001,15 @@ export interface operations {
           "application/json": components["schemas"]["CollectionPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -20038,6 +20048,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -20298,6 +20317,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Not Found */
       404: {
@@ -36697,6 +36725,15 @@ export interface operations {
           "application/json": components["schemas"]["RolesPaginatedResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   create_role_api_v1_roles__post: {
@@ -36723,6 +36760,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -36759,6 +36805,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36805,6 +36860,24 @@ export interface operations {
           "application/json": components["schemas"]["RolePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36843,6 +36916,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36894,6 +36985,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36934,6 +37034,15 @@ export interface operations {
           "application/json": components["schemas"]["RolePublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36970,6 +37079,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

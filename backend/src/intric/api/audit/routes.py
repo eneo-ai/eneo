@@ -972,14 +972,7 @@ async def request_async_export(
         )
 
     # Validate and normalize format
-    export_format = request.format.lower().strip()
-    if export_format == "json":
-        export_format = "jsonl"  # Accept "json" as alias for "jsonl"
-    if export_format not in ["csv", "jsonl"]:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid export format: '{request.format}'. Supported formats: csv, json, jsonl",
-        )
+    export_format = "jsonl" if request.format == "json" else request.format
 
     # Generate job ID
     job_id = uuid4()
