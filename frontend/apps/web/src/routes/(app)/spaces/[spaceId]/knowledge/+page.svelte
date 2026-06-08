@@ -120,14 +120,22 @@
 </svelte:head>
 
 {#snippet noCreatePermission(resourceType: string)}
+  {@const message = m.knowledge_create_no_permission({ resourceType })}
   <!-- Sits where the create button would be, so the header layout stays
-       consistent whether or not the user can create. The reason is on hover/focus. -->
-  <Tooltip
-    text={m.knowledge_create_no_permission({ resourceType })}
-    placement="bottom"
-    class="text-secondary hover:text-primary flex cursor-help items-center"
-  >
-    <IconInfo />
+       consistent whether or not the user can create. A real <button> trigger
+       keeps it keyboard-focusable (tabbable), and aria-label exposes the reason
+       to screen readers rather than relying on hover alone. -->
+  <Tooltip text={message} placement="bottom" asFragment let:trigger>
+    {@const tip = trigger[0]}
+    <button
+      {...tip}
+      use:tip.action
+      type="button"
+      aria-label={message}
+      class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
+    >
+      <IconInfo />
+    </button>
   </Tooltip>
 {/snippet}
 
