@@ -7,7 +7,7 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
-  import { Button } from "@intric/ui";
+  import { Alert, Button } from "@intric/ui";
   import { resolve } from "$app/paths";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
@@ -137,9 +137,9 @@
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
       {:else if $selectedTab === "collections" && !$currentSpace.hasPermission("create", "collection")}
-        <p class="text-secondary max-w-72 text-right text-xs">
+        <Alert class="max-w-80">
           {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
-        </p>
+        </Alert>
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
           <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
@@ -150,9 +150,9 @@
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
       {:else if $selectedTab === "websites" && !$currentSpace.hasPermission("create", "website")}
-        <p class="text-secondary max-w-72 text-right text-xs">
+        <Alert class="max-w-80">
           {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
-        </p>
+        </Alert>
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
@@ -178,9 +178,9 @@
           </p>
         {/if}
       {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}
-        <p class="text-secondary max-w-72 text-right text-xs">
+        <Alert class="max-w-80">
           {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
-        </p>
+        </Alert>
       {/if}
     </Page.Flex>
   </Page.Header>

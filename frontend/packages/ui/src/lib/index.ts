@@ -1,6 +1,7 @@
 // Reexport your entry components here
 
 export { Button } from "./Button/index.js";
+export { Alert, type AlertVariant } from "./Alert/index.js";
 export { Tooltip } from "./Tooltip/index.js";
 export { ProgressBar } from "./ProgressBar/index.js";
 export { Markdown, type MarkdownCustomRenderingOptions } from "./Markdown/index.js";
