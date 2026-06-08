@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+
+from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
@@ -185,6 +187,97 @@ async def test_update_assistant_completion_model_in_space(setup: Setup):
     setup.service.repo.update.return_value = MagicMock(prompt="new prompt!", id=uuid4())
 
     await setup.service.update_assistant(TEST_UUID)
+
+
+def configure_personal_default_assistant(
+    setup: Setup, *, can_manage_assistants: bool = False
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.id = TEST_UUID
+    assistant.collections = []
+    assistant.websites = []
+    assistant.integration_knowledge_list = []
+
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+    space.is_personal.return_value = True
+    space.default_assistant = MagicMock(id=TEST_UUID)
+    space.get_assistant.return_value = assistant
+    space.is_completion_model_available.return_value = True
+    space.is_completion_model_in_space.return_value = True
+    setup.service.space_repo.update.return_value = space
+
+    actor = MagicMock()
+    actor.can_edit_default_assistant.return_value = True
+    actor.can_edit_assistants.return_value = can_manage_assistants
+    actor.can_toggle_insight.return_value = True
+    actor.get_assistant_permissions.return_value = []
+    setup.service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    return assistant, space
+
+
+async def test_personal_chat_can_change_personal_default_completion_model(setup: Setup):
+    assistant, space = configure_personal_default_assistant(setup)
+    completion_model_id = uuid4()
+    completion_model = MagicMock(id=completion_model_id)
+    space.get_completion_model.return_value = completion_model
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=completion_model_id,
+    )
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] == completion_model
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"name": "Renamed"},
+        {"prompt": PromptCreate(text="Changed prompt")},
+        {"completion_model_kwargs": ModelKwargs()},
+        {"logging_enabled": False},
+        {"groups": []},
+        {"websites": []},
+        {"integration_knowledge_ids": []},
+        {"mcp_server_ids": []},
+        {"mcp_tools": []},
+        {"attachment_ids": []},
+        {"description": None},
+        {"insight_enabled": False},
+        {"data_retention_days": None},
+        {"metadata_json": {}},
+        {"icon_id": uuid4()},
+    ],
+)
+async def test_personal_chat_cannot_change_extended_default_assistant_fields(
+    setup: Setup, update: dict[str, Any]
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+
+    with pytest.raises(
+        UnauthorizedException,
+        match="only allows changing the personal assistant's completion model",
+    ):
+        await setup.service.update_assistant(assistant_id=TEST_UUID, **update)
+
+    assistant.update.assert_not_called()
+
+
+async def test_assistant_managers_can_edit_extended_personal_default_fields(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=True
+    )
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        name="Renamed",
+    )
+
+    assert assistant.update.call_args.kwargs["name"] == "Renamed"
 
 
 @pytest.mark.parametrize("template_in_space", [True, False])

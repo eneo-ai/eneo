@@ -300,6 +300,10 @@ async def update_assistant(
     if "metadata_json" not in request_dict:
         metadata_json = NOT_PROVIDED
 
+    data_retention_days = assistant.data_retention_days
+    if "data_retention_days" not in request_dict:
+        data_retention_days = NOT_PROVIDED
+
     # Handle icon_id: check if it was provided in the request
     icon_id = NOT_PROVIDED
     if "icon_id" in request_dict:
@@ -320,7 +324,7 @@ async def update_assistant(
         mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
-        data_retention_days=assistant.data_retention_days,
+        data_retention_days=data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
     )
@@ -855,7 +859,10 @@ async def get_assistant_session(
     session_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    assistant_service = container.assistant_service()
     session_service = container.session_service()
+
+    await assistant_service.get_assistant(id)
     session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
     return to_session_public(session)
 
@@ -875,13 +882,13 @@ async def delete_assistant_session(
     assistant_service = container.assistant_service()
     user = container.user()
 
-    # Delete session
+    # Authorize before mutating the session. This also enforces personal_chat
+    # for sessions belonging to the personal space's default assistant.
+    assistant, _ = await assistant_service.get_assistant(id)
+
     session = await session_service.delete(session_id, assistant_id=id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-
-    # Get assistant info for audit log
-    assistant, _ = await assistant_service.get_assistant(id)
 
     # Get space for context
     space = None
@@ -968,7 +975,10 @@ async def leave_feedback(
         Depends(get_container(with_user_from_assistant_api_key=True)),
     ],
 ):
+    assistant_service = container.assistant_service()
     session_service = container.session_service()
+
+    await assistant_service.get_assistant(id)
     session = await session_service.leave_feedback(
         session_id=session_id, assistant_id=id, feedback=feedback
     )

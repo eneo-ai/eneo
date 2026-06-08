@@ -19,10 +19,16 @@ from intric.assistants.api.assistant_models import (
     AskAssistant,
     AssistantResponse,
 )
-from intric.assistants.api.assistant_router import ask_assistant
+from intric.assistants.api.assistant_router import (
+    ask_assistant,
+    delete_assistant_session,
+    get_assistant_session,
+    leave_feedback,
+)
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.sessions.session import SessionInDB
+from intric.main.exceptions import UnauthorizedException
+from intric.sessions.session import SessionFeedback, SessionInDB
 
 
 @pytest.fixture
@@ -348,3 +354,51 @@ class TestAssistantResponseStructure:
         # - Return the mock's default (if not using spec)
         # - Raise AttributeError (if using strict spec)
         # Our mock uses spec=AssistantResponse, so session_id won't be a real attribute
+
+
+class TestLegacyAssistantSessionAuthorization:
+    @pytest.fixture
+    def unauthorized_container(self, mock_container):
+        assistant_service = mock_container.assistant_service.return_value
+        assistant_service.get_assistant.side_effect = UnauthorizedException(
+            "Personal chat access has been revoked"
+        )
+        mock_container.session_service.return_value = AsyncMock()
+        return mock_container
+
+    async def test_get_authorizes_assistant_before_loading_session(
+        self, unauthorized_container
+    ):
+        with pytest.raises(UnauthorizedException):
+            await get_assistant_session(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                container=unauthorized_container,
+            )
+
+        unauthorized_container.session_service.return_value.get_session_by_uuid.assert_not_awaited()
+
+    async def test_delete_authorizes_assistant_before_deleting_session(
+        self, unauthorized_container
+    ):
+        with pytest.raises(UnauthorizedException):
+            await delete_assistant_session(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                container=unauthorized_container,
+            )
+
+        unauthorized_container.session_service.return_value.delete.assert_not_awaited()
+
+    async def test_feedback_authorizes_assistant_before_writing_feedback(
+        self, unauthorized_container
+    ):
+        with pytest.raises(UnauthorizedException):
+            await leave_feedback(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                feedback=SessionFeedback(value=1),
+                container=unauthorized_container,
+            )
+
+        unauthorized_container.session_service.return_value.leave_feedback.assert_not_awaited()
