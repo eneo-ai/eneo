@@ -7,8 +7,9 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
-  import { Alert, Button } from "@intric/ui";
+  import { Button, Tooltip } from "@intric/ui";
   import { resolve } from "$app/paths";
+  import { IconInfo } from "@intric/icons/info";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
@@ -118,6 +119,18 @@
   >
 </svelte:head>
 
+{#snippet noCreatePermission(resourceType: string)}
+  <!-- Sits where the create button would be, so the header layout stays
+       consistent whether or not the user can create. The reason is on hover/focus. -->
+  <Tooltip
+    text={m.knowledge_create_no_permission({ resourceType })}
+    placement="bottom"
+    class="text-secondary hover:text-primary flex cursor-help items-center"
+  >
+    <IconInfo />
+  </Tooltip>
+{/snippet}
+
 <Page.Root tabController={selectedTab}>
   <Page.Header>
     <Page.Title title={m.knowledge()}></Page.Title>
@@ -136,6 +149,8 @@
     <Page.Flex>
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
+      {:else if $selectedTab === "collections"}
+        {@render noCreatePermission(m.collections().toLowerCase())}
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
           <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
@@ -145,6 +160,8 @@
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
+      {:else if $selectedTab === "websites"}
+        {@render noCreatePermission(m.websites().toLowerCase())}
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
@@ -169,37 +186,24 @@
               : m.shared_integrations_require_admin()}
           </p>
         {/if}
+      {:else if $selectedTab === "integrations"}
+        {@render noCreatePermission(m.integrations().toLowerCase())}
       {/if}
     </Page.Flex>
   </Page.Header>
   <Page.Main>
     {#if userCanSeeCollections}
       <Page.Tab id="collections">
-        {#if !$currentSpace.hasPermission("create", "collection")}
-          <Alert class="mt-4 mr-3 w-fit max-w-xl">
-            {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
-          </Alert>
-        {/if}
         <CollectionTable></CollectionTable>
       </Page.Tab>
     {/if}
     {#if userCanSeeWebsites}
       <Page.Tab id="websites">
-        {#if !$currentSpace.hasPermission("create", "website")}
-          <Alert class="mt-4 mr-3 w-fit max-w-xl">
-            {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
-          </Alert>
-        {/if}
         <WebsiteTable bind:selectedWebsiteIds></WebsiteTable>
       </Page.Tab>
     {/if}
     {#if userCanSeeIntegrations}
       <Page.Tab id="integrations">
-        {#if !$currentSpace.hasPermission("create", "integrationKnowledge")}
-          <Alert class="mt-4 mr-3 w-fit max-w-xl">
-            {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
-          </Alert>
-        {/if}
         {#if showIntegrationsNotice}
           <div class="border-dimmer hidden border-b py-3 pr-3 lg:block">
             <div
