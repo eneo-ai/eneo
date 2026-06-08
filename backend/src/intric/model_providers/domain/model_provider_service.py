@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
-from intric.main.exceptions import NameCollisionException
+from intric.main.exceptions import BadRequestException, NameCollisionException
 from intric.model_providers.domain.model_provider import ModelProvider
 from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -363,12 +363,12 @@ class ModelProviderService:
         """Delete a provider.
 
         Raises:
-            ValueError: If the provider has models attached to it
+            BadRequestException: If the provider has models attached to it
         """
         # Check if provider has any models
         model_count = await self.repository.count_models_for_provider(provider_id)
         if model_count > 0:
-            raise ValueError(
+            raise BadRequestException(
                 f"Cannot delete provider: {model_count} model(s) are using this provider. "
                 "Delete the models first."
             )

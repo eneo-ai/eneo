@@ -17,6 +17,7 @@ from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.roles.permissions import Permission
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
@@ -115,6 +116,7 @@ class ListCredentialsResponse(BaseModel):
     summary="Set API credential for current tenant",
     description="Set or update API credentials for a specific LLM provider. "
     "Tenant admin only. Provider-specific fields are validated.",
+    responses=responses.get_responses([403, 422]),
 )
 async def set_credential(
     provider: Provider,
@@ -175,6 +177,7 @@ async def set_credential(
     summary="List API credentials for current tenant",
     description="List all configured API credentials with masked keys and encryption status. "
     "Tenant admin only.",
+    responses=responses.get_responses([403]),
 )
 async def list_credentials(
     container: Annotated[Container, Depends(get_container(with_user=True))],

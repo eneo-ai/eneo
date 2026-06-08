@@ -30,7 +30,13 @@ router = APIRouter()
 ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 
-@router.get("/", response_model=PaginatedResponse[WebsitePublic], deprecated=True)
+@router.get(
+    "/",
+    response_model=PaginatedResponse[WebsitePublic],
+    responses=responses.get_responses([410]),
+    description="Deprecated: list websites. Always returns 410 Gone.",
+    deprecated=True,
+)
 async def get_websites(
     container: ContainerDep,
     for_tenant: Annotated[
@@ -41,7 +47,13 @@ async def get_websites(
     raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
-@router.post("/", response_model=WebsitePublic, deprecated=True)
+@router.post(
+    "/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([410]),
+    description="Deprecated: create a website. Always returns 410 Gone.",
+    deprecated=True,
+)
 async def create_website(
     crawl: WebsiteCreateRequestDeprecated,
     container: ContainerDep,
@@ -52,6 +64,7 @@ async def create_website(
 @router.get(
     "/check-url/",
     response_model=WebsiteExistsResponse | None,
+    responses=responses.get_responses([]),
     summary="Check if URL exists on Organization space",
     description="""
     Check if a website URL already exists on the user's Organization space.
@@ -175,7 +188,10 @@ async def get_website(
 
 
 @router.post(
-    "/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404])
+    "/{id}/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([404]),
+    description="Update a website's configuration by id.",
 )
 async def update_website(
     website_update: WebsiteUpdate,
@@ -216,7 +232,13 @@ async def update_website(
     return WebsitePublic.from_domain(website)
 
 
-@router.delete("/{id}/", status_code=200, responses=responses.get_responses([404]))
+@router.delete(
+    "/{id}/",
+    status_code=200,
+    response_model=None,
+    responses=responses.get_responses([404]),
+    description="Delete a website by id.",
+)
 async def delete_website(
     id: Annotated[UUID, Path(description="Unique identifier of the website to delete")],
     container: ContainerDep,
@@ -283,7 +305,12 @@ async def run_crawl(
     return CrawlRunPublic.from_domain(crawl_run)
 
 
-@router.get("/{id}/runs/", response_model=PaginatedResponse[CrawlRunPublic])
+@router.get(
+    "/{id}/runs/",
+    response_model=PaginatedResponse[CrawlRunPublic],
+    responses=responses.get_responses([404]),
+    description="List crawl runs for a website by id.",
+)
 async def get_crawl_runs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
@@ -296,7 +323,12 @@ async def get_crawl_runs(
     )
 
 
-@router.post("/{id}/transfer/", status_code=204)
+@router.post(
+    "/{id}/transfer/",
+    status_code=204,
+    responses=responses.get_responses([403, 404]),
+    description="Transfer a website to another space by id.",
+)
 async def transfer_website_to_space(
     transfer_req: TransferRequest,
     id: Annotated[

@@ -34,6 +34,7 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
     "/",
     response_model=SecurityClassificationPublic,
     status_code=201,
+    description="Create a new security classification for the current tenant.",
     responses=responses.get_responses([400]),
 )
 async def create_security_classification(
@@ -146,6 +147,7 @@ async def get_security_classification(
 @router.patch(
     "/",
     response_model=SecurityClassificationsListPublic,
+    description="Update the security levels (ordering) of security classifications.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_security_classification_levels(
@@ -214,6 +216,7 @@ async def update_security_classification_levels(
 @router.delete(
     "/{id}/",
     status_code=204,
+    description="Delete a security classification, optionally forcing if still referenced.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_security_classification(
@@ -270,6 +273,7 @@ async def delete_security_classification(
 @router.patch(
     "/{id}/",
     response_model=SecurityClassificationPublic,
+    description="Update a single security classification's name and/or description.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_security_classification(
@@ -339,6 +343,7 @@ async def update_security_classification(
 @router.post(
     "/enable/",
     response_model=SecurityEnableResponse,
+    description="Enable or disable security classifications for the current tenant.",
     responses=responses.get_responses([400, 403]),
 )
 async def toggle_security_classifications(

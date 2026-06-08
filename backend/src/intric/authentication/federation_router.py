@@ -30,6 +30,7 @@ from intric.main.request_context import set_request_context
 from intric.observability.debug_toggle import is_debug_enabled
 from intric.observability.redaction import sanitize_payload
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.settings.credential_resolver import CredentialResolver
 from intric.tenants.tenant import TenantState
 from intric.users.user import UserAdd, UserInDB, UserState
@@ -409,6 +410,7 @@ class FederationStatusResponse(BaseModel):
         "Used by login page to determine which authentication method to show. "
         "No authentication required (public endpoint)."
     ),
+    responses=responses.get_responses([]),
 )
 async def get_federation_status(
     container: Annotated[Container, Depends(get_container())],
@@ -491,6 +493,7 @@ async def get_federation_status(
         "Only returns tenants with slugs configured for federation. "
         "No authentication required."
     ),
+    responses=responses.get_responses([]),
 )
 async def list_tenants(
     container: Annotated[Container, Depends(get_container())],
@@ -906,6 +909,7 @@ async def initiate_auth(
 
 @router.post(
     "/callback",
+    response_model=AccessTokenResponse,
     summary="OIDC callback handler",
     description=(
         "Handle OIDC callback, validate token, lookup user. "

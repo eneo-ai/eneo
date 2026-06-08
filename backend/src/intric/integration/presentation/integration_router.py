@@ -21,6 +21,7 @@ from intric.integration.presentation.models import (
 )
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
 
@@ -29,6 +30,8 @@ router = APIRouter()
     "/",
     response_model=IntegrationList,
     status_code=200,
+    description="List all available integrations.",
+    responses=responses.get_responses([]),
 )
 async def get_integrations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -46,6 +49,8 @@ async def get_integrations(
     "/tenant/",
     response_model=TenantIntegrationList,
     status_code=200,
+    description="List the tenant's integrations, optionally filtered.",
+    responses=responses.get_responses([]),
 )
 async def get_tenant_integrations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -65,6 +70,8 @@ async def get_tenant_integrations(
     "/tenant/add/{integration_id}/",
     response_model=TenantIntegration,
     status_code=200,
+    description="Add an integration to the tenant.",
+    responses=responses.get_responses([400, 404]),
 )
 async def add_tenant_integration(
     integration_id: UUID,
@@ -101,6 +108,8 @@ async def add_tenant_integration(
 @router.delete(
     "/tenant/remove/{tenant_integration_id}/",
     status_code=204,
+    description="Remove an integration from the tenant.",
+    responses=responses.get_responses([404]),
 )
 async def remove_tenant_integration(
     tenant_integration_id: UUID,
@@ -140,6 +149,8 @@ async def remove_tenant_integration(
     "/me/",
     response_model=UserIntegrationList,
     status_code=200,
+    description="List the current user's personal integrations.",
+    responses=responses.get_responses([]),
 )
 async def get_user_integrations(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -178,6 +189,8 @@ async def get_user_integrations(
     "/spaces/{space_id}/available/",
     response_model=UserIntegrationList,
     status_code=200,
+    description="List integrations available for a specific space.",
+    responses=responses.get_responses([404]),
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
@@ -209,6 +222,8 @@ async def get_available_integrations_for_space(
 @router.delete(
     "/users/{user_integration_id}/",
     status_code=204,
+    description="Disconnect the current user's integration.",
+    responses=responses.get_responses([404]),
 )
 async def disconnect_user_integration(
     user_integration_id: UUID,
@@ -248,6 +263,8 @@ async def disconnect_user_integration(
     "/sync-logs/{integration_knowledge_id:uuid}/",
     response_model=PaginatedSyncLogList,
     status_code=200,
+    description="Get paginated sync history for an integration knowledge.",
+    responses=responses.get_responses([]),
 )
 async def get_sync_logs(
     integration_knowledge_id: UUID,
@@ -295,6 +312,8 @@ async def get_sync_logs(
     "/{user_integration_id}/preview/",
     response_model=IntegrationPreviewDataList,
     status_code=200,
+    description="Get preview data for a user integration.",
+    responses=responses.get_responses([404]),
 )
 async def get_integration_preview(
     user_integration_id: UUID,
@@ -314,6 +333,8 @@ async def get_integration_preview(
     "/{user_integration_id:uuid}/sharepoint/tree/",
     response_model=SharePointTreeResponse,
     status_code=200,
+    description="Get SharePoint/OneDrive folder tree for a user integration.",
+    responses=responses.get_responses([400, 404]),
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
@@ -407,6 +428,8 @@ async def get_sharepoint_folder_tree(
     "/{integration_id:uuid}/",
     response_model=Integration,
     status_code=200,
+    description="Get a single integration by ID.",
+    responses=responses.get_responses([404]),
 )
 async def get_integration_by_id(
     integration_id: UUID,

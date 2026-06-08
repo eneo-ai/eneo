@@ -1117,6 +1117,7 @@ async def update_api_key(
     "/api-keys/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     tags=["API Keys"],
     summary="Revoke API key (deprecated alias)",
     responses={
@@ -1250,6 +1251,7 @@ async def extend_api_key_expiration(
     "/api-keys/{id}/purge",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     tags=["API Keys"],
     summary="Permanently delete API key",
     description=(

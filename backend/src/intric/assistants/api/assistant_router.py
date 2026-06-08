@@ -72,6 +72,7 @@ _LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
 @router.post(
     "/",
     response_model=AssistantPublic,
+    description="Create a new assistant in a space.",
     responses=responses.get_responses([404]),
 )
 async def create_assistant(
@@ -156,7 +157,12 @@ async def create_assistant(
     return assembler.from_assistant_to_model(created_assistant, permissions=permissions)
 
 
-@router.get("/", response_model=PaginatedResponse[AssistantPublic])
+@router.get(
+    "/",
+    response_model=PaginatedResponse[AssistantPublic],
+    description="List assistants. Requires Admin permission if `for_tenant` is `true`.",
+    responses=responses.get_responses([403]),
+)
 async def get_assistants(
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -224,6 +230,7 @@ async def get_assistant(
 @router.post(
     "/{id}/",
     response_model=AssistantPublic,
+    description="Update an assistant. Omitted fields are not updated.",
     responses=responses.get_responses([400, 404]),
 )
 async def update_assistant(
@@ -665,6 +672,7 @@ async def update_assistant(
 @router.delete(
     "/{id}/",
     status_code=204,
+    description="Delete an assistant.",
     responses=responses.get_responses([403, 404]),
 )
 async def delete_assistant(
@@ -741,6 +749,7 @@ async def delete_assistant(
 @router.post(
     "/{id}/sessions/",
     response_model=AskResponse,
+    description="Ask an assistant and start a new session. Streams the response as Server-Sent Events if `stream` is `true`.",
     responses=responses.streaming_response(AskResponse, [400, 404]),
 )
 async def ask_assistant(
@@ -868,6 +877,7 @@ async def get_assistant_session(
 @router.delete(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
+    description="Delete a session belonging to an assistant.",
     responses=responses.get_responses([400, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
@@ -926,6 +936,7 @@ async def delete_assistant_session(
 @router.post(
     "/{id}/sessions/{session_id}/",
     response_model=AskResponse,
+    description="Ask a follow-up question in an existing session. Streams the response as Server-Sent Events if `stream` is `true`.",
     responses=responses.streaming_response(AskResponse, [400, 404]),
 )
 async def ask_followup(
@@ -961,6 +972,7 @@ async def ask_followup(
 @router.post(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
+    description="Leave feedback on a session.",
     responses=responses.get_responses([400, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
@@ -1076,7 +1088,12 @@ async def generate_read_only_assistant_key(
     return api_key
 
 
-@router.post("/{id}/transfer/", status_code=204)
+@router.post(
+    "/{id}/transfer/",
+    status_code=204,
+    description="Transfer an assistant to another space.",
+    responses=responses.get_responses([403, 404]),
+)
 async def transfer_assistant_to_space(
     id: UUID,
     transfer_req: TransferApplicationRequest,
@@ -1145,6 +1162,8 @@ async def transfer_assistant_to_space(
 @router.get(
     "/{id}/prompts/",
     response_model=PaginatedResponse[PromptSparse],
+    description="List the prompt history for an assistant.",
+    responses=responses.get_responses([404]),
     include_in_schema=get_settings().dev,
 )
 async def get_prompts(
@@ -1162,6 +1181,7 @@ async def get_prompts(
 @router.post(
     "/{id}/publish/",
     response_model=AssistantPublic,
+    description="Publish or unpublish an assistant.",
     responses=responses.get_responses([403, 404]),
 )
 async def publish_assistant(
@@ -1231,7 +1251,9 @@ async def publish_assistant(
 
 @router.get(
     "/{id}/mcp-servers/",
-    responses=responses.get_responses([404]),
+    response_model=None,
+    description="Get all MCP servers associated with an assistant.",
+    responses=responses.get_responses([403, 404]),
 )
 async def get_assistant_mcp_servers(
     id: UUID,
@@ -1258,7 +1280,9 @@ async def get_assistant_mcp_servers(
 
 @router.post(
     "/{id}/mcp-servers/{mcp_server_id}/",
-    responses=responses.get_responses([400, 404]),
+    response_model=None,
+    description="Add an MCP server to an assistant.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def add_mcp_to_assistant(
     id: UUID,
@@ -1301,7 +1325,8 @@ async def add_mcp_to_assistant(
 @router.delete(
     "/{id}/mcp-servers/{mcp_server_id}/",
     status_code=204,
-    responses=responses.get_responses([404]),
+    description="Remove an MCP server from an assistant.",
+    responses=responses.get_responses([403, 404]),
 )
 async def remove_mcp_from_assistant(
     id: UUID,

@@ -20,6 +20,7 @@ _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))
 
 @router.get(
     "/{id}/",
+    description="Get a prompt by id.",
     response_model=PromptPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -33,6 +34,7 @@ async def get_prompt(id: UUID, container: _ContainerWithUser):
 
 @router.patch(
     "/{id}/",
+    description="Update a prompt's description by id.",
     response_model=PromptPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -52,6 +54,7 @@ async def update_prompt_description(
 
 @router.delete(
     "/{id}/",
+    description="Delete a prompt by id.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )

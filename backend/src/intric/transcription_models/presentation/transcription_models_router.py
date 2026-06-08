@@ -45,6 +45,8 @@ router = APIRouter()
 @router.get(
     "/",
     response_model=PaginatedResponse[TranscriptionModelPublic],
+    responses=responses.get_responses([403]),
+    description="List all transcription models for the tenant.",
 )
 async def get_transcription_models(
     user: CurrentUser,
@@ -64,7 +66,8 @@ async def get_transcription_models(
 @router.post(
     "/{id}/",
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
+    description="Update org settings for a transcription model.",
 )
 async def update_transcription_model(
     id: UUID,
@@ -149,7 +152,7 @@ async def update_transcription_model(
 @router.get(
     "/{model_id}/usage",
     response_model=TranscriptionModelUsageStats,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="Count apps and spaces that would be moved by migrating this model.",
 )
 async def get_transcription_model_usage(
@@ -173,7 +176,7 @@ async def get_transcription_model_usage(
 @router.get(
     "/{model_id}/usage/details",
     response_model=TranscriptionModelUsageDetails,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="List apps using this transcription model (for the migrate dialog).",
 )
 async def get_transcription_model_usage_details(
@@ -227,7 +230,7 @@ async def get_transcription_model_usage_details(
 @router.get(
     "/{model_id}/migration-validate",
     response_model=ValidationResult,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     description="Validate transcription migration compatibility without executing.",
 )
 async def validate_transcription_migration(
@@ -335,7 +338,7 @@ async def migrate_transcription_model_usage(
 @router.get(
     "/migration-history",
     response_model=list[ModelMigrationHistory],
-    responses=responses.get_responses([400]),
+    responses=responses.get_responses([400, 403]),
     description="List all transcription migration history for the tenant.",
 )
 async def get_all_transcription_migration_history(
@@ -353,7 +356,7 @@ async def get_all_transcription_migration_history(
 @router.get(
     "/migration-history/{migration_id}",
     response_model=ModelMigrationHistory,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="Get a specific transcription migration history record by ID.",
 )
 async def get_transcription_migration_history_by_id(
@@ -373,7 +376,7 @@ async def get_transcription_migration_history_by_id(
 @router.get(
     "/{model_id}/migration-history",
     response_model=list[ModelMigrationHistory],
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="Get migration history for a specific transcription model.",
 )
 async def get_transcription_model_migration_history(

@@ -232,7 +232,8 @@ async def _resolve_single_tenant_redirect_uri(
     "/login/token/",
     response_model=AccessToken,
     name="Login",
-    responses=responses.get_responses([401]),
+    description="Authenticate with email and password (OAuth2 password flow).",
+    responses=responses.get_responses([401, 500]),
 )
 async def user_login_with_email_and_password(
     request: Request,
@@ -342,7 +343,12 @@ async def user_login_with_email_and_password(
         )
 
 
-@router.post("/login/openid-connect/mobilityguard/", response_model=AccessToken)
+@router.post(
+    "/login/openid-connect/mobilityguard/",
+    response_model=AccessToken,
+    description="Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).",
+    responses=responses.get_responses([400, 401, 500, 502]),
+)
 async def login_with_mobilityguard(
     request: Request,
     openid_connect_login: OpenIdConnectLogin,
@@ -685,6 +691,11 @@ async def login_with_mobilityguard(
 @router.get(
     "/",
     response_model=CursorPaginatedResponse[UserSparse],
+    description=(
+        "List users in the current tenant. Available to authenticated tenant "
+        "members; API keys require admin scope and permission."
+    ),
+    responses=responses.get_responses([403]),
     dependencies=[
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
         Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
@@ -916,6 +927,8 @@ async def get_current_user_tenant(
     "/admin/invite/",
     response_model=UserAdminView,
     status_code=201,
+    description="Invite a new user to the tenant (admin).",
+    responses=responses.get_responses([400, 403]),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def invite_user(
@@ -990,6 +1003,8 @@ async def invite_user(
 @users_admin_router.patch(
     "/admin/{id}/",
     response_model=UserAdminView,
+    description="Update a user in the tenant (admin).",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def update_user(
@@ -1110,6 +1125,8 @@ async def update_user(
 @users_admin_router.delete(
     "/admin/{id}/",
     status_code=204,
+    description="Delete a user from the tenant (admin).",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def delete_user(
@@ -1179,6 +1196,8 @@ async def delete_user(
 @router.post(
     "/provision/",
     status_code=201,
+    description="Provision a user from a Zitadel access token.",
+    response_model=None,
     responses=responses.get_responses([403]),
 )
 async def provision_user(

@@ -36,6 +36,7 @@ from intric.questions import question_protocol
 from intric.questions.question import Message
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.sessions.session import SessionMetadataPublic, SessionPublic
 from intric.sessions.session_protocol import (
     to_session_metadata_paginated_response,
@@ -87,7 +88,12 @@ def _default_analytics_range(
     return resolved_start, resolved_end
 
 
-@router.get("/counts/", response_model=Counts)
+@router.get(
+    "/counts/",
+    response_model=Counts,
+    description="Get total tenant counts.",
+    responses=responses.get_responses([]),
+)
 async def get_counts(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -96,7 +102,12 @@ async def get_counts(
     return await service.get_tenant_counts()
 
 
-@router.get("/metadata-statistics/")
+@router.get(
+    "/metadata-statistics/",
+    response_model=MetadataStatistics,
+    description="Get metadata statistics for analytics.",
+    responses=responses.get_responses([]),
+)
 async def get_metadata(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
@@ -121,7 +132,12 @@ async def get_metadata(
     )
 
 
-@router.get("/assistant-activity/", response_model=AssistantActivityStats)
+@router.get(
+    "/assistant-activity/",
+    response_model=AssistantActivityStats,
+    description="Get assistant activity statistics for the tenant.",
+    responses=responses.get_responses([]),
+)
 async def get_assistant_activity(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
@@ -148,7 +164,10 @@ async def get_assistant_activity(
 
 
 @router.get(
-    "/metadata-statistics/aggregated/", response_model=MetadataStatisticsAggregated
+    "/metadata-statistics/aggregated/",
+    response_model=MetadataStatisticsAggregated,
+    description="Get aggregated analytics data in hourly buckets.",
+    responses=responses.get_responses([]),
 )
 async def get_metadata_aggregated(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -170,7 +189,12 @@ async def get_metadata_aggregated(
     )
 
 
-@router.get("/assistants/{assistant_id}/", response_model=PaginatedResponse[Message])
+@router.get(
+    "/assistants/{assistant_id}/",
+    response_model=PaginatedResponse[Message],
+    description="Get the questions asked to an assistant within a time range.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def get_most_recent_questions(
     assistant_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -215,6 +239,8 @@ async def get_most_recent_questions(
 @router.get(
     "/assistants/{assistant_id}/questions/",
     response_model=CursorPaginatedResponse[AssistantInsightQuestion],
+    description="Get paginated question history for an assistant.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_most_recent_questions_paginated(
     assistant_id: UUID,
@@ -259,7 +285,12 @@ async def get_most_recent_questions_paginated(
     )
 
 
-@router.post("/assistants/{assistant_id}/")
+@router.post(
+    "/assistants/{assistant_id}/",
+    response_model=None,
+    description="Ask a question using an assistant's recent questions as context.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def ask_question_about_questions(
     assistant_id: UUID,
     ask_analysis: AskAnalysis,
@@ -317,7 +348,12 @@ async def ask_question_about_questions(
     return AnalysisAnswer(answer=completion.text or "")
 
 
-@router.post("/conversation-insights/")
+@router.post(
+    "/conversation-insights/",
+    response_model=None,
+    description="Ask a question about an assistant's or group chat's conversations.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def ask_unified_questions_about_questions(
     ask_analysis: AskAnalysis,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -487,6 +523,8 @@ async def get_conversation_insights(
 @router.get(
     "/conversation-insights/jobs/{job_id}/",
     response_model=AnalysisJobStatusResponse,
+    description="Get the status of a conversation insights analysis job.",
+    responses=responses.get_responses([404]),
 )
 async def get_conversation_insight_job(
     job_id: UUID,

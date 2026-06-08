@@ -50,6 +50,7 @@ router = APIRouter()
     description=(
         "Legacy groups endpoint. Use collections/spaces instead for new integrations."
     ),
+    responses=responses.get_responses([]),
 )
 async def get_groups(
     request: Request,
@@ -86,6 +87,7 @@ async def get_group_by_id(
     description=(
         "Legacy groups endpoint. Use collections/spaces instead for new integrations."
     ),
+    responses=responses.get_responses([]),
 )
 async def create_group(
     group: CreateGroupRequest,
@@ -105,7 +107,8 @@ async def create_group(
 @router.post(
     "/{id}/",
     response_model=CollectionPublic,
-    responses=responses.get_responses([404]),
+    description="Update a collection (legacy group) by id.",
+    responses=responses.get_responses([403, 404]),
 )
 async def update_group(
     id: UUID,
@@ -165,7 +168,9 @@ async def update_group(
 
 @router.delete(
     "/{id}/",
-    responses=responses.get_responses([404]),
+    response_model=None,
+    description="Delete a collection (legacy group) by id.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_group_by_id(
     id: UUID,
@@ -225,6 +230,7 @@ async def delete_group_by_id(
 @router.post(
     "/{id}/info-blobs/",
     response_model=PaginatedResponse[InfoBlobPublic],
+    description="Add info-blobs to a collection (legacy group) and embed them.",
     responses=responses.get_responses([400, 404, 403, 503]),
 )
 async def add_info_blobs(
@@ -340,6 +346,7 @@ async def get_info_blobs(
     "/{id}/info-blobs/upload/",
     response_model=JobPublic,
     status_code=202,
+    description="Upload a file to a collection (legacy group); starts a processing job.",
     responses=responses.get_responses([413, 415]),
 )
 async def upload_file(
@@ -408,6 +415,8 @@ async def upload_file(
 @router.post(
     "/{id}/searches/",
     response_model=PaginatedResponse[SemanticSearchResponse],
+    description="Run a semantic search within a collection (legacy group).",
+    responses=responses.get_responses([404]),
 )
 async def run_semantic_search(
     id: UUID,
@@ -430,7 +439,12 @@ async def run_semantic_search(
     return protocol.to_paginated_response(results)
 
 
-@router.post("/{id}/transfer/", status_code=204)
+@router.post(
+    "/{id}/transfer/",
+    status_code=204,
+    description="Transfer a collection (legacy group) to another space.",
+    responses=responses.get_responses([403, 404]),
+)
 async def transfer_group_to_space(
     id: UUID,
     transfer_req: TransferRequest,

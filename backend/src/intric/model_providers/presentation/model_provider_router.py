@@ -118,6 +118,8 @@ ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)
 @router.get(
     "/",
     response_model=list[ModelProviderPublic],
+    description="List all model providers for the tenant.",
+    responses=responses.get_responses([403]),
 )
 async def list_providers(
     user: CurrentUser,
@@ -131,6 +133,11 @@ async def list_providers(
 
 @router.get(
     "/capabilities/",
+    response_model=dict[str, object],
+    description=(
+        "Get supported model types and top models per provider type from LiteLLM."
+    ),
+    responses=responses.get_responses([]),
 )
 async def get_provider_capabilities(
     _user: CurrentUser,
@@ -274,7 +281,12 @@ async def get_provider_capabilities(
     }
 
 
-@router.get("/favorites/")
+@router.get(
+    "/favorites/",
+    response_model=dict[str, list[str]],
+    description="Get the tenant's favorite provider types.",
+    responses=responses.get_responses([]),
+)
 async def get_favorite_providers(
     user: CurrentUser,
     session: SessionDep,
@@ -286,7 +298,12 @@ async def get_favorite_providers(
     return {"providers": tenant.favorite_providers}
 
 
-@router.put("/favorites/")
+@router.put(
+    "/favorites/",
+    response_model=dict[str, list[str]],
+    description="Set the tenant's favorite provider types.",
+    responses=responses.get_responses([]),
+)
 async def set_favorite_providers(
     body: FavoriteProvidersUpdate,
     user: CurrentUser,
@@ -300,6 +317,12 @@ async def set_favorite_providers(
 
 @router.get(
     "/model-defaults/",
+    response_model=dict[str, object],
+    description=(
+        "Look up recommended default values for a model from LiteLLM's "
+        "model_cost database."
+    ),
+    responses=responses.get_responses([]),
 )
 async def get_model_defaults(
     model_name: str,
@@ -351,7 +374,7 @@ async def get_model_defaults(
 @router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_provider(
     provider_id: UUID,
@@ -367,7 +390,8 @@ async def get_provider(
 @router.post(
     "/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([409]),
+    description="Create a new model provider.",
+    responses=responses.get_responses([403, 409]),
 )
 async def create_provider(
     data: ModelProviderCreate,
@@ -390,7 +414,8 @@ async def create_provider(
 @router.put(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([404, 409]),
+    description="Update an existing model provider.",
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_provider(
     provider_id: UUID,
@@ -412,6 +437,10 @@ async def update_provider(
 
 @router.get(
     "/{provider_id}/models/",
+    response_model=list[dict[str, Any]],
+    description=(
+        "List available models from the provider's API using its credentials."
+    ),
     responses=responses.get_responses([404]),
 )
 async def list_provider_models(
@@ -435,6 +464,8 @@ async def list_provider_models(
 
 @router.post(
     "/{provider_id}/test/",
+    response_model=dict[str, Any],
+    description="Test connectivity to a model provider.",
     responses=responses.get_responses([404]),
 )
 async def test_provider(
@@ -447,6 +478,10 @@ async def test_provider(
 
 @router.post(
     "/{provider_id}/validate-model/",
+    response_model=dict[str, Any],
+    description=(
+        "Validate that a model works with this provider by making a minimal API call."
+    ),
     responses=responses.get_responses([404]),
 )
 async def validate_model(
@@ -460,7 +495,9 @@ async def validate_model(
 
 @router.delete(
     "/{provider_id}/",
-    responses=responses.get_responses([404]),
+    response_model=dict[str, str],
+    description="Delete a model provider.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_provider(
     provider_id: UUID,

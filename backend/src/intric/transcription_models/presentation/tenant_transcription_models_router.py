@@ -82,8 +82,9 @@ def _service(
 
 @router.post(
     "/",
+    description="Create a new tenant-specific transcription model.",
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_tenant_transcription_model(
     model_create: TenantTranscriptionModelCreate,
@@ -103,6 +104,7 @@ async def create_tenant_transcription_model(
 
 @router.put(
     "/{model_id}/",
+    description="Update a tenant-specific transcription model.",
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([403, 404]),
 )
@@ -125,6 +127,8 @@ async def update_tenant_transcription_model(
 
 @router.delete(
     "/{model_id}/",
+    description="Delete a tenant-specific transcription model.",
+    response_model=None,
     responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_transcription_model(

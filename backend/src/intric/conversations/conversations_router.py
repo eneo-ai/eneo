@@ -256,8 +256,9 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
 
 @router.post(
     "/",
+    description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
     responses=responses.streaming_response(
-        response_codes=[400, 404],
+        response_codes=[400, 403, 404],
         models=[
             SSEText,
             SSEIntricEvent,
@@ -359,6 +360,7 @@ async def chat(
 @router.post(
     "/preflight",
     response_model=PreflightResponse,
+    description="Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).",
     responses=responses.get_responses([400, 403, 404, 422, 429]),
 )
 async def preflight_tokens(
@@ -542,6 +544,7 @@ async def get_conversation(
 @router.delete(
     "/{session_id}/",
     status_code=204,
+    description="Deletes a specific conversation (session).",
     responses=responses.get_responses([400, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
@@ -572,6 +575,7 @@ async def delete_conversation(
 @router.post(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
+    description="Leave feedback for a conversation.",
     responses=responses.get_responses([400, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
@@ -609,6 +613,7 @@ async def leave_feedback(
 @router.post(
     "/{session_id}/title/",
     response_model=SessionPublic,
+    description="Generate and set the title of a conversation.",
     responses=responses.get_responses([400, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
@@ -634,6 +639,7 @@ async def set_title_of_conversation(
 @router.post(
     "/approve-tools/",
     response_model=ToolApprovalResponse,
+    description="Submit approval decisions for pending tool calls from a tool_approval_required event.",
     responses=responses.get_responses([400, 403, 404, 409, 429]),
 )
 async def approve_tools(

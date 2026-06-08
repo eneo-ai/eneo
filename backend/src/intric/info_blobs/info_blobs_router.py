@@ -37,6 +37,7 @@ CurrentUserDep = Annotated[UserInDB, Depends(get_current_active_user)]
 @router.get(
     "/",
     response_model=PaginatedResponse[InfoBlobPublicNoText],
+    responses=responses.get_responses([]),
 )
 async def get_info_blob_ids(
     request: Request,
@@ -76,6 +77,7 @@ async def get_info_blob(
 @router.post(
     "/{id}/",
     response_model=InfoBlobPublic,
+    description="Updates an info-blob by id. Omitted fields are not updated.",
     responses=responses.get_responses([404]),
 )
 async def update_info_blob(
@@ -102,6 +104,7 @@ async def update_info_blob(
 @router.delete(
     "/{id}/",
     response_model=InfoBlobPublic,
+    description="Deletes an info-blob by id. Returns the deleted object.",
     responses=responses.get_responses([404]),
 )
 async def delete_info_blob(
@@ -124,6 +127,8 @@ async def delete_info_blob(
 @router.get(
     "/spaces/{space_id}/info-blobs/",
     response_model=PaginatedResponse[InfoBlobPublicNoText],
+    description="Returns the info-blobs of a space (without text).",
+    responses=responses.get_responses([]),
 )
 async def get_space_info_blobs(
     space_id: Annotated[UUID, Path()],

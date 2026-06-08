@@ -41,6 +41,7 @@ from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,12 @@ async def _enrich_logs_with_actor_info(
     return enriched_logs
 
 
-@router.delete("/access-session/rate-limit", status_code=204)
+@router.delete(
+    "/access-session/rate-limit",
+    status_code=204,
+    description="Reset the audit session rate limit for the current user (testing only).",
+    responses=responses.get_responses([404, 503]),
+)
 async def reset_rate_limit(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -193,7 +199,12 @@ async def reset_rate_limit(
     return Response(status_code=204)
 
 
-@router.post("/access-session", response_model=AccessJustificationResponse)
+@router.post(
+    "/access-session",
+    response_model=AccessJustificationResponse,
+    description="Create an audit access session with justification, stored server-side.",
+    responses=responses.get_responses([400, 403, 429, 503]),
+)
 async def create_access_session(
     request: AccessJustificationRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -330,7 +341,12 @@ async def create_access_session(
     return response
 
 
-@router.get("/logs", response_model=AuditLogListResponse)
+@router.get(
+    "/logs",
+    response_model=AuditLogListResponse,
+    description="List audit logs for the authenticated user's tenant.",
+    responses=responses.get_responses([401, 403]),
+)
 async def list_audit_logs(
     request: Request,
     actions: Annotated[Optional[list[ActionType]], Depends(parse_action_list)],
@@ -552,7 +568,12 @@ async def list_audit_logs(
     return response
 
 
-@router.get("/logs/user/{user_id}", response_model=AuditLogListResponse)
+@router.get(
+    "/logs/user/{user_id}",
+    response_model=AuditLogListResponse,
+    description="Get all audit logs where the user is actor or target (GDPR Article 15 export).",
+    responses=responses.get_responses([403, 404]),
+)
 async def get_user_logs(
     user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -650,7 +671,16 @@ async def get_user_logs(
     )
 
 
-@router.get("/logs/export")
+@router.get(
+    "/logs/export",
+    response_model=None,
+    description=(
+        "Export audit logs to CSV or JSON Lines format. Default limit is 50,000 "
+        "records (configurable via max_records, max 100,000); the response includes "
+        "an X-Records-Truncated header when the limit is hit."
+    ),
+    responses=responses.get_responses([403, 413]),
+)
 async def export_audit_logs(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     user_id: Annotated[
@@ -877,7 +907,16 @@ async def export_audit_logs(
 # ============================================================================
 
 
-@router.post("/logs/export/async", response_model=ExportJobResponse)
+@router.post(
+    "/logs/export/async",
+    response_model=ExportJobResponse,
+    description=(
+        "Request an async background export of audit logs and receive a job ID. "
+        "Limited to 2 concurrent exports per tenant; generated files are "
+        "auto-deleted after 24 hours."
+    ),
+    responses=responses.get_responses([403, 429]),
+)
 async def request_async_export(
     request: ExportJobRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -933,14 +972,7 @@ async def request_async_export(
         )
 
     # Validate and normalize format
-    export_format = request.format.lower().strip()
-    if export_format == "json":
-        export_format = "jsonl"  # Accept "json" as alias for "jsonl"
-    if export_format not in ["csv", "jsonl"]:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid export format: '{request.format}'. Supported formats: csv, json, jsonl",
-        )
+    export_format = "jsonl" if request.format == "json" else request.format
 
     # Generate job ID
     job_id = uuid4()
@@ -996,7 +1028,12 @@ async def request_async_export(
     )
 
 
-@router.get("/logs/export/{job_id}/status", response_model=ExportJobStatusResponse)
+@router.get(
+    "/logs/export/{job_id}/status",
+    response_model=ExportJobStatusResponse,
+    description="Get the status and progress of an async export job.",
+    responses=responses.get_responses([403, 404]),
+)
 async def get_export_status(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1052,7 +1089,15 @@ async def get_export_status(
     )
 
 
-@router.get("/logs/export/{job_id}/download")
+@router.get(
+    "/logs/export/{job_id}/download",
+    response_model=None,
+    description=(
+        "Download the completed export file for an async export job. "
+        "Files are auto-deleted after 24 hours."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def download_export(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1121,7 +1166,12 @@ async def download_export(
     )
 
 
-@router.post("/logs/export/{job_id}/cancel")
+@router.post(
+    "/logs/export/{job_id}/cancel",
+    response_model=None,
+    description="Cancel an in-progress async export job.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def cancel_export(
     job_id: Annotated[UUID, Path(..., description="Export job ID")],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1171,7 +1221,12 @@ async def cancel_export(
     }
 
 
-@router.get("/retention-policy", response_model=RetentionPolicyResponse)
+@router.get(
+    "/retention-policy",
+    response_model=RetentionPolicyResponse,
+    description="Get the current audit log retention policy for the tenant.",
+    responses=responses.get_responses([403]),
+)
 async def get_retention_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -1199,7 +1254,12 @@ async def get_retention_policy(
     return RetentionPolicyResponse.model_validate(policy.model_dump())
 
 
-@router.put("/retention-policy", response_model=RetentionPolicyResponse)
+@router.put(
+    "/retention-policy",
+    response_model=RetentionPolicyResponse,
+    description="Update the audit log retention policy for the tenant.",
+    responses=responses.get_responses([403]),
+)
 async def update_retention_policy(
     request: RetentionPolicyUpdateRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],

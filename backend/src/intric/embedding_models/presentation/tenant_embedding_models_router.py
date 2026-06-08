@@ -89,8 +89,9 @@ def _service(
 
 @router.post(
     "/",
+    description="Create a new tenant-specific embedding model.",
     response_model=EmbeddingModelPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_tenant_embedding_model(
     model_create: TenantEmbeddingModelCreate,
@@ -110,6 +111,7 @@ async def create_tenant_embedding_model(
 
 @router.put(
     "/{model_id}/",
+    description="Update a tenant-specific embedding model.",
     response_model=EmbeddingModelPublic,
     responses=responses.get_responses([403, 404]),
 )
@@ -132,6 +134,8 @@ async def update_tenant_embedding_model(
 
 @router.delete(
     "/{model_id}/",
+    description="Delete a tenant-specific embedding model.",
+    response_model=None,
     responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_embedding_model(
