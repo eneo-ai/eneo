@@ -26,30 +26,33 @@ utilities backed by semantic tokens). Never write raw colors into `class`.
 
 > Pick a class by **intent + intensity**, never by raw color.
 
-| Intent | Use |
-| --- | --- |
+| Intent                        | Use                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------- |
 | Error / failure / destructive | `negative-*` (e.g. `bg-negative-default/10`, `text-negative-stronger`) |
-| Caution / warning | `warning-*` |
-| Success / ok | `positive-*` |
-| Brand / primary action | `accent-*` / `primary` |
-| Page & dialog surfaces | `bg-primary` / `bg-secondary` / `bg-tertiary` |
-| Body / dimmed / inverted text | `text-primary` / `text-secondary` / `text-muted` / `text-on-fill` |
-| Hairlines & outlines | `border-dimmer` / `border-default` / `border-stronger` |
+| Caution / warning             | `warning-*`                                                            |
+| Success / ok                  | `positive-*`                                                           |
+| Brand / primary action        | `accent-*` / `primary`                                                 |
+| Page & dialog surfaces        | `bg-primary` / `bg-secondary` / `bg-tertiary`                          |
+| Body / dimmed / inverted text | `text-primary` / `text-secondary` / `text-muted` / `text-on-fill`      |
+| Hairlines & outlines          | `border-dimmer` / `border-default` / `border-stronger`                 |
 
 ### Don't
 
 - ❌ Tailwind palette utilities: `bg-orange-50`, `text-red-600`, `border-gray-300`.
   These don't adapt between light/dark.
 - ❌ Arbitrary literals in classes: `bg-[#fff]`, `text-[rgb(...)]`.
-- ❌ The `dark:` variant. **It is inert in this app** — the theme switches via
-  `data-theme` on `<html>`, not via a `.dark` class (none is ever set, no
-  `<ModeWatcher>` is mounted). A semantic token already carries its dark value,
-  so `bg-negative-default/10` is correct in both themes; `dark:bg-…` does nothing.
+- ❌ The `dark:` variant in application code. Theme differences belong in the
+  semantic token definitions, so `bg-negative-default/10` is correct in both
+  themes. The variant remains wired to `data-theme` only for vendored components
+  that have not yet been migrated.
 
 ### Enforcement
 
-`intric/no-raw-color` (ESLint) flags raw palette utilities and arbitrary color
-literals in `class`. It runs at **warn** today because of a pre-existing backlog
-(~250 occurrences across ~20 files); flip it to `error` in
-`apps/web/eslint.config.js` once the backlog is burned down. Escape hatch for a
-genuinely themeless surface: `<!-- eslint-disable-next-line intric/no-raw-color -->`.
+`intric/no-raw-color` (ESLint) runs as an error in the web app and shared UI
+package. It inspects Svelte, JavaScript, and TypeScript strings, including
+generated markup and component `<style>` blocks. The existing backlog is tracked
+in each package's `eslint-suppressions.json`; adding another violation exceeds
+the baseline and fails CI.
+
+Escape hatch for a genuinely themeless surface:
+`<!-- eslint-disable-next-line intric/no-raw-color -->`.

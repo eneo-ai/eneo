@@ -103,7 +103,7 @@
         <IconArrowUpToLine />
       </Button>
     </div>
-    <nav class="flex h-[3.25rem] w-full overflow-x-auto">
+    <nav class="flex h-[3.25rem] w-full items-center gap-1 overflow-x-auto px-3">
       <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}
         >{m.personal()}</a
@@ -131,13 +131,14 @@
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/if}
 
-      <JobManagerDropdown></JobManagerDropdown>
-      <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu
-        tenantFederationEnabled={Boolean(
-          data.featureFlags?.federationStatus?.has_multi_tenant_federation
-        )}
-      ></ProfileMenu>
+      <div class="ml-3 flex items-center gap-3">
+        <JobManagerDropdown></JobManagerDropdown>
+        <ProfileMenu
+          tenantFederationEnabled={Boolean(
+            data.featureFlags?.federationStatus?.has_multi_tenant_federation
+          )}
+        ></ProfileMenu>
+      </div>
     </nav>
   </header>
 
@@ -149,14 +150,13 @@
 <Toaster />
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "../../app.css";
   nav a {
-    @apply text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] items-center px-8 pt-0.5 text-[0.9rem] tracking-[0.01rem] hover:font-medium hover:tracking-normal;
+    @apply text-secondary hover:bg-muted hover:text-foreground flex h-9 items-center rounded-lg px-3 text-[0.9rem] font-medium tracking-[0.01rem] transition-colors;
   }
 
   nav a[data-current="page"] {
-    @apply text-brand-intric font-medium tracking-normal;
-    background: rgba(from var(--background-hover-default) r g b / 0.1);
+    @apply bg-muted text-foreground;
   }
 
   main {
@@ -172,9 +172,5 @@
     box-shadow: 0px 14px 12px 2px rgba(0, 0, 0, 0.1);
     border: 0.5px solid var(--border-stronger);
     border-bottom: 0px;
-  }
-
-  .subtle-border {
-    background: linear-gradient(0deg, var(--border-default) 0%, transparent 100%);
   }
 </style>

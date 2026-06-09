@@ -1,0 +1,347 @@
+{
+  "src/lib/assets/EneoWordMark.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/assets/IntricWordMark.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/layout/Page/Header.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/toast/Toaster.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/ui/badge/badge.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/components/ui/button/button.svelte": {
+    "intric/no-raw-color": {
+      "count": 9
+    }
+  },
+  "src/lib/components/ui/calendar/calendar-month-select.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/calendar/calendar-year-select.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/checkbox/checkbox.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/components/ui/dropdown-menu/dropdown-menu-item.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/ui/field/field-label.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/input-group/input-group-input.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/input-group/input-group-textarea.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/input-group/input-group.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/components/ui/input/input.svelte": {
+    "intric/no-raw-color": {
+      "count": 8
+    }
+  },
+  "src/lib/components/ui/select/select-trigger.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/components/ui/switch/switch.svelte": {
+    "intric/no-raw-color": {
+      "count": 5
+    }
+  },
+  "src/lib/components/ui/tabs/tabs-trigger.svelte": {
+    "intric/no-raw-color": {
+      "count": 7
+    }
+  },
+  "src/lib/components/ui/textarea/textarea.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/features/ai-models/components/ModelStatusIcons.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/features/api-keys/ApiKeySecretDialog.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/features/api-keys/CreateApiKeyDialog.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/features/api-keys/ExpiringKeysBanner.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/features/api-keys/apiKeyTableUtils.ts": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/features/apps/components/AppIcon.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/features/chat/components/conversation/ThinkingIndicator.svelte": {
+    "intric/no-raw-color": {
+      "count": 7
+    }
+  },
+  "src/lib/features/insights/components/InsightsConversationTable.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/features/spaces/components/SpaceSelector.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/features/templates/components/LucideIconPicker.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/+layout.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/account/api-keys/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/account/api-keys/ApiKeyTable.svelte": {
+    "intric/no-raw-color": {
+      "count": 8
+    }
+  },
+  "src/routes/(app)/admin/api-keys/AdminApiKeyTable.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/audit-logs/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 200
+    }
+  },
+  "src/routes/(app)/admin/audit-logs/AccessJustificationForm.svelte": {
+    "intric/no-raw-color": {
+      "count": 19
+    }
+  },
+  "src/routes/(app)/admin/audit-logs/AuditConfigTab.svelte": {
+    "intric/no-raw-color": {
+      "count": 11
+    }
+  },
+  "src/routes/(app)/admin/insights/InteractiveGraph.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/insights/assistant/[assistantId]/QuestionTable.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/insights/prepareData.ts": {
+    "intric/no-raw-color": {
+      "count": 16
+    }
+  },
+  "src/routes/(app)/admin/legacy/user-groups/UserGroupMembersEditor.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/mcp-servers/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 8
+    }
+  },
+  "src/routes/(app)/admin/mcp-servers/MCPServerPrimaryCell.svelte": {
+    "intric/no-raw-color": {
+      "count": 14
+    }
+  },
+  "src/routes/(app)/admin/mcp-servers/MCPToolsPanel.svelte": {
+    "intric/no-raw-color": {
+      "count": 19
+    }
+  },
+  "src/routes/(app)/admin/models/ModelNameCell.svelte": {
+    "intric/no-raw-color": {
+      "count": 6
+    }
+  },
+  "src/routes/(app)/admin/models/components/PageEmptyState.svelte": {
+    "intric/no-raw-color": {
+      "count": 7
+    }
+  },
+  "src/routes/(app)/admin/models/components/ProviderEmptyState.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/models/components/ProviderGlyph.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/routes/(app)/admin/usage/tokens/TokenOverviewTable.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/usage/users/UsageBadge.svelte": {
+    "intric/no-raw-color": {
+      "count": 18
+    }
+  },
+  "src/routes/(app)/admin/usage/users/UserTokenSummary.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/usage/users/[userId]/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/users/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/dashboard/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/dashboard/[assistantId]/[[sessionId]]/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/dashboard/app/[appId]/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 5
+    }
+  },
+  "src/routes/(app)/dashboard/app/[appId]/results/[resultId]/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/results/[resultId]/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/AudioRecorder.svelte": {
+    "intric/no-raw-color": {
+      "count": 18
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputAudioRecording.svelte": {
+    "intric/no-raw-color": {
+      "count": 10
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputUpload.svelte": {
+    "intric/no-raw-color": {
+      "count": 16
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/assistants/AssistantTile.svelte": {
+    "intric/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {
+    "intric/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/knowledge/integrations/IntegrationSyncStatusCell.svelte": {
+    "intric/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/settings/SelectMCPServers.svelte": {
+    "intric/no-raw-color": {
+      "count": 6
+    }
+  },
+  "src/routes/(public)/login/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 28
+    }
+  },
+  "src/routes/(public)/login/failed/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(public)/logout/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/integrations/callback/token/+page.svelte": {
+    "intric/no-raw-color": {
+      "count": 12
+    }
+  }
+}
