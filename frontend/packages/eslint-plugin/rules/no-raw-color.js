@@ -1,89 +1,115 @@
 /**
- * Flags raw colors written straight into `class` attributes instead of going
- * through eneo's semantic design tokens.
+ * Flags raw colors written into UI source instead of going through eneo's
+ * semantic design tokens.
  *
- * Eneo has a three-layer color system:
- *   1. Raw palette      packages/ui/src/styles/themes/palette.css
- *                       (--color-ui-red-500, --color-soil-500, …) — never used directly.
- *   2. Semantic tokens  themes/light.css + dark.css, scoped to
- *                       :root[data-theme="light"|"dark"] — auto-switch per theme.
- *                       (--negative-*, --warning-*, --accent-*, --background-*,
- *                        --text-*, --border-*, each in dimmer/default/stronger).
- *   3. Tailwind utils   apps/web/src/app.css @theme inline maps layer 2 to
- *                       `bg-negative-default`, `text-warning-stronger`, etc.
+ * The rule inspects string literals in Svelte, JavaScript, and TypeScript,
+ * including class strings assembled in scripts, generated markup, attributes,
+ * class directives, and component <style> blocks.
  *
- * Writing Tailwind's built-in palette (`bg-orange-50`, `text-red-600`) or an
- * arbitrary literal (`bg-[#fff]`, `text-[rgb(...)]`) bypasses this system: the
- * color does NOT adapt between light/dark (the theme switches via `data-theme`,
- * not via Tailwind's `.dark` class — which is never set in this app, so `dark:`
- * variants are inert). Use a semantic token instead.
+ * What it catches:
+ *   - Tailwind palette utilities, including white/black and eneo raw palettes
+ *   - Hex values and CSS color functions
+ *   - Direct references to raw palette variables (`--color-ui-*`, `--color-soil-*`)
+ *   - `dark:` variants, since theme differences belong in semantic tokens
  *
- * What it catches (inside `class="…"`, `class={…}` and `class:…` directives):
- *   - Tailwind palette utilities: (bg|text|border|ring|fill|stroke|…)-<color>-<shade>
- *   - Arbitrary color values: …-[#hex] / …-[rgb(…)] / …-[hsl(…)] / …-[oklch(…)]
+ * Escape hatch: use an ESLint disable comment for a genuinely themeless value,
+ * such as a fixed brand or flag color.
  *
- * Escape hatch: `<!-- eslint-disable-next-line intric/no-raw-color -->` for the
- * rare genuinely-themeless surface (e.g. a fixed brand logo color).
- *
- * @type {import('eslint').Rule.RuleModule}
+ * @type {import("eslint").Rule.RuleModule}
  */
 
-// Tailwind's default palette names. eneo's semantic tokens (negative, warning,
-// accent, brand-intric, chart-red, …) are intentionally NOT in this list, so
-// `bg-negative-default` / `text-chart-red` are never flagged.
 const PALETTE =
-  "slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
+  "slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|soil|moss|amethyst|pine";
 const UTIL =
   "bg|text|border|ring|ring-offset|fill|stroke|from|via|to|divide|outline|decoration|caret|accent|placeholder|shadow";
 
-// `(?<![\w-])` lets a variant prefix precede the utility (e.g. `hover:bg-red-500`,
-// `dark:bg-red-500`) since the `:` is not a word/dash char.
-const RAW_PALETTE = new RegExp(
-  `(?<![\\w-])(?:${UTIL})-(?:${PALETTE})-(?:50|100|200|300|400|500|600|700|800|900|950)(?![\\w-])`,
-);
-
-// Arbitrary color literals: `bg-[#fff]`, `text-[rgb(…)]`, `border-[oklch(…)]`.
-const RAW_ARBITRARY = new RegExp(
-  `(?<![\\w-])(?:${UTIL})-\\[\\s*(?:#[0-9a-fA-F]{3,8}|rgba?\\(|hsla?\\(|oklch\\()`,
-);
-
-const firstMatch = (text) => {
-  const m = RAW_PALETTE.exec(text) ?? RAW_ARBITRARY.exec(text);
-  return m ? m[0] : null;
-};
+const PATTERNS = [
+  {
+    source: `(?<![\\w-])(?:${UTIL})-(?:(?:${PALETTE})-(?:50|100|200|300|400|500|600|700|800|900|950)|white|black)(?![\\w-])`,
+    messageId: "rawColor",
+  },
+  {
+    source: `(?<![\\w-])(?:${UTIL})-\\[\\s*(?:#[0-9a-fA-F]{3,8}|rgba?\\(|hsla?\\(|oklch\\(|lab\\(|lch\\(|hwb\\(|color\\()`,
+    messageId: "rawColor",
+  },
+  {
+    source: String.raw`(?<!&)#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?|oklch|lab|lch|hwb|color)\s*\(`,
+    messageId: "rawColor",
+  },
+  {
+    source: String.raw`var\(\s*--color-(?:ui|soil|moss|amethyst|pine|intric|white|black)[\w-]*`,
+    messageId: "rawColor",
+  },
+  {
+    source: String.raw`(?<![\w-])dark:`,
+    messageId: "darkVariant",
+  },
+];
 
 const rule = {
   meta: {
-    type: "suggestion",
+    type: "problem",
     docs: {
       description:
-        "Disallow raw colors in class attributes; use eneo semantic design tokens (bg-negative-dimmer, text-warning-stronger, …) so colors adapt to light/dark.",
+        "Disallow raw colors in UI source; use eneo semantic design tokens so colors adapt to light/dark.",
     },
     schema: [],
     messages: {
       rawColor:
-        "Raw color `{{ token }}` bypasses the theme tokens and won't adapt to light/dark. Use a semantic token instead (e.g. bg-negative-dimmer, text-warning-stronger, bg-secondary, text-muted, border-default).",
+        "Raw color `{{ token }}` bypasses the theme tokens. Use a semantic token instead (for example bg-negative-dimmer, text-warning-stronger, bg-secondary, text-muted, or border-default).",
+      darkVariant:
+        "`dark:` variants bypass eneo's data-theme token system. Put the theme difference in a semantic token instead.",
     },
   },
 
   create(context) {
-    const sourceCode = context.sourceCode ?? context.getSourceCode();
+    const check = (node, text) => {
+      const reported = new Set();
+      const coveredRanges = [];
 
-    const check = (node) => {
-      const token = firstMatch(sourceCode.getText(node));
-      if (token) {
-        context.report({ node, messageId: "rawColor", data: { token } });
+      for (const { source, messageId } of PATTERNS) {
+        for (const match of text.matchAll(new RegExp(source, "g"))) {
+          const start = match.index;
+          const end = start + match[0].length;
+          if (
+            messageId === "rawColor" &&
+            coveredRanges.some(([coveredStart, coveredEnd]) => {
+              return start >= coveredStart && end <= coveredEnd;
+            })
+          ) {
+            continue;
+          }
+
+          const key = `${messageId}:${match.index}:${match[0]}`;
+          if (reported.has(key)) continue;
+          reported.add(key);
+          if (messageId === "rawColor") coveredRanges.push([start, end]);
+          context.report({
+            node,
+            messageId,
+            data: { token: match[0] },
+          });
+        }
       }
     };
 
     return {
-      // Static and dynamic `class` attributes: class="…" / class={…}
-      SvelteAttribute(node) {
-        if (node.key?.name === "class") check(node);
+      Literal(node) {
+        if (typeof node.value === "string") check(node, node.value);
       },
-      // Class directives: class:bg-red-500={…}
+      TemplateElement(node) {
+        check(node, node.value.raw);
+      },
+      SvelteLiteral(node) {
+        if (typeof node.value === "string") check(node, node.value);
+      },
       SvelteDirective(node) {
-        if (node.kind === "Class") check(node);
+        if (node.kind === "Class") check(node, node.key?.name?.name ?? "");
+      },
+      SvelteText(node) {
+        if (node.parent?.type === "SvelteStyleElement") {
+          check(node, node.value);
+        }
       },
     };
   },

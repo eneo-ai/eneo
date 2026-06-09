@@ -48,6 +48,7 @@
   "devDependencies": {
     "@eslint/js": "^9.24.0",
     "@internationalized/date": "^3.7.0",
+    "@intric/eslint-plugin": "workspace:*",
     "@intric/intric-js": "workspace:*",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "^1.51.1",

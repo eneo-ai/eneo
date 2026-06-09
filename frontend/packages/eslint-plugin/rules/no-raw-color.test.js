@@ -39,6 +39,16 @@ ruleTester.run("no-raw-color", rule, {
     },
     // Arbitrary non-color value (a size) is fine.
     { filename: "T.svelte", code: '<div class="w-[460px]"></div>' },
+    // Semantic variables are allowed in component CSS.
+    {
+      filename: "T.svelte",
+      code: "<style>.item { color: var(--text-primary); }</style>",
+    },
+    // HTML entities are not hex colors.
+    {
+      filename: "T.svelte",
+      code: '<script>const escaped = "&#123;";</script>',
+    },
   ],
   invalid: [
     // Static raw palette utility.
@@ -51,7 +61,7 @@ ruleTester.run("no-raw-color", rule, {
     {
       filename: "T.svelte",
       code: '<div class={fail ? "bg-warning-dimmer/40 dark:bg-orange-950" : ""}></div>',
-      errors: [{ messageId: "rawColor" }],
+      errors: [{ messageId: "rawColor" }, { messageId: "darkVariant" }],
     },
     // Raw palette in a class directive.
     {
@@ -63,6 +73,41 @@ ruleTester.run("no-raw-color", rule, {
     {
       filename: "T.svelte",
       code: '<div class="bg-[#ffffff]"></div>',
+      errors: [{ messageId: "rawColor" }],
+    },
+    {
+      filename: "T.svelte",
+      code: '<div class="bg-white text-black"></div>',
+      errors: [{ messageId: "rawColor" }, { messageId: "rawColor" }],
+    },
+    {
+      filename: "T.svelte",
+      code: '<div class="dark:bg-negative-dimmer"></div>',
+      errors: [{ messageId: "darkVariant" }],
+    },
+    {
+      filename: "T.svelte",
+      code: '<script>const cls = "bg-red-500";</script><div class={cls}></div>',
+      errors: [{ messageId: "rawColor" }],
+    },
+    {
+      filename: "T.svelte",
+      code: '<div class="bg-[var(--color-ui-red-500)]"></div>',
+      errors: [{ messageId: "rawColor" }],
+    },
+    {
+      filename: "T.svelte",
+      code: '<div class="bg-[lch(50%_20_30)]"></div>',
+      errors: [{ messageId: "rawColor" }],
+    },
+    {
+      filename: "T.svelte",
+      code: "<style>.item { color: #fff; box-shadow: 0 0 1px rgb(0 0 0 / 20%); }</style>",
+      errors: [{ messageId: "rawColor" }, { messageId: "rawColor" }],
+    },
+    {
+      filename: "T.svelte",
+      code: '<script>const html = `<span class="text-orange-600">x</span>`;</script>',
       errors: [{ messageId: "rawColor" }],
     },
   ],
