@@ -1,27 +1,32 @@
 """Application service for helper-assistant role assignments.
 
-Owns the lifecycle of role slots in ``org_space_assistant_roles`` — list
-the active assignments for a tenant, assign / reassign an assistant to a
-role, unassign a role, toggle the ``is_enabled`` / ``is_visible_to_users``
-flags, list the append-only history written to
-``help_assistant_assignment_history``, and run the two admin reset
-actions (PRD §7).
+Owns the lifecycle of role slots in ``org_space_assistant_roles`` — list the
+active assignments for a tenant, install / uninstall a shipped Help Assistant
+template, and toggle the ``is_enabled`` / ``is_visible_to_users`` flags.
+
+Help Assistants are not preseeded. An admin installs a template from the admin
+UI (``install_helper``), which creates the underlying assistant (owned by the
+per-tenant system user, living in the org-space) with **blank** instructions,
+plus the active role row. ``uninstall_helper`` reverses that — it removes the
+role and hard-deletes the assistant so the template becomes available to add
+again.
 
 Enforces the cross-table invariant from PRD §4 ("the assistant filling a
-helper role must live in the org-space") and audit-logs every mutation.
-All mutations require ``Permission.ADMIN``; ``get_active`` is admin-free
-because it drives the availability lookup the prompt-guide modal uses
-for every signed-in user.
+helper role must live in the org-space") and audit-logs every mutation. All
+mutations require ``Permission.ADMIN``; ``get_active`` is admin-free because it
+drives the availability lookup the prompt-guide modal uses for every signed-in
+user.
 
-The two reset paths consume :mod:`intric.help_assistants.defaults` — the
-single runtime source of truth for shipped Help Assistant config — so the
-admin UI cannot drift from what the team ships.
+The installable templates come from :mod:`intric.help_assistants.templates` —
+the single code-owned registry of shipped Help Assistants. Templates carry
+identity + invariants only; instructions are pasted by the admin afterwards.
 
-Archive-replaced helpers (PRD §3, §9) routes hard-deletion through
-``assistant_service.delete_assistant`` so existing cleanup paths
-(e.g. the API-key scope revoker) run; the FK on
+``uninstall_helper`` routes hard-deletion through
+``assistant_service.delete_assistant`` so existing cleanup paths (e.g. the
+API-key scope revoker) run; the FK on
 ``help_assistant_assignment_history.assistant_id`` is ``ON DELETE SET NULL``,
-so history rows survive with ``assistant_name_snapshot`` intact.
+so the history row written before deletion survives with
+``assistant_name_snapshot`` intact.
 """
 
 from __future__ import annotations
@@ -34,8 +39,6 @@ from intric.assistants.assistant import Assistant
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.help_assistants.defaults import get_defaults
-from intric.help_assistants.domain.assignment_history import AssignmentHistory
 from intric.help_assistants.domain.assignment_history_reason import (
     AssignmentHistoryReason,
 )
@@ -47,6 +50,11 @@ from intric.help_assistants.infrastructure.help_assistant_assignment_history_rep
 )
 from intric.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
+)
+from intric.help_assistants.templates import (
+    HelperAssistantTemplate,
+    get_template,
+    list_templates,
 )
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -104,12 +112,24 @@ class OrgSpaceAssistantRoleService:
             org_space_id=org_space_id, kind=kind
         )
 
-    async def list_history(self, kind: HelperKind) -> list[AssignmentHistory]:
+    async def list_available_templates(
+        self,
+    ) -> list[tuple[HelperKind, HelperAssistantTemplate]]:
+        """Shipped templates not yet installed for the calling tenant.
+
+        Drives the admin "Add help assistant" picker: a template drops out of
+        the list once its kind has an active role, and reappears after the
+        helper is uninstalled.
+        """
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
-        return await self.history_repo.list_by_org_space_and_kind(
-            org_space_id=org_space_id, kind=kind
-        )
+        active = await self.role_repo.list_for_org_space(org_space_id=org_space_id)
+        installed_kinds = {role.kind for role in active}
+        return [
+            (kind, template)
+            for kind, template in list_templates()
+            if kind not in installed_kinds
+        ]
 
     async def toggle_enabled(self, kind: HelperKind, value: bool) -> RoleAssignment:
         validate_permission(self.user, Permission.ADMIN)
@@ -181,104 +201,55 @@ class OrgSpaceAssistantRoleService:
 
         return assignment
 
-    async def reset_instructions_only(self, kind: HelperKind) -> Assistant:
+    async def install_helper(self, kind: HelperKind) -> RoleAssignment:
+        """Install a shipped Help Assistant template into the tenant.
+
+        Creates the underlying assistant — owned by the per-tenant system
+        user, living in the org-space — with **blank** instructions, then the
+        active role assignment. The helper starts ``is_enabled=True`` but
+        ``is_visible_to_users=False`` so an admin can paste the instructions
+        (maintained in the Eneo community) before exposing the helper to
+        users. Refuses to install a kind that is already installed.
+        """
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
 
-        current = await self.role_repo.get_by_org_space_and_kind(
+        existing = await self.role_repo.get_by_org_space_and_kind(
             org_space_id=org_space_id, kind=kind
         )
-        if current is None:
-            raise BadRequestException(f"No active assignment for role '{kind.value}'.")
+        if existing is not None:
+            raise BadRequestException(
+                f"Help assistant '{kind.value}' is already installed."
+            )
 
+        template = get_template(kind)
         system_user_id = await self._resolve_system_user_id()
-        defaults = get_defaults(kind)
-
-        # Explicit ownership: the new prompt must be attributed to the
-        # tenant's system user (the helper-assistant owner), not the calling
-        # admin — the audit log records the admin separately. ``_add_prompt``
-        # is the same flip-is_selected path that ``assistant_service.update_assistant``
-        # uses internally; we go through the repo directly so we can pass the
-        # prompt we just created instead of letting ``update_assistant``
-        # create a second one (and attribute it via its own owner rules).
-        new_prompt = await self.prompt_service.create_prompt(
-            text=defaults.prompt_text,
-            description="Reset to shipped default",
-            owner_user_id=system_user_id,
-        )
-        assert new_prompt is not None
-        await self.assistant_repo._add_prompt(  # pyright: ignore[reportPrivateUsage]
-            assistant_id=current.assistant_id, prompt=new_prompt
-        )
-
-        assistant = await self._load_assistant(current.assistant_id)
-        assert current.id is not None
-        await self.audit_service.log_async(
-            tenant_id=self.user.tenant_id,
-            user=self.user,
-            action=ActionType.HELP_ASSISTANT_RESET_INSTRUCTIONS,
-            entity_type=EntityType.ASSISTANT,
-            entity_id=current.assistant_id,
-            description=(
-                f"Reset instructions to shipped default for help-assistant "
-                f"role '{kind.value}'"
-            ),
-            metadata=AuditMetadata.standard(
-                actor=self.user,
-                target=assistant,
-                extra={
-                    "role_kind": kind.value,
-                    "role_assignment_id": str(current.id),
-                    "org_space_id": str(org_space_id),
-                    "new_prompt_id": str(new_prompt.id),
-                },
-            ),
-        )
-
-        return assistant
-
-    async def reset_to_default(self, kind: HelperKind) -> Assistant:
-        validate_permission(self.user, Permission.ADMIN)
-        org_space_id = await self._resolve_org_space_id()
-
-        current = await self.role_repo.get_by_org_space_and_kind(
-            org_space_id=org_space_id, kind=kind
-        )
-        if current is None:
-            raise BadRequestException(f"No active assignment for role '{kind.value}'.")
-
-        old_assistant_id = current.assistant_id
-        old_assistant = await self._load_assistant(old_assistant_id)
-        old_assistant_name = old_assistant.name
-
-        system_user_id = await self._resolve_system_user_id()
-        defaults = get_defaults(kind)
 
         completion_model = (
             await self.completion_model_crud_service.get_default_completion_model()
         )
         if completion_model is None:
             logger.warning(
-                "Tenant %s has no eligible completion model; resetting "
-                "help-assistant role '%s' with completion_model_id=NULL — an "
-                "admin must pick one before the helper can run.",
+                "Tenant %s has no eligible completion model; installing "
+                "help-assistant '%s' with completion_model_id=NULL — an admin "
+                "must pick one before the helper can run.",
                 self.user.tenant_id,
                 kind.value,
             )
 
+        # Blank instructions by design — the admin pastes them in afterwards.
         new_prompt = await self.prompt_service.create_prompt(
-            text=defaults.prompt_text,
-            description=defaults.description,
+            text="",
+            description=None,
             owner_user_id=system_user_id,
         )
         assert new_prompt is not None
 
         # Build the entity directly: ``AssistantFactory.create_assistant``
-        # round-trips through ``UserInDB`` → ``UserSparse.model_validate``,
-        # and the system user's reserved-TLD email (``system+<tid>@eneo.local``)
-        # fails that validation. ``model_construct`` skips validators so we
-        # can carry the system_user_id through the entity into the repo
-        # without touching production email validators.
+        # round-trips through ``UserSparse.model_validate``, and the system
+        # user's reserved-TLD email (``system+<tid>@eneo.local``) fails that
+        # validation. ``model_construct`` skips validators so we can carry the
+        # system_user_id through the entity into the repo.
         new_assistant_id = uuid4()
         system_user_sparse = UserSparse.model_construct(
             id=system_user_id,
@@ -290,44 +261,40 @@ class OrgSpaceAssistantRoleService:
             user=system_user_sparse,
             space_id=org_space_id,
             completion_model=completion_model,
-            name=defaults.name,
+            name=template.name,
             prompt=new_prompt,
             completion_model_kwargs=ModelKwargs(),
-            logging_enabled=defaults.logging_enabled,
+            logging_enabled=template.logging_enabled,
             websites=[],
             collections=[],
             attachments=[],
             published=False,
-            description=defaults.description,
-            insight_enabled=defaults.insight_enabled,
-            data_retention_days=defaults.data_retention_days,
+            description=template.description,
+            insight_enabled=template.insight_enabled,
+            data_retention_days=template.data_retention_days,
         )
         await self.assistant_repo.add(new_assistant)
 
-        current.reassign_to(assistant_id=new_assistant_id, actor_user_id=self.user.id)
-        assignment = await self.role_repo.update(current)
-        assert assignment.id is not None
-
-        history_entry = self.factory.create_assignment_history_entry(
+        assignment = self.factory.create_role_assignment(
             org_space_id=org_space_id,
             kind=kind,
-            assistant_id=old_assistant_id,
-            assistant_name_snapshot=old_assistant_name,
-            replaced_by_assistant_id=new_assistant_id,
-            reason=AssignmentHistoryReason.RESET_TO_DEFAULT,
-            actor_user_id=self.user.id,
+            assistant_id=new_assistant_id,
+            is_enabled=True,
+            is_visible_to_users=False,
+            created_by_user_id=self.user.id,
+            updated_by_user_id=self.user.id,
         )
-        await self.history_repo.add(history_entry)
+        assignment = await self.role_repo.add(assignment)
+        assert assignment.id is not None
 
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
-            action=ActionType.HELP_ASSISTANT_RESET_TO_DEFAULT,
+            action=ActionType.HELP_ASSISTANT_INSTALLED,
             entity_type=EntityType.ASSISTANT,
             entity_id=new_assistant_id,
             description=(
-                f"Reset help-assistant role '{kind.value}' to shipped "
-                f"default (previous: '{old_assistant_name}')"
+                f"Installed help-assistant '{template.name}' (role '{kind.value}')"
             ),
             metadata=AuditMetadata.standard(
                 actor=self.user,
@@ -336,73 +303,68 @@ class OrgSpaceAssistantRoleService:
                     "role_kind": kind.value,
                     "role_assignment_id": str(assignment.id),
                     "org_space_id": str(org_space_id),
-                    "previous_assistant_id": str(old_assistant_id),
-                    "previous_assistant_name": old_assistant_name,
                     "new_prompt_id": str(new_prompt.id),
                 },
             ),
         )
 
-        return new_assistant
+        return assignment
 
-    async def list_archivable_helpers(self, kind: HelperKind) -> list[Assistant]:
+    async def uninstall_helper(self, kind: HelperKind) -> None:
+        """Uninstall the active Help Assistant for ``kind``.
+
+        Removes the role assignment and hard-deletes the underlying assistant
+        so the template becomes available to add again. Writes an append-only
+        history row (``reason=UNASSIGNED``) before deletion so the audit trail
+        and the ``ask_guard`` "former helper" check keep a name snapshot.
+        """
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
 
-        replaced_ids = await self.history_repo.list_replaced_assistant_ids_by_org_space(
-            org_space_id=org_space_id
+        current = await self.role_repo.get_by_org_space_and_kind(
+            org_space_id=org_space_id, kind=kind
         )
-        active_assignments = await self.role_repo.list_for_org_space(
-            org_space_id=org_space_id
-        )
-        active_ids = {a.assistant_id for a in active_assignments if a.kind == kind}
-        archivable_ids = replaced_ids - active_ids
-
-        assistants: list[Assistant] = []
-        for assistant_id in archivable_ids:
-            assistant = await self._load_assistant(assistant_id)
-            assistants.append(assistant)
-        return assistants
-
-    async def archive_helper(self, assistant_id: UUID) -> None:
-        validate_permission(self.user, Permission.ADMIN)
-        org_space_id = await self._resolve_org_space_id()
-
-        replaced_ids = await self.history_repo.list_replaced_assistant_ids_by_org_space(
-            org_space_id=org_space_id
-        )
-        if assistant_id not in replaced_ids:
+        if current is None:
             raise BadRequestException(
-                "Assistant is not an archivable helper for this org-space."
+                f"No active assignment for help assistant '{kind.value}'."
             )
+        assert current.id is not None
 
-        active_assignments = await self.role_repo.list_for_org_space(
-            org_space_id=org_space_id
-        )
-        if assistant_id in {a.assistant_id for a in active_assignments}:
-            raise BadRequestException(
-                "Assistant is currently assigned to a help-assistant role; "
-                "reassign or unassign the role before archiving."
-            )
-
-        # Capture the name before the row is gone so the audit entry stays
-        # meaningful once ``assistant_id`` is NULL on every history row.
+        assistant_id = current.assistant_id
         assistant = await self._load_assistant(assistant_id)
         assistant_name_snapshot = assistant.name
 
+        history_entry = self.factory.create_assignment_history_entry(
+            org_space_id=org_space_id,
+            kind=kind,
+            assistant_id=assistant_id,
+            assistant_name_snapshot=assistant_name_snapshot,
+            replaced_by_assistant_id=None,
+            reason=AssignmentHistoryReason.UNASSIGNED,
+            actor_user_id=self.user.id,
+        )
+        await self.history_repo.add(history_entry)
+
+        # The role's ``assistant_id`` FK is ``ON DELETE RESTRICT``, so the role
+        # row must go before the assistant it points at.
+        await self.role_repo.delete(current.id)
         await self.assistant_service.delete_assistant(assistant_id)
 
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
             user=self.user,
-            action=ActionType.HELP_ASSISTANT_ARCHIVED,
+            action=ActionType.HELP_ASSISTANT_UNINSTALLED,
             entity_type=EntityType.ASSISTANT,
             entity_id=assistant_id,
-            description=(f"Archived helper assistant '{assistant_name_snapshot}'"),
+            description=(
+                f"Uninstalled help-assistant '{assistant_name_snapshot}' "
+                f"(role '{kind.value}')"
+            ),
             metadata=AuditMetadata.standard(
                 actor=self.user,
                 target=assistant,
                 extra={
+                    "role_kind": kind.value,
                     "assistant_name_snapshot": assistant_name_snapshot,
                     "org_space_id": str(org_space_id),
                 },
@@ -420,8 +382,8 @@ class OrgSpaceAssistantRoleService:
         )
         if system_user_id is None:
             raise BadRequestException(
-                "Tenant is missing its system user; the help-assistant seed "
-                "migration has not run for this tenant."
+                "Tenant is missing its system user; the help-assistant "
+                "infrastructure migration has not run for this tenant."
             )
         return system_user_id
 

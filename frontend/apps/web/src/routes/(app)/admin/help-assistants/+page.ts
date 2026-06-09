@@ -10,15 +10,16 @@ export const load: PageLoad = async (event) => {
   const { intric } = await event.parent();
   event.depends("admin:help-assistants:load");
 
-  // v1 has a single helper kind (prompt_guide); the archivable list is scoped
-  // to it. The role table itself iterates over `roles`, so future kinds surface
-  // there without code changes (step 031 / PRD §9). Assignment history is no
-  // longer shown here — those actions are audit-logged and surface under
-  // Granskningsloggar (/admin/audit-logs) like every other admin action.
-  const [roles, archivable] = await Promise.all([
+  // `roles` = the help assistants currently installed for this tenant (the
+  // table rows). `templates` = the shipped blueprints not yet installed (the
+  // "Add help assistant" picker). A kind moves from `templates` to `roles`
+  // when installed, and back when uninstalled. Each kind owns its own UI hook
+  // elsewhere (e.g. the Prompt Guide button on assistant settings pages); this
+  // page only installs / configures / removes them.
+  const [roles, templates] = await Promise.all([
     intric.helpAssistants.admin.listRoles(),
-    intric.helpAssistants.admin.listArchivable({ kind: "prompt_guide" })
+    intric.helpAssistants.admin.listTemplates()
   ]);
 
-  return { roles, archivable };
+  return { roles, templates };
 };

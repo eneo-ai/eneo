@@ -1,12 +1,10 @@
 """Pydantic models for the help-assistant admin router (PRD §5, §9).
 
 Public shapes returned by ``/api/v1/admin/help-assistants/...`` plus the
-request bodies for the few mutating endpoints. ``RoleAssignmentPublic``
-mirrors ``org_space_assistant_roles``; ``AssignmentHistoryPublic`` mirrors
-``help_assistant_assignment_history`` (PRD §3). ``AssistantSummaryPublic``
-is the minimal shape the admin UI needs to render the archivable-helpers
-list — full ``AssistantPublic`` would pull in fields the admin doesn't
-use here.
+request bodies for the mutating endpoints. ``RoleAssignmentPublic`` mirrors
+``org_space_assistant_roles``; ``HelperTemplatePublic`` is the shape the admin
+"Add help assistant" picker renders from (the shipped templates not yet
+installed for the tenant).
 """
 
 from __future__ import annotations
@@ -16,9 +14,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from intric.help_assistants.domain.assignment_history_reason import (
-    AssignmentHistoryReason,
-)
 from intric.help_assistants.domain.helper_kind import HelperKind
 
 
@@ -45,27 +40,16 @@ class RoleAssignmentPublic(BaseModel):
     updated_at: datetime
 
 
-class AssignmentHistoryPublic(BaseModel):
-    """One row of ``help_assistant_assignment_history`` (PRD §3)."""
+class HelperTemplatePublic(BaseModel):
+    """A shipped Help Assistant template available to install.
 
-    model_config = ConfigDict(from_attributes=True)
+    Drives the admin "Add help assistant" picker — one entry per shipped
+    ``HelperKind`` that is not already installed for the tenant.
+    """
 
-    id: UUID
-    org_space_id: UUID
     kind: HelperKind
-    assistant_id: UUID | None
-    assistant_name_snapshot: str
-    replaced_by_assistant_id: UUID | None
-    reason: AssignmentHistoryReason
-    actor_user_id: UUID | None
-    replaced_at: datetime
-
-
-class AssistantSummaryPublic(BaseModel):
-    """Minimal assistant shape for the archivable-helpers list."""
-
-    id: UUID
     name: str
+    description: str
 
 
 class ToggleRequest(BaseModel):

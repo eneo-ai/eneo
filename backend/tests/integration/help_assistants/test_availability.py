@@ -468,9 +468,9 @@ async def test_no_completion_model_branch(
 ):
     """Helper assistant exists but has ``completion_model_id=NULL``.
 
-    Pins the safety net for the ``reset_to_default`` warning path in
-    ``OrgSpaceAssistantRoleService.reset_to_default``: when no tenant
-    model is eligible, the reset leaves the helper with NULL — the
+    Pins the safety net for the ``install_helper`` warning path in
+    ``OrgSpaceAssistantRoleService.install_helper``: when no tenant
+    model is eligible, install leaves the helper with NULL — the
     availability endpoint must report ``no_completion_model`` so the
     button stays hidden until an admin picks one.
     """

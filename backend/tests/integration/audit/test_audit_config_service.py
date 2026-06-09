@@ -192,14 +192,14 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_32_actions(
+    async def test_get_config_admin_actions_has_31_actions(
         self, db_session, seeded_tenant
     ):
         """Verify admin_actions category has correct action count.
 
-        25 base admin actions + 7 Help Assistant admin actions
-        (role assign/unassign, enabled/visible toggles, reset-instructions,
-        reset-to-default, archive) = 32. Mirrors the unit assertions in
+        25 base admin actions + 6 Help Assistant admin actions
+        (role assign/unassign, enabled/visible toggles, install, uninstall)
+        = 31. Mirrors the unit assertions in
         ``tests/unit/test_audit_config_service.py`` and
         ``tests/unit/test_audit_category_mappings.py``.
         """

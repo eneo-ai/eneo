@@ -7,8 +7,8 @@ same symbol so existing import sites keep working.
 A new kind is added by:
 
 1. extending this enum, and
-2. registering a ``HelperAssistantDefaults`` for it in
-   ``intric.help_assistants.defaults``.
+2. registering a ``HelperAssistantTemplate`` for it in
+   ``intric.help_assistants.templates``.
 
 The string value must match the column value used in the migrations
 (``org_space_assistant_roles.kind``, ``help_assistant_assignment_history.kind``,

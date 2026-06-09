@@ -8,9 +8,9 @@ Pins the wiring contract for ``/api/v1/admin/help-assistants``:
     ``UnauthorizedException`` → 403.
   * ``GET /roles/{kind}/`` returns ``null`` when no role is assigned.
 
-The service-layer unit tests (step 015–017) already cover the audit
-metadata shape and the reset/archive side-effects in detail; the tests
-here verify the HTTP wrapper, not the underlying behavior.
+The service-layer unit tests already cover the audit metadata shape and
+the install/uninstall side-effects in detail; the tests here verify the
+HTTP wrapper, not the underlying behavior.
 """
 
 from __future__ import annotations
@@ -190,26 +190,18 @@ MUTATION_REQUESTS = [
         ),
     ),
     (
-        "reset_instructions",
+        "install",
         lambda kind, _aid: (
             "POST",
-            f"/api/v1/admin/help-assistants/roles/{kind}/reset-instructions",
+            f"/api/v1/admin/help-assistants/roles/{kind}/",
             None,
         ),
     ),
     (
-        "reset_to_default",
+        "uninstall",
         lambda kind, _aid: (
-            "POST",
-            f"/api/v1/admin/help-assistants/roles/{kind}/reset-to-default",
-            None,
-        ),
-    ),
-    (
-        "archive",
-        lambda kind, aid: (
-            "POST",
-            f"/api/v1/admin/help-assistants/roles/{kind}/archive/{aid}",
+            "DELETE",
+            f"/api/v1/admin/help-assistants/roles/{kind}/",
             None,
         ),
     ),

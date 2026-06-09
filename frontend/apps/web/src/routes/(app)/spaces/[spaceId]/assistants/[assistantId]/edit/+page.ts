@@ -1,3 +1,6 @@
+import { redirect } from "@sveltejs/kit";
+import { resolve } from "$app/paths";
+
 export const load = async (event) => {
   const { intric } = await event.parent();
   const [assistant, mcpServers, promptGuideAvailability] = await Promise.all([
@@ -11,6 +14,12 @@ export const load = async (event) => {
       .availability({ kind: "prompt_guide", target_id: event.params.assistantId })
       .catch(() => null)
   ]);
+
+  // Help assistants are edited in the admin UI, not in a space. If someone
+  // lands here via a stale link, send them to the help-assistants admin page.
+  if ((assistant as { is_help_assistant?: boolean }).is_help_assistant) {
+    redirect(307, resolve("/admin/help-assistants"));
+  }
 
   return {
     assistant,

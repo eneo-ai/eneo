@@ -363,7 +363,7 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "MCP-verktyg inaktiverat",
         "description_sv": "Loggar när ett MCP-verktyg inaktiveras",
     },
-    # Help Assistant Actions (7)
+    # Help Assistant Actions (6)
     ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: {
         "name_sv": "Hjälpassistent tilldelad",
         "description_sv": (
@@ -386,25 +386,17 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Hjälpassistent synlighet ändrad",
         "description_sv": ("Loggar när synligheten för en hjälpassistentroll ändras"),
     },
-    ActionType.HELP_ASSISTANT_RESET_INSTRUCTIONS.value: {
-        "name_sv": "Hjälpassistentens instruktioner återställda",
+    ActionType.HELP_ASSISTANT_INSTALLED.value: {
+        "name_sv": "Hjälpassistent tillagd",
         "description_sv": (
-            "Loggar när en administratör återställer instruktionerna för en "
-            "hjälpassistent till standardvärdet"
+            "Loggar när en administratör lägger till en hjälpassistent från en mall"
         ),
     },
-    ActionType.HELP_ASSISTANT_RESET_TO_DEFAULT.value: {
-        "name_sv": "Hjälpassistent återställd till standard",
+    ActionType.HELP_ASSISTANT_UNINSTALLED.value: {
+        "name_sv": "Hjälpassistent borttagen",
         "description_sv": (
-            "Loggar när en administratör återställer en hjälpassistent helt "
-            "till standardvärdet"
-        ),
-    },
-    ActionType.HELP_ASSISTANT_ARCHIVED.value: {
-        "name_sv": "Hjälpassistent arkiverad",
-        "description_sv": (
-            "Loggar när en administratör arkiverar en ersatt hjälpassistent "
-            "som inte längre fyller någon roll"
+            "Loggar när en administratör tar bort en hjälpassistent och "
+            "dess underliggande assistent"
         ),
     },
     # System Actions (3)

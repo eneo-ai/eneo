@@ -17,7 +17,6 @@
 
 /** @typedef {"prompt_guide"} HelperKind */
 /** @typedef {"in_progress" | "completed" | "abandoned" | "failed"} HelperRunStatus */
-/** @typedef {"reassigned" | "unassigned" | "reset_instructions_only" | "reset_to_default" | "archived"} AssignmentHistoryReason */
 /** @typedef {"no_assignment" | "role_disabled" | "role_not_visible" | "no_completion_model" | "no_edit_rights"} HelperUnavailableReason */
 
 /**
@@ -34,22 +33,10 @@
  */
 
 /**
- * @typedef {Object} AssignmentHistoryPublic
- * @property {string} id
- * @property {string} org_space_id
+ * @typedef {Object} HelperTemplatePublic
  * @property {HelperKind} kind
- * @property {string | null} assistant_id
- * @property {string} assistant_name_snapshot
- * @property {string | null} replaced_by_assistant_id
- * @property {AssignmentHistoryReason} reason
- * @property {string | null} actor_user_id
- * @property {string} replaced_at
- */
-
-/**
- * @typedef {Object} AssistantSummaryPublic
- * @property {string} id
  * @property {string} name
+ * @property {string} description
  */
 
 /**
@@ -157,86 +144,51 @@ export function initHelpAssistants(client) {
       },
 
       /**
-       * Reset the active helper's instructions to the registry default while
-       * keeping the same assistant id (instructions-only reset, PRD §6).
-       * @param {{kind: HelperKind}} params
-       * @returns {Promise<true>}
+       * List shipped Help Assistant templates not yet installed for the
+       * tenant. Drives the admin "Add help assistant" picker — a template
+       * drops out once installed and reappears after it is uninstalled.
+       * @returns {Promise<HelperTemplatePublic[]>}
        * @throws {IntricError}
        */
-      resetInstructions: async ({ kind }) => {
+      listTemplates: async () => {
         // @ts-ignore - endpoint exists in backend but not yet in generated schema
-        await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/reset-instructions", {
+        const res = await client.fetch("/api/v1/admin/help-assistants/templates/", {
+          method: "get"
+        });
+        return /** @type {{items: HelperTemplatePublic[]}} */ (res).items;
+      },
+
+      /**
+       * Install a shipped template: creates a blank helper assistant + active
+       * role for `kind`. The helper starts enabled but not visible to users,
+       * so an admin can paste the instructions before exposing it.
+       * @param {{kind: HelperKind}} params
+       * @returns {Promise<RoleAssignmentPublic>}
+       * @throws {IntricError}
+       */
+      install: async ({ kind }) => {
+        // @ts-ignore - endpoint exists in backend but not yet in generated schema
+        const res = await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/", {
           method: "post",
           params: { path: { kind } }
         });
-        return true;
+        return /** @type {RoleAssignmentPublic} */ (res);
       },
 
       /**
-       * Full reset: archive the current helper and create a fresh one from the
-       * defaults registry (PRD §6).
+       * Uninstall the active helper for `kind`: removes the role and
+       * hard-deletes the underlying assistant. The template becomes available
+       * to add again afterwards.
        * @param {{kind: HelperKind}} params
        * @returns {Promise<true>}
        * @throws {IntricError}
        */
-      resetToDefault: async ({ kind }) => {
+      uninstall: async ({ kind }) => {
         // @ts-ignore - endpoint exists in backend but not yet in generated schema
-        await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/reset-to-default", {
-          method: "post",
+        await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/", {
+          method: "delete",
           params: { path: { kind } }
         });
-        return true;
-      },
-
-      /**
-       * List the assignment history for a helper kind (replacements, resets,
-       * archives), newest first.
-       * @param {{kind: HelperKind}} params
-       * @returns {Promise<AssignmentHistoryPublic[]>}
-       * @throws {IntricError}
-       */
-      listHistory: async ({ kind }) => {
-        // @ts-ignore - endpoint exists in backend but not yet in generated schema
-        const res = await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/history", {
-          method: "get",
-          params: { path: { kind } }
-        });
-        return /** @type {{items: AssignmentHistoryPublic[]}} */ (res).items;
-      },
-
-      /**
-       * List replaced helper assistants for a kind that can still be archived
-       * (PRD §6 — admins can hard-archive helpers that are no longer active).
-       * @param {{kind: HelperKind}} params
-       * @returns {Promise<AssistantSummaryPublic[]>}
-       * @throws {IntricError}
-       */
-      listArchivable: async ({ kind }) => {
-        // @ts-ignore - endpoint exists in backend but not yet in generated schema
-        const res = await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/archivable", {
-          method: "get",
-          params: { path: { kind } }
-        });
-        return /** @type {{items: AssistantSummaryPublic[]}} */ (res).items;
-      },
-
-      /**
-       * Archive a replaced helper assistant. The kind is part of the URL for
-       * symmetry with the other admin routes; only the assistant id drives the
-       * action server-side.
-       * @param {{kind: HelperKind, assistant_id: string}} params
-       * @returns {Promise<true>}
-       * @throws {IntricError}
-       */
-      archive: async ({ kind, assistant_id }) => {
-        await client.fetch(
-          // @ts-ignore - endpoint exists in backend but not yet in generated schema
-          "/api/v1/admin/help-assistants/roles/{kind}/archive/{assistant_id}",
-          {
-            method: "post",
-            params: { path: { kind, assistant_id } }
-          }
-        );
         return true;
       }
     },

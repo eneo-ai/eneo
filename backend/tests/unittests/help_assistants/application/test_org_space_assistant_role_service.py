@@ -4,8 +4,8 @@ Cover the service-layer behaviour with its collaborators mocked:
 
 - non-admin callers raise ``UnauthorizedException`` on every mutation,
 - ``get_active`` requires no admin permission, and
-- the enabled/visible toggles, the reset (instructions-only / to-default)
-  and archive actions, and their audit-log entries.
+- the enabled/visible toggles, install / uninstall of a template, and
+  their audit-log entries.
 
 The service collaborates with ``AssistantService``, ``SpaceService`` and
 ``AuditService`` through DI — they are mocked here so the tests only
@@ -23,6 +23,9 @@ import pytest
 from intric.audit.domain.action_types import ActionType
 from intric.help_assistants.application.org_space_assistant_role_service import (
     OrgSpaceAssistantRoleService,
+)
+from intric.help_assistants.domain.assignment_history_reason import (
+    AssignmentHistoryReason,
 )
 from intric.help_assistants.domain.factory import HelperAssistantsFactory
 from intric.help_assistants.domain.helper_kind import HelperKind
@@ -150,7 +153,9 @@ def _build_service(
             {"kind": HelperKind.PROMPT_GUIDE, "value": False},
         ),
         ("list_for_calling_tenant", {}),
-        ("list_history", {"kind": HelperKind.PROMPT_GUIDE}),
+        ("list_available_templates", {}),
+        ("install_helper", {"kind": HelperKind.PROMPT_GUIDE}),
+        ("uninstall_helper", {"kind": HelperKind.PROMPT_GUIDE}),
     ],
 )
 async def test_non_admin_mutations_raise_unauthorized(method: str, kwargs: dict):
@@ -310,23 +315,164 @@ async def test_list_for_calling_tenant_returns_assignments_for_org_space():
 
 
 @pytest.mark.asyncio
-async def test_list_history_returns_history_rows_for_kind():
+async def test_list_available_templates_excludes_installed_kinds():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
-    history_rows = [MagicMock()]
 
-    history_repo = AsyncMock()
-    history_repo.list_by_org_space_and_kind.return_value = history_rows
+    # Prompt Guide already installed → it must not surface as available.
+    installed = _make_role_row(
+        role_id=uuid4(), org_space_id=org_space_id, assistant_id=uuid4()
+    )
+    role_repo = AsyncMock()
+    role_repo.list_for_org_space.return_value = [installed]
 
     service, _ = _build_service(
+        user=admin, org_space_id=org_space_id, role_repo=role_repo
+    )
+
+    result = await service.list_available_templates()
+
+    assert HelperKind.PROMPT_GUIDE not in {kind for kind, _template in result}
+
+
+@pytest.mark.asyncio
+async def test_list_available_templates_lists_uninstalled_kinds():
+    admin = _make_user(Permission.ADMIN)
+    org_space_id = uuid4()
+
+    role_repo = AsyncMock()
+    role_repo.list_for_org_space.return_value = []  # nothing installed yet
+
+    service, _ = _build_service(
+        user=admin, org_space_id=org_space_id, role_repo=role_repo
+    )
+
+    result = await service.list_available_templates()
+
+    assert HelperKind.PROMPT_GUIDE in {kind for kind, _template in result}
+
+
+@pytest.mark.asyncio
+async def test_install_helper_creates_blank_assistant_and_hidden_role():
+    admin = _make_user(Permission.ADMIN)
+    org_space_id = uuid4()
+    system_user_id = uuid4()
+    new_prompt = MagicMock(id=uuid4())
+
+    role_repo = AsyncMock()
+    role_repo.get_by_org_space_and_kind.return_value = None  # not installed
+    role_repo.add.return_value = _make_role_row(
+        role_id=uuid4(),
+        org_space_id=org_space_id,
+        assistant_id=uuid4(),
+        is_enabled=True,
+        is_visible_to_users=False,
+    )
+
+    prompt_service = AsyncMock()
+    prompt_service.create_prompt.return_value = new_prompt
+
+    users_repo = AsyncMock()
+    users_repo.get_system_user_id_for_tenant.return_value = system_user_id
+
+    completion_model_crud_service = AsyncMock()
+    # No eligible model is fine: install proceeds with completion_model=None.
+    completion_model_crud_service.get_default_completion_model.return_value = None
+
+    service, mocks = _build_service(
         user=admin,
         org_space_id=org_space_id,
+        role_repo=role_repo,
+        prompt_service=prompt_service,
+        users_repo=users_repo,
+        completion_model_crud_service=completion_model_crud_service,
+    )
+
+    result = await service.install_helper(kind=HelperKind.PROMPT_GUIDE)
+
+    # Blank instructions by design.
+    prompt_service.create_prompt.assert_awaited_once()
+    assert prompt_service.create_prompt.await_args.kwargs["text"] == ""
+
+    # A new assistant row was created in the org-space.
+    mocks["assistant_repo"].add.assert_awaited_once()
+    new_assistant = mocks["assistant_repo"].add.await_args.args[0]
+    assert new_assistant.space_id == org_space_id
+
+    # The role is installed enabled-but-hidden, pointing at the new assistant.
+    role_repo.add.assert_awaited_once()
+    added_role = role_repo.add.await_args.args[0]
+    assert added_role.kind == HelperKind.PROMPT_GUIDE
+    assert added_role.is_enabled is True
+    assert added_role.is_visible_to_users is False
+    assert added_role.assistant_id == new_assistant.id
+    assert result.is_visible_to_users is False
+
+    audit_kwargs = mocks["audit_service"].log_async.await_args.kwargs
+    assert audit_kwargs["action"] == ActionType.HELP_ASSISTANT_INSTALLED
+
+
+@pytest.mark.asyncio
+async def test_install_helper_rejects_when_already_installed():
+    admin = _make_user(Permission.ADMIN)
+    org_space_id = uuid4()
+    existing = _make_role_row(
+        role_id=uuid4(), org_space_id=org_space_id, assistant_id=uuid4()
+    )
+    role_repo = AsyncMock()
+    role_repo.get_by_org_space_and_kind.return_value = existing
+
+    service, mocks = _build_service(
+        user=admin, org_space_id=org_space_id, role_repo=role_repo
+    )
+
+    with pytest.raises(BadRequestException, match="already installed"):
+        await service.install_helper(kind=HelperKind.PROMPT_GUIDE)
+
+    mocks["assistant_repo"].add.assert_not_awaited()
+    role_repo.add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_helper_writes_history_then_removes_role_and_assistant():
+    admin = _make_user(Permission.ADMIN)
+    org_space_id = uuid4()
+    assistant_id = uuid4()
+    role_id = uuid4()
+    role = _make_role_row(
+        role_id=role_id, org_space_id=org_space_id, assistant_id=assistant_id
+    )
+    assistant = _mock_assistant(
+        assistant_id=assistant_id, space_id=org_space_id, name="Prompt Guide"
+    )
+
+    role_repo = AsyncMock()
+    role_repo.get_by_org_space_and_kind.return_value = role
+
+    assistant_service = AsyncMock()
+    assistant_service.get_assistant.return_value = (assistant, [])
+
+    history_repo = AsyncMock()
+
+    service, mocks = _build_service(
+        user=admin,
+        org_space_id=org_space_id,
+        role_repo=role_repo,
         history_repo=history_repo,
+        assistant_service=assistant_service,
     )
 
-    result = await service.list_history(kind=HelperKind.PROMPT_GUIDE)
+    await service.uninstall_helper(kind=HelperKind.PROMPT_GUIDE)
 
-    assert result == history_rows
-    history_repo.list_by_org_space_and_kind.assert_awaited_once_with(
-        org_space_id=org_space_id, kind=HelperKind.PROMPT_GUIDE
-    )
+    # History snapshot written before deletion.
+    history_repo.add.assert_awaited_once()
+    history_entry = history_repo.add.await_args.args[0]
+    assert history_entry.reason == AssignmentHistoryReason.UNASSIGNED
+    assert history_entry.assistant_name_snapshot == "Prompt Guide"
+
+    # The role row is removed before the assistant (FK is ON DELETE RESTRICT).
+    role_repo.delete.assert_awaited_once_with(role_id)
+    assistant_service.delete_assistant.assert_awaited_once_with(assistant_id)
+
+    audit_kwargs = mocks["audit_service"].log_async.await_args.kwargs
+    assert audit_kwargs["action"] == ActionType.HELP_ASSISTANT_UNINSTALLED

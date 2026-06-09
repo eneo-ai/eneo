@@ -54,8 +54,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 32, (
-            f"Expected 32 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 31, (
+            f"Expected 31 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -306,7 +306,7 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 32,
+            "admin_actions": 31,
             "user_actions": 36,
             "security_events": 6,
             "file_operations": 2,
