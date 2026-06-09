@@ -18,7 +18,6 @@ from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
-from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
 def check_feature_enabled(
@@ -46,6 +45,7 @@ router = APIRouter(
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),
     ],
+    responses=responses.get_responses([401]),
 )
 
 # Provider enum - supported LLM providers
@@ -258,7 +258,7 @@ async def set_tenant_credential(
 
     Raises:
         HTTPException 404: Tenant not found
-        HTTPException 422: Validation error with field-level error messages
+        BadRequestException: Provider-specific credential validation failed
     """
     tenant_service = container.tenant_service()
     settings = get_settings()
@@ -273,43 +273,19 @@ async def set_tenant_credential(
             deployment_name=request.deployment_name,
             strict_mode=settings.tenant_credentials_enabled,
         )
-
-        return SetCredentialResponse(
-            tenant_id=result["tenant_id"],
-            provider=result["provider"],
-            masked_key=result["masked_key"],
-            message=f"API credential for {provider} set successfully",
-            set_at=result["set_at"],
-        )
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
-    except ValueError as e:
-        # Parse validation errors from service
-        error_message = str(e)
-        if "Credential validation failed" in error_message:
-            errors = (
-                error_message.split(": ", 1)[1].split("; ")
-                if ": " in error_message
-                else [error_message]
-            )
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "credential_validation_failed",
-                    "message": f"Credential validation failed for provider '{provider}'",
-                    "errors": errors,
-                    "provider_requirements": {
-                        k: list(v) for k, v in PROVIDER_REQUIRED_FIELDS.items()
-                    },
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
-        )
+
+    return SetCredentialResponse(
+        tenant_id=result["tenant_id"],
+        provider=result["provider"],
+        masked_key=result["masked_key"],
+        message=f"API credential for {provider} set successfully",
+        set_at=result["set_at"],
+    )
 
 
 @router.delete(

@@ -38,7 +38,7 @@ router = APIRouter()
 @router.post(
     "/",
     response_model=FilePublic,
-    responses=responses.get_responses([400, 413, 415]),
+    responses=responses.get_responses([400, 403, 413, 415]),
     description="Upload a file; rejects unsupported media types and oversized files.",
 )
 async def upload_file(

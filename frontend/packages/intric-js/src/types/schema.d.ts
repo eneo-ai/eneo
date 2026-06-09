@@ -18005,6 +18005,15 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -18163,6 +18172,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -19413,6 +19431,15 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
       /** @description No legacy API key found. */
       404: {
         headers: {
@@ -19774,6 +19801,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -20424,6 +20460,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["JobPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Request Entity Too Large */
@@ -23034,13 +23079,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
       /** @description Too Many Requests */
@@ -26634,6 +26679,15 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -26643,13 +26697,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -26674,6 +26728,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -30369,6 +30432,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -36166,6 +36238,13 @@ export interface operations {
           "application/json": components["schemas"]["SharePointSubscriptionPublic"];
         };
       };
+      /** @description Subscription cannot be recreated */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Authentication required */
       401: {
         headers: {
@@ -36219,6 +36298,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["ServiceAccountAuthStartResponse"];
         };
+      };
+      /** @description OAuth configuration is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Authentication required */
       401: {
@@ -38142,6 +38228,15 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -38190,6 +38285,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteCredentialResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38241,6 +38345,15 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -38290,6 +38403,15 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -38334,6 +38456,15 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -38343,13 +38474,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -38372,6 +38503,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteSettingsResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38412,6 +38552,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38467,6 +38616,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -38505,6 +38663,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38560,6 +38727,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -38569,13 +38745,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -38602,6 +38778,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -38656,6 +38841,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   add_module_api_v1_modules__post: {
@@ -38678,6 +38872,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModuleInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -38713,6 +38916,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -38800,6 +39012,13 @@ export interface operations {
           "application/json": components["schemas"]["InitiateAuthResponse"];
         };
       };
+      /** @description Tenant selection or redirect URI is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Tenant is not active */
       403: {
         headers: {
@@ -38870,6 +39089,13 @@ export interface operations {
       };
       /** @description Domain not allowed, inactive tenant, or user missing */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Tenant or user not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

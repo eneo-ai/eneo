@@ -755,7 +755,7 @@ async def get_tenant_users(
     "/me/",
     response_model=UserPublic,
     name="Get current user",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_currently_authenticated_user(
     current_user: Annotated[
@@ -872,7 +872,7 @@ async def generate_api_key(
     description="Permanently revokes the caller's legacy (v1) API key.",
     responses={
         404: {"description": "No legacy API key found."},
-        **api_key_error_responses([401]),
+        **api_key_error_responses([401, 403]),
     },
 )
 async def revoke_legacy_api_key(

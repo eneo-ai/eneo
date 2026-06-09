@@ -361,7 +361,7 @@ async def chat(
     "/preflight",
     response_model=PreflightResponse,
     description="Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).",
-    responses=responses.get_responses([400, 403, 404, 422, 429]),
+    responses=responses.get_responses([400, 403, 404, 429]),
 )
 async def preflight_tokens(
     request: PreflightRequest,

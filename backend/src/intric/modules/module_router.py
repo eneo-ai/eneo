@@ -15,7 +15,10 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.tenants.tenant import TenantInDB
 
-router = APIRouter(dependencies=[Depends(auth.authenticate_super_duper_api_key)])
+router = APIRouter(
+    dependencies=[Depends(auth.authenticate_super_duper_api_key)],
+    responses=responses.get_responses([401]),
+)
 
 _Container = Annotated[Container, Depends(get_container())]
 

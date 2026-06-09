@@ -497,7 +497,7 @@ async def get_notification_preferences(
     description="Update the caller's API key expiry notification preferences.",
     responses={
         200: {"description": "Updated notification preferences."},
-        **error_responses([400, 401, 429]),
+        **error_responses([400, 401, 403, 429]),
     },
 )
 async def update_notification_preferences(
@@ -646,7 +646,7 @@ async def upsert_notification_subscription(
     description="Remove a followed API key/assistant/app/space target from subscribed notifications.",
     responses={
         200: {"description": "Updated notification subscriptions."},
-        **error_responses([401, 429]),
+        **error_responses([401, 403, 429]),
     },
 )
 async def delete_notification_subscription(

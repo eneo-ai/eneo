@@ -9,47 +9,37 @@ declared (or a response shape regresses).
 What it derives (high-signal, low false-positive):
   1. Auth-gate dependencies (router- and endpoint-level) -> 401/403.
   2. AST of the handler body (and one level into helpers defined in the same
-     module): literal ``raise HTTPException(status_code=N)``, ``raise <Mapped
-     DomainException>(...)`` (mapped via EXCEPTION_MAP) and ``validate_permission
-     (...)`` calls (-> 403).
+     module): literal ``raise HTTPException(N)`` /
+     ``raise HTTPException(status_code=N)``, ``raise <Mapped
+     DomainException>(...)`` (mapped via EXCEPTION_MAP) and
+     ``validate_permission(...)`` calls (-> 403).
   3. Response-shape traps: ``422`` listed in ``responses`` (overrides FastAPI's
      HTTPValidationError); ``response_model=None`` while the return annotation is
      a Pydantic model / TypedDict (erases the success schema).
 
 What it deliberately does NOT do: trace error codes raised deep inside services
 /repositories the handler delegates to (e.g. a repo ``UniqueException`` -> 400).
-Those need a periodic manual audit / behavioural tests; see
-``docs/route-error-contract-plan.md``.
+Those need periodic manual audits and behavioural tests.
 
-Rollout is a shrink-only ratchet: ``route_error_contract_baseline.json`` records
-the currently-tolerated violations so the test is green today and only blocks
-NEW (or regressed) routes. Regenerate it with::
-
-    ENEO_ROUTE_CONTRACT_WRITE_BASELINE=1 uv run pytest \
-        tests/unit/test_route_error_contract.py -q
-
-The baseline can only shrink: if a baselined route is fixed, the test fails
-until the stale entry is removed (regenerate, or set
-``ENEO_ROUTE_CONTRACT_ALLOW_STALE=1`` for a mid-burndown commit).
+There is intentionally no baseline or allowlist. Every mechanically-detectable
+violation fails the build.
 """
 
 from __future__ import annotations
 
 import ast
 import inspect
-import json
-import os
 import textwrap
 import typing
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
+from starlette.routing import Mount
 
 from intric.main.exceptions import EXCEPTION_MAP
-
-BASELINE_PATH = Path(__file__).with_name("route_error_contract_baseline.json")
 
 # Dependency __name__ (or require_permission's inner qualname) -> required code.
 # These raise HTTPException/UnauthorizedException/AuthenticationException directly
@@ -57,6 +47,7 @@ BASELINE_PATH = Path(__file__).with_name("route_error_contract_baseline.json")
 AUTH_DEP_CODES: dict[str, int] = {
     "authenticate_super_api_key": 401,
     "authenticate_super_duper_api_key": 401,
+    "require_scim_auth": 401,
     "require_user_for_creation": 403,
     "require_user_identity": 403,
     "require_session_auth": 403,
@@ -80,28 +71,60 @@ EXCEPTION_NAME_TO_CODE: dict[str, int] = {
 _SUCCESS_AND_VALIDATION = {200, 201, 202, 203, 204, 422}
 
 
-def _routes() -> list[APIRoute]:
-    from intric.server.routers import router
+@dataclass(frozen=True)
+class DiscoveredRoute:
+    path: str
+    route: APIRoute
 
-    out: list[APIRoute] = []
-    for route in router.routes:
+
+def _join_path(prefix: str, path: str) -> str:
+    if not prefix:
+        return path
+    return f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _walk_routes(routes: list[Any], *, prefix: str = "") -> list[DiscoveredRoute]:
+    out: list[DiscoveredRoute] = []
+    for route in routes:
         if isinstance(route, APIRoute) and route.path and route.path != "/":
-            out.append(route)
+            out.append(
+                DiscoveredRoute(path=_join_path(prefix, route.path), route=route)
+            )
+            continue
+        if isinstance(route, Mount):
+            child_routes = getattr(route.app, "routes", None)
+            if child_routes is not None:
+                out.extend(
+                    _walk_routes(
+                        list(child_routes),
+                        prefix=_join_path(prefix, route.path),
+                    )
+                )
     return out
 
 
-def _identity(route: APIRoute, method: str) -> str:
-    return f"{method} {route.path}"
+def _routes() -> list[DiscoveredRoute]:
+    from intric.server.main import app
+
+    return _walk_routes(list(app.routes))
 
 
-def _declared_codes(route: APIRoute) -> set[int]:
+def _identity(path: str, method: str) -> str:
+    return f"{method} {path}"
+
+
+def _response_codes(route: APIRoute) -> set[int]:
     codes: set[int] = set()
     for key in route.responses or {}:
         if isinstance(key, int):
             codes.add(key)
         elif isinstance(key, str) and key.isdigit():
             codes.add(int(key))
-    return {c for c in codes if c not in _SUCCESS_AND_VALIDATION}
+    return codes
+
+
+def _declared_codes(route: APIRoute) -> set[int]:
+    return _response_codes(route) - _SUCCESS_AND_VALIDATION
 
 
 def _dep_callables(route: APIRoute) -> list[Any]:
@@ -170,11 +193,13 @@ def _ast_required_codes_from_func(func: Any, *, seen: set[str]) -> set[int]:
             fn = node.exc.func
             fname = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
             if fname == "HTTPException":
+                code = _status_const_to_int(node.exc.args[0]) if node.exc.args else None
                 for kw in node.exc.keywords:
                     if kw.arg == "status_code":
                         code = _status_const_to_int(kw.value)
-                        if code is not None and code not in _SUCCESS_AND_VALIDATION:
-                            required.add(code)
+                        break
+                if code is not None and code not in _SUCCESS_AND_VALIDATION:
+                    required.add(code)
             elif fname in EXCEPTION_NAME_TO_CODE:
                 code = EXCEPTION_NAME_TO_CODE[fname]
                 if code not in _SUCCESS_AND_VALIDATION:
@@ -223,7 +248,7 @@ def _is_model_type(annotation: Any) -> bool:
 
 def _shape_violations(route: APIRoute) -> list[str]:
     violations: list[str] = []
-    if 422 in {k if isinstance(k, int) else None for k in (route.responses or {})}:
+    if 422 in _response_codes(route):
         violations.append("forbidden_422_declared")
 
     if route.response_model is None and (route.status_code or 200) != 204:
@@ -253,73 +278,50 @@ def _route_violations(route: APIRoute, method: str) -> list[str]:
 
 def _compute_all() -> dict[str, list[str]]:
     result: dict[str, list[str]] = {}
-    for route in _routes():
+    for discovered in _routes():
+        route = discovered.route
         for method in sorted(route.methods or set()):
             if method in ("HEAD", "OPTIONS"):
                 continue
             v = _route_violations(route, method)
             if v:
-                result[_identity(route, method)] = v
+                result[_identity(discovered.path, method)] = v
     return result
 
 
-def _load_baseline() -> dict[str, list[str]]:
-    if not BASELINE_PATH.exists():
-        return {}
-    data = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+def _raises_positional_http_exception() -> None:
+    from fastapi import HTTPException
+
+    raise HTTPException(409, "Conflict")
 
 
-def _write_baseline(current: dict[str, list[str]]) -> None:
-    payload: dict[str, Any] = {
-        "_comment": (
-            "Generated by test_route_error_contract. Each key is 'METHOD /path'; "
-            "the list is the tolerated rule-ids for that route. Regenerate with "
-            "ENEO_ROUTE_CONTRACT_WRITE_BASELINE=1. Shrink-only: do not add by hand."
-        )
-    }
-    for key in sorted(current):
-        payload[key] = current[key]
-    BASELINE_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+def test_discovers_direct_and_mounted_routes() -> None:
+    paths = {discovered.path for discovered in _routes()}
+    assert "/api/healthz" in paths
+    assert "/scim/v2/Users" in paths
+
+
+def test_detects_positional_http_exception_status() -> None:
+    assert _ast_required_codes_from_func(
+        _raises_positional_http_exception, seen=set()
+    ) == {409}
+
+
+def test_rejects_string_422_response_key() -> None:
+    router = APIRouter()
+
+    @router.get("/string-422", responses={"422": {"description": "Wrong shape"}})
+    async def endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    route = next(route for route in router.routes if isinstance(route, APIRoute))
+    assert _shape_violations(route) == ["forbidden_422_declared"]
 
 
 def test_route_error_contract() -> None:
-    current = _compute_all()
-
-    if os.environ.get("ENEO_ROUTE_CONTRACT_WRITE_BASELINE"):
-        _write_baseline(current)
-        return
-
-    baseline = _load_baseline()
-
-    new_violations: dict[str, list[str]] = {}
-    for ident, rules in current.items():
-        tolerated = set(baseline.get(ident, []))
-        fresh = sorted(set(rules) - tolerated)
-        if fresh:
-            new_violations[ident] = fresh
-
-    stale: dict[str, list[str]] = {}
-    if not os.environ.get("ENEO_ROUTE_CONTRACT_ALLOW_STALE"):
-        for ident, rules in baseline.items():
-            current_rules = set(current.get(ident, []))
-            gone = sorted(set(rules) - current_rules)
-            if gone:
-                stale[ident] = gone
-
-    messages: list[str] = []
-    if new_violations:
-        messages.append(
-            "New route error-contract violations (declare these codes, or fix the "
-            "handler):\n"
-            + "\n".join(
-                f"  {k}: {', '.join(v)}" for k, v in sorted(new_violations.items())
-            )
-        )
-    if stale:
-        messages.append(
-            "Stale baseline entries (these routes were fixed — regenerate the "
-            "baseline with ENEO_ROUTE_CONTRACT_WRITE_BASELINE=1):\n"
-            + "\n".join(f"  {k}: {', '.join(v)}" for k, v in sorted(stale.items()))
-        )
-    assert not messages, "\n\n".join(messages)
+    violations = _compute_all()
+    message = "\n".join(
+        f"  {identity}: {', '.join(rules)}"
+        for identity, rules in sorted(violations.items())
+    )
+    assert not violations, f"Route error-contract violations:\n{message}"
