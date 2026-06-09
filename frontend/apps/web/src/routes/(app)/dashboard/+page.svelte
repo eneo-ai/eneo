@@ -12,7 +12,6 @@
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import SelectTheme from "$lib/components/SelectTheme.svelte";
 
   export let data;
   const { user } = getAppContext();
@@ -70,10 +69,6 @@
       <Dropdown.Menu let:item>
         <div class="p-2">
           {m.logged_in_as()}<br /><span class="font-mono text-sm">{user.email}</span>
-        </div>
-        <div class="border-default my-1 border-b"></div>
-        <div class="p-2">
-          <SelectTheme></SelectTheme>
         </div>
         <div class="border-default my-1 border-b"></div>
         <Button
