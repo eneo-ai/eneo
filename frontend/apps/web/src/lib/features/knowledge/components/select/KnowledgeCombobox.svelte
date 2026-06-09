@@ -187,7 +187,7 @@
                     value={`website:${website.id}`}
                     onSelect={() => selectAndClose(() => onAddWebsite(website))}
                     class={pagesFailed > 0
-                      ? "bg-warning-dimmer/40 dark:bg-warning-default/35"
+                      ? "border-negative-default bg-negative-default/10 border-l-4"
                       : undefined}
                   >
                     <IconWeb class="shrink-0" />
@@ -195,7 +195,7 @@
                     {#if pagesFailed > 0}
                       <Badge
                         variant="outline"
-                        class="border-warning-default/30 text-warning-stronger"
+                        class="border-negative-default/30 text-negative-stronger"
                       >
                         {m.pages_failed({ count: pagesFailed })}
                       </Badge>

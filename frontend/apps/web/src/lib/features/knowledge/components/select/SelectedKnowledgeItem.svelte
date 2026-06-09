@@ -77,7 +77,7 @@
 >
   <div
     class="flex h-14 w-full items-center gap-2 px-3 {hasFailures
-      ? 'bg-warning-dimmer/40 dark:bg-warning-default/35'
+      ? 'border-negative-default bg-negative-default/10 border-l-4'
       : ''}"
     class:text-negative-default={!modelEnabled}
   >
@@ -111,7 +111,7 @@
 
     {#if kind === "website"}
       {#if hasFailures}
-        <Badge variant="outline" class="border-warning-default/30 text-warning-stronger">
+        <Badge variant="outline" class="border-negative-default/30 text-negative-stronger">
           {m.pages_failed({ count: pagesFailed })}
         </Badge>
       {/if}
