@@ -97,7 +97,7 @@
 
     <div class="flex items-center justify-between gap-2 px-2 py-1.5">
       <span class="text-foreground text-sm">{m.theme()}</span>
-      <ThemeToggle />
+      <ThemeToggle menu />
     </div>
 
     <DropdownMenu.Separator />
