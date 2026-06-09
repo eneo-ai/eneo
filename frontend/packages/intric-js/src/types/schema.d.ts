@@ -6804,7 +6804,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Healthz */
+    /**
+     * Get Healthz
+     * @description Report backend and worker health for deployment probes.
+     */
     get: operations["get_healthz_api_healthz_get"];
     put?: never;
     post?: never;
@@ -6823,12 +6826,7 @@ export interface paths {
     };
     /**
      * Crawler Health
-     * @description Detailed crawler diagnostics. NOT for K8s probes.
-     *
-     *     Public endpoint - no auth required. Shows only job counts and tenant IDs.
-     *
-     *     Args:
-     *         include_all: If True, return all tenant queue lengths instead of top-10.
+     * @description Get detailed crawler queue and worker diagnostics.
      */
     get: operations["crawler_health_api_healthz_crawler_get"];
     put?: never;
@@ -6846,7 +6844,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Version */
+    /**
+     * Get Version
+     * @description Get the running backend version.
+     */
     get: operations["get_version_version_get"];
     put?: never;
     post?: never;
@@ -17672,6 +17673,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -17995,6 +18005,15 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -18153,6 +18172,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -19403,6 +19431,15 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
       /** @description No legacy API key found. */
       404: {
         headers: {
@@ -19766,6 +19803,15 @@ export interface operations {
           "application/json": components["schemas"]["UserPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -19888,6 +19934,15 @@ export interface operations {
           "application/json": components["schemas"]["InfoBlobPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -19932,8 +19987,35 @@ export interface operations {
           "application/json": components["schemas"]["InfoBlobPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -19970,6 +20052,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["InfoBlobPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -20063,6 +20154,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GroupPublicWithMetadata"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -20362,6 +20462,15 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -20456,6 +20565,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {
@@ -20819,6 +20937,15 @@ export interface operations {
           "application/json": components["schemas"]["AssistantPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -20861,6 +20988,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -20914,6 +21050,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21014,6 +21159,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21327,6 +21481,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21370,6 +21533,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21684,6 +21856,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21727,6 +21908,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21781,6 +21971,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -22156,6 +22355,15 @@ export interface operations {
           "application/json": components["schemas"]["GroupChatPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -22364,6 +22572,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -22862,13 +23079,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
       /** @description Too Many Requests */
@@ -22905,6 +23122,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -22953,6 +23179,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -23014,6 +23249,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23056,6 +23300,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -23198,6 +23451,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23280,6 +23542,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23318,6 +23589,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ServicePublicWithUser"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23362,6 +23642,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ServicePublicWithUser"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23451,6 +23749,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_ServiceRun_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23504,6 +23811,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23545,6 +23861,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {
@@ -23642,6 +23967,15 @@ export interface operations {
           "application/json": components["schemas"]["Counts"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_metadata_api_v1_analysis_metadata_statistics__get: {
@@ -23663,6 +23997,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatistics"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23697,6 +24040,15 @@ export interface operations {
           "application/json": components["schemas"]["AssistantActivityStats"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23727,6 +24079,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatisticsAggregated"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23959,12 +24320,32 @@ export interface operations {
           "application/json": components["schemas"]["ConversationInsightResponse"];
         };
       };
-      /** @description Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24112,12 +24493,32 @@ export interface operations {
           "application/json": components["schemas"]["CursorPaginatedResponse_SessionMetadataPublic_"];
         };
       };
-      /** @description Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24150,12 +24551,23 @@ export interface operations {
           "application/json": components["schemas"]["SessionPublic"];
         };
       };
-      /** @description Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled */
+      /** @description Forbidden */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -26267,6 +26679,15 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -26276,13 +26697,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -26307,6 +26728,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -27872,6 +28302,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AllowedOriginPublic_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_completion_models_api_v1_completion_models__get: {
@@ -28077,15 +28516,6 @@ export interface operations {
           "application/json": components["schemas"]["ValidationResult"];
         };
       };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -28137,15 +28567,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MigrationResult"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -28669,15 +29090,6 @@ export interface operations {
           "application/json": components["schemas"]["ValidationResult"];
         };
       };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -28729,15 +29141,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MigrationResult"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -28969,6 +29372,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29467,6 +29879,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29513,6 +29934,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -29629,6 +30059,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29682,6 +30121,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29711,6 +30159,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29791,6 +30248,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29844,6 +30310,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -29873,6 +30348,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -29946,6 +30430,24 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -29993,6 +30495,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30084,6 +30595,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30278,6 +30798,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IconPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Request Entity Too Large */
@@ -31496,6 +32025,15 @@ export interface operations {
           "application/json": components["schemas"]["SpaceMember"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -32143,6 +32681,15 @@ export interface operations {
           "application/json": components["schemas"]["WebsitePublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -32186,6 +32733,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32297,6 +32853,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_crawl_runs_api_v1_websites__id__runs__get: {
@@ -32318,6 +32883,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32422,6 +32996,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -32517,6 +33100,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {
@@ -32750,6 +33342,15 @@ export interface operations {
           "application/json": components["schemas"]["TokenUsageSummary"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32792,6 +33393,15 @@ export interface operations {
           "application/json": components["schemas"]["UserTokenUsageSummary"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32826,6 +33436,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserTokenUsageSummaryDetail"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32871,6 +33490,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TokenUsageSummary"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32946,6 +33574,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -33262,6 +33899,15 @@ export interface operations {
           "application/json": components["schemas"]["AuditConfigResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_audit_config_api_v1_audit_config_patch: {
@@ -33284,6 +33930,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -33315,6 +33979,15 @@ export interface operations {
           "application/json": components["schemas"]["ActionConfigResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_action_config_api_v1_audit_config_actions_patch: {
@@ -33337,6 +34010,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -34146,6 +34837,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -34220,6 +34920,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IntegrationPreviewDataList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -34422,6 +35131,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34550,6 +35268,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -34761,6 +35488,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -35171,13 +35907,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Validation token echoed as plain text, or webhook health status. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            status: string;
+          };
+          "text/plain": string;
         };
       };
       /** @description Validation Error */
@@ -35499,6 +36238,13 @@ export interface operations {
           "application/json": components["schemas"]["SharePointSubscriptionPublic"];
         };
       };
+      /** @description Subscription cannot be recreated */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Authentication required */
       401: {
         headers: {
@@ -35552,6 +36298,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["ServiceAccountAuthStartResponse"];
         };
+      };
+      /** @description OAuth configuration is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Authentication required */
       401: {
@@ -35704,6 +36457,15 @@ export interface operations {
           "application/json": components["schemas"]["AuthUrlPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -35793,6 +36555,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   register_new_user_api_v1_sysadmin_users__post: {
@@ -35866,6 +36637,15 @@ export interface operations {
           "application/json": components["schemas"]["UserInDB"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -35912,6 +36692,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -35968,6 +36757,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36008,6 +36806,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_TenantWithMaskedCredentials_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36043,6 +36850,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36094,6 +36910,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36134,6 +36959,15 @@ export interface operations {
           "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36172,6 +37006,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post: {
@@ -36190,6 +37033,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -36279,6 +37131,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_EmbeddingModelLegacy_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36306,6 +37167,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CompletionModelPublic_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36346,6 +37216,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36407,6 +37286,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36447,6 +37335,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AllowedOriginInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36480,6 +37377,15 @@ export interface operations {
           "application/json": components["schemas"]["AllowedOriginInDB"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36508,6 +37414,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -36540,6 +37455,15 @@ export interface operations {
           "application/json": {
             [key: string]: string | boolean;
           };
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36591,6 +37515,15 @@ export interface operations {
           };
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Internal Server Error */
       500: {
         headers: {
@@ -36629,6 +37562,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36702,6 +37644,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36787,6 +37738,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36833,6 +37793,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -36952,6 +37921,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36998,6 +37976,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -37097,6 +38084,15 @@ export interface operations {
           "application/json": components["schemas"]["ScimTokenStatusResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Tenant not found */
       404: {
         headers: {
@@ -37135,6 +38131,15 @@ export interface operations {
           "application/json": components["schemas"]["ScimTokenCreatedResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Tenant not found */
       404: {
         headers: {
@@ -37170,6 +38175,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Tenant not found */
       404: {
@@ -37212,6 +38226,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37264,6 +38287,15 @@ export interface operations {
           "application/json": components["schemas"]["DeleteCredentialResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -37311,6 +38343,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37362,6 +38403,15 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -37406,6 +38456,15 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -37415,13 +38474,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -37444,6 +38503,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteSettingsResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37484,6 +38552,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37539,6 +38616,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -37577,6 +38663,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37632,6 +38727,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -37641,13 +38745,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -37674,6 +38778,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -37728,6 +38841,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   add_module_api_v1_modules__post: {
@@ -37750,6 +38872,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModuleInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -37785,6 +38916,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -37872,6 +39012,13 @@ export interface operations {
           "application/json": components["schemas"]["InitiateAuthResponse"];
         };
       };
+      /** @description Tenant selection or redirect URI is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Tenant is not active */
       403: {
         headers: {
@@ -37947,6 +39094,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Tenant or user not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -37967,7 +39121,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description OpenAPI specification */
       200: {
         headers: {
           [name: string]: unknown;
@@ -38421,7 +39575,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Backend and worker are healthy */
       200: {
         headers: {
           [name: string]: unknown;
@@ -38429,6 +39583,13 @@ export interface operations {
         content: {
           "application/json": unknown;
         };
+      };
+      /** @description Worker health check failed */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -38443,7 +39604,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Crawler diagnostics */
       200: {
         headers: {
           [name: string]: unknown;
@@ -38472,7 +39633,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Backend version */
       200: {
         headers: {
           [name: string]: unknown;

@@ -30,6 +30,7 @@ router = APIRouter(
     dependencies=[
         Depends(auth.authenticate_super_api_key),
     ],
+    responses=responses.get_responses([401]),
 )
 
 
@@ -278,7 +279,7 @@ class DeleteSettingsResponse(BaseModel):
     "Only provided fields are updated; missing fields retain previous values. "
     "Settings persist across server restarts and override environment defaults. "
     "System admin only.",
-    responses=responses.get_responses([404, 422]),
+    responses=responses.get_responses([404]),
 )
 async def update_crawler_settings(
     tenant_id: UUID,
@@ -301,7 +302,7 @@ async def update_crawler_settings(
 
     Raises:
         HTTPException 404: Tenant not found
-        HTTPException 422: Validation error
+        RequestValidationError: Invalid settings are rejected before the handler
     """
     tenant_service = container.tenant_service()
 
@@ -323,11 +324,6 @@ async def update_crawler_settings(
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         )
 

@@ -539,6 +539,7 @@ async def list_tenants(
         "Returns URL to redirect user to IdP login page."
     ),
     responses={
+        400: {"description": "Tenant selection or redirect URI is invalid"},
         403: {"description": "Tenant is not active"},
         404: {"description": "Tenant not found or not configured"},
         500: {"description": "Federation or redirect configuration missing"},
@@ -920,6 +921,7 @@ async def initiate_auth(
         400: {"description": "Invalid or expired state"},
         401: {"description": "Token validation failed"},
         403: {"description": "Domain not allowed, inactive tenant, or user missing"},
+        404: {"description": "Tenant or user not found"},
     },
 )
 async def auth_callback(

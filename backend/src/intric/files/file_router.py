@@ -38,7 +38,7 @@ router = APIRouter()
 @router.post(
     "/",
     response_model=FilePublic,
-    responses=responses.get_responses([415, 413]),
+    responses=responses.get_responses([400, 403, 413, 415]),
     description="Upload a file; rejects unsupported media types and oversized files.",
 )
 async def upload_file(
@@ -102,7 +102,7 @@ async def get_files(
     "/{id}/",
     response_model=FilePublic,
     status_code=200,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="Fetch a single file's metadata by id.",
 )
 async def get_file(
@@ -168,7 +168,7 @@ async def delete_file(
     "/{id}/signed-url/",
     response_model=SignedURLResponse,
     status_code=200,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     summary="Generate a signed URL for file download",
     description="""
     Generates a signed URL that can be used to download a file without authentication.

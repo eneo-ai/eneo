@@ -83,7 +83,12 @@ from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direc
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
+router = APIRouter(
+    dependencies=[Security(auth.authenticate_super_api_key)],
+    # Router-level 401: every route requires the super API key, so all of them
+    # can return 401. Declared once here instead of per-route get_responses.
+    responses=responses.get_responses([401]),
+)
 
 
 class OIDCDebugToggleRequest(BaseModel):
@@ -1302,7 +1307,7 @@ async def migrate_completion_model_for_all_tenants(
     "/completion-models/create",
     response_model=CompletionModelSparse,
     description="Create global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([400, 401]),
+    responses=responses.get_responses([400, 401, 409]),
 )
 async def create_completion_model(
     model_data: CompletionModelCreate,
@@ -1342,7 +1347,7 @@ async def create_completion_model(
     "/completion-models/{id}/metadata",
     response_model=CompletionModelSparse,
     description="Update global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([404, 401]),
+    responses=responses.get_responses([401, 404, 409]),
 )
 async def update_completion_model_metadata(
     id: UUID,
@@ -1437,7 +1442,7 @@ async def delete_completion_model(
     "/embedding-models/create",
     response_model=EmbeddingModelSparse,
     description="Create global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([400, 401]),
+    responses=responses.get_responses([400, 401, 409]),
 )
 async def create_embedding_model(
     model_data: EmbeddingModelCreate,
@@ -1471,7 +1476,7 @@ async def create_embedding_model(
     "/embedding-models/{id}/metadata",
     response_model=EmbeddingModelSparse,
     description="Update global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([404, 401]),
+    responses=responses.get_responses([401, 404, 409]),
 )
 async def update_embedding_model_metadata(
     id: UUID,

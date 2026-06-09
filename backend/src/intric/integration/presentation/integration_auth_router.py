@@ -24,7 +24,7 @@ router = APIRouter()
     response_model=AuthUrlPublic,
     status_code=200,
     description="Generate the OAuth2 authorization URL for a tenant integration.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def gen_url(
     tenant_integration_id: UUID,

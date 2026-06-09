@@ -43,7 +43,7 @@ EndDateQuery = Annotated[
         "Get aggregate token usage statistics for the specified date range. "
         "If no dates are provided, the last 30 days are used."
     ),
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_token_usage(
     container: ContainerDep,
@@ -71,7 +71,7 @@ async def get_token_usage(
         "Get token usage statistics aggregated by user for the specified date "
         "range. If no dates are provided, the last 30 days are used."
     ),
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_user_token_usage(
     container: ContainerDep,
@@ -110,7 +110,7 @@ async def get_user_token_usage(
         "Get token usage summary for a specific user without fetching all users. "
         "If no dates are provided, the last 30 days are used."
     ),
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_user_summary(
     user_id: UUID,
@@ -145,7 +145,7 @@ async def get_user_summary(
         "Get model breakdown for a specific user within the specified date range. "
         "If no dates are provided, the last 30 days are used."
     ),
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_user_model_breakdown(
     user_id: UUID,

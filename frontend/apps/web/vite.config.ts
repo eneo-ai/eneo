@@ -49,7 +49,8 @@ export default defineConfig({
         extends: "./vite.config.ts",
         test: {
           name: "client",
-          environment: "browser",
+          // No `environment`: browser mode runs in a real Chromium, so Vitest
+          // ignores the jsdom/node environment field here.
           browser: {
             enabled: true,
             provider: "playwright",

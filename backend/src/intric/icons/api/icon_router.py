@@ -41,7 +41,7 @@ async def get_icon(id: UUID, container: _Container) -> Response:
 @router.post(
     "/",
     response_model=IconPublic,
-    responses=responses.get_responses([415, 413]),
+    responses=responses.get_responses([400, 413, 415]),
     summary="Upload icon",
     description="Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.",
 )

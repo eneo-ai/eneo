@@ -391,7 +391,7 @@ async def get_provider(
     "/",
     response_model=ModelProviderPublic,
     description="Create a new model provider.",
-    responses=responses.get_responses([403, 409]),
+    responses=responses.get_responses([400, 403, 409]),
 )
 async def create_provider(
     data: ModelProviderCreate,

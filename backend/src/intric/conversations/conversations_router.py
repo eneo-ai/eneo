@@ -361,7 +361,7 @@ async def chat(
     "/preflight",
     response_model=PreflightResponse,
     description="Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).",
-    responses=responses.get_responses([400, 403, 404, 422, 429]),
+    responses=responses.get_responses([400, 403, 404, 429]),
 )
 async def preflight_tokens(
     request: PreflightRequest,
@@ -436,7 +436,7 @@ async def preflight_tokens(
 @router.get(
     "/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def list_conversations(
@@ -522,7 +522,7 @@ async def list_conversations(
 @router.get(
     "/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_conversation(
@@ -545,7 +545,7 @@ async def get_conversation(
     "/{session_id}/",
     status_code=204,
     description="Deletes a specific conversation (session).",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_conversation(
@@ -576,7 +576,7 @@ async def delete_conversation(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback for a conversation.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(
@@ -614,7 +614,7 @@ async def leave_feedback(
     "/{session_id}/title/",
     response_model=SessionPublic,
     description="Generate and set the title of a conversation.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def set_title_of_conversation(
@@ -815,7 +815,7 @@ async def approve_tools(
 @router.patch(
     "/{session_id}/name/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
     description="Rename a conversation (session).",
 )

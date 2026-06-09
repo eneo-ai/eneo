@@ -61,7 +61,7 @@ async def get_info_blob_ids(
 @router.get(
     "/{id}/",
     response_model=InfoBlobPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_info_blob(
     id: Annotated[UUID, Path()],
@@ -78,7 +78,7 @@ async def get_info_blob(
     "/{id}/",
     response_model=InfoBlobPublic,
     description="Updates an info-blob by id. Omitted fields are not updated.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def update_info_blob(
     id: Annotated[UUID, Path()],
@@ -105,7 +105,7 @@ async def update_info_blob(
     "/{id}/",
     response_model=InfoBlobPublic,
     description="Deletes an info-blob by id. Returns the deleted object.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_info_blob(
     id: Annotated[UUID, Path()],

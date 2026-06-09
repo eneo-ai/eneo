@@ -1,11 +1,11 @@
 # backend/src/intric/tenants/presentation/tenant_federation_router.py
 
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal, Optional, cast
+from typing import Annotated, Any, Literal, Optional, Self, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Audit logging - module level imports for consistency
 from intric.audit.domain.action_types import ActionType
@@ -42,6 +42,7 @@ router = APIRouter(
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),
     ],
+    responses=responses.get_responses([401]),
 )
 
 
@@ -173,6 +174,24 @@ class SetFederationRequest(FederationRequestBase):
 
 class PatchFederationRequest(FederationRequestBase):
     """Request model for partially updating the current tenant federation config."""
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> Self:
+        invalid_null_fields = [
+            field
+            for field in (
+                "provider",
+                "discovery_endpoint",
+                "client_id",
+                "client_secret",
+            )
+            if field in self.model_fields_set and getattr(self, field) is None
+        ]
+        if invalid_null_fields:
+            raise ValueError(
+                f"PATCH does not allow null for: {', '.join(invalid_null_fields)}"
+            )
+        return self
 
 
 class SetFederationResponse(BaseModel):
@@ -563,7 +582,7 @@ async def set_tenant_federation(
         "Only provided fields are changed; omitted fields stay unchanged. "
         "PATCH requires an existing federation config. System admin only."
     ),
-    responses=responses.get_responses([400, 404, 422]),
+    responses=responses.get_responses([400, 404]),
 )
 async def patch_tenant_federation(
     tenant_id: UUID,
@@ -589,17 +608,6 @@ async def patch_tenant_federation(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one field must be provided for patch",
-        )
-
-    invalid_null_fields = [
-        field
-        for field in ("provider", "discovery_endpoint", "client_id", "client_secret")
-        if field in updates and updates[field] is None
-    ]
-    if invalid_null_fields:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"PATCH does not allow null for: {', '.join(invalid_null_fields)}",
         )
 
     provider = updates.get("provider") or existing_config.get("provider") or "unknown"

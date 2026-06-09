@@ -816,6 +816,7 @@ async def renew_expired_subscriptions(
     ),
     responses={
         200: {"description": "Subscription successfully recreated"},
+        400: {"description": "Subscription cannot be recreated"},
         404: {"description": "Subscription not found"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
@@ -959,6 +960,7 @@ async def recreate_subscription(
     ),
     responses={
         200: {"description": "OAuth authorization URL generated"},
+        400: {"description": "OAuth configuration is invalid"},
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },

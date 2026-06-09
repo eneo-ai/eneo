@@ -18,7 +18,6 @@ from intric.main.exceptions import NotFoundException
 from intric.roles.permissions import Permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
-from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
 def check_feature_enabled(
@@ -116,7 +115,7 @@ class ListCredentialsResponse(BaseModel):
     summary="Set API credential for current tenant",
     description="Set or update API credentials for a specific LLM provider. "
     "Tenant admin only. Provider-specific fields are validated.",
-    responses=responses.get_responses([403, 422]),
+    responses=responses.get_responses([400, 403]),
 )
 async def set_credential(
     provider: Provider,
@@ -128,46 +127,22 @@ async def set_credential(
     user = container.user()
     tenant_id = user.tenant_id
 
-    try:
-        result = await tenant_service.set_credential(
-            tenant_id=tenant_id,
-            provider=provider,
-            api_key=request.api_key,
-            endpoint=request.endpoint,
-            api_version=request.api_version,
-            deployment_name=request.deployment_name,
-            strict_mode=settings.tenant_credentials_enabled,
-        )
+    result = await tenant_service.set_credential(
+        tenant_id=tenant_id,
+        provider=provider,
+        api_key=request.api_key,
+        endpoint=request.endpoint,
+        api_version=request.api_version,
+        deployment_name=request.deployment_name,
+        strict_mode=settings.tenant_credentials_enabled,
+    )
 
-        return SetCredentialResponse(
-            provider=result["provider"],
-            masked_key=result["masked_key"],
-            message=f"API credential for {provider} set successfully",
-            set_at=result["set_at"],
-        )
-    except ValueError as e:
-        error_message = str(e)
-        if "Credential validation failed" in error_message:
-            errors = (
-                error_message.split(": ", 1)[1].split("; ")
-                if ": " in error_message
-                else [error_message]
-            )
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "credential_validation_failed",
-                    "message": f"Credential validation failed for provider '{provider}'",
-                    "errors": errors,
-                    "provider_requirements": {
-                        k: list(v) for k, v in PROVIDER_REQUIRED_FIELDS.items()
-                    },
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
-        )
+    return SetCredentialResponse(
+        provider=result["provider"],
+        masked_key=result["masked_key"],
+        message=f"API credential for {provider} set successfully",
+        set_at=result["set_at"],
+    )
 
 
 @router.get(
@@ -177,7 +152,7 @@ async def set_credential(
     summary="List API credentials for current tenant",
     description="List all configured API credentials with masked keys and encryption status. "
     "Tenant admin only.",
-    responses=responses.get_responses([403]),
+    responses=responses.get_responses([403, 404]),
 )
 async def list_credentials(
     container: Annotated[Container, Depends(get_container(with_user=True))],

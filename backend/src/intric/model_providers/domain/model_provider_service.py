@@ -282,7 +282,7 @@ class ModelProviderService:
                 source = credentials if field["in_"] == "credentials" else config
                 value = source.get(field["name"])
                 if not value or (isinstance(value, str) and not value.strip()):
-                    raise ValueError(
+                    raise BadRequestException(
                         f"Field '{field['name']}' is required for provider '{provider_type}'"
                     )
 

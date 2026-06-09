@@ -197,4 +197,5 @@ ignore_names = [
     "DomainUserTokenUsage",
     "DomainUserTokenUsageSummary",
     "TranscriptionModelsDB",
+    "Options",                     # jwt.types.Options; used only in a string cast: cast("Options", ...)
 ]

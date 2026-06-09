@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from check_route_metadata import is_router_file_path
+from check_route_metadata import contains_route_decorator
 
 PREFERRED_BRANCH_RE = re.compile(
     r"^(feature|feat|fix|hotfix|security|chore|deps|docs|test|refactor|remove|ci)/"
@@ -194,7 +194,9 @@ def main() -> int:
         return 0
 
     router_paths = [
-        path for path in paths if path.startswith("backend/src/") and is_router_file_path(path)
+        path
+        for path in paths
+        if path.startswith("backend/src/") and contains_route_decorator(root / path)
     ]
     router_changed = bool(router_paths)
 

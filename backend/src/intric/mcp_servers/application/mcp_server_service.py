@@ -3,7 +3,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from intric.main.exceptions import UnauthorizedException
+from sqlalchemy.exc import IntegrityError
+
+from intric.main.exceptions import NameCollisionException, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from intric.mcp_servers.infrastructure.client.mcp_client import (
@@ -213,7 +215,12 @@ class MCPServerService:
             mcp_server.http_auth_config_schema = None
 
         # Connection succeeded - save to database
-        mcp_server = await self.repo.add(mcp_server)
+        try:
+            mcp_server = await self.repo.add(mcp_server)
+        except IntegrityError as e:
+            raise NameCollisionException(
+                "An MCP server with this name already exists."
+            ) from e
 
         # Save discovered tools
         for tool_def in tools:
@@ -305,7 +312,12 @@ class MCPServerService:
                 http_auth_config_schema
             )
 
-        mcp_server = await self.repo.update(mcp_server)
+        try:
+            mcp_server = await self.repo.update(mcp_server)
+        except IntegrityError as e:
+            raise NameCollisionException(
+                "An MCP server with this name already exists."
+            ) from e
         return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)
