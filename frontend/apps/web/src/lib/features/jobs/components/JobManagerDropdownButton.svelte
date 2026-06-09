@@ -19,7 +19,7 @@
 <Popover.Root bind:open={$showJobManagerPanel}>
   <Popover.Trigger>
     {#snippet child({ props })}
-      <Button {...props} variant="ghost" size="icon" aria-label={m.notifications()}>
+      <Button {...props} variant="ghost" size="icon-lg" aria-label={m.notifications()}>
         {#if $currentlyRunningJobs === 0 && !$hasUrgentKeys && !$hasWarningKeys}
           <IconNotification />
         {:else if $hasUrgentKeys}

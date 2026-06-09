@@ -51,7 +51,7 @@
         {...props}
         type="button"
         aria-label={m.account_and_settings()}
-        class="bg-accent-default text-on-fill ring-offset-secondary hover:bg-accent-stronger focus-visible:ring-stronger flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+        class="bg-accent-default text-on-fill hover:bg-accent-stronger focus-visible:ring-ring/50 flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-colors focus-visible:ring-3 focus-visible:outline-none"
       >
         {initials}
       </button>

@@ -131,7 +131,7 @@
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/if}
 
-      <div class="ml-1 flex items-center gap-1">
+      <div class="ml-3 flex items-center gap-2">
         <JobManagerDropdown></JobManagerDropdown>
         <ProfileMenu
           tenantFederationEnabled={Boolean(
