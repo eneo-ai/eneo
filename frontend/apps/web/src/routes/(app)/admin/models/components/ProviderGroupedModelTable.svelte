@@ -161,7 +161,11 @@
           model: item.value,
           type: modelType,
           completionModels:
-            modelType === "completionModel" ? (tenantModels as unknown as CompletionModel[]) : []
+            modelType === "completionModel" ? (tenantModels as unknown as CompletionModel[]) : [],
+          transcriptionModels:
+            modelType === "transcriptionModel"
+              ? (tenantModels as unknown as TranscriptionModel[])
+              : []
         })
     })
   ];

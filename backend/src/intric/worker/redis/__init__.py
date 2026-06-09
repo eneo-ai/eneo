@@ -2,6 +2,7 @@
 
 This package provides:
 - LuaScripts: Centralized atomic Lua scripts for Redis operations
+- redis_lease: Self-renewing, owner-checked distributed lock
 - r: Redis client instance
 - get_redis: Factory function for Redis client
 - get_worker_health: Worker health check via Redis
@@ -16,6 +17,7 @@ from intric.worker.redis.client import (
     parse_arq_health_string,
     r,
 )
+from intric.worker.redis.lease import redis_lease
 from intric.worker.redis.lua_scripts import LuaScripts
 
 __all__ = [
@@ -25,4 +27,5 @@ __all__ = [
     "get_worker_health",
     "parse_arq_health_string",
     "r",
+    "redis_lease",
 ]

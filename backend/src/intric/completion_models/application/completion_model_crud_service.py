@@ -1,7 +1,7 @@
-from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.config import get_settings
+from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.roles.permissions import Permission, validate_permissions
@@ -36,7 +36,16 @@ class CompletionModelCRUDService:
 
         available_models: list["CompletionModel"] = []
         for model in models:
-            if model.family == "azure" and not get_settings().using_azure_models:
+            # `using_azure_models` gates the *predefined global* Azure models
+            # (tenant_id is None) that ship with Eneo. A tenant that explicitly
+            # configures an Azure provider gets family="azure" too, but those
+            # models are deliberate config and must never be hidden by a global
+            # deployment flag — otherwise they 200 on create yet vanish here.
+            if (
+                model.family == "azure"
+                and model.tenant_id is None
+                and not get_settings().using_azure_models
+            ):
                 continue
 
             available_models.append(model)
@@ -67,7 +76,7 @@ class CompletionModelCRUDService:
         # Otherwise get the latest model
         sorted_models = sorted(
             completion_models,
-            key=lambda model: model.created_at or datetime.min,
+            key=lambda model: datetime_or_utc_min(model.created_at),
             reverse=True,
         )
 

@@ -56,6 +56,19 @@ export default ts.config(
     }
   },
   {
+    // Block raw colors in UI source — every color must go through eneo's
+    // semantic design tokens (bg-negative-dimmer, text-warning-stronger, …) so
+    // it adapts to light/dark via `data-theme`. This also covers class strings
+    // assembled in scripts, generated markup, and component <style> blocks.
+    //
+    // Existing violations are tracked in eslint-suppressions.json. ESLint only
+    // suppresses that per-file count, so newly added violations fail CI.
+    files: ["src/**/*.{svelte,js,ts}"],
+    rules: {
+      "intric/no-raw-color": "error"
+    }
+  },
+  {
     rules: {
       "no-undef": "off",
       "@typescript-eslint/no-unused-vars": [

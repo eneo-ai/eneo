@@ -17,6 +17,7 @@ _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))
 @router.get(
     "/{id}/",
     response_class=Response,
+    response_model=None,
     summary="Get icon image",
     description="Returns icon as binary data. Public endpoint for img tags. Cached for 1 year.",
     responses={
@@ -40,7 +41,7 @@ async def get_icon(id: UUID, container: _Container) -> Response:
 @router.post(
     "/",
     response_model=IconPublic,
-    responses=responses.get_responses([415, 413]),
+    responses=responses.get_responses([400, 413, 415]),
     summary="Upload icon",
     description="Upload icon image (PNG, JPEG, WebP). Max 256 KB. Returns icon ID.",
 )

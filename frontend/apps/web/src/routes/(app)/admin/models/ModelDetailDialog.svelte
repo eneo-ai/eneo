@@ -13,10 +13,12 @@
   import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "lucide-svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
   import EditModelDialog from "./EditModelDialog.svelte";
   import MigrateModelDialog from "./MigrateModelDialog.svelte";
+  import ModelUsageSection from "./ModelUsageSection.svelte";
   import { formatTokens, getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
   import { findHostingLabel } from "$lib/features/ai-models/hosting/hostingOptions";
   import ModelCostBadge from "$lib/features/ai-models/components/ModelCostBadge.svelte";
@@ -43,6 +45,12 @@
 
   const showEditDialog = writable(false);
   const showMigrateDialog = writable(false);
+
+  // Usage tab exists for completion + transcription (both expose usage
+  // endpoints); embedding models have none. It lazy-loads on activation, so
+  // it must not be the default tab.
+  let activeTab = $state("info");
+  const showUsageTab = $derived(type === "completionModel" || type === "transcriptionModel");
 
   const deprecation = $derived(
     getDeprecationStatus("deprecation_date" in model ? model : { deprecation_date: null })
@@ -99,183 +107,26 @@
         </div>
       {/if}
 
-      <!-- Properties -->
-      <div class="px-6 py-5">
-        <table class="w-full">
-          <tbody class="text-[15px]">
-            <tr>
-              <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
-                >{m.display_name()}</td
-              >
-              <td class="py-2.5">{model.nickname ?? model.name}</td>
-            </tr>
-            <tr>
-              <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
-                >{m.model_identifier()}</td
-              >
-              <td class="py-2.5">{model.name}</td>
-            </tr>
-
-            <!-- Context window -->
-            {#if "max_input_tokens" in model}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.model_context_label()}</td
-                >
-                <td class="py-2.5 font-mono text-sm">
-                  {m.model_context_value({
-                    input: formatTokens(model.max_input_tokens),
-                    output: formatTokens(model.max_output_tokens)
-                  })}
-                </td>
-              </tr>
-            {/if}
-
-            <!-- Capabilities -->
-            {#if "reasoning" in model}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.capability_reasoning()}</td
-                >
-                <td class="py-2.5">
-                  {#if model.reasoning}
-                    <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
-                    <span class="sr-only">{m.yes()}</span>
-                  {:else}
-                    <span class="text-muted/30">–</span>
-                  {/if}
-                </td>
-              </tr>
-            {/if}
-            {#if "vision" in model}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.capability_vision()}</td
-                >
-                <td class="py-2.5">
-                  {#if model.vision}
-                    <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
-                    <span class="sr-only">{m.yes()}</span>
-                  {:else}
-                    <span class="text-muted/30">–</span>
-                  {/if}
-                </td>
-              </tr>
-            {/if}
-            {#if "supports_tool_calling" in model}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.capability_tools()}</td
-                >
-                <td class="py-2.5">
-                  {#if model.supports_tool_calling}
-                    <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
-                    <span class="sr-only">{m.yes()}</span>
-                  {:else}
-                    <span class="text-muted/30">–</span>
-                  {/if}
-                </td>
-              </tr>
-            {/if}
-
-            <tr>
-              <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
-            </tr>
-
-            <!-- Hosting -->
-            {#if model.hosting}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.hosting_region()}</td
-                >
-                <td class="py-2.5"
-                  >{findHostingLabel(model.hosting) || model.hosting.toUpperCase()}</td
-                >
-              </tr>
-            {/if}
-
-            <!-- Indicative cost -->
-            <tr>
-              <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                >{m.model_pricing_label()}</td
-              >
-              <td class="py-2.5">
-                <ModelCostBadge {model} />
-              </td>
-            </tr>
-
-            <!-- Security classification (read-only) -->
-            <tr>
-              <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.security()}</td>
-              <td class="py-2.5">
-                {#if model.security_classification}
-                  {model.security_classification.name}
-                {:else}
-                  <span class="text-muted/30">{m.no_classification()}</span>
-                {/if}
-              </td>
-            </tr>
-
-            <!-- Open source -->
-            {#if model.open_source}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.model_label_open_source()}</td
-                >
-                <td class="py-2.5">
-                  <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
-                  <span class="sr-only">{m.yes()}</span>
-                </td>
-              </tr>
-            {/if}
-
-            <!-- Metadata divider only if at least one of the metadata rows below renders -->
-            {#if model.family || model.org || model.description}
-              <tr>
-                <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
-              </tr>
-            {/if}
-
-            {#if model.family}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-                  >{m.model_family()}</td
-                >
-                <td class="py-2.5">{model.family}</td>
-              </tr>
-            {/if}
-            {#if model.org}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.provider()}</td>
-                <td class="py-2.5">{model.org}</td>
-              </tr>
-            {/if}
-            {#if model.description}
-              <tr>
-                <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.description()}</td
-                >
-                <td class="text-muted py-2.5">{model.description}</td>
-              </tr>
-            {/if}
-          </tbody>
-        </table>
-
-        {#if model.hf_link}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -- external HuggingFace URL from model metadata -->
-          <a
-            href={model.hf_link}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"
-          >
-            <!-- eslint-disable intric/no-hardcoded-text -- HuggingFace is a brand name -->
-            HuggingFace
-            <!-- eslint-enable intric/no-hardcoded-text -->
-            <ExternalLink size={13} aria-hidden="true" />
-          </a>
-          <!-- eslint-enable svelte/no-navigation-without-resolve -->
-        {/if}
-      </div>
+      {#if showUsageTab}
+        <Tabs.Root bind:value={activeTab}>
+          <Tabs.List variant="line" class="w-full justify-start px-6 pt-2">
+            <Tabs.Trigger value="info">{m.model_detail_tab_info()}</Tabs.Trigger>
+            <Tabs.Trigger value="usage">{m.model_detail_tab_usage()}</Tabs.Trigger>
+          </Tabs.List>
+          <Tabs.Content value="info">{@render properties()}</Tabs.Content>
+          <Tabs.Content value="usage">
+            <div class="px-6 py-5">
+              <ModelUsageSection
+                type={type === "transcriptionModel" ? "transcriptionModel" : "completionModel"}
+                modelId={model.id}
+                active={activeTab === "usage"}
+              />
+            </div>
+          </Tabs.Content>
+        </Tabs.Root>
+      {:else}
+        {@render properties()}
+      {/if}
     </div>
 
     <div class="border-border flex justify-end gap-2 border-t px-6 py-4">
@@ -287,6 +138,177 @@
     </div>
   </Dialog.Content>
 </Dialog.Root>
+
+{#snippet properties()}
+  <div class="px-6 py-5">
+    <table class="w-full">
+      <tbody class="text-[15px]">
+        <tr>
+          <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap">{m.display_name()}</td
+          >
+          <td class="py-2.5">{model.nickname ?? model.name}</td>
+        </tr>
+        <tr>
+          <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
+            >{m.model_identifier()}</td
+          >
+          <td class="py-2.5">{model.name}</td>
+        </tr>
+
+        <!-- Context window -->
+        {#if "max_input_tokens" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_context_label()}</td
+            >
+            <td class="py-2.5 font-mono text-sm">
+              {m.model_context_value({
+                input: formatTokens(model.max_input_tokens),
+                output: formatTokens(model.max_output_tokens)
+              })}
+            </td>
+          </tr>
+        {/if}
+
+        <!-- Capabilities -->
+        {#if "reasoning" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.capability_reasoning()}</td
+            >
+            <td class="py-2.5">
+              {#if model.reasoning}
+                <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                <span class="sr-only">{m.yes()}</span>
+              {:else}
+                <span class="text-muted/30">–</span>
+              {/if}
+            </td>
+          </tr>
+        {/if}
+        {#if "vision" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.capability_vision()}</td
+            >
+            <td class="py-2.5">
+              {#if model.vision}
+                <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                <span class="sr-only">{m.yes()}</span>
+              {:else}
+                <span class="text-muted/30">–</span>
+              {/if}
+            </td>
+          </tr>
+        {/if}
+        {#if "supports_tool_calling" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.capability_tools()}</td
+            >
+            <td class="py-2.5">
+              {#if model.supports_tool_calling}
+                <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                <span class="sr-only">{m.yes()}</span>
+              {:else}
+                <span class="text-muted/30">–</span>
+              {/if}
+            </td>
+          </tr>
+        {/if}
+
+        <tr>
+          <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
+        </tr>
+
+        <!-- Hosting -->
+        {#if model.hosting}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.hosting_region()}</td>
+            <td class="py-2.5">{findHostingLabel(model.hosting) || model.hosting.toUpperCase()}</td>
+          </tr>
+        {/if}
+
+        <!-- Indicative cost -->
+        <tr>
+          <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+            >{m.model_pricing_label()}</td
+          >
+          <td class="py-2.5">
+            <ModelCostBadge {model} />
+          </td>
+        </tr>
+
+        <!-- Security classification (read-only) -->
+        <tr>
+          <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.security()}</td>
+          <td class="py-2.5">
+            {#if model.security_classification}
+              {model.security_classification.name}
+            {:else}
+              <span class="text-muted/30">{m.no_classification()}</span>
+            {/if}
+          </td>
+        </tr>
+
+        <!-- Open source -->
+        {#if model.open_source}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_label_open_source()}</td
+            >
+            <td class="py-2.5">
+              <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+              <span class="sr-only">{m.yes()}</span>
+            </td>
+          </tr>
+        {/if}
+
+        <!-- Metadata divider only if at least one of the metadata rows below renders -->
+        {#if model.family || model.org || model.description}
+          <tr>
+            <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
+          </tr>
+        {/if}
+
+        {#if model.family}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.model_family()}</td>
+            <td class="py-2.5">{model.family}</td>
+          </tr>
+        {/if}
+        {#if model.org}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.provider()}</td>
+            <td class="py-2.5">{model.org}</td>
+          </tr>
+        {/if}
+        {#if model.description}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.description()}</td>
+            <td class="text-muted py-2.5">{model.description}</td>
+          </tr>
+        {/if}
+      </tbody>
+    </table>
+
+    {#if model.hf_link}
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- external HuggingFace URL from model metadata -->
+      <a
+        href={model.hf_link}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"
+      >
+        <!-- eslint-disable intric/no-hardcoded-text -- HuggingFace is a brand name -->
+        HuggingFace
+        <!-- eslint-enable intric/no-hardcoded-text -->
+        <ExternalLink size={13} aria-hidden="true" />
+      </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+    {/if}
+  </div>
+{/snippet}
 
 <EditModelDialog {model} {type} openController={showEditDialog} />
 

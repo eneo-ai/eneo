@@ -273,6 +273,8 @@ from intric.questions.questions_repo import QuestionRepository
 from intric.redis.connection import build_redis_pool_kwargs
 from intric.roles.roles_repo import RolesRepository
 from intric.roles.roles_service import RolesService
+from intric.scim.repositories.token_repository import ScimTokenRepository
+from intric.scim.services.token_service import ScimTokenService
 from intric.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
 )
@@ -326,6 +328,12 @@ from intric.token_usage.infrastructure.user_token_usage_analyzer import (
     UserTokenUsageAnalyzer,
 )
 from intric.transcription_models.application import TranscriptionModelCRUDService
+from intric.transcription_models.application.transcription_model_migration_history_service import (  # noqa: E501
+    TranscriptionModelMigrationHistoryService,
+)
+from intric.transcription_models.application.transcription_model_migration_service import (  # noqa: E501
+    TranscriptionModelMigrationService,
+)
 from intric.transcription_models.domain import TranscriptionModelRepository
 from intric.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
@@ -833,6 +841,15 @@ class Container(containers.DeclarativeContainer):
         CompletionModelMigrationHistoryService,
         session=session,
     )
+    transcription_model_migration_service = providers.Factory(
+        TranscriptionModelMigrationService,
+        session=session,
+        transcription_model_repo=transcription_model_repo,
+    )
+    transcription_model_migration_history_service = providers.Factory(
+        TranscriptionModelMigrationHistoryService,
+        session=session,
+    )
     transcription_model_service = providers.Factory(
         TranscriptionModelService,
         transcription_model_repo=transcription_model_repo,
@@ -852,6 +869,15 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    scim_token_repository = providers.Factory(
+        ScimTokenRepository,
+        session=session,
+    )
+    scim_token_service = providers.Factory(
+        ScimTokenService,
+        repository=scim_token_repository,
+        audit_service=audit_service,
     )
     tenant_service = providers.Factory(
         TenantService,

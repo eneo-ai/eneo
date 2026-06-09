@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -203,3 +204,46 @@ async def test_azure_models_with_feature_flag_on(service: AIModelsService):
 
     assert len(models) == 3
     assert "azure" in [model.family for model in models]
+
+
+async def test_tenant_azure_models_shown_when_flag_off(service: AIModelsService):
+    # A tenant that explicitly configures an Azure provider gets family="azure"
+    # on its completion models. Those are deliberate config and must stay
+    # visible even when the global `using_azure_models` flag (which only gates
+    # the predefined global Azure models) is off. Regression for Azure
+    # completion models 200-ing on create yet never appearing in the admin
+    # list / chat picker.
+    get_settings().using_azure_models = False
+    tenant_azure = TEST_MODEL_AZURE.model_copy(update={"tenant_id": TEST_TENANT.id})
+    service.completion_model_repo.get_models.return_value = [
+        TEST_MODEL_GPT4,
+        TEST_MODEL_AZURE,  # global → hidden
+        tenant_azure,  # tenant-owned → shown
+    ]
+
+    models = await service.get_completion_models()
+
+    families = [model.family for model in models]
+    assert families.count("azure") == 1
+    assert any(model.tenant_id == TEST_TENANT.id for model in models)
+
+
+def test_get_latest_available_model_handles_missing_created_at(
+    service: AIModelsService,
+):
+    latest = service._get_latest_available_model(
+        [
+            TEST_MODEL_CHATGPT.model_copy(
+                update={"created_at": None, "can_access": True}
+            ),
+            TEST_MODEL_GPT4.model_copy(
+                update={
+                    "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    "can_access": True,
+                }
+            ),
+        ]
+    )
+
+    assert latest is not None
+    assert latest.id == TEST_MODEL_GPT4.id

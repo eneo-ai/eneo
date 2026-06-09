@@ -13,7 +13,7 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
-  import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
@@ -401,7 +401,7 @@
             </p>
           {/if}
           <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
-            <SelectKnowledgeV2
+            <SelectKnowledge
               originMode="personal"
               bind:selectedWebsites={$update.websites}
               bind:selectedCollections={$update.groups}
@@ -431,7 +431,7 @@
             </p>
           {/if}
           <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
-            <SelectKnowledgeV2
+            <SelectKnowledge
               originMode="organization"
               bind:selectedWebsites={$update.websites}
               bind:selectedCollections={$update.groups}

@@ -26,7 +26,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { toastError } from "$lib/core/errors";
+  import { getErrorMessage, toastError } from "$lib/core/errors";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Loader2, AlertTriangle } from "lucide-svelte";
@@ -262,7 +262,7 @@
 
       await createModels(modelsToCreate, providerId);
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : m.failed_to_create_model();
+      error = getErrorMessage(e);
       toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;
@@ -304,7 +304,7 @@
       if (!providerId) throw new Error(m.no_provider_selected());
       await createModels(models, providerId);
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : m.failed_to_create_model();
+      error = getErrorMessage(e);
       toastError(e, m.failed_to_create_model());
     } finally {
       isSubmitting = false;

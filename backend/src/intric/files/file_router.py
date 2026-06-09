@@ -36,7 +36,10 @@ router = APIRouter()
 
 
 @router.post(
-    "/", response_model=FilePublic, responses=responses.get_responses([415, 413])
+    "/",
+    response_model=FilePublic,
+    responses=responses.get_responses([400, 403, 413, 415]),
+    description="Upload a file; rejects unsupported media types and oversized files.",
 )
 async def upload_file(
     upload_file: UploadFile,
@@ -81,6 +84,8 @@ async def upload_file(
     "/",
     response_model=PaginatedResponse[FilePublic],
     status_code=200,
+    responses=responses.get_responses([]),
+    description="List the current user's uploaded files.",
 )
 async def get_files(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -97,6 +102,8 @@ async def get_files(
     "/{id}/",
     response_model=FilePublic,
     status_code=200,
+    responses=responses.get_responses([403, 404]),
+    description="Fetch a single file's metadata by id.",
 )
 async def get_file(
     id: UUID,
@@ -106,7 +113,18 @@ async def get_file(
     return await service.get_file_by_id(file_id=id)
 
 
-@router.delete("/{id}/", status_code=204)
+@router.delete(
+    "/{id}/",
+    status_code=204,
+    response_class=Response,
+    description="Delete a file owned by the current user.",
+    responses={
+        204: {
+            "description": "File deleted successfully. No response body is returned."
+        },
+        **responses.get_responses([403, 404]),
+    },
+)
 async def delete_file(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -114,8 +132,8 @@ async def delete_file(
     service = container.file_service()
     current_user = container.user()
 
-    # Get file details BEFORE deletion (snapshot pattern)
-    file = await service.get_file_by_id(file_id=id)
+    # Delete atomically by owner; the returned row is kept for audit metadata.
+    file = await service.delete_file(id)
 
     # Build extra context capturing what was deleted
     extra = {
@@ -128,9 +146,6 @@ async def delete_file(
         if hasattr(file, "created_at") and file.created_at
         else None,
     }
-
-    # Delete file
-    await service.delete_file(id)
 
     # Audit logging
     audit_service = container.audit_service()
@@ -153,6 +168,7 @@ async def delete_file(
     "/{id}/signed-url/",
     response_model=SignedURLResponse,
     status_code=200,
+    responses=responses.get_responses([403, 404]),
     summary="Generate a signed URL for file download",
     description="""
     Generates a signed URL that can be used to download a file without authentication.
@@ -193,6 +209,7 @@ async def generate_signed_url(
     "/{id}/download/",
     status_code=200,
     response_class=Response,
+    response_model=None,
     summary="Download a file using a signed URL",
     description="""
     Allows downloading a file using a pre-signed URL token.

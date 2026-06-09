@@ -2,21 +2,23 @@
 @source "../../../packages/ui/src/";
 
 /* ------------------------------------------------------------------ */
-/* Tailwind v4 dark variant — class-based, not OS-based               */
+/* Tailwind v4 dark variant — aligned with eneo's data-theme state    */
 /* ------------------------------------------------------------------ */
-/* Tailwind v4's default `dark:` variant fires on                     */
-/* `@media (prefers-color-scheme: dark)`. This app, however, manages  */
-/* its own theme via a `.dark` class on `<html>` and explicitly pins  */
-/* `color-scheme: light` so the browser doesn't paint native widgets  */
-/* with the OS dark palette. Without overriding the variant, every    */
-/* `dark:` utility on a vendored shadcn component (Select, Input,     */
-/* Textarea, Checkbox, Switch, Button, …) silently fires whenever the */
-/* user's OS is in dark mode — even though the app is rendering in    */
-/* light mode. The most visible symptom is shadcn Select/Input        */
-/* triggers picking up `dark:bg-input/30`, which paints them grey on  */
-/* the otherwise white surface. Re-binding `dark:` to the `.dark`     */
-/* class keeps the variant aligned with the app's actual theme state. */
-@custom-variant dark (&:where(.dark, .dark *));
+/* New eneo code should use semantic tokens instead of `dark:`. Some  */
+/* vendored components still contain the variant, however, so bind it */
+/* to the same data-theme contract as packages/ui themes: explicit    */
+/* dark always wins, while system follows the OS preference.          */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:where([data-theme="system"], [data-theme="system"] *) {
+      @slot;
+    }
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* shadcn-svelte token mappings                                       */

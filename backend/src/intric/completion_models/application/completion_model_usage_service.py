@@ -294,8 +294,14 @@ class CompletionModelUsageService:
                 select(Users.id).where(Users.tenant_id == tenant_id)
             )
         elif entity_type in {"assistant_template", "app_template"}:
-            # Global entities - no tenant filtering needed
-            return true()
+            # Templates carry their own tenant_id and soft-delete marker. Scope
+            # strictly to this tenant and skip soft-deleted rows so the impact
+            # count never includes another tenant's or an already-deleted
+            # template. Keep in sync with the migration service's copy.
+            return and_(
+                table.tenant_id == tenant_id,
+                table.deleted_at.is_(None),
+            )
         else:
             self.logger.warning(
                 f"Unknown entity type for tenant filtering: {entity_type}"
@@ -936,14 +942,26 @@ class CompletionModelUsageService:
         assistant_templates_stmt = (
             select(func.count())
             .select_from(AssistantTemplates)
-            .where(AssistantTemplates.completion_model_id == model_id)
+            .where(
+                and_(
+                    AssistantTemplates.completion_model_id == model_id,
+                    AssistantTemplates.tenant_id == tenant_id,
+                    AssistantTemplates.deleted_at.is_(None),
+                )
+            )
         )
         self.logger.debug(f"Assistant templates query: {assistant_templates_stmt}")
 
         app_templates_stmt = (
             select(func.count())
             .select_from(AppTemplates)
-            .where(AppTemplates.completion_model_id == model_id)
+            .where(
+                and_(
+                    AppTemplates.completion_model_id == model_id,
+                    AppTemplates.tenant_id == tenant_id,
+                    AppTemplates.deleted_at.is_(None),
+                )
+            )
         )
         self.logger.debug(f"App templates query: {app_templates_stmt}")
 

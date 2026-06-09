@@ -19,6 +19,7 @@ from intric.authentication.auth_dependencies import (
     require_resource_permission_for_method,
 )
 from intric.conversations.conversation_models import (
+    ConversationRenameRequest,
     ConversationRequest,
     PreflightRequest,
     PreflightResponse,
@@ -36,8 +37,10 @@ from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
     SessionFeedback,
+    SessionInDB,
     SessionMetadataPublic,
     SessionPublic,
+    SessionUpdate,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -232,10 +235,30 @@ async def _validate_conversation_scope(
                 )
 
 
+async def _authorize_session_access(container: Container, session: SessionInDB) -> None:
+    """Authorize the caller against the session's underlying chat partner.
+
+    Session ownership alone is not sufficient: a permission can be revoked after
+    a session is created (e.g. personal_chat), and the historical session must
+    then become unreachable. Re-check the current permission by resolving the
+    session's assistant or group chat — get_assistant/get_group_chat raise
+    UnauthorizedException when access is no longer allowed, and get_assistant is
+    default-assistant-aware so the personal chat is gated by personal_chat.
+    """
+    if session.group_chat_id:
+        group_chat_service = container.group_chat_service()
+        await group_chat_service.get_group_chat(group_chat_id=session.group_chat_id)
+    else:
+        assert session.assistant is not None
+        assistant_service = container.assistant_service()
+        await assistant_service.get_assistant(session.assistant.id)
+
+
 @router.post(
     "/",
+    description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
     responses=responses.streaming_response(
-        response_codes=[400, 404],
+        response_codes=[400, 403, 404],
         models=[
             SSEText,
             SSEIntricEvent,
@@ -337,7 +360,8 @@ async def chat(
 @router.post(
     "/preflight",
     response_model=PreflightResponse,
-    responses=responses.get_responses([400, 403, 404, 422, 429]),
+    description="Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).",
+    responses=responses.get_responses([400, 403, 404, 429]),
 )
 async def preflight_tokens(
     request: PreflightRequest,
@@ -412,7 +436,7 @@ async def preflight_tokens(
 @router.get(
     "/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def list_conversations(
@@ -498,7 +522,7 @@ async def list_conversations(
 @router.get(
     "/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_conversation(
@@ -512,13 +536,16 @@ async def get_conversation(
     session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
 
+    await _authorize_session_access(container, session)
+
     return to_session_public(session)
 
 
 @router.delete(
     "/{session_id}/",
     status_code=204,
-    responses=responses.get_responses([400, 404]),
+    description="Deletes a specific conversation (session).",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_conversation(
@@ -533,6 +560,8 @@ async def delete_conversation(
     session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
 
+    await _authorize_session_access(container, session)
+
     if session.group_chat_id:
         await session_service.delete(session_id, group_chat_id=session.group_chat_id)
     else:
@@ -546,7 +575,8 @@ async def delete_conversation(
 @router.post(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 404]),
+    description="Leave feedback for a conversation.",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(
@@ -562,6 +592,8 @@ async def leave_feedback(
     # Determine if this is a group chat or assistant session
     session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
+
+    await _authorize_session_access(container, session)
 
     if session.group_chat_id:
         updated_session = await session_service.leave_feedback(
@@ -581,7 +613,8 @@ async def leave_feedback(
 @router.post(
     "/{session_id}/title/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 404]),
+    description="Generate and set the title of a conversation.",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def set_title_of_conversation(
@@ -589,15 +622,24 @@ async def set_title_of_conversation(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Set the title of a conversation"""
-    conversation_service = container.conversation_service()
-    session = await conversation_service.set_title_of_conversation(session_id)
+    # Authorize before generating the title — set_title invokes the model, so
+    # the permission check must run first to keep a revoked user from triggering
+    # inference on a historical session.
+    session_service = container.session_service()
+    session = await session_service.get_session_by_uuid(session_id)
     assert session is not None
-    return to_session_public(session)
+    await _authorize_session_access(container, session)
+
+    conversation_service = container.conversation_service()
+    updated_session = await conversation_service.set_title_of_conversation(session_id)
+    assert updated_session is not None
+    return to_session_public(updated_session)
 
 
 @router.post(
     "/approve-tools/",
     response_model=ToolApprovalResponse,
+    description="Submit approval decisions for pending tool calls from a tool_approval_required event.",
     responses=responses.get_responses([400, 403, 404, 409, 429]),
 )
 async def approve_tools(
@@ -768,3 +810,29 @@ async def approve_tools(
         decisions_remaining=submit_result.decisions_remaining,
         unrecognized_tool_call_ids=submit_result.unrecognized_tool_call_ids,
     )
+
+
+@router.patch(
+    "/{session_id}/name/",
+    response_model=SessionPublic,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+    description="Rename a conversation (session).",
+)
+async def rename_conversation(
+    payload: ConversationRenameRequest,
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Rename a conversation (session)"""
+    session_service = container.session_service()
+    session = await session_service.get_session_by_uuid(session_id)
+    assert session is not None
+    await _authorize_session_access(container, session)
+
+    updated_session = await session_service.update_session(
+        SessionUpdate(id=session_id, name=payload.name)
+    )
+    return to_session_public(updated_session)

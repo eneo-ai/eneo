@@ -7,6 +7,7 @@
   import { m } from "$lib/paraglide/messages";
   import ExpiringKeysNotification from "$lib/features/api-keys/ExpiringKeysNotification.svelte";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
+  import ExpandableErrorRow from "./ExpandableErrorRow.svelte";
   const jobManager = getJobManager();
   const {
     state: { uploads, jobs, currentlyRunningJobs }
@@ -44,32 +45,33 @@
         class="border-stronger bg-primary ring-default min-h-10 items-center justify-between rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
       >
         {#each $uploads as upload (upload.id)}
-          <div
-            class="border-default flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0"
-          >
-            <div class="flex-shrink truncate pr-4">{upload.file.name}</div>
-            {#if upload.status === "queued"}
-              <div class="text-secondary w-48 min-w-48 text-right">{m.waiting()}</div>
-            {:else if upload.status === "failed"}
-              <div class="w-48 min-w-48 text-right">
-                <div class="text-negative-default font-medium">{m.failed()}</div>
-                {#if upload.errorMessage}
-                  <div class="text-secondary text-xs whitespace-normal">{upload.errorMessage}</div>
-                {/if}
-              </div>
-            {:else if upload.status === "completed"}
-              <div class="text-positive-default w-48 min-w-48 text-right font-medium">
-                {m.done()}
-              </div>
-            {:else}
-              <div class="flex w-48 min-w-48 items-center gap-x-4">
-                <ProgressBar progress={upload.progress}></ProgressBar>
-                <div class="w-10 text-end">
-                  <span class="text-primary text-sm">{upload.progress}%</span>
+          {#if upload.status === "failed" && upload.errorMessage}
+            <ExpandableErrorRow label={upload.file.name} message={upload.errorMessage} />
+          {:else}
+            <div
+              class="border-default flex items-center justify-between gap-x-3 border-b px-2 py-1.5 whitespace-nowrap last-of-type:border-b-0"
+            >
+              <div class="flex-shrink truncate pr-4">{upload.file.name}</div>
+              {#if upload.status === "queued"}
+                <div class="text-secondary w-48 min-w-48 text-right">{m.waiting()}</div>
+              {:else if upload.status === "failed"}
+                <div class="text-negative-default w-48 min-w-48 text-right font-medium">
+                  {m.failed()}
                 </div>
-              </div>
-            {/if}
-          </div>
+              {:else if upload.status === "completed"}
+                <div class="text-positive-default w-48 min-w-48 text-right font-medium">
+                  {m.done()}
+                </div>
+              {:else}
+                <div class="flex w-48 min-w-48 items-center gap-x-4">
+                  <ProgressBar progress={upload.progress}></ProgressBar>
+                  <div class="w-10 text-end">
+                    <span class="text-primary text-sm">{upload.progress}%</span>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
         {/each}
       </div>
     </div>

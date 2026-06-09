@@ -369,7 +369,7 @@ class AuditService:
         # rather than have vanish into a warning log.
         try:
             await job_manager.enqueue(
-                cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
+                Task.LOG_AUDIT_EVENT, job_id, cast(TaskParams, params)
             )
         except (TypeError, ValueError, AttributeError, AssertionError):
             raise

@@ -79,6 +79,7 @@ class ActionType(str, Enum):
     TRANSCRIPTION_MODEL_CREATED = "transcription_model_created"
     TRANSCRIPTION_MODEL_UPDATED = "transcription_model_updated"
     TRANSCRIPTION_MODEL_DELETED = "transcription_model_deleted"
+    TRANSCRIPTION_MODEL_MIGRATED = "transcription_model_migrated"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"
@@ -107,6 +108,19 @@ class ActionType(str, Enum):
     HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE = "help_assistant_role_toggled_visible"
     HELP_ASSISTANT_INSTALLED = "help_assistant_installed"
     HELP_ASSISTANT_UNINSTALLED = "help_assistant_uninstalled"
+
+    # SCIM Provisioning Actions
+    SCIM_USER_PROVISIONED = "scim_user_provisioned"
+    SCIM_USER_RECONCILED = "scim_user_reconciled"
+    SCIM_USER_REACTIVATED = "scim_user_reactivated"
+    SCIM_USER_DEPROVISIONED = "scim_user_deprovisioned"
+    SCIM_USER_UPDATED = "scim_user_updated"
+    SCIM_GROUP_CREATED = "scim_group_created"
+    SCIM_GROUP_REACTIVATED = "scim_group_reactivated"
+    SCIM_GROUP_UPDATED = "scim_group_updated"
+    SCIM_GROUP_DELETED = "scim_group_deleted"
+    SCIM_TOKEN_CREATED = "scim_token_created"
+    SCIM_TOKEN_REVOKED = "scim_token_revoked"
 
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"

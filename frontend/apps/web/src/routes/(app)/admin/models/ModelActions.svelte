@@ -41,6 +41,7 @@
   export let model: AnyModel;
   export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];
+  export let transcriptionModels: TranscriptionModel[] = [];
 
   const intric = getIntric();
 
@@ -55,10 +56,16 @@
   let deleteError: string | null = null;
   let showMigrateOption = false;
 
-  $: completionModelTargets = type === "completionModel" ? completionModels : [];
+  $: supportsMigration = type === "completionModel" || type === "transcriptionModel";
+  $: migrateTargets =
+    type === "completionModel"
+      ? completionModels
+      : type === "transcriptionModel"
+        ? transcriptionModels
+        : [];
   $: modelLabel = "nickname" in model && model.nickname ? model.nickname : model.name;
-  $: isMigratedCompletionModel =
-    type === "completionModel" && "migrated_to_model_id" in model && !!model.migrated_to_model_id;
+  $: isMigratedModel =
+    supportsMigration && "migrated_to_model_id" in model && !!model.migrated_to_model_id;
 
   function openDelete() {
     deleteError = null;
@@ -85,8 +92,8 @@
     } catch (e: unknown) {
       deleteError = getErrorMessage(e);
       showMigrateOption =
-        type === "completionModel" &&
-        !isMigratedCompletionModel &&
+        supportsMigration &&
+        !isMigratedModel &&
         e instanceof IntricError &&
         e.code === MODEL_IN_USE_CODE;
     } finally {
@@ -110,7 +117,7 @@
       {m.edit_model()}
     </DropdownMenu.Item>
 
-    {#if type === "completionModel" && !isMigratedCompletionModel}
+    {#if supportsMigration && !isMigratedModel}
       <DropdownMenu.Item onclick={() => showMigrateDialog.set(true)}>
         <ArrowRight />
         {m.migrate_model_usage()}
@@ -196,10 +203,11 @@
   </Dialog.Content>
 </Dialog.Root>
 
-{#if type === "completionModel" && !isMigratedCompletionModel}
+{#if supportsMigration && !isMigratedModel}
   <MigrateModelDialog
     openController={showMigrateDialog}
-    sourceModel={model as CompletionModel}
-    models={completionModelTargets}
+    sourceModel={model as CompletionModel | TranscriptionModel}
+    models={migrateTargets}
+    modelType={type as "completionModel" | "transcriptionModel"}
   />
 {/if}

@@ -111,7 +111,12 @@ class AssistantBase(BaseModel):
     @field_validator("completion_model_kwargs", mode="before")
     @classmethod
     def set_model_kwargs(cls, model_kwargs: ModelKwargs | None):
-        return model_kwargs or ModelKwargs()
+        # `default_factory` does not fire for explicit None; coerce here so
+        # legacy NULL JSONB rows load. `is None` (not truthiness) so a
+        # corrupt non-None value still raises ValidationError.
+        if model_kwargs is None:
+            return ModelKwargs()
+        return model_kwargs
 
 
 _DEPRECATED_DESCRIPTION = "This field is deprecated and will be ignored"

@@ -17,6 +17,8 @@
 */**/.env
 
 # docker
+# devcontainer Feature lockfile (auto-generated locally; not tracked by the team)
+.devcontainer/devcontainer-lock.json
 
 # venv
 .venv/
@@ -85,6 +87,11 @@ target/
 vendor/
 *.log
 coverage/
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+htmlcov/
 .cache/
 tmp/
 backend/celerybeat-schedule

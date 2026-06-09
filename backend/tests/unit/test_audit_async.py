@@ -10,6 +10,7 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.jobs.job_models import Task
 
 
 @pytest.mark.asyncio
@@ -42,7 +43,7 @@ async def test_log_async_enqueues_to_arq():
         call_args = mock_job_manager.enqueue.call_args
 
         # Verify function name
-        assert call_args[0][0] == "log_audit_event"
+        assert call_args[0][0] == Task.LOG_AUDIT_EVENT
 
         # Verify job_id
         assert call_args[0][1] == job_id
@@ -109,3 +110,8 @@ async def test_log_async_with_optional_params():
         assert params["ip_address"] == "192.168.1.1"
         assert params["user_agent"] == "Mozilla/5.0"
         assert params["request_id"] == str(request_id)
+
+
+def test_audit_tasks_are_registered_in_task_enum():
+    assert Task.LOG_AUDIT_EVENT.value == "log_audit_event"
+    assert Task.EXPORT_AUDIT_LOGS.value == "export_audit_logs"

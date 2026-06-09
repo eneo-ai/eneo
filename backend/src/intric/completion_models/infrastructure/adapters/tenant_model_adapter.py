@@ -3,6 +3,7 @@
 import base64
 import json
 import re
+import socket
 import uuid
 from typing import (
     TYPE_CHECKING,
@@ -10,19 +11,28 @@ from typing import (
     AsyncIterator,
     Callable,
     Literal,
+    NoReturn,
     Optional,
     Protocol,
     TypedDict,
     cast,
 )
 
+import aiohttp
+import httpx
 import litellm
 from litellm.exceptions import (
+    APIConnectionError,
     APIError,
     AuthenticationError,
     BadRequestError,
+    InternalServerError,
     RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
 )
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from typing_extensions import override
 
 from intric.ai_models.completion_models.completion_model import (
@@ -44,6 +54,35 @@ from intric.model_providers.infrastructure.tenant_model_credential_resolver impo
 )
 
 logger = get_logger(__name__)
+
+PROVIDER_UNAVAILABLE_MESSAGE = (
+    "AI service is temporarily unavailable. Please try again later."
+)
+PROVIDER_UNAVAILABLE_CODE = "provider_unavailable"
+# Some providers wrap DNS/socket failures in generic APIError/RuntimeError types.
+# Keep this fallback narrow so transient upstream failures stay distinguishable.
+_PROVIDER_UNAVAILABLE_TEXT = (
+    "cannot connect",
+    "connection refused",
+    "connection reset",
+    "connection timed out",
+    "temporary failure in name resolution",
+    "name or service not known",
+    "service unavailable",
+    "timed out",
+)
+_PROVIDER_UNAVAILABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    APIConnectionError,
+    Timeout,
+    ServiceUnavailableError,
+    InternalServerError,
+    httpx.ConnectError,
+    httpx.TimeoutException,
+    aiohttp.ClientError,
+    socket.gaierror,
+    ConnectionError,
+    TimeoutError,
+)
 
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
@@ -137,6 +176,27 @@ def _acompletion_call(**kwargs: Any) -> Any:
     return cast(Callable[..., Any], getattr(litellm, "acompletion"))(**kwargs)
 
 
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def _is_provider_unavailable_error(exc: BaseException) -> bool:
+    for chained in _exception_chain(exc):
+        if isinstance(chained, _PROVIDER_UNAVAILABLE_EXCEPTIONS):
+            return True
+        error_text = str(chained).lower()
+        if any(marker in error_text for marker in _PROVIDER_UNAVAILABLE_TEXT):
+            return True
+    return False
+
+
 def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
@@ -194,6 +254,44 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Example: "openai/openai/gpt-4" -> sends "openai/gpt-4" to custom endpoint
         self.litellm_model = f"{provider_type}/{model.name}"
         self.provider_type = provider_type
+
+    def _record_provider_unavailable(self, *, phase: str, exc: BaseException) -> None:
+        span = trace.get_current_span()
+        if span.is_recording():
+            is_streaming = phase in {"stream_preparation", "stream_iteration"}
+            span.set_attribute("gen_ai.operation.name", "chat")
+            span.set_attribute("gen_ai.provider.name", self.provider_type)
+            span.set_attribute("gen_ai.request.model", self.model.name)
+            span.set_attribute("gen_ai.request.stream", is_streaming)
+            span.set_attribute("error.type", PROVIDER_UNAVAILABLE_CODE)
+            span.set_attribute("eneo.ai.provider_unavailable", True)
+            span.set_attribute("eneo.ai.provider_type", self.provider_type)
+            span.set_attribute("eneo.ai.model", self.litellm_model)
+            span.set_attribute("eneo.ai.operation", phase)
+            span.set_attribute("eneo.ai.error_type", exc.__class__.__name__)
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, PROVIDER_UNAVAILABLE_MESSAGE))
+
+        logger.exception(
+            f"[TenantModelAdapter] Provider unavailable for {self.litellm_model} during {phase}",
+            extra={
+                "provider_type": self.provider_type,
+                "model": self.litellm_model,
+                "operation": phase,
+                "error_type": exc.__class__.__name__,
+                "error_code": PROVIDER_UNAVAILABLE_CODE,
+            },
+        )
+
+    def _raise_provider_unavailable(
+        self, *, phase: str, exc: BaseException
+    ) -> NoReturn:
+        self._record_provider_unavailable(phase=phase, exc=exc)
+        raise OpenAIException(
+            PROVIDER_UNAVAILABLE_MESSAGE,
+            code=PROVIDER_UNAVAILABLE_CODE,
+            details={"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True},
+        ) from exc
 
     def _mask_sensitive_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Return copy of params with masked API key for safe logging."""
@@ -772,7 +870,18 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             raise OpenAIException(f"Invalid request: {error_message}") from exc
 
+        except (
+            APIConnectionError,
+            Timeout,
+            ServiceUnavailableError,
+            InternalServerError,
+        ) as exc:
+            self._raise_provider_unavailable(phase="completion", exc=exc)
+
         except APIError as exc:
+            if _is_provider_unavailable_error(exc):
+                self._raise_provider_unavailable(phase="completion", exc=exc)
+
             error_message = str(exc)
             logger.error(
                 f"API error for tenant model {self.model.name}: {error_message}",
@@ -799,6 +908,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 raise OpenAIException(f"API error: {error_message}") from exc
 
         except Exception as exc:
+            if _is_provider_unavailable_error(exc):
+                self._raise_provider_unavailable(phase="completion", exc=exc)
+
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error for {self.litellm_model}"
             )
@@ -921,7 +1033,18 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             raise OpenAIException(f"Invalid request: {error_message}") from exc
 
+        except (
+            APIConnectionError,
+            Timeout,
+            ServiceUnavailableError,
+            InternalServerError,
+        ) as exc:
+            self._raise_provider_unavailable(phase="stream_preparation", exc=exc)
+
         except APIError as exc:
+            if _is_provider_unavailable_error(exc):
+                self._raise_provider_unavailable(phase="stream_preparation", exc=exc)
+
             error_message = str(exc)
             logger.error(
                 f"API error for streaming tenant model {self.model.name}: {error_message}",
@@ -948,6 +1071,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 raise OpenAIException(f"API error: {error_message}") from exc
 
         except Exception as exc:
+            if _is_provider_unavailable_error(exc):
+                self._raise_provider_unavailable(phase="stream_preparation", exc=exc)
+
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error creating stream for {self.litellm_model}"
             )
@@ -1440,14 +1566,23 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
-            logger.error(
-                f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
-                exc_info=True,
-            )
+            if _is_provider_unavailable_error(exc):
+                self._record_provider_unavailable(phase="stream_iteration", exc=exc)
+                # Streaming Completion events expose numeric error_code, not JSON details.
+                error = PROVIDER_UNAVAILABLE_MESSAGE
+                error_code = 503
+            else:
+                logger.error(
+                    f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
+                    exc_info=True,
+                )
+                error = f"Stream error: {str(exc)}"
+                error_code = 500
+
             yield Completion(
                 text="",
-                error=f"Stream error: {str(exc)}",
-                error_code=500,
+                error=error,
+                error_code=error_code,
                 response_type=ResponseType.ERROR,
                 stop=True,
             )
