@@ -83,7 +83,12 @@ from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direc
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
+router = APIRouter(
+    dependencies=[Security(auth.authenticate_super_api_key)],
+    # Router-level 401: every route requires the super API key, so all of them
+    # can return 401. Declared once here instead of per-route get_responses.
+    responses=responses.get_responses([401]),
+)
 
 
 class OIDCDebugToggleRequest(BaseModel):

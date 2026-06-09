@@ -35905,6 +35905,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   register_new_user_api_v1_sysadmin_users__post: {
@@ -35978,6 +35987,15 @@ export interface operations {
           "application/json": components["schemas"]["UserInDB"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36024,6 +36042,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36080,6 +36107,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36120,6 +36156,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_TenantWithMaskedCredentials_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36155,6 +36200,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36206,6 +36260,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36246,6 +36309,15 @@ export interface operations {
           "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36284,6 +36356,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post: {
@@ -36302,6 +36383,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -36391,6 +36481,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_EmbeddingModelLegacy_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36418,6 +36517,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CompletionModelPublic_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36458,6 +36566,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36519,6 +36636,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36559,6 +36685,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AllowedOriginInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36592,6 +36727,15 @@ export interface operations {
           "application/json": components["schemas"]["AllowedOriginInDB"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36620,6 +36764,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -36652,6 +36805,15 @@ export interface operations {
           "application/json": {
             [key: string]: string | boolean;
           };
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36703,6 +36865,15 @@ export interface operations {
           };
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Internal Server Error */
       500: {
         headers: {
@@ -36741,6 +36912,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -36814,6 +36994,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -37209,6 +37398,15 @@ export interface operations {
           "application/json": components["schemas"]["ScimTokenStatusResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Tenant not found */
       404: {
         headers: {
@@ -37247,6 +37445,15 @@ export interface operations {
           "application/json": components["schemas"]["ScimTokenCreatedResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Tenant not found */
       404: {
         headers: {
@@ -37282,6 +37489,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Tenant not found */
       404: {
