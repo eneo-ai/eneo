@@ -12,12 +12,14 @@ from intric.database.database import AsyncSession
 from intric.database.tables.governance_policy_table import (
     GovernancePolicies,
     GovernancePolicyCompletionModels,
+    GovernancePolicyDisabledMcpTools,
     GovernancePolicyMcpServers,
     GovernancePolicyProviders,
 )
 from intric.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
+    PolicyMcpServer,
     PolicyScope,
 )
 
@@ -33,10 +35,18 @@ class GovernancePolicyRepoImpl:
         ).where(GovernancePolicyCompletionModels.policy_id == row.id)
         model_rows = (await self.session.execute(models_stmt)).all()
 
-        mcp_stmt = sa.select(GovernancePolicyMcpServers.mcp_server_id).where(
-            GovernancePolicyMcpServers.policy_id == row.id
-        )
-        mcp_ids = [r[0] for r in (await self.session.execute(mcp_stmt)).all()]
+        mcp_stmt = sa.select(
+            GovernancePolicyMcpServers.mcp_server_id,
+            GovernancePolicyMcpServers.is_default_enabled,
+        ).where(GovernancePolicyMcpServers.policy_id == row.id)
+        mcp_rows = (await self.session.execute(mcp_stmt)).all()
+
+        disabled_tools_stmt = sa.select(
+            GovernancePolicyDisabledMcpTools.mcp_tool_id
+        ).where(GovernancePolicyDisabledMcpTools.policy_id == row.id)
+        disabled_tool_ids = [
+            r[0] for r in (await self.session.execute(disabled_tools_stmt)).all()
+        ]
 
         provider_stmt = sa.select(GovernancePolicyProviders.model_provider_id).where(
             GovernancePolicyProviders.policy_id == row.id
@@ -55,7 +65,11 @@ class GovernancePolicyRepoImpl:
                 for r in model_rows
             ],
             model_provider_ids=provider_ids,
-            mcp_server_ids=mcp_ids,
+            mcp_servers=[
+                PolicyMcpServer(mcp_server_id=r[0], is_default_enabled=bool(r[1]))
+                for r in mcp_rows
+            ],
+            disabled_mcp_tool_ids=disabled_tool_ids,
             default_prompt_library_id=row.default_prompt_library_id,
             updated_at=row.updated_at,
             updated_by_user_id=row.updated_by_user_id,
@@ -135,12 +149,31 @@ class GovernancePolicyRepoImpl:
                 GovernancePolicyMcpServers.policy_id == policy.id
             )
         )
-        if policy.mcp_server_ids:
+        if policy.mcp_servers:
             await self.session.execute(
                 sa.insert(GovernancePolicyMcpServers).values(
                     [
-                        {"policy_id": policy.id, "mcp_server_id": mid}
-                        for mid in policy.mcp_server_ids
+                        {
+                            "policy_id": policy.id,
+                            "mcp_server_id": s.mcp_server_id,
+                            "is_default_enabled": s.is_default_enabled,
+                        }
+                        for s in policy.mcp_servers
+                    ]
+                )
+            )
+
+        await self.session.execute(
+            sa.delete(GovernancePolicyDisabledMcpTools).where(
+                GovernancePolicyDisabledMcpTools.policy_id == policy.id
+            )
+        )
+        if policy.disabled_mcp_tool_ids:
+            await self.session.execute(
+                sa.insert(GovernancePolicyDisabledMcpTools).values(
+                    [
+                        {"policy_id": policy.id, "mcp_tool_id": tid}
+                        for tid in policy.disabled_mcp_tool_ids
                     ]
                 )
             )

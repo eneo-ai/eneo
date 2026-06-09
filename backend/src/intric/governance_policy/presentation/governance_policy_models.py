@@ -24,9 +24,18 @@ class ModelsRestrictionInput(BaseModel):
     provider_ids: list[UUID] = []
 
 
+class PolicyMcpServerInput(BaseModel):
+    mcp_server_id: UUID
+    # Whether the server starts switched ON in the user's chat (UX seed only).
+    is_default_enabled: bool = True
+
+
 class McpRestrictionInput(BaseModel):
     enabled: bool
-    server_ids: list[UUID] = []
+    servers: list[PolicyMcpServerInput] = []
+    # Deny-set of tool IDs switched OFF on allowed servers; new tools synced
+    # onto a server later are allowed automatically.
+    disabled_tool_ids: list[UUID] = []
 
 
 class PromptEnforcementInput(BaseModel):
@@ -56,9 +65,15 @@ class ModelsRestrictionPublic(BaseModel):
     provider_ids: list[UUID]
 
 
+class PolicyMcpServerPublic(BaseModel):
+    mcp_server_id: UUID
+    is_default_enabled: bool
+
+
 class McpRestrictionPublic(BaseModel):
     enabled: bool
-    server_ids: list[UUID]
+    servers: list[PolicyMcpServerPublic]
+    disabled_tool_ids: list[UUID]
 
 
 class PromptEnforcementPublic(BaseModel):

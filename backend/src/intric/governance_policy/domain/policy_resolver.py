@@ -10,7 +10,8 @@ and is called from both read paths (UI display) and ask-time runtime
 enforcement.
 """
 
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -35,6 +36,12 @@ class EffectiveConfig:
 
     prompt_enforced: bool
     enforced_prompt_text: str | None
+
+    # Allowed servers that start switched OFF in the user's chat (UX seed
+    # only — the user can still enable them per conversation).
+    default_disabled_mcp_server_ids: list[UUID] = field(
+        default_factory=lambda: []  # noqa: C408
+    )
 
 
 _EMPTY = EffectiveConfig(
@@ -101,10 +108,30 @@ def resolve(
 
     # ---- MCP --------------------------------------------------------------
     available_mcp_servers: list["MCPServer"] = []
+    default_disabled_mcp_server_ids: list[UUID] = []
     if policy.mcp_restriction_enabled:
-        allowed_mcp_ids: set[UUID] = set(policy.mcp_server_ids)
-        available_mcp_servers = [
-            s for s in tenant_mcp_servers if s.id in allowed_mcp_ids
+        allowed_mcp_ids: set[UUID] = {e.mcp_server_id for e in policy.mcp_servers}
+        disabled_tool_ids: set[UUID] = set(policy.disabled_mcp_tool_ids)
+        for server in tenant_mcp_servers:
+            if server.id not in allowed_mcp_ids:
+                continue
+            if disabled_tool_ids and any(
+                t.id in disabled_tool_ids for t in server.tools
+            ):
+                # Shallow-copy before narrowing tools: the entity instance is
+                # shared with other readers in the same request, and both the
+                # chat UI serialization and the MCP proxy registry consume
+                # `available_mcp_servers[].tools` as the allowed set.
+                server = copy.copy(server)
+                server.tools = [
+                    t for t in server.tools if t.id not in disabled_tool_ids
+                ]
+            available_mcp_servers.append(server)
+        available_ids = {s.id for s in available_mcp_servers}
+        default_disabled_mcp_server_ids = [
+            e.mcp_server_id
+            for e in policy.mcp_servers
+            if not e.is_default_enabled and e.mcp_server_id in available_ids
         ]
 
     # ---- PROMPT -----------------------------------------------------------
@@ -122,6 +149,7 @@ def resolve(
         policy_default_model=policy_default_model,
         mcp_enforced=policy.mcp_restriction_enabled,
         available_mcp_servers=available_mcp_servers,
+        default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
     )

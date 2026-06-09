@@ -5,6 +5,7 @@ import pytest
 from intric.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
+    PolicyMcpServer,
     PolicyScope,
 )
 from intric.main.exceptions import BadRequestException
@@ -22,7 +23,8 @@ def test_default_policy_has_all_restrictions_disabled():
     assert p.mcp_restriction_enabled is False
     assert p.prompt_enforcement_enabled is False
     assert p.completion_models == []
-    assert p.mcp_server_ids == []
+    assert p.mcp_servers == []
+    assert p.disabled_mcp_tool_ids == []
     assert p.default_prompt_library_id is None
 
 
@@ -70,19 +72,64 @@ def test_disabling_models_restriction_clears_models():
     assert p.models_restriction_enabled is False
 
 
-def test_set_mcp_restriction_allows_empty_when_enabled():
-    """deny-all is valid (explicit empty whitelist)."""
+def test_set_mcp_restriction_rejects_empty_when_enabled():
+    """Deny-all is expressed by disabling the dimension, not an empty grant."""
     p = _empty_policy()
-    p.set_mcp_restriction(enabled=True, ids=[])
-    assert p.mcp_restriction_enabled is True
-    assert p.mcp_server_ids == []
+    with pytest.raises(BadRequestException):
+        p.set_mcp_restriction(enabled=True, servers=[])
 
 
 def test_set_mcp_restriction_rejects_duplicates():
     p = _empty_policy()
     a = uuid4()
     with pytest.raises(BadRequestException):
-        p.set_mcp_restriction(enabled=True, ids=[a, a])
+        p.set_mcp_restriction(
+            enabled=True,
+            servers=[
+                PolicyMcpServer(mcp_server_id=a),
+                PolicyMcpServer(mcp_server_id=a),
+            ],
+        )
+
+
+def test_set_mcp_restriction_rejects_duplicate_disabled_tool_ids():
+    p = _empty_policy()
+    tool = uuid4()
+    with pytest.raises(BadRequestException):
+        p.set_mcp_restriction(
+            enabled=True,
+            servers=[PolicyMcpServer(mcp_server_id=uuid4())],
+            disabled_tool_ids=[tool, tool],
+        )
+
+
+def test_set_mcp_restriction_stores_default_flag_and_disabled_tools():
+    p = _empty_policy()
+    server_id = uuid4()
+    tool_id = uuid4()
+    p.set_mcp_restriction(
+        enabled=True,
+        servers=[PolicyMcpServer(mcp_server_id=server_id, is_default_enabled=False)],
+        disabled_tool_ids=[tool_id],
+    )
+    assert p.mcp_restriction_enabled is True
+    assert p.mcp_servers == [
+        PolicyMcpServer(mcp_server_id=server_id, is_default_enabled=False)
+    ]
+    assert p.disabled_mcp_tool_ids == [tool_id]
+
+
+def test_disabling_mcp_restriction_clears_servers_and_disabled_tools():
+    p = _empty_policy()
+    p.set_mcp_restriction(
+        enabled=True,
+        servers=[PolicyMcpServer(mcp_server_id=uuid4())],
+        disabled_tool_ids=[uuid4()],
+    )
+    p.set_mcp_restriction(enabled=False, servers=[])
+    assert p.mcp_restriction_enabled is False
+    assert p.mcp_servers == []
+    assert p.disabled_mcp_tool_ids == []
 
 
 def test_set_prompt_enforcement_requires_id_when_enabled():

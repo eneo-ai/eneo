@@ -4,6 +4,7 @@ from uuid import uuid4
 from intric.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
+    PolicyMcpServer,
     PolicyScope,
 )
 from intric.governance_policy.domain.policy_resolver import (
@@ -21,7 +22,11 @@ def _mk_model(id=None, name="m", provider_id=None):
     return SimpleNamespace(id=id or uuid4(), name=name, provider_id=provider_id)
 
 
-def _mk_mcp(id=None, name="s"):
+def _mk_mcp(id=None, name="s", tools=None):
+    return SimpleNamespace(id=id or uuid4(), name=name, tools=tools or [])
+
+
+def _mk_tool(id=None, name="t"):
     return SimpleNamespace(id=id or uuid4(), name=name)
 
 
@@ -217,10 +222,12 @@ def test_mcp_disabled_no_filtering():
     assert cfg.available_mcp_servers == []
 
 
-def test_mcp_enabled_with_empty_whitelist_is_deny_all():
+def test_mcp_enabled_with_stale_empty_whitelist_is_deny_all():
+    """The entity rejects enabled+empty, but a stale persisted state must
+    still resolve to deny-all rather than crash or grant everything."""
     s = _mk_mcp()
     p = _empty_policy()
-    p.set_mcp_restriction(enabled=True, ids=[])
+    p.mcp_restriction_enabled = True
     cfg = resolve(
         assistant=_mk_assistant(),
         space_is_personal=True,
@@ -237,7 +244,13 @@ def test_mcp_enforced_filters_to_whitelist_intersection_with_tenant():
     s1, s2 = _mk_mcp(), _mk_mcp()
     stale_id = uuid4()
     p = _empty_policy()
-    p.set_mcp_restriction(enabled=True, ids=[s1.id, stale_id])
+    p.set_mcp_restriction(
+        enabled=True,
+        servers=[
+            PolicyMcpServer(mcp_server_id=s1.id),
+            PolicyMcpServer(mcp_server_id=stale_id),
+        ],
+    )
     cfg = resolve(
         assistant=_mk_assistant(),
         space_is_personal=True,
@@ -247,6 +260,74 @@ def test_mcp_enforced_filters_to_whitelist_intersection_with_tenant():
         library_prompt_text=None,
     )
     assert cfg.available_mcp_servers == [s1]
+    assert cfg.default_disabled_mcp_server_ids == []
+
+
+def test_mcp_disabled_tools_are_filtered_out_without_mutating_entity():
+    kept, dropped = _mk_tool(), _mk_tool()
+    s = _mk_mcp(tools=[kept, dropped])
+    p = _empty_policy()
+    p.set_mcp_restriction(
+        enabled=True,
+        servers=[PolicyMcpServer(mcp_server_id=s.id)],
+        disabled_tool_ids=[dropped.id],
+    )
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=p,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[s],
+        library_prompt_text=None,
+    )
+    (resolved,) = cfg.available_mcp_servers
+    assert [t.id for t in resolved.tools] == [kept.id]
+    # The tenant entity is shared with other readers — must stay untouched.
+    assert [t.id for t in s.tools] == [kept.id, dropped.id]
+
+
+def test_mcp_server_without_disabled_tools_is_passed_through_unchanged():
+    s = _mk_mcp(tools=[_mk_tool()])
+    other_server_tool = uuid4()
+    p = _empty_policy()
+    p.set_mcp_restriction(
+        enabled=True,
+        servers=[PolicyMcpServer(mcp_server_id=s.id)],
+        disabled_tool_ids=[other_server_tool],
+    )
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=p,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[s],
+        library_prompt_text=None,
+    )
+    assert cfg.available_mcp_servers == [s]
+
+
+def test_mcp_default_disabled_servers_are_reported():
+    s1, s2 = _mk_mcp(), _mk_mcp()
+    stale_id = uuid4()
+    p = _empty_policy()
+    p.set_mcp_restriction(
+        enabled=True,
+        servers=[
+            PolicyMcpServer(mcp_server_id=s1.id, is_default_enabled=False),
+            PolicyMcpServer(mcp_server_id=s2.id, is_default_enabled=True),
+            PolicyMcpServer(mcp_server_id=stale_id, is_default_enabled=False),
+        ],
+    )
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=p,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[s1, s2],
+        library_prompt_text=None,
+    )
+    # Stale server ids never reach the frontend seed list.
+    assert cfg.default_disabled_mcp_server_ids == [s1.id]
 
 
 def test_prompt_disabled_returns_none():

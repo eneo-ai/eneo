@@ -119,6 +119,11 @@ class EffectiveConfigPublic(BaseModel):
     available_mcp_servers: list[MCPServerPublicDict] = Field(
         default_factory=_empty_mcp_server_public_dict_list  # type: ignore[arg-type]
     )
+    # Allowed servers that start switched OFF in the user's chat (UX seed
+    # only — the user can still enable them per conversation).
+    default_disabled_mcp_server_ids: list[UUID] = Field(
+        default_factory=_empty_uuid_list
+    )
     prompt_locked: bool
 
 

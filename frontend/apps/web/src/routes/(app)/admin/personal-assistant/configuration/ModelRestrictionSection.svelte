@@ -5,7 +5,6 @@
 -->
 
 <script lang="ts">
-  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
@@ -99,15 +98,15 @@
           >
             <div class="flex items-center gap-3">
               {#if pid !== null}
-                <Checkbox
+                <Switch
                   checked={isProviderSelected}
-                  onCheckedChange={(v) => toggleProvider(pid, !!v)}
+                  onCheckedChange={(v) => toggleProvider(pid, v)}
                   aria-label={m.governance_provider_allow_all_aria({
                     provider: providerName(pid)
                   })}
                 />
               {:else}
-                <div class="h-4 w-4" aria-hidden="true"></div>
+                <div class="w-8" aria-hidden="true"></div>
               {/if}
               <div>
                 <div class="text-primary text-sm font-semibold">
@@ -144,11 +143,11 @@
                 {@const includedViaProvider = isProviderSelected}
                 {@const effectivelySelected = includedViaProvider || (sel?.selected ?? false)}
                 <tr class="border-default border-t {includedViaProvider ? 'bg-secondary/30' : ''}">
-                  <td class="w-12 px-4 py-2.5">
-                    <Checkbox
+                  <td class="w-14 px-4 py-2.5">
+                    <Switch
                       checked={effectivelySelected}
                       disabled={includedViaProvider}
-                      onCheckedChange={(v) => toggleModelSelected(model.id, !!v)}
+                      onCheckedChange={(v) => toggleModelSelected(model.id, v)}
                       aria-label={m.governance_model_allow_aria({
                         name: model.nickname ?? model.name
                       })}

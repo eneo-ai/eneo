@@ -52,9 +52,13 @@
         bind:mcpEnabled={draft.mcpEnabled}
         allMcpServers={draft.allMcpServers}
         mcpSelections={draft.mcpSelections}
+        disabledMcpToolIds={draft.disabledMcpToolIds}
         mcpSummary={draft.mcpSummary}
+        mcpValid={draft.mcpValid}
         badgeVariant={draft.badgeVariant}
         toggleMcp={draft.toggleMcp}
+        toggleMcpDefault={draft.toggleMcpDefault}
+        toggleMcpTool={draft.toggleMcpTool}
       />
       <PromptEnforcementSection
         bind:promptEnabled={draft.promptEnabled}

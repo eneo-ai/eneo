@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -257,6 +257,26 @@
     for (const id of Array.from(disabledMcpServerIds)) {
       if (!validIds.has(id)) disabledMcpServerIds.delete(id);
     }
+  });
+
+  // Seed the toggles from the governance policy's per-server chat defaults.
+  // Keyed on the conversation OBJECT: ChatService replaces it on new/loaded
+  // conversations but mutates it while a conversation is running, so the seed
+  // never wipes toggles the user made mid-conversation.
+  let seededConversation: unknown = null;
+  $effect(() => {
+    const conversation = chat.currentConversation;
+    const partner = chat.partner;
+    if (conversation === seededConversation) return;
+    seededConversation = conversation;
+    untrack(() => {
+      disabledMcpServerIds.clear();
+      if (partner && "effective_config" in partner) {
+        for (const id of partner.effective_config?.default_disabled_mcp_server_ids ?? []) {
+          disabledMcpServerIds.add(id);
+        }
+      }
+    });
   });
 
   // Check if the assistant has MCP servers/tools

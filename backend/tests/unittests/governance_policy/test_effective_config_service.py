@@ -7,6 +7,7 @@ from intric.governance_policy.application.effective_config_service import (
 )
 from intric.governance_policy.domain.governance_policy import (
     GovernancePolicy,
+    PolicyMcpServer,
     PolicyScope,
 )
 
@@ -20,7 +21,11 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
         id=uuid4(), tenant_id=tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
     )
     policy.set_mcp_restriction(
-        enabled=True, ids=[enabled_server_id, disabled_server_id]
+        enabled=True,
+        servers=[
+            PolicyMcpServer(mcp_server_id=enabled_server_id),
+            PolicyMcpServer(mcp_server_id=disabled_server_id),
+        ],
     )
 
     service = EffectiveConfigService(

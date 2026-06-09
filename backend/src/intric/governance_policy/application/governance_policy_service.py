@@ -9,6 +9,7 @@ from uuid import UUID
 from intric.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
+    PolicyMcpServer,
     PolicyScope,
 )
 from intric.governance_policy.domain.governance_policy_repo import (
@@ -71,7 +72,7 @@ class GovernancePolicyService:
         models_restriction: (
             tuple[bool, list[PolicyCompletionModel], list[UUID]] | None
         ) = None,
-        mcp_restriction: tuple[bool, list[UUID]] | None = None,
+        mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
     ) -> GovernancePolicy:
         validate_permission(self.user, Permission.ADMIN)
@@ -89,10 +90,14 @@ class GovernancePolicyService:
             )
 
         if mcp_restriction is not None:
-            enabled, ids = mcp_restriction
-            if enabled and ids:
-                await self._validate_mcp_servers_belong_to_tenant(ids)
-            policy.set_mcp_restriction(enabled=enabled, ids=ids)
+            enabled, servers, disabled_tool_ids = mcp_restriction
+            if enabled and servers:
+                await self._validate_mcp_servers_and_tools(servers, disabled_tool_ids)
+            policy.set_mcp_restriction(
+                enabled=enabled,
+                servers=servers,
+                disabled_tool_ids=disabled_tool_ids,
+            )
 
         if prompt_enforcement is not None:
             enabled, prompt_id = prompt_enforcement
@@ -127,15 +132,33 @@ class GovernancePolicyService:
                     "accessible to this tenant"
                 )
 
-    async def _validate_mcp_servers_belong_to_tenant(self, ids: list[UUID]) -> None:
+    async def _validate_mcp_servers_and_tools(
+        self, servers: list[PolicyMcpServer], disabled_tool_ids: list[UUID]
+    ) -> None:
         tenant_servers = (
             await self.mcp_server_settings_service.get_available_mcp_servers()
         )
-        enabled_ids = {s.id for s in tenant_servers if s.is_enabled}
-        for sid in ids:
-            if sid not in enabled_ids:
+        enabled_servers = [s for s in tenant_servers if s.is_enabled]
+        enabled_ids = {s.id for s in enabled_servers}
+        selected_ids: set[UUID] = set()
+        for entry in servers:
+            if entry.mcp_server_id not in enabled_ids:
                 raise BadRequestException(
-                    f"MCP server {sid} is not enabled for this tenant"
+                    f"MCP server {entry.mcp_server_id} is not enabled for this tenant"
+                )
+            selected_ids.add(entry.mcp_server_id)
+        # Disabled tools must belong to a selected server — anything else is a
+        # stale or cross-tenant reference.
+        selectable_tool_ids = {
+            tool.id
+            for server in enabled_servers
+            if server.id in selected_ids
+            for tool in server.tools
+        }
+        for tool_id in disabled_tool_ids:
+            if tool_id not in selectable_tool_ids:
+                raise BadRequestException(
+                    f"MCP tool {tool_id} does not belong to an allowed server"
                 )
 
     async def _validate_prompt_belongs_to_tenant(self, prompt_id: UUID) -> None:

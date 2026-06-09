@@ -11,6 +11,7 @@ from intric.governance_policy.presentation.governance_policy_models import (
     McpRestrictionPublic,
     ModelsRestrictionPublic,
     PolicyCompletionModelPublic,
+    PolicyMcpServerPublic,
     PromptEnforcementPublic,
 )
 
@@ -32,7 +33,14 @@ class GovernancePolicyAssembler:
             ),
             mcp_restriction=McpRestrictionPublic(
                 enabled=policy.mcp_restriction_enabled,
-                server_ids=list(policy.mcp_server_ids),
+                servers=[
+                    PolicyMcpServerPublic(
+                        mcp_server_id=s.mcp_server_id,
+                        is_default_enabled=s.is_default_enabled,
+                    )
+                    for s in policy.mcp_servers
+                ],
+                disabled_tool_ids=list(policy.disabled_mcp_tool_ids),
             ),
             prompt_enforcement=PromptEnforcementPublic(
                 enabled=policy.prompt_enforcement_enabled,

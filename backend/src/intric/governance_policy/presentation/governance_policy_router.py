@@ -14,6 +14,7 @@ from intric.audit.domain.entity_types import EntityType
 from intric.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
+    PolicyMcpServer,
 )
 from intric.governance_policy.presentation.governance_policy_models import (
     GovernancePolicyPublic,
@@ -62,10 +63,27 @@ def _policy_changes(
             "old": before.mcp_restriction_enabled,
             "new": after.mcp_restriction_enabled,
         }
-    if _ids(before.mcp_server_ids) != _ids(after.mcp_server_ids):
-        changes["mcp_server_ids"] = {
-            "old": _ids(before.mcp_server_ids),
-            "new": _ids(after.mcp_server_ids),
+
+    def _mcp_entries(policy: GovernancePolicy) -> list[dict[str, object]]:
+        return sorted(
+            (
+                {
+                    "id": str(s.mcp_server_id),
+                    "is_default_enabled": s.is_default_enabled,
+                }
+                for s in policy.mcp_servers
+            ),
+            key=lambda entry: str(entry["id"]),
+        )
+
+    before_mcp = _mcp_entries(before)
+    after_mcp = _mcp_entries(after)
+    if before_mcp != after_mcp:
+        changes["mcp_servers"] = {"old": before_mcp, "new": after_mcp}
+    if _ids(before.disabled_mcp_tool_ids) != _ids(after.disabled_mcp_tool_ids):
+        changes["disabled_mcp_tool_ids"] = {
+            "old": _ids(before.disabled_mcp_tool_ids),
+            "new": _ids(after.disabled_mcp_tool_ids),
         }
     if before.prompt_enforcement_enabled != after.prompt_enforcement_enabled:
         changes["prompt_enforcement_enabled"] = {
@@ -128,7 +146,14 @@ async def update_governance_policy(
     if payload.mcp_restriction is not None:
         mcp_restriction = (
             payload.mcp_restriction.enabled,
-            list(payload.mcp_restriction.server_ids),
+            [
+                PolicyMcpServer(
+                    mcp_server_id=s.mcp_server_id,
+                    is_default_enabled=s.is_default_enabled,
+                )
+                for s in payload.mcp_restriction.servers
+            ],
+            list(payload.mcp_restriction.disabled_tool_ids),
         )
 
     prompt_enforcement = None

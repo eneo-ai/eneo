@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.base_class import BaseCrossReference, BasePublic
-from intric.database.tables.mcp_server_table import MCPServers
+from intric.database.tables.mcp_server_table import MCPServers, MCPServerTools
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.prompt_library_table import PromptLibrary
 from intric.database.tables.tenant_table import Tenants
@@ -86,6 +86,22 @@ class GovernancePolicyMcpServers(BaseCrossReference):
     )
     mcp_server_id: Mapped[UUID] = mapped_column(
         ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
+    )
+    # Whether the server starts switched ON in the user's chat (UX seed only;
+    # the user can toggle any allowed server per conversation).
+    is_default_enabled: Mapped[bool] = mapped_column(server_default="True")
+
+
+class GovernancePolicyDisabledMcpTools(BaseCrossReference):
+    # __tablename__ auto-generated as "governance_policy_disabled_mcp_tools".
+    # Deny-set: rows are tools the admin switched OFF on an allowed server.
+    # Tools synced onto a server later are therefore allowed automatically.
+
+    policy_id: Mapped[UUID] = mapped_column(
+        ForeignKey(GovernancePolicies.id, ondelete="CASCADE"), primary_key=True
+    )
+    mcp_tool_id: Mapped[UUID] = mapped_column(
+        ForeignKey(MCPServerTools.id, ondelete="CASCADE"), primary_key=True
     )
 
 

@@ -35,13 +35,31 @@ type CompletionModel = {
   can_access?: boolean;
 };
 type ModelProvider = { id: string; name: string; is_active?: boolean };
-type McpServer = { id: string; name: string; is_available?: boolean };
+type McpTool = {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_enabled_by_default?: boolean;
+  removed_from_remote?: boolean;
+};
+type McpServer = {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_available?: boolean;
+  tools?: McpTool[] | null;
+};
 type PromptOption = { id: string; name: string; description?: string | null };
 
 type PolicyModel = { completion_model_id: string; is_default: boolean };
+type PolicyMcpServer = { mcp_server_id: string; is_default_enabled: boolean };
 type Policy = {
   models_restriction: { enabled: boolean; models: PolicyModel[]; provider_ids?: string[] | null };
-  mcp_restriction: { enabled: boolean; server_ids: string[] };
+  mcp_restriction: {
+    enabled: boolean;
+    servers: PolicyMcpServer[];
+    disabled_tool_ids?: string[] | null;
+  };
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
 };
 
@@ -58,7 +76,7 @@ export type BadgeVariant = "default" | "outline" | "destructive";
 
 const EMPTY_POLICY: Policy = {
   models_restriction: { enabled: false, models: [], provider_ids: [] },
-  mcp_restriction: { enabled: false, server_ids: [] },
+  mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
   prompt_enforcement: { enabled: false, prompt_library_id: null }
 };
 
@@ -80,7 +98,10 @@ export class PolicyDraft {
   modelSelections = new SvelteMap<string, ModelSelection>();
   providerSelections = new SvelteSet<string>();
   mcpEnabled = $state(false);
-  mcpSelections = new SvelteSet<string>();
+  // Selected (allowed) servers → whether they start switched ON in users' chat.
+  mcpSelections = new SvelteMap<string, { isDefaultEnabled: boolean }>();
+  // Deny-set of tool ids switched off on allowed servers.
+  disabledMcpToolIds = new SvelteSet<string>();
   promptEnabled = $state(false);
   selectedPromptId = $state<string | null>(null);
 
@@ -123,14 +144,31 @@ export class PolicyDraft {
     }
     this.mcpEnabled = policy.mcp_restriction.enabled;
     this.mcpSelections.clear();
-    for (const id of policy.mcp_restriction.server_ids) this.mcpSelections.add(id);
+    for (const server of policy.mcp_restriction.servers) {
+      this.mcpSelections.set(server.mcp_server_id, {
+        isDefaultEnabled: server.is_default_enabled
+      });
+    }
+    this.disabledMcpToolIds.clear();
+    for (const id of policy.mcp_restriction.disabled_tool_ids ?? []) {
+      this.disabledMcpToolIds.add(id);
+    }
     this.promptEnabled = policy.prompt_enforcement.enabled;
     this.selectedPromptId = policy.prompt_enforcement.prompt_library_id ?? null;
     this.saveError = null;
   }
 
   // ---- Derived inputs ------------------------------------------------------
-  allMcpServers = $derived(this.#allMcpServers);
+  // Only tools that exist on the remote and are globally enabled are offered —
+  // globally disabled tools never run regardless of this policy.
+  allMcpServers = $derived(
+    this.#allMcpServers.map((server) => ({
+      ...server,
+      tools: (server.tools ?? []).filter(
+        (tool) => tool.is_enabled_by_default !== false && !tool.removed_from_remote
+      )
+    }))
+  );
   modelsByProvider = $derived.by(() => {
     const map = new SvelteMap<string | null, CompletionModel[]>();
     for (const model of this.#allModels) {
@@ -171,7 +209,17 @@ export class PolicyDraft {
       null
   );
   #initialProviderIds = $derived(new SvelteSet(this.#policy.models_restriction.provider_ids ?? []));
-  #initialMcpIds = $derived(new SvelteSet(this.#policy.mcp_restriction.server_ids));
+  #initialMcpServers = $derived(
+    new SvelteMap(
+      this.#policy.mcp_restriction.servers.map((server) => [
+        server.mcp_server_id,
+        server.is_default_enabled
+      ])
+    )
+  );
+  #initialDisabledToolIds = $derived(
+    new SvelteSet(this.#policy.mcp_restriction.disabled_tool_ids ?? [])
+  );
 
   #modelsDirty = $derived(
     this.modelsEnabled !== this.#policy.models_restriction.enabled ||
@@ -183,8 +231,12 @@ export class PolicyDraft {
   );
   #mcpDirty = $derived(
     this.mcpEnabled !== this.#policy.mcp_restriction.enabled ||
-      this.mcpSelections.size !== this.#initialMcpIds.size ||
-      Array.from(this.mcpSelections).some((id) => !this.#initialMcpIds.has(id))
+      this.mcpSelections.size !== this.#initialMcpServers.size ||
+      Array.from(this.mcpSelections.entries()).some(
+        ([id, v]) => this.#initialMcpServers.get(id) !== v.isDefaultEnabled
+      ) ||
+      this.disabledMcpToolIds.size !== this.#initialDisabledToolIds.size ||
+      Array.from(this.disabledMcpToolIds).some((id) => !this.#initialDisabledToolIds.has(id))
   );
   #promptDirty = $derived(
     this.promptEnabled !== this.#policy.prompt_enforcement.enabled ||
@@ -200,10 +252,12 @@ export class PolicyDraft {
       this.defaultModelId === null ||
       this.effectiveModelIds.has(this.defaultModelId)
   );
+  mcpValid = $derived(!this.mcpEnabled || this.mcpSelections.size > 0);
   canSave = $derived(
     this.dirty &&
       (!this.modelsEnabled || this.effectiveModelIds.size > 0) &&
       this.defaultValid &&
+      this.mcpValid &&
       (!this.promptEnabled || this.selectedPromptId !== null)
   );
 
@@ -277,8 +331,24 @@ export class PolicyDraft {
   };
 
   toggleMcp = (id: string, on: boolean) => {
-    if (on) this.mcpSelections.add(id);
-    else this.mcpSelections.delete(id);
+    if (on) {
+      this.mcpSelections.set(id, { isDefaultEnabled: true });
+    } else {
+      this.mcpSelections.delete(id);
+      // Tool overrides only make sense for allowed servers — drop them so a
+      // later re-select starts from "all tools on".
+      const server = this.allMcpServers.find((s) => s.id === id);
+      for (const tool of server?.tools ?? []) this.disabledMcpToolIds.delete(tool.id);
+    }
+  };
+
+  toggleMcpDefault = (id: string, on: boolean) => {
+    if (this.mcpSelections.has(id)) this.mcpSelections.set(id, { isDefaultEnabled: on });
+  };
+
+  toggleMcpTool = (toolId: string, on: boolean) => {
+    if (on) this.disabledMcpToolIds.delete(toolId);
+    else this.disabledMcpToolIds.add(toolId);
   };
 
   toggleProvider = (pid: string, on: boolean) => {
@@ -310,11 +380,9 @@ export class PolicyDraft {
     ) {
       out.push(m.governance_confirm_models_hidden());
     }
-    if (
-      this.mcpEnabled &&
-      this.mcpSelections.size === 0 &&
-      (!initial.mcp_restriction.enabled || initial.mcp_restriction.server_ids.length !== 0)
-    ) {
+    // Turning the grant OFF removes every MCP server from the personal
+    // assistant (enabled+empty can no longer be saved).
+    if (!this.mcpEnabled && initial.mcp_restriction.enabled) {
       out.push(m.governance_confirm_mcp_disabled());
     }
     if (this.promptEnabled && !initial.prompt_enforcement.enabled) {
@@ -336,7 +404,11 @@ export class PolicyDraft {
         },
         mcp_restriction: {
           enabled: this.mcpEnabled,
-          server_ids: Array.from(this.mcpSelections)
+          servers: Array.from(this.mcpSelections.entries()).map(([id, v]) => ({
+            mcp_server_id: id,
+            is_default_enabled: v.isDefaultEnabled
+          })),
+          disabled_tool_ids: Array.from(this.disabledMcpToolIds)
         },
         prompt_enforcement: {
           enabled: this.promptEnabled,

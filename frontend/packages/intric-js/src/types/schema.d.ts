@@ -10272,6 +10272,8 @@ export interface components {
       mcp_enforced: boolean;
       /** Available Mcp Servers */
       available_mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
+      /** Default Disabled Mcp Server Ids */
+      default_disabled_mcp_server_ids?: string[];
       /** Prompt Locked */
       prompt_locked: boolean;
     };
@@ -11961,17 +11963,24 @@ export interface components {
       /** Enabled */
       enabled: boolean;
       /**
-       * Server Ids
+       * Servers
        * @default []
        */
-      server_ids?: string[];
+      servers?: components["schemas"]["PolicyMcpServerInput"][];
+      /**
+       * Disabled Tool Ids
+       * @default []
+       */
+      disabled_tool_ids?: string[];
     };
     /** McpRestrictionPublic */
     McpRestrictionPublic: {
       /** Enabled */
       enabled: boolean;
-      /** Server Ids */
-      server_ids: string[];
+      /** Servers */
+      servers: components["schemas"]["PolicyMcpServerPublic"][];
+      /** Disabled Tool Ids */
+      disabled_tool_ids: string[];
     };
     /** Message */
     Message: {
@@ -13646,6 +13655,29 @@ export interface components {
       completion_model_id: string;
       /** Is Default */
       is_default: boolean;
+    };
+    /** PolicyMcpServerInput */
+    PolicyMcpServerInput: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /**
+       * Is Default Enabled
+       * @default true
+       */
+      is_default_enabled?: boolean;
+    };
+    /** PolicyMcpServerPublic */
+    PolicyMcpServerPublic: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Is Default Enabled */
+      is_default_enabled: boolean;
     };
     /**
      * PreflightRequest
@@ -17587,7 +17619,10 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
     };
-    /** SSEReasoning */
+    /**
+     * SSEReasoning
+     * @description Event carrying a chunk of the model's reasoning/thinking text.
+     */
     SSEReasoning: {
       /**
        * Session Id

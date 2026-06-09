@@ -29,6 +29,14 @@ class PolicyCompletionModel:
 
 
 @dataclass
+class PolicyMcpServer:
+    mcp_server_id: UUID
+    # Whether the server starts switched ON in the user's chat. Defaults are
+    # UX-only: the user can always toggle any allowed server per conversation.
+    is_default_enabled: bool = True
+
+
+@dataclass
 class GovernancePolicy:
     """Tenant-level governance config for personal default assistants.
 
@@ -52,7 +60,10 @@ class GovernancePolicy:
     # provider in `model_provider_ids`" — so a provider whitelist is a
     # subscription to that provider's future models, not a snapshot.
     model_provider_ids: list[UUID] = field(default_factory=lambda: [])  # noqa: C408
-    mcp_server_ids: list[UUID] = field(default_factory=lambda: [])  # noqa: C408
+    mcp_servers: list[PolicyMcpServer] = field(default_factory=lambda: [])  # noqa: C408
+    # Tool IDs the admin switched OFF on allowed servers. Stored as a deny-set
+    # so tools synced onto a server later are allowed automatically.
+    disabled_mcp_tool_ids: list[UUID] = field(default_factory=lambda: [])  # noqa: C408
     default_prompt_library_id: UUID | None = None
 
     updated_at: datetime | None = None
@@ -84,13 +95,28 @@ class GovernancePolicy:
         self.completion_models = list(models) if enabled else []
         self.model_provider_ids = list(provider_ids) if enabled else []
 
-    def set_mcp_restriction(self, *, enabled: bool, ids: list[UUID]) -> None:
+    def set_mcp_restriction(
+        self,
+        *,
+        enabled: bool,
+        servers: list[PolicyMcpServer],
+        disabled_tool_ids: list[UUID] | None = None,
+    ) -> None:
+        disabled_tool_ids = list(disabled_tool_ids or [])
+        # Deny-all is expressed by disabling the dimension ("no MCP in the
+        # personal assistant"), so an enabled grant must allow something.
+        if enabled and not servers:
+            raise BadRequestException(
+                "Cannot enable MCP servers without selecting at least one server"
+            )
+        ids = [s.mcp_server_id for s in servers]
         if len(ids) != len(set(ids)):
             raise BadRequestException("Duplicate MCP server IDs")
-        # enabled=True with empty list is allowed: "no MCP servers in
-        # personal assistant" (explicit deny-all).
+        if len(disabled_tool_ids) != len(set(disabled_tool_ids)):
+            raise BadRequestException("Duplicate MCP tool IDs")
         self.mcp_restriction_enabled = enabled
-        self.mcp_server_ids = list(ids) if enabled else []
+        self.mcp_servers = list(servers) if enabled else []
+        self.disabled_mcp_tool_ids = disabled_tool_ids if enabled else []
 
     def set_prompt_enforcement(
         self, *, enabled: bool, prompt_library_id: UUID | None

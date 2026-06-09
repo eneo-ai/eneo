@@ -116,6 +116,9 @@ class AssistantAssembler:
                 )
                 for server in effective_config.available_mcp_servers
             ],
+            default_disabled_mcp_server_ids=list(
+                effective_config.default_disabled_mcp_server_ids
+            ),
             prompt_locked=effective_config.prompt_enforced,
         )
 

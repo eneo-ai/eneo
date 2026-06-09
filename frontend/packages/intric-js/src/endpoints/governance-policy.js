@@ -21,7 +21,7 @@ export function initGovernancePolicy(client) {
      * are touched.
      * @param {Object} params
      * @param {{enabled: boolean, models: {completion_model_id: string, is_default: boolean}[], provider_ids: string[]} | null} [params.models_restriction]
-     * @param {{enabled: boolean, server_ids: string[]} | null} [params.mcp_restriction]
+     * @param {{enabled: boolean, servers: {mcp_server_id: string, is_default_enabled: boolean}[], disabled_tool_ids: string[]} | null} [params.mcp_restriction]
      * @param {{enabled: boolean, prompt_library_id: string | null} | null} [params.prompt_enforcement]
      * @throws {IntricError}
      */
