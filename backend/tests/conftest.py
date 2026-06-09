@@ -17,6 +17,9 @@ if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
     os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour
 
 import asyncio
+import faulthandler
+import sys
+import threading
 import warnings
 from typing import TYPE_CHECKING
 
@@ -90,6 +93,55 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     for entry in IGNORED_WARNINGS:
         config.addinivalue_line("filterwarnings", entry.to_filter_string())
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(
+    session: pytest.Session,  # noqa: ARG001  # required by pytest hook contract
+    exitstatus: int,
+) -> None:
+    """Guarantee the process always terminates with a clear, bounded signal.
+
+    The tests themselves complete in ~11s, but interpreter shutdown can
+    intermittently hang while joining a non-daemon thread left running by the
+    test stack (a Twisted reactor started via Scrapy/crochet, or a leaked
+    async client). When that happens the process never exits, so CI and
+    automated callers wait indefinitely with no result after the summary line
+    has already printed.
+
+    This arms a daemon watchdog: if shutdown overruns the budget it dumps every
+    thread's traceback (to pinpoint the offending thread) and hard-exits while
+    preserving the pass/fail status. On a clean shutdown the daemon is killed
+    with the process and this is a no-op — zero impact on normal runs. Set
+    PYTEST_SHUTDOWN_WATCHDOG_SECONDS=0 to disable.
+    """
+    try:
+        budget = float(os.getenv("PYTEST_SHUTDOWN_WATCHDOG_SECONDS", "60"))
+    except ValueError:
+        budget = 60.0
+    if budget <= 0:
+        return
+
+    status = int(exitstatus)
+
+    def _watchdog() -> None:
+        import time
+
+        time.sleep(budget)
+        sys.stderr.write(
+            f"\n[pytest watchdog] interpreter shutdown exceeded {budget:.0f}s "
+            "after the session finished — a non-daemon thread is blocking exit. "
+            "Dumping thread tracebacks and forcing exit "
+            f"(status={status}).\n"
+        )
+        sys.stderr.flush()
+        faulthandler.dump_traceback(all_threads=True)
+        sys.stderr.flush()
+        os._exit(status)
+
+    threading.Thread(
+        target=_watchdog, name="pytest-shutdown-watchdog", daemon=True
+    ).start()
 
 
 def pytest_terminal_summary(

@@ -5,6 +5,7 @@
   import { IconLogout } from "@intric/icons/logout";
   import { IconBuilding2 } from "@intric/icons/building-2";
   import { Button } from "@intric/ui";
+  import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { createDropdownMenu } from "@melt-ui/svelte";
   import { fly, fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
@@ -106,6 +107,13 @@
         {m.oidc_choose_another_org()}
       </Button>
     {/if}
+
+    <div
+      class="border-default text-primary flex h-[3.5rem] w-full items-center justify-between gap-3 border-b pr-4 pl-5"
+    >
+      <span>{m.theme()}</span>
+      <ThemeToggle />
+    </div>
 
     <Button
       variant="destructive"

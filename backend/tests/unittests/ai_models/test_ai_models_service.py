@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -225,3 +226,24 @@ async def test_tenant_azure_models_shown_when_flag_off(service: AIModelsService)
     families = [model.family for model in models]
     assert families.count("azure") == 1
     assert any(model.tenant_id == TEST_TENANT.id for model in models)
+
+
+def test_get_latest_available_model_handles_missing_created_at(
+    service: AIModelsService,
+):
+    latest = service._get_latest_available_model(
+        [
+            TEST_MODEL_CHATGPT.model_copy(
+                update={"created_at": None, "can_access": True}
+            ),
+            TEST_MODEL_GPT4.model_copy(
+                update={
+                    "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    "can_access": True,
+                }
+            ),
+        ]
+    )
+
+    assert latest is not None
+    assert latest.id == TEST_MODEL_GPT4.id

@@ -1,6 +1,7 @@
 roles:
   - name: 'User'
     permissions:
+      - personal_chat
       - assistants
       - group_chats
       - apps
@@ -9,6 +10,7 @@ roles:
 
   - name: 'AI Configurator'
     permissions:
+      - personal_chat
       - assistants
       - group_chats
       - apps
@@ -22,6 +24,7 @@ roles:
   - name: 'Owner'
     permissions:
       - admin
+      - personal_chat
       - assistants
       - group_chats
       - apps

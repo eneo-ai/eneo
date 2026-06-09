@@ -11,6 +11,7 @@ from intric.scim.domain.errors import (
     ScimUserConflictError,
     ScimUserNotFoundError,
 )
+from intric.scim.openapi import scim_responses
 from intric.scim.schemas.common import ListResponse
 from intric.scim.schemas.user import PatchRequest, ScimUser, ScimUserRequest
 from intric.scim.services.user_service import ScimUserService
@@ -18,7 +19,13 @@ from intric.scim.services.user_service import ScimUserService
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Users"])
 
 
-@router.post("/Users", status_code=status.HTTP_201_CREATED, response_model=ScimUser)
+@router.post(
+    "/Users",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ScimUser,
+    description="Provision a SCIM user.",
+    responses=scim_responses(400, 401, 409, 500),
+)
 async def create_user(
     payload: ScimUserRequest,
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
@@ -35,7 +42,12 @@ async def create_user(
         raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
-@router.get("/Users")
+@router.get(
+    "/Users",
+    description="List and filter SCIM users.",
+    responses=scim_responses(400, 401, 500),
+    response_model=ListResponse,
+)
 async def list_users(
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
     filter: str | None = None,
@@ -60,7 +72,12 @@ async def list_users(
     )
 
 
-@router.get("/Users/{user_id}")
+@router.get(
+    "/Users/{user_id}",
+    description="Get a SCIM user by identifier.",
+    responses=scim_responses(400, 401, 404, 500),
+    response_model=ScimUser,
+)
 async def get_user(
     user_id: UUID,
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],
@@ -71,7 +88,12 @@ async def get_user(
         raise ScimHttpError(404, "User not found") from e
 
 
-@router.put("/Users/{user_id}")
+@router.put(
+    "/Users/{user_id}",
+    description="Replace a SCIM user.",
+    responses=scim_responses(400, 401, 404, 409, 500),
+    response_model=ScimUser,
+)
 async def replace_user(
     user_id: UUID,
     payload: ScimUserRequest,
@@ -85,7 +107,12 @@ async def replace_user(
         raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
-@router.patch("/Users/{user_id}")
+@router.patch(
+    "/Users/{user_id}",
+    description="Apply SCIM patch operations to a user.",
+    responses=scim_responses(400, 401, 404, 409, 500),
+    response_model=ScimUser,
+)
 async def patch_user(
     user_id: UUID,
     payload: PatchRequest,
@@ -99,7 +126,13 @@ async def patch_user(
         raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
-@router.delete("/Users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/Users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Delete a SCIM user.",
+    responses=scim_responses(400, 401, 404, 500),
+    response_model=None,
+)
 async def delete_user(
     user_id: UUID,
     service: Annotated[ScimUserService, Depends(get_scim_user_service)],

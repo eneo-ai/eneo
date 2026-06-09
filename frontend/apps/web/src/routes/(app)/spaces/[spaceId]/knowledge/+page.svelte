@@ -7,8 +7,9 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
-  import { Button } from "@intric/ui";
+  import { Button, Tooltip } from "@intric/ui";
   import { resolve } from "$app/paths";
+  import { IconInfo } from "@intric/icons/info";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
@@ -118,6 +119,26 @@
   >
 </svelte:head>
 
+{#snippet noCreatePermission(resourceType: string)}
+  {@const message = m.knowledge_create_no_permission({ resourceType })}
+  <!-- Sits where the create button would be, so the header layout stays
+       consistent whether or not the user can create. A real <button> trigger
+       keeps it keyboard-focusable (tabbable), and aria-label exposes the reason
+       to screen readers rather than relying on hover alone. -->
+  <Tooltip text={message} placement="bottom" asFragment let:trigger>
+    {@const tip = trigger[0]}
+    <button
+      {...tip}
+      use:tip.action
+      type="button"
+      aria-label={message}
+      class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
+    >
+      <IconInfo />
+    </button>
+  </Tooltip>
+{/snippet}
+
 <Page.Root tabController={selectedTab}>
   <Page.Header>
     <Page.Title title={m.knowledge()}></Page.Title>
@@ -136,10 +157,8 @@
     <Page.Flex>
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
-      {:else if $selectedTab === "collections" && !$currentSpace.hasPermission("create", "collection")}
-        <p class="text-secondary max-w-72 text-right text-xs">
-          {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
-        </p>
+      {:else if $selectedTab === "collections"}
+        {@render noCreatePermission(m.collections().toLowerCase())}
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
           <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
@@ -149,10 +168,8 @@
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
-      {:else if $selectedTab === "websites" && !$currentSpace.hasPermission("create", "website")}
-        <p class="text-secondary max-w-72 text-right text-xs">
-          {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
-        </p>
+      {:else if $selectedTab === "websites"}
+        {@render noCreatePermission(m.websites().toLowerCase())}
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
@@ -177,10 +194,8 @@
               : m.shared_integrations_require_admin()}
           </p>
         {/if}
-      {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}
-        <p class="text-secondary max-w-72 text-right text-xs">
-          {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
-        </p>
+      {:else if $selectedTab === "integrations"}
+        {@render noCreatePermission(m.integrations().toLowerCase())}
       {/if}
     </Page.Flex>
   </Page.Header>

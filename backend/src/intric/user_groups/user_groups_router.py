@@ -21,6 +21,8 @@ router = APIRouter()
 @router.get(
     "/",
     response_model=PaginatedResponse[UserGroupPublic],
+    description="List all user groups in the tenant.",
+    responses=responses.get_responses([]),
 )
 async def get_user_groups(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -34,6 +36,7 @@ async def get_user_groups(
 @router.get(
     "/{id}/",
     response_model=UserGroupPublic,
+    description="Get a single user group by id.",
     responses=responses.get_responses([404]),
 )
 async def get_user_group_by_uuid(
@@ -44,7 +47,12 @@ async def get_user_group_by_uuid(
     return await service.get_user_group_by_uuid(id)
 
 
-@router.post("/", response_model=UserGroupPublic)
+@router.post(
+    "/",
+    response_model=UserGroupPublic,
+    description="Create a new user group.",
+    responses=responses.get_responses([400, 403]),
+)
 async def create_user_group(
     user_group: UserGroupCreateRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -56,7 +64,8 @@ async def create_user_group(
 @router.post(
     "/{id}/",
     response_model=UserGroupPublic,
-    responses=responses.get_responses([404]),
+    description="Update an existing user group by id.",
+    responses=responses.get_responses([400, 401, 403, 404]),
 )
 async def update_user_group(
     id: UUID,
@@ -72,7 +81,8 @@ async def update_user_group(
 @router.delete(
     "/{id}/",
     response_model=UserGroupPublic,
-    responses=responses.get_responses([404]),
+    description="Delete a user group by id.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_user_group_by_uuid(
     id: UUID,
@@ -85,7 +95,8 @@ async def delete_user_group_by_uuid(
 @router.post(
     "/{id}/users/{user_id}/",
     response_model=UserGroupPublic,
-    responses=responses.get_responses([404]),
+    description="Add a user to a user group.",
+    responses=responses.get_responses([401, 403, 404]),
 )
 async def add_user_to_user_group(
     id: UUID,
@@ -99,7 +110,8 @@ async def add_user_to_user_group(
 @router.delete(
     "/{id}/users/{user_id}/",
     response_model=UserGroupPublic,
-    responses=responses.get_responses([404]),
+    description="Remove a user from a user group.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_user_from_user_group(
     id: UUID,

@@ -20,6 +20,8 @@ class Task(str, Enum):
     SYNC_SHAREPOINT_DELTA = "sync_sharepoint_delta"
     UPDATE_MODEL_USAGE_STATS = "update_model_usage_stats"
     ANALYZE_CONVERSATION_INSIGHTS = "analyze_conversation_insights"
+    EXPORT_AUDIT_LOGS = "export_audit_logs"
+    LOG_AUDIT_EVENT = "log_audit_event"
 
 
 class JobBase(BaseModel):

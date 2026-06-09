@@ -44,7 +44,10 @@ if [ -n "$LOCAL_HOOKS_PATH" ] && [ ! -d "$LOCAL_HOOKS_PATH" ]; then
     echo "Resetting repo-local core.hooksPath ('$LOCAL_HOOKS_PATH') to Git default for the devcontainer"
     git config --local --unset-all core.hooksPath
 fi
-pre-commit install --overwrite
+pre-commit install --overwrite --install-hooks \
+    --hook-type pre-commit \
+    --hook-type commit-msg \
+    --hook-type pre-push
 
 # Install Bun
 curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"

@@ -104,6 +104,16 @@ class TextSanitizer:
 
 class TextExtractor:
     @staticmethod
+    def _looks_binary(filepath: Path) -> bool:
+        # A NUL byte in the leading chunk reliably marks binary content
+        # (images, video, archives); UTF-8/cp1252 text never contains it.
+        try:
+            with open(filepath, "rb") as f:
+                return b"\x00" in f.read(8192)
+        except (PermissionError, OSError):
+            return False
+
+    @staticmethod
     def extract_from_plain_text(filepath: Path, filename: str | None = None) -> str:
         display_name = filename or filepath.name
         # Try UTF-8 first, then cp1252 (Windows), then UTF-8 with replacement
@@ -312,7 +322,11 @@ class TextExtractor:
             case TextMimeTypes.XLSX | TextMimeTypes.XLS:
                 extracted_text = self.extract_from_xlsx(filepath, display_name)
             case _:
-                # Fallback to plain text
+                # Unknown mimetype: only treat as text if it is not binary.
+                # Guards against binary uploads (e.g. unsupported image formats)
+                # being decoded into garbage and written to the TEXT column.
+                if self._looks_binary(filepath):
+                    raise UnsupportedFormatError(display_name, mimetype or "binary")
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
 
         return extracted_text.strip()

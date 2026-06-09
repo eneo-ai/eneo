@@ -22,3 +22,46 @@ tasks:
     cmds:
       - uv run alembic upgrade head
     dir: ./backend
+
+  # --- Quality gates (enforced) ---------------------------------------------
+  # `task check` is the single aggregated, deterministic pass/fail signal:
+  # ruff + format on the backend, svelte-check + eslint on the frontend.
+
+  check:
+    desc: "Run all enforced quality gates (backend + frontend)"
+    cmds:
+      - task: check:backend
+      - task: check:frontend
+
+  check:backend:
+    dir: ./backend
+    cmds:
+      - uv run ruff check src/intric
+      - uv run ruff format --check src/intric
+
+  check:frontend:
+    dir: ./frontend
+    cmds:
+      - bun run check
+      - bun run lint
+
+  # --- Dead-code analysis (advisory, non-blocking) --------------------------
+  # Surfaces unused files/exports/deps and dead Python symbols for a human to
+  # triage. Not wired into pre-commit; nothing is auto-removed.
+
+  deadcode:
+    desc: "Dead-code + dependency analysis (backend + frontend, advisory)"
+    cmds:
+      - task: deadcode:backend
+      - task: deadcode:frontend
+
+  deadcode:backend:
+    dir: ./backend
+    cmds:
+      - uv run vulture
+      - uv run deptry src
+
+  deadcode:frontend:
+    dir: ./frontend
+    cmds:
+      - bun run knip

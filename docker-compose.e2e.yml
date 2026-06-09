@@ -1,0 +1,125 @@
+# Ephemeral, self-contained stack for end-to-end tests.
+#
+# Lifecycle: `up` seeds a FRESH database, `down` removes everything. It brings its
+# own postgres + redis (no volumes, so no data survives teardown) and never
+# touches your dev/prod database — your local db can be in any state.
+#
+# Prod-safety by construction:
+#   - its own throwaway postgres/redis, isolated network
+#   - every outbound LLM key is a dummy, so it can't reach a real provider
+#   - reuses the devcontainer image + venv (read-only), ships nothing to prod
+#
+# Bring up:   docker compose -f docker-compose.e2e.yml up -d --wait
+# Tear down:  docker compose -f docker-compose.e2e.yml down        (data is gone)
+#
+# Normally you don't run these by hand — `bun run test:e2e` brings the stack up
+# before the run and tears it down after (see frontend/apps/web/e2e/*).
+
+name: eneo-e2e
+
+services:
+  e2e-db:
+    image: pgvector/pgvector:pg13
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: eneo_test
+    tmpfs:
+      - /var/lib/postgresql/data # in-memory: nothing persists across runs
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eneo_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  e2e-redis:
+    image: redis
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Deterministic OpenAI-compatible stand-in. The seeded test model's provider
+  # endpoint points here, so chat completions never reach a real provider.
+  e2e-mock-model:
+    image: eneo_devcontainer-eneo
+    command: ["python3", "/workspace/e2e/mock_model_server.py"]
+    volumes:
+      - .:/workspace:ro
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8200"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  e2e-backend:
+    image: eneo_devcontainer-eneo
+    # Root so we can install the few system libs the devcontainer adds
+    # post-create (not baked into the image). The venv is mounted read-only.
+    user: root
+    working_dir: /workspace/backend
+    depends_on:
+      e2e-db:
+        condition: service_healthy
+      e2e-redis:
+        condition: service_healthy
+      e2e-mock-model:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      POSTGRES_HOST: e2e-db
+      POSTGRES_DB: eneo_test
+      REDIS_HOST: e2e-redis
+      PYTHONDONTWRITEBYTECODE: "1"
+      # No encryption → seeded provider credentials are read as plaintext (no
+      # real keys involved). Requires tenant credentials disabled.
+      ENCRYPTION_KEY: ""
+      TENANT_CREDENTIALS_ENABLED: "false"
+      # Hard guarantee: no real outbound model calls from the test stack.
+      OPENAI_API_KEY: test-openai-key
+      ANTHROPIC_API_KEY: test-anthropic-key
+      AZURE_API_KEY: test-azure-key
+      MISTRAL_API_KEY: test-mistral-key
+      # Deterministic identity for the seeded login user.
+      DEFAULT_TENANT_NAME: E2ETenant
+      DEFAULT_USER_EMAIL: e2e@example.com
+      DEFAULT_USER_PASSWORD: E2ePassword1!
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        export PATH="/workspace/backend/.venv/bin:$$PATH"
+        apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
+        python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
+        python /workspace/e2e/seed.py  # seed mock completion model
+        exec gunicorn src.intric.server.main:app \
+          --workers 1 --worker-class uvicorn.workers.UvicornWorker \
+          --bind 0.0.0.0:8000
+    ports:
+      - "8124:8000"
+    volumes:
+      - .:/workspace
+      - backend_venv:/workspace/backend/.venv:ro
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8000"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 60s
+
+networks:
+  e2e:
+    name: eneo-e2e
+
+volumes:
+  # The devcontainer's prebuilt backend venv, reused read-only so we skip a pip
+  # install. Requires the devcontainer to have been built at least once.
+  backend_venv:
+    external: true
+    name: eneo_devcontainer_backend_venv

@@ -227,7 +227,7 @@ class TenantService:
 
         Raises:
             NotFoundException: If tenant not found
-            ValueError: If validation fails
+            BadRequestException: If provider-specific validation fails
         """
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
@@ -258,7 +258,7 @@ class TenantService:
         )
 
         if validation_errors:
-            raise ValueError(
+            raise BadRequestException(
                 f"Credential validation failed for provider '{provider}': "
                 + "; ".join(validation_errors)
             )

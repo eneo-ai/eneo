@@ -56,6 +56,20 @@ export default ts.config(
     }
   },
   {
+    // Block raw colors in class attributes — every color must go through eneo's
+    // semantic design tokens (bg-negative-dimmer, text-warning-stronger, …) so
+    // it adapts to light/dark via `data-theme`. Tailwind palette utilities
+    // (bg-orange-50) and arbitrary literals (bg-[#fff]) bypass the theme and the
+    // `dark:` variant is inert here (no `.dark` class is ever set).
+    //
+    // Currently "warn": there is a backlog of pre-existing raw colors to burn
+    // down (see frontend/COLORS.md). Flip to "error" once the backlog is clear.
+    files: ["**/*.svelte"],
+    rules: {
+      "intric/no-raw-color": "warn"
+    }
+  },
+  {
     rules: {
       "no-undef": "off",
       "@typescript-eslint/no-unused-vars": [

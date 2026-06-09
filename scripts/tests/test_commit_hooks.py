@@ -268,7 +268,7 @@ class CommitHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("schema.d.ts is out of sync", result.stderr)
 
-    def test_pre_push_check_runs_route_metadata_for_router_changes(self) -> None:
+    def test_pre_push_check_runs_route_metadata_for_endpoint_changes(self) -> None:
         root = self.make_repo()
         bin_dir = root / "bin"
         scripts_dir = root / "scripts"
@@ -287,7 +287,8 @@ class CommitHookTests(unittest.TestCase):
         subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
 
-        router = root / "backend" / "src" / "intric" / "demo_router.py"
+        router = root / "backend" / "src" / "intric" / "resources" / "users.py"
+        router.parent.mkdir(parents=True)
         router.write_text(
             "@router.post(\n"
             '    "/demo",\n'
@@ -310,6 +311,33 @@ class CommitHookTests(unittest.TestCase):
         result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
         self.assertEqual(result.returncode, 2)
         self.assertIn("route decorator missing description, responses", result.stderr)
+
+    def test_route_metadata_check_all_discovers_endpoints_in_any_python_file(
+        self,
+    ) -> None:
+        root = self.make_repo()
+        endpoint = root / "backend" / "src" / "intric" / "resources" / "users.py"
+        endpoint.parent.mkdir(parents=True)
+        endpoint.write_text(
+            "@router.post(\n"
+            '    "/users",\n'
+            "    response_model=UserResponse,\n"
+            ")\n"
+            "async def create_user():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+
+        result = run_script(
+            ROUTE_METADATA_CHECK,
+            "--repo-root",
+            str(root),
+            "--all",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(str(endpoint), result.stderr)
+        self.assertIn("missing description, responses", result.stderr)
 
     def test_route_metadata_check_flags_missing_fields_on_mutation_routes(self) -> None:
         root = self.make_repo()

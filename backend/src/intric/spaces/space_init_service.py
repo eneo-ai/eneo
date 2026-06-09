@@ -33,7 +33,7 @@ class SpaceInitService:
 
     async def _ensure_tenant_space(self) -> "Space":
         hub = await self.space_service.get_or_create_tenant_space()
-        if hub.default_assistant is None:
+        if hub.default_assistant is None and not hub.default_assistant_load_failed:
             hub = await self._update_space_with_default_assistant(hub)
         return hub
 
@@ -54,8 +54,12 @@ class SpaceInitService:
             # Create personal space if it does not exist
             personal_space = await self._create_personal_space()
 
-        if personal_space.default_assistant is None:
-            # Create default assistant if it does not exist
+        if (
+            personal_space.default_assistant is None
+            and not personal_space.default_assistant_load_failed
+        ):
+            # Create default assistant only when none exists. If a default row
+            # exists but failed to load, recreating would orphan a duplicate.
             personal_space = await self._update_space_with_default_assistant(
                 personal_space
             )
@@ -65,7 +69,7 @@ class SpaceInitService:
     async def get_space(self, space_id: "UUID"):
         space = await self.space_service.get_space(space_id)
 
-        if space.default_assistant is None:
+        if space.default_assistant is None and not space.default_assistant_load_failed:
             space = await self._update_space_with_default_assistant(space)
 
         return space

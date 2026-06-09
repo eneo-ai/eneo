@@ -334,7 +334,7 @@ class IntegrationKnowledgeService:
                     exc_info=True,
                 )
         else:
-            raise ValueError("Unknown integration type")
+            raise BadRequestException("Unknown integration type")
 
         # Return both knowledge and job for frontend to track progress
         return knowledge, job

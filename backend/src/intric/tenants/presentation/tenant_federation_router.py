@@ -1,11 +1,11 @@
 # backend/src/intric/tenants/presentation/tenant_federation_router.py
 
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal, Optional, cast
+from typing import Annotated, Any, Literal, Optional, Self, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Audit logging - module level imports for consistency
 from intric.audit.domain.action_types import ActionType
@@ -22,6 +22,7 @@ from intric.main.config import (
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 logger = get_logger(__name__)
 
@@ -41,6 +42,7 @@ router = APIRouter(
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),
     ],
+    responses=responses.get_responses([401]),
 )
 
 
@@ -172,6 +174,24 @@ class SetFederationRequest(FederationRequestBase):
 
 class PatchFederationRequest(FederationRequestBase):
     """Request model for partially updating the current tenant federation config."""
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> Self:
+        invalid_null_fields = [
+            field
+            for field in (
+                "provider",
+                "discovery_endpoint",
+                "client_id",
+                "client_secret",
+            )
+            if field in self.model_fields_set and getattr(self, field) is None
+        ]
+        if invalid_null_fields:
+            raise ValueError(
+                f"PATCH does not allow null for: {', '.join(invalid_null_fields)}"
+            )
+        return self
 
 
 class SetFederationResponse(BaseModel):
@@ -467,6 +487,7 @@ async def _log_federation_update(
         "This replaces the current setup and requires all required fields. "
         "System admin only."
     ),
+    responses=responses.get_responses([400, 404]),
 )
 async def set_tenant_federation(
     tenant_id: UUID,
@@ -561,6 +582,7 @@ async def set_tenant_federation(
         "Only provided fields are changed; omitted fields stay unchanged. "
         "PATCH requires an existing federation config. System admin only."
     ),
+    responses=responses.get_responses([400, 404]),
 )
 async def patch_tenant_federation(
     tenant_id: UUID,
@@ -586,17 +608,6 @@ async def patch_tenant_federation(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one field must be provided for patch",
-        )
-
-    invalid_null_fields = [
-        field
-        for field in ("provider", "discovery_endpoint", "client_id", "client_secret")
-        if field in updates and updates[field] is None
-    ]
-    if invalid_null_fields:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"PATCH does not allow null for: {', '.join(invalid_null_fields)}",
         )
 
     provider = updates.get("provider") or existing_config.get("provider") or "unknown"
@@ -680,6 +691,7 @@ async def patch_tenant_federation(
     status_code=status.HTTP_200_OK,
     summary="Delete tenant federation config",
     description="Remove custom identity provider for tenant. System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def delete_tenant_federation(
     tenant_id: UUID,
@@ -730,6 +742,7 @@ async def delete_tenant_federation(
     status_code=status.HTTP_200_OK,
     summary="Get tenant federation config",
     description="View federation config with masked secrets. System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def get_tenant_federation(
     tenant_id: UUID,
@@ -771,9 +784,11 @@ async def get_tenant_federation(
 
 @router.post(
     "/{tenant_id}/federation/test",
+    response_model=None,
     status_code=status.HTTP_200_OK,
     summary="Test tenant federation config",
     description="Test connection to tenant's IdP. System admin only.",
+    responses=responses.get_responses([400, 404, 500]),
 )
 async def test_tenant_federation(
     tenant_id: UUID,

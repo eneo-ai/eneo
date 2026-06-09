@@ -444,6 +444,22 @@ class TestTextExtractorExtractMethod:
         result = extractor.extract(test_file, "application/octet-stream")
         assert result == "Unknown format content"
 
+    def test_extract_rejects_binary_fallthrough(self, tmp_path):
+        """Binary data routed to the text fallback must be rejected, not decoded.
+
+        Regression for issue #431: WebP/AVIF (and any binary) reaching the
+        unknown-mimetype fallback used to be cp1252-decoded into garbage and
+        written to the TEXT column, crashing Postgres. It must raise instead.
+        """
+        extractor = TextExtractor()
+
+        test_file = tmp_path / "image.webp"
+        # NUL byte marks the content as binary.
+        test_file.write_bytes(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+
+        with pytest.raises(UnsupportedFormatError):
+            extractor.extract(test_file, "image/webp")
+
     def test_extract_strips_whitespace(self, tmp_path):
         """Should strip leading/trailing whitespace from result."""
         extractor = TextExtractor()

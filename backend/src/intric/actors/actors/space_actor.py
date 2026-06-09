@@ -611,6 +611,18 @@ class SpaceActor:
             ):
                 return False
 
+        # The personal chat (personal space default assistant) is gated by its
+        # own tenant permission, decoupled from ASSISTANTS so a baseline role can
+        # grant chat without management of assistants. Service keys authorize via
+        # scope, not user roles, so they bypass this gate (as above).
+        if (
+            resource_type == SpaceResourceType.DEFAULT_ASSISTANT
+            and self.space.is_personal()
+            and not self._is_service_api_key()
+            and Permission.PERSONAL_CHAT not in self.user.permissions
+        ):
+            return False
+
         if (
             resource_type == SpaceResourceType.SERVICE
             and Modules.INTRIC_APPLICATIONS not in self.user.modules
