@@ -54,7 +54,7 @@
     {#each templates as template (template.kind)}
       <DropdownMenu.Item
         onclick={() => install(template.kind)}
-        class="flex-col items-start gap-0.5 whitespace-normal"
+        class="cursor-pointer flex-col items-start gap-0.5 whitespace-normal"
       >
         <span class="font-medium">{template.name}</span>
         <span class="text-muted-foreground text-xs leading-snug">{template.description}</span>
