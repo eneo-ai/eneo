@@ -68,6 +68,17 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: frontend
 
+      # knip resolves real imports against generated artifacts. The paraglide
+      # i18n catalogs under src/lib/paraglide are gitignored and only exist
+      # after a compile; without them knip floods with ~384 false
+      # "unresolved import" findings for `$lib/paraglide/*`. svelte-kit sync
+      # generates the rest of the SvelteKit ambient types.
+      - name: Generate SvelteKit & paraglide artifacts
+        working-directory: frontend/apps/web
+        run: |
+          bun run prepare
+          bun run i18n:compile
+
       # --- Scans (each swallows its exit code; report-only) ----------------
       - name: Vulture — unused Python code
         continue-on-error: true
