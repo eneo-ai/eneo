@@ -16,7 +16,7 @@ router = APIRouter()
     "/",
     response_model=PaginatedResponse[AllowedOriginPublic],
     description="List the tenant's allowed CORS origins.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_origins(
     container: Annotated[Container, Depends(get_container(with_user=True))],

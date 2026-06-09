@@ -73,7 +73,7 @@ async def update_group_chat(
     response_model=GroupChatPublic,
     description="""Get an existing group chat by its ID.""",
     status_code=200,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_group_chat(
     id: UUID,

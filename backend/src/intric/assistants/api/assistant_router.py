@@ -73,7 +73,7 @@ _LEGACY_ASSISTANT_API_KEY_EXAMPLE = {
     "/",
     response_model=AssistantPublic,
     description="Create a new assistant in a space.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def create_assistant(
     request: Request,
@@ -211,7 +211,7 @@ async def get_assistants(
 @router.get(
     "/{id}/",
     response_model=AssistantPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_assistant(
     id: UUID,
@@ -231,7 +231,7 @@ async def get_assistant(
     "/{id}/",
     response_model=AssistantPublic,
     description="Update an assistant. Omitted fields are not updated.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def update_assistant(
     id: UUID,
@@ -750,7 +750,7 @@ async def delete_assistant(
     "/{id}/sessions/",
     response_model=AskResponse,
     description="Ask an assistant and start a new session. Streams the response as Server-Sent Events if `stream` is `true`.",
-    responses=responses.streaming_response(AskResponse, [400, 404]),
+    responses=responses.streaming_response(AskResponse, [400, 403, 404]),
 )
 async def ask_assistant(
     id: UUID,
@@ -824,7 +824,7 @@ async def ask_assistant(
 @router.get(
     "/{id}/sessions/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_assistant_sessions(
@@ -858,7 +858,7 @@ async def get_assistant_sessions(
 @router.get(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_assistant_session(
@@ -878,7 +878,7 @@ async def get_assistant_session(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
     description="Delete a session belonging to an assistant.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def delete_assistant_session(
@@ -937,7 +937,7 @@ async def delete_assistant_session(
     "/{id}/sessions/{session_id}/",
     response_model=AskResponse,
     description="Ask a follow-up question in an existing session. Streams the response as Server-Sent Events if `stream` is `true`.",
-    responses=responses.streaming_response(AskResponse, [400, 404]),
+    responses=responses.streaming_response(AskResponse, [400, 403, 404]),
 )
 async def ask_followup(
     id: UUID,
@@ -973,7 +973,7 @@ async def ask_followup(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback on a session.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def leave_feedback(

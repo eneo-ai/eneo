@@ -92,7 +92,7 @@ def _default_analytics_range(
     "/counts/",
     response_model=Counts,
     description="Get total tenant counts.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_counts(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -106,7 +106,7 @@ async def get_counts(
     "/metadata-statistics/",
     response_model=MetadataStatistics,
     description="Get metadata statistics for analytics.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_metadata(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -136,7 +136,7 @@ async def get_metadata(
     "/assistant-activity/",
     response_model=AssistantActivityStats,
     description="Get assistant activity statistics for the tenant.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_assistant_activity(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -167,7 +167,7 @@ async def get_assistant_activity(
     "/metadata-statistics/aggregated/",
     response_model=MetadataStatisticsAggregated,
     description="Get aggregated analytics data in hourly buckets.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_metadata_aggregated(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -487,11 +487,7 @@ async def ask_unified_questions_about_questions(
 @router.get(
     "/conversation-insights/",
     response_model=ConversationInsightResponse,
-    responses={
-        403: {
-            "description": "Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled"
-        }
-    },
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_conversation_insights(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -549,11 +545,7 @@ async def get_conversation_insight_job(
 @router.get(
     "/conversation-insights/sessions/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
-    responses={
-        403: {
-            "description": "Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled"
-        }
-    },
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_conversation_insight_sessions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -645,11 +637,7 @@ async def get_conversation_insight_sessions(
 @router.get(
     "/conversation-insights/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses={
-        403: {
-            "description": "Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled"
-        }
-    },
+    responses=responses.get_responses([403, 404]),
 )
 async def get_conversation_insight_session(
     session_id: UUID,

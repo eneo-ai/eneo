@@ -1077,7 +1077,7 @@ async def trigger_integration_full_sync(
     "/{id}/members/",
     response_model=SpaceMember,
     description="Add a user as a member of a space with a given role.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def add_space_member(

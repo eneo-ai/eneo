@@ -175,7 +175,9 @@ async def bulk_run_crawl(
 
 
 @router.get(
-    "/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404])
+    "/{id}/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([403, 404]),
 )
 async def get_website(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
@@ -190,7 +192,7 @@ async def get_website(
 @router.post(
     "/{id}/",
     response_model=WebsitePublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="Update a website's configuration by id.",
 )
 async def update_website(
@@ -274,7 +276,7 @@ async def delete_website(
 @router.post(
     "/{id}/run/",
     response_model=CrawlRunPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 429]),
     summary="Trigger a crawl",
     description="""
     Manually trigger a crawl for a specific website. This can be used to:
@@ -308,7 +310,7 @@ async def run_crawl(
 @router.get(
     "/{id}/runs/",
     response_model=PaginatedResponse[CrawlRunPublic],
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     description="List crawl runs for a website by id.",
 )
 async def get_crawl_runs(
@@ -370,7 +372,7 @@ async def transfer_website_to_space(
 @router.get(
     "/{id}/info-blobs/",
     response_model=PaginatedResponse[InfoBlobPublicNoText],
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_info_blobs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],

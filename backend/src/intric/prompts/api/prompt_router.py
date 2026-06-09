@@ -56,7 +56,7 @@ async def update_prompt_description(
     "/{id}/",
     description="Delete a prompt by id.",
     status_code=204,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_prompt(
     id: UUID,

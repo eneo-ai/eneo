@@ -75,7 +75,7 @@ async def list_users(
 @router.get(
     "/Users/{user_id}",
     description="Get a SCIM user by identifier.",
-    responses=scim_responses(401, 404, 500),
+    responses=scim_responses(400, 401, 404, 500),
     response_model=ScimUser,
 )
 async def get_user(
@@ -130,7 +130,7 @@ async def patch_user(
     "/Users/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     description="Delete a SCIM user.",
-    responses=scim_responses(401, 404, 500),
+    responses=scim_responses(400, 401, 404, 500),
     response_model=None,
 )
 async def delete_user(

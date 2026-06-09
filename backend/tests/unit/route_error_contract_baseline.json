@@ -18,9 +18,6 @@
   "GET /admin/credentials/": [
     "missing_declared_code:404"
   ],
-  "GET /analysis/conversation-insights/sessions/": [
-    "missing_declared_code:400"
-  ],
   "GET /auth/initiate": [
     "missing_declared_code:400"
   ],
@@ -49,9 +46,6 @@
   "POST /admin/sharepoint/subscriptions/{subscription_id}/recreate": [
     "missing_declared_code:400"
   ],
-  "POST /assistants/": [
-    "missing_declared_code:403"
-  ],
   "POST /auth/callback": [
     "missing_declared_code:404"
   ],
@@ -61,13 +55,7 @@
   "POST /files/": [
     "missing_declared_code:403"
   ],
-  "POST /groups/": [
-    "missing_declared_code:403"
-  ],
   "POST /groups/{id}/info-blobs/upload/": [
-    "missing_declared_code:403"
-  ],
-  "POST /info-blobs/{id}/": [
     "missing_declared_code:403"
   ],
   "POST /modules/": [

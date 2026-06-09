@@ -223,7 +223,7 @@ async def get_available_integrations_for_space(
     "/users/{user_integration_id}/",
     status_code=204,
     description="Disconnect the current user's integration.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def disconnect_user_integration(
     user_integration_id: UUID,
@@ -313,7 +313,7 @@ async def get_sync_logs(
     response_model=IntegrationPreviewDataList,
     status_code=200,
     description="Get preview data for a user integration.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def get_integration_preview(
     user_integration_id: UUID,

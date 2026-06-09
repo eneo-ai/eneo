@@ -87,7 +87,7 @@ async def get_group_by_id(
     description=(
         "Legacy groups endpoint. Use collections/spaces instead for new integrations."
     ),
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def create_group(
     group: CreateGroupRequest,
@@ -443,7 +443,7 @@ async def run_semantic_search(
     "/{id}/transfer/",
     status_code=204,
     description="Transfer a collection (legacy group) to another space.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def transfer_group_to_space(
     id: UUID,

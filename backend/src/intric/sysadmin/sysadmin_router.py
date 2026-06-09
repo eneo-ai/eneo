@@ -1307,7 +1307,7 @@ async def migrate_completion_model_for_all_tenants(
     "/completion-models/create",
     response_model=CompletionModelSparse,
     description="Create global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([400, 401]),
+    responses=responses.get_responses([400, 401, 409]),
 )
 async def create_completion_model(
     model_data: CompletionModelCreate,
@@ -1347,7 +1347,7 @@ async def create_completion_model(
     "/completion-models/{id}/metadata",
     response_model=CompletionModelSparse,
     description="Update global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([404, 401]),
+    responses=responses.get_responses([401, 404, 409]),
 )
 async def update_completion_model_metadata(
     id: UUID,
@@ -1442,7 +1442,7 @@ async def delete_completion_model(
     "/embedding-models/create",
     response_model=EmbeddingModelSparse,
     description="Create global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([400, 401]),
+    responses=responses.get_responses([400, 401, 409]),
 )
 async def create_embedding_model(
     model_data: EmbeddingModelCreate,
@@ -1476,7 +1476,7 @@ async def create_embedding_model(
     "/embedding-models/{id}/metadata",
     response_model=EmbeddingModelSparse,
     description="Update global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([404, 401]),
+    responses=responses.get_responses([401, 404, 409]),
 )
 async def update_embedding_model_metadata(
     id: UUID,

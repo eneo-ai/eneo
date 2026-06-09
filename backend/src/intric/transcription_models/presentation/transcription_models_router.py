@@ -230,7 +230,7 @@ async def get_transcription_model_usage_details(
 @router.get(
     "/{model_id}/migration-validate",
     response_model=ValidationResult,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([403, 404]),
     description="Validate transcription migration compatibility without executing.",
 )
 async def validate_transcription_migration(
@@ -250,7 +250,7 @@ async def validate_transcription_migration(
 @router.post(
     "/{model_id}/migrate",
     response_model=MigrationResult,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([403, 404]),
     description="Migrate all usage from one transcription model to another.",
 )
 async def migrate_transcription_model_usage(

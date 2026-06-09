@@ -82,7 +82,7 @@ def _service(
     "/",
     response_model=CompletionModelPublic,
     description="Create a new tenant-specific completion model.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def create_tenant_completion_model(
     model_create: TenantCompletionModelCreate,
@@ -105,7 +105,7 @@ async def create_tenant_completion_model(
     "/{model_id}/",
     response_model=CompletionModelPublic,
     description="Update a tenant-specific completion model.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_tenant_completion_model(
     model_id: UUID,

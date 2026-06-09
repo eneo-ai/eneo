@@ -76,7 +76,7 @@ async def list_groups(
 @router.get(
     "/Groups/{group_id}",
     description="Get a SCIM group by identifier.",
-    responses=scim_responses(401, 404, 500),
+    responses=scim_responses(400, 401, 404, 500),
     response_model=ScimGroup,
 )
 async def get_group(
@@ -131,7 +131,7 @@ async def patch_group(
     "/Groups/{group_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     description="Delete a SCIM group.",
-    responses=scim_responses(401, 404, 500),
+    responses=scim_responses(400, 401, 404, 500),
     response_model=None,
 )
 async def delete_group(

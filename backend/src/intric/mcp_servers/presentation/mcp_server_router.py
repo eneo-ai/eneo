@@ -91,7 +91,7 @@ async def get_tenant_mcp_settings(
     "/settings/{mcp_server_id}/",
     description="Enable an MCP server for the current tenant with optional credentials.",
     response_model=MCPServerSettingsPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def enable_mcp_for_tenant(
     mcp_server_id: UUID,
@@ -259,7 +259,7 @@ async def get_mcp_server(
     "/",
     description="Create a new MCP server in global catalog (admin only).",
     response_model=MCPServerCreateResponse,
-    responses=responses.get_responses([400, 403]),
+    responses=responses.get_responses([400, 403, 409]),
 )
 async def create_mcp_server(
     data: MCPServerCreate,
@@ -328,7 +328,7 @@ async def create_mcp_server(
     "/{id}/",
     description="Update an MCP server in global catalog (admin only).",
     response_model=MCPServerPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def update_mcp_server(
     id: UUID,

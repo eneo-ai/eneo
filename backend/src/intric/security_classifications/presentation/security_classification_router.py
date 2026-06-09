@@ -35,7 +35,7 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
     response_model=SecurityClassificationPublic,
     status_code=201,
     description="Create a new security classification for the current tenant.",
-    responses=responses.get_responses([400]),
+    responses=responses.get_responses([400, 403]),
 )
 async def create_security_classification(
     request: SecurityClassificationCreatePublic,

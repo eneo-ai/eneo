@@ -213,7 +213,7 @@ async def get_model_usage_details(
 @router.get(
     "/{model_id}/migration-validate",
     response_model=ValidationResult,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def validate_migration(
     model_id: UUID,
@@ -235,7 +235,7 @@ async def validate_migration(
     "/{model_id}/migrate",
     description="Migrate all usage from one completion model to another.",
     response_model=MigrationResult,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def migrate_model_usage(
     model_id: UUID,

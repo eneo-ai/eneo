@@ -398,7 +398,7 @@ async def delete_app(
     description="Queue a run for an app by id.",
     status_code=203,
     response_model=AppRunPublic,
-    responses=responses.get_responses([400, 403]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def run_app(
     id: UUID,
