@@ -1485,6 +1485,7 @@
   "assistant_is_typing": "Assistenten skriver",
   "assistant_is_thinking": "Assistenten tänker",
   "chat_reasoning_working": "Arbetar…",
+  "chat_reasoning_thought_for": "Tänkte i {seconds}s",
   "chat_reasoning_tools_label": "Verktyg",
   "chat_reasoning_show_call": "Visa anrop",
   "chat_reasoning_running": "Kör…",

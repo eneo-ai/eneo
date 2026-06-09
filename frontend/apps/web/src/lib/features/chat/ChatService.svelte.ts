@@ -546,6 +546,12 @@ export class ChatService {
 
               ref.references = text.references;
             },
+            onReasoning: (event) => {
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // @ts-expect-error - reasoning is a runtime property for streaming
+              ref.reasoning = ((ref.reasoning as string | undefined) ?? "") + event.reasoning;
+            },
             onImage: (image) => {
               if (!ref || isStale()) return;
               if (!ensureCurrentSession(image)) return;

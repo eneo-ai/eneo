@@ -17587,6 +17587,16 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
     };
+    /** SSEReasoning */
+    SSEReasoning: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Reasoning */
+      reasoning: string;
+    };
     /** SSEIntricEvent */
     SSEIntricEvent: {
       /**

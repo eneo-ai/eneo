@@ -133,6 +133,7 @@ class _LiteLLMStreamToolCall(Protocol):
 
 class _LiteLLMDelta(Protocol):
     content: str | None
+    reasoning_content: str | None
     tool_calls: list[_LiteLLMStreamToolCall] | None
 
 
@@ -1158,6 +1159,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
                     logger.debug(f"[DEBUG] Delta: {delta}")
+
+                    # Forward provider reasoning/thinking deltas (e.g. Anthropic
+                    # extended thinking surfaced by LiteLLM as reasoning_content)
+                    # as REASONING chunks. Kept separate from text so it never
+                    # pollutes the persisted answer.
+                    reasoning_delta = getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        yield Completion(
+                            reasoning_content=reasoning_delta,
+                            response_type=ResponseType.REASONING,
+                        )
 
                     # Accumulate tool call deltas
                     if delta.tool_calls:

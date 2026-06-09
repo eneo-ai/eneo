@@ -1486,6 +1486,7 @@
   "assistant_is_typing": "Assistant is typing",
   "assistant_is_thinking": "Assistant is thinking",
   "chat_reasoning_working": "Working…",
+  "chat_reasoning_thought_for": "Thought for {seconds}s",
   "chat_reasoning_tools_label": "Tools",
   "chat_reasoning_show_call": "Show call",
   "chat_reasoning_running": "Running…",

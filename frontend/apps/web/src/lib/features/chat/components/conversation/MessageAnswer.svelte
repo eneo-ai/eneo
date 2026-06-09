@@ -38,6 +38,12 @@
       | undefined
   );
 
+  // Reasoning/thinking text streamed for this message (runtime-only field,
+  // accumulated by ChatService; absent once a conversation is reloaded).
+  const reasoningText = $derived(
+    ((message as Record<string, unknown>).reasoning as string | undefined) ?? ""
+  );
+
   // Check if there's a pending tool approval for this message (only on last message)
   const hasPendingApproval = $derived(isLast() && chat.pendingToolApproval !== null);
 
@@ -162,11 +168,14 @@
     {/each}
   {/if}
 
-  {#if mcpToolCalls && mcpToolCalls.length > 0}
+  {#if tracedSteps.length > 0 || reasoningText.trim().length > 0}
+    <div class="mb-4">
+      <ReasoningTrace steps={tracedSteps} reasoning={reasoningText} working={toolsStillExecuting} />
+    </div>
+  {/if}
+
+  {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
-      {#if tracedSteps.length > 0}
-        <ReasoningTrace steps={tracedSteps} working={toolsStillExecuting} />
-      {/if}
       {#each pendingToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === pendingToolCalls.length - 1}
         {@const isPendingTool =

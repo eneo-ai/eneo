@@ -961,6 +961,12 @@ class AssistantService:
                             )
                             yield chunk
 
+                        if chunk.response_type == ResponseType.REASONING:
+                            # Reasoning/thinking text — pass through to SSE. Not
+                            # appended to response_string so it never lands in the
+                            # persisted answer.
+                            yield chunk
+
                         if chunk.response_type == ResponseType.FILES:
                             image_file = await self.file_service.save_image_from_bytes(
                                 chunk.image_data

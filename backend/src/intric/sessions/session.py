@@ -117,6 +117,12 @@ class SSEText(SSEBase):
     references: list[InfoBlobAskAssistantPublic]
 
 
+class SSEReasoning(SSEBase):
+    """Event carrying a chunk of the model's reasoning/thinking text."""
+
+    reasoning: str
+
+
 class SSEFiles(SSEBase):
     generated_files: list[FilePublic]
 
@@ -179,6 +185,7 @@ class ToolApprovalResponse(BaseModel):
 # Add the SSE models here in order to include them in the openapi schema
 SSE_MODELS = [
     SSEText,
+    SSEReasoning,
     SSEIntricEvent,
     SSEToolCall,
     SSEToolApprovalRequired,
