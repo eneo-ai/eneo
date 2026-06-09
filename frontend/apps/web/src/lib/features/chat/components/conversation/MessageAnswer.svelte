@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Markdown } from "@intric/ui";
   import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
+  import ReasoningTrace from "./ReasoningTrace.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
@@ -51,6 +52,32 @@
   const submittingToolIds = new SvelteSet<string>();
   const deniedToolIds = new SvelteSet<string>();
   let isSubmittingBulk = $state(false);
+
+  // Split tool calls: pending approvals stay as prominent cards below (a
+  // blocking decision must never hide); everything else (running, done, denied)
+  // folds into the collapsible reasoning trace above them.
+  const isPending = (tc: { tool_call_id?: string }) =>
+    !!tc.tool_call_id && pendingToolIds.includes(tc.tool_call_id);
+  const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
+  const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
+  const tracedSteps = $derived(
+    tracedToolCalls.map((tc, i) => {
+      const denied =
+        (!!tc.tool_call_id && deniedToolIds.has(tc.tool_call_id)) || tc.approved === false;
+      const isLastTraced = i === tracedToolCalls.length - 1;
+      const status: "running" | "complete" | "denied" = denied
+        ? "denied"
+        : toolsStillExecuting && isLastTraced
+          ? "running"
+          : "complete";
+      return {
+        toolName: tc.tool_name,
+        serverName: tc.server_name,
+        args: tc.arguments,
+        status
+      };
+    })
+  );
 
   function toggleToolCallExpanded(index: number) {
     if (expandedToolCalls.has(index)) {
@@ -137,8 +164,11 @@
 
   {#if mcpToolCalls && mcpToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
-      {#each mcpToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
-        {@const isLastToolCall = idx === mcpToolCalls.length - 1}
+      {#if tracedSteps.length > 0}
+        <ReasoningTrace steps={tracedSteps} working={toolsStillExecuting} />
+      {/if}
+      {#each pendingToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
+        {@const isLastToolCall = idx === pendingToolCalls.length - 1}
         {@const isPendingTool =
           toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
         {@const isDeniedLocally = toolCall.tool_call_id && deniedToolIds.has(toolCall.tool_call_id)}
