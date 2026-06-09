@@ -150,7 +150,7 @@
 <Toaster />
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "../../app.css";
   nav a {
     @apply text-secondary hover:bg-muted hover:text-foreground flex h-9 items-center rounded-lg px-3 text-[0.9rem] font-medium tracking-[0.01rem] transition-colors;
   }
