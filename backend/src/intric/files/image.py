@@ -7,6 +7,8 @@ from intric.main.exceptions import FileNotSupportedException
 class ImageMimeTypes(MimeTypesBase):
     PNG = "image/png"
     JPEG = "image/jpeg"
+    WEBP = "image/webp"
+    AVIF = "image/avif"
 
 
 class ImageExtractor:
