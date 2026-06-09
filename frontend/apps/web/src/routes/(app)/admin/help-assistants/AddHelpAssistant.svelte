@@ -45,15 +45,19 @@
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
-  <DropdownMenu.Content align="end" class="min-w-64">
+  <!-- Fixed, viewport-capped width so the box doesn't grow to the widest
+       description (the menu-item base is `w-max` + `whitespace-nowrap`); items
+       stack and wrap instead. -->
+  <DropdownMenu.Content align="end" class="w-80 max-w-[calc(100vw-2rem)]">
     <DropdownMenu.Label>{m.admin_help_assistants_add_menu_label()}</DropdownMenu.Label>
     <DropdownMenu.Separator />
     {#each templates as template (template.kind)}
-      <DropdownMenu.Item onclick={() => install(template.kind)}>
-        <div class="flex flex-col gap-0.5">
-          <span class="font-medium">{template.name}</span>
-          <span class="text-muted-foreground text-xs">{template.description}</span>
-        </div>
+      <DropdownMenu.Item
+        onclick={() => install(template.kind)}
+        class="flex-col items-start gap-0.5 whitespace-normal"
+      >
+        <span class="font-medium">{template.name}</span>
+        <span class="text-muted-foreground text-xs leading-snug">{template.description}</span>
       </DropdownMenu.Item>
     {/each}
   </DropdownMenu.Content>

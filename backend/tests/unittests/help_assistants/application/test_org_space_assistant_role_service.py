@@ -30,6 +30,7 @@ from intric.help_assistants.domain.assignment_history_reason import (
 from intric.help_assistants.domain.factory import HelperAssistantsFactory
 from intric.help_assistants.domain.helper_kind import HelperKind
 from intric.help_assistants.domain.role_assignment import RoleAssignment
+from intric.help_assistants.templates import get_template
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB
@@ -353,7 +354,7 @@ async def test_list_available_templates_lists_uninstalled_kinds():
 
 
 @pytest.mark.asyncio
-async def test_install_helper_creates_blank_assistant_and_hidden_role():
+async def test_install_helper_creates_assistant_with_shipped_prompt_and_visible_role():
     admin = _make_user(Permission.ADMIN)
     org_space_id = uuid4()
     system_user_id = uuid4()
@@ -366,7 +367,7 @@ async def test_install_helper_creates_blank_assistant_and_hidden_role():
         org_space_id=org_space_id,
         assistant_id=uuid4(),
         is_enabled=True,
-        is_visible_to_users=False,
+        is_visible_to_users=True,
     )
 
     prompt_service = AsyncMock()
@@ -390,23 +391,25 @@ async def test_install_helper_creates_blank_assistant_and_hidden_role():
 
     result = await service.install_helper(kind=HelperKind.PROMPT_GUIDE)
 
-    # Blank instructions by design.
+    # The shipped template prompt is applied (it drives the Q&A UI), not blank.
     prompt_service.create_prompt.assert_awaited_once()
-    assert prompt_service.create_prompt.await_args.kwargs["text"] == ""
+    installed_text = prompt_service.create_prompt.await_args.kwargs["text"]
+    assert installed_text == get_template(HelperKind.PROMPT_GUIDE).prompt_text
+    assert installed_text != ""
 
     # A new assistant row was created in the org-space.
     mocks["assistant_repo"].add.assert_awaited_once()
     new_assistant = mocks["assistant_repo"].add.await_args.args[0]
     assert new_assistant.space_id == org_space_id
 
-    # The role is installed enabled-but-hidden, pointing at the new assistant.
+    # The role is installed enabled and visible, pointing at the new assistant.
     role_repo.add.assert_awaited_once()
     added_role = role_repo.add.await_args.args[0]
     assert added_role.kind == HelperKind.PROMPT_GUIDE
     assert added_role.is_enabled is True
-    assert added_role.is_visible_to_users is False
+    assert added_role.is_visible_to_users is True
     assert added_role.assistant_id == new_assistant.id
-    assert result.is_visible_to_users is False
+    assert result.is_visible_to_users is True
 
     audit_kwargs = mocks["audit_service"].log_async.await_args.kwargs
     assert audit_kwargs["action"] == ActionType.HELP_ASSISTANT_INSTALLED

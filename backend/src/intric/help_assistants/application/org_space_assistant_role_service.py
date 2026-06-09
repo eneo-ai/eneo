@@ -6,10 +6,10 @@ template, and toggle the ``is_enabled`` / ``is_visible_to_users`` flags.
 
 Help Assistants are not preseeded. An admin installs a template from the admin
 UI (``install_helper``), which creates the underlying assistant (owned by the
-per-tenant system user, living in the org-space) with **blank** instructions,
-plus the active role row. ``uninstall_helper`` reverses that — it removes the
-role and hard-deletes the assistant so the template becomes available to add
-again.
+per-tenant system user, living in the org-space) populated from the template —
+including its shipped instructions — plus the active role row.
+``uninstall_helper`` reverses that — it removes the role and hard-deletes the
+assistant so the template becomes available to add again.
 
 Enforces the cross-table invariant from PRD §4 ("the assistant filling a
 helper role must live in the org-space") and audit-logs every mutation. All
@@ -205,11 +205,12 @@ class OrgSpaceAssistantRoleService:
         """Install a shipped Help Assistant template into the tenant.
 
         Creates the underlying assistant — owned by the per-tenant system
-        user, living in the org-space — with **blank** instructions, then the
-        active role assignment. The helper starts ``is_enabled=True`` but
-        ``is_visible_to_users=False`` so an admin can paste the instructions
-        (maintained in the Eneo community) before exposing the helper to
-        users. Refuses to install a kind that is already installed.
+        user, living in the org-space — populated from the template, including
+        its shipped instructions, then the active role assignment. The helper
+        starts enabled and visible to users: the shipped prompt is what makes
+        it render the structured Q&A on assistant settings pages, so it is
+        usable as soon as it is added. Refuses to install a kind that is
+        already installed.
         """
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
@@ -237,9 +238,11 @@ class OrgSpaceAssistantRoleService:
                 kind.value,
             )
 
-        # Blank instructions by design — the admin pastes them in afterwards.
+        # Ship the template's instructions: the Prompt Guide's prompt is what
+        # drives the eneo-question Q&A rendering on assistant settings pages,
+        # so every install (and re-install after a delete) reproduces it.
         new_prompt = await self.prompt_service.create_prompt(
-            text="",
+            text=template.prompt_text,
             description=None,
             owner_user_id=system_user_id,
         )
@@ -280,7 +283,7 @@ class OrgSpaceAssistantRoleService:
             kind=kind,
             assistant_id=new_assistant_id,
             is_enabled=True,
-            is_visible_to_users=False,
+            is_visible_to_users=True,
             created_by_user_id=self.user.id,
             updated_by_user_id=self.user.id,
         )

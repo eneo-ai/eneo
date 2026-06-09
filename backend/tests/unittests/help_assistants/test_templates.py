@@ -1,9 +1,10 @@
 """Unit tests for the Help Assistant template registry.
 
 The registry is the single code-owned source of installable Help Assistants.
-Templates carry identity (name/description) and the fixed Help-Assistant
-invariants only — instructions are deliberately absent (a freshly installed
-helper starts blank; the admin pastes them in afterwards).
+Templates carry identity (name/description), the shipped instructions
+(``prompt_text``) applied on install, and the fixed Help-Assistant invariants.
+The Prompt Guide's prompt is what drives the ``eneo-question`` Q&A rendering on
+assistant settings pages, so install (and re-install) must reproduce it.
 """
 
 from __future__ import annotations
@@ -30,16 +31,17 @@ def test_prompt_guide_template_is_registered():
     assert TEMPLATES_BY_KIND[HelperKind.PROMPT_GUIDE] is template
 
 
-def test_template_carries_identity_and_invariants_but_no_instructions():
+def test_template_carries_identity_invariants_and_shipped_instructions():
     template = get_template(HelperKind.PROMPT_GUIDE)
 
     assert template.name == "Prompt Guide"
     assert template.description
-    # Help assistants ship with logging/insights off; there is intentionally
-    # no instruction text — installs are blank and configured by an admin.
+    # Help assistants ship with logging/insights off.
     assert template.logging_enabled is False
     assert template.insight_enabled is False
-    assert not hasattr(template, "prompt_text")
+    # Instructions ship with the template and drive the structured Q&A UI.
+    assert template.prompt_text
+    assert "eneo-question" in template.prompt_text
 
 
 def test_list_templates_includes_prompt_guide():
