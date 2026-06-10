@@ -59,6 +59,42 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
     assert [server.id for server in cfg.available_mcp_servers] == [enabled_server_id]
 
 
+async def test_resolve_for_all_restrictions_disabled_skips_catalog_fetches():
+    # An all-disabled policy row exists for any tenant whose admin merely opened
+    # the config page. The resolver never reads the catalogs in that case, so we
+    # must not pay the full-table scans on every chat/preflight/space read.
+    tenant_id = uuid4()
+    policy = GovernancePolicy(
+        id=uuid4(), tenant_id=tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
+
+    completion_model_crud_service = AsyncMock(
+        get_available_completion_models=AsyncMock(return_value=[])
+    )
+    mcp_server_settings_service = AsyncMock(
+        get_available_mcp_servers=AsyncMock(return_value=[])
+    )
+    prompt_library_repo = AsyncMock()
+
+    service = EffectiveConfigService(
+        user=SimpleNamespace(tenant_id=tenant_id),
+        policy_repo=AsyncMock(get_by_tenant=AsyncMock(return_value=policy)),
+        prompt_library_repo=prompt_library_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
+    )
+
+    cfg = await service.resolve_for(
+        SimpleNamespace(is_default=True), space_is_personal=True
+    )
+
+    assert cfg.models_enforced is False
+    assert cfg.mcp_enforced is False
+    completion_model_crud_service.get_available_completion_models.assert_not_called()
+    mcp_server_settings_service.get_available_mcp_servers.assert_not_called()
+    prompt_library_repo.get.assert_not_called()
+
+
 async def test_resolve_for_non_personal_space_short_circuits_before_repos():
     policy_repo = AsyncMock()
     service = EffectiveConfigService(

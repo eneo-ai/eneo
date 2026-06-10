@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from intric.governance_policy.domain.governance_policy import PolicyScope
@@ -16,12 +17,14 @@ if TYPE_CHECKING:
     from intric.completion_models.application.completion_model_crud_service import (
         CompletionModelCRUDService,
     )
+    from intric.completion_models.domain.completion_model import CompletionModel
     from intric.governance_policy.domain.governance_policy_repo import (
         GovernancePolicyRepo,
     )
     from intric.mcp_servers.application.mcp_server_settings_service import (
         MCPServerSettingsService,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
     from intric.users.user import UserInDB
 
@@ -82,26 +85,37 @@ class EffectiveConfigService:
                 library_prompt_text=None,
             )
 
-        # Tenant-accessible completion models. Global models (tenant_id=NULL)
-        # show up here naturally because `can_access` already accounts for them.
-        tenant_models = (
-            await self.completion_model_crud_service.get_available_completion_models()
-        )
+        # Fetch only the catalogs the resolver will actually consult: it reads
+        # tenant_completion_models only when models_restriction_enabled and
+        # tenant_mcp_servers only when mcp_restriction_enabled. An all-disabled
+        # policy row exists for any tenant whose admin merely opened the config
+        # page, so skipping these keeps the chat hot path off two full-table
+        # scans per resolution. The independent fetches run concurrently.
+        async def _load_models() -> "list[CompletionModel]":
+            if not policy.models_restriction_enabled:
+                return []
+            # Tenant-accessible completion models. Global models (tenant_id=NULL)
+            # show up here because `can_access` already accounts for them.
+            return await self.completion_model_crud_service.get_available_completion_models()
 
-        tenant_mcp_servers = [
-            server
-            for server in await self.mcp_server_settings_service.get_available_mcp_servers()
-            if server.is_enabled
-        ]
+        async def _load_mcp_servers() -> "list[MCPServer]":
+            if not policy.mcp_restriction_enabled:
+                return []
+            servers = await self.mcp_server_settings_service.get_available_mcp_servers()
+            return [server for server in servers if server.is_enabled]
 
-        library_prompt_text: str | None = None
-        if policy.default_prompt_library_id is not None:
+        async def _load_prompt_text() -> str | None:
+            if policy.default_prompt_library_id is None:
+                return None
             entry = await self.prompt_library_repo.get(
                 id=policy.default_prompt_library_id,
                 tenant_id=self.user.tenant_id,
             )
-            if entry is not None:
-                library_prompt_text = entry.text
+            return entry.text if entry is not None else None
+
+        tenant_models, tenant_mcp_servers, library_prompt_text = await asyncio.gather(
+            _load_models(), _load_mcp_servers(), _load_prompt_text()
+        )
 
         return resolve(
             assistant=assistant,
