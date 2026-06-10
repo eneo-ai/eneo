@@ -9651,7 +9651,8 @@ export interface components {
      *             "crawl_feeder_enabled": false,
      *             "crawl_feeder_interval_seconds": 10,
      *             "crawl_feeder_batch_size": 10,
-     *             "crawl_job_max_age_seconds": 1800
+     *             "crawl_job_max_age_seconds": 1800,
+     *             "crawl_page_batch_size": 100
      *         }
      *
      *     Example - Partial update (adjust timeouts only):
@@ -9726,6 +9727,12 @@ export interface components {
        * @example 1800
        */
       crawl_job_max_age_seconds?: number | null;
+      /**
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       * @example 100
+       */
+      crawl_page_batch_size?: number | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
