@@ -264,6 +264,18 @@ TENANT_WORKER_SEMAPHORE_TTL_SECONDS=39600  # 11 hours
 # WEB CRAWLER SETTINGS
 # ============================================================================
 
+# --- EXTERNAL CRAWLER SERVICE -----------------------------------------------
+# All crawl execution is delegated to the external crawler service (the
+# `kravla` service in docker-compose.yml), which streams pages back as
+# NDJSON and always honors robots.txt. REQUIRED for crawling: crawl jobs
+# fail with a clear error when CRAWLER_SERVICE_URL is unset.
+
+CRAWLER_SERVICE_URL=http://kravla:8080
+
+# Must match CRAWLER_API_KEY on the kravla service in docker-compose.yml
+# Generate: openssl rand -hex 32
+CRAWLER_SERVICE_API_KEY=change-this-shared-secret  # CHANGE THIS
+
 # --- BASIC SETTINGS ---------------------------------------------------------
 
 # How long a single crawl can run (seconds). Default: 10 hours
@@ -276,20 +288,20 @@ CLOSESPIDER_ITEMCOUNT=20000
 # Maximum file size the crawler will download (bytes). Default: 10MB
 DOWNLOAD_MAX_SIZE=10485760
 
-# Follow robots.txt rules (recommended)
-OBEY_ROBOTS=true
+# --- RECRAWL OPTIMIZATIONS ---------------------------------------------------
+# Unchanged pages are skipped automatically on recrawls (content hashes and
+# ETag/Last-Modified conditional requests); no configuration needed.
 
-# Automatically slow down to not overload target websites
-AUTOTHROTTLE_ENABLED=true
+# Sitemap short-circuit: scheduled sitemap crawls are skipped while the
+# sitemap fingerprint (url+lastmod entries) matches the last completed crawl.
+# Manual recrawls always run; a full crawl is forced past the max age.
+# CRAWL_SITEMAP_SKIP_ENABLED=true
+# CRAWL_SITEMAP_SKIP_MAX_AGE_HOURS=168
 
 # --- ADVANCED SETTINGS ------------------------------------------------------
 
 # Pages saved per database write. Lower = less data loss on crash, higher = faster
 CRAWL_PAGE_BATCH_SIZE=100
-
-# Retry configuration for failed pages during crawl
-# CRAWL_PAGE_MAX_RETRIES=3           # Maximum retries per page (default: 3)
-# CRAWL_PAGE_RETRY_DELAY=1.0         # Initial retry delay in seconds (exponential backoff)
 
 # Parallel embedding API calls per crawl
 CRAWL_EMBEDDING_CONCURRENCY=3

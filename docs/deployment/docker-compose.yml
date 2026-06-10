@@ -8,6 +8,10 @@
 #   2. Replace "your-domain.com" (lines 65, 68, 91, 94) with your domain
 #   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
 #   4. Create external network: docker network create proxy_tier
+#   5. Generate a crawler API key (openssl rand -hex 32) and set it BOTH as
+#      CRAWLER_API_KEY on the kravla service below AND as
+#      CRAWLER_SERVICE_API_KEY in env_backend.env, together with
+#      CRAWLER_SERVICE_URL=http://kravla:8080
 #
 # CUSTOMIZATION NOTE:
 #   This is a reference configuration. Customize for your organization's
@@ -130,6 +134,34 @@ services:
       - proxy_tier
     depends_on:
       - backend
+
+  kravla:
+    # External crawler service - executes all website crawls and streams
+    # pages back to the worker as NDJSON. The worker holds one HTTP
+    # connection open for the full duration of a crawl (can be hours), so
+    # never place an idle-timeout proxy between worker and this service.
+    # Internal only: no ports, no Traefik labels. The worker reaches it at
+    # http://kravla:8080 (set CRAWLER_SERVICE_URL in env_backend.env).
+    #
+    # Sizing: KRAVLA_MEMORY_MBYTES (default 1024) is the crawler's internal
+    # memory budget per crawl, NOT a container limit - if you set a container
+    # memory limit, leave headroom for MAX_CONCURRENT_CRAWLS (default 2)
+    # concurrent crawls plus the runtime itself.
+    image: ghcr.io/oddly-even/kravla:0.1.0
+    container_name: eneo_kravla
+    restart: unless-stopped
+    environment:
+      # Must match CRAWLER_SERVICE_API_KEY in env_backend.env
+      # Generate: openssl rand -hex 32
+      - CRAWLER_API_KEY=change-this-shared-secret  # CHANGE THIS
+    networks:
+      - proxy_tier
+    healthcheck:
+      # The image has no curl/wget; probe with the bundled bun runtime
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:8080/healthz'); if (!r.ok) throw new Error(r.status)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   db:
     image: pgvector/pgvector:pg16
