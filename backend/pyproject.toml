@@ -32,7 +32,6 @@ dependencies = [
     "dependency-injector>=4.41.0,<5",
     "docx2python>=3.5.0,<4",
     "html2text>=2024.2.26,<2025",
-    "beautifulsoup4>=4.12.3,<5",
     "pgvector>=0.2.5,<0.3",
     "sqlalchemy-mixins>=2.0.5,<3",
     "python-magic>=0.4.27,<0.5",
