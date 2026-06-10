@@ -38,14 +38,19 @@ def _policy_changes(
 ) -> dict[str, object]:
     changes: dict[str, object] = {}
 
-    before_models = [
-        {"id": str(m.completion_model_id), "is_default": m.is_default}
-        for m in before.completion_models
-    ]
-    after_models = [
-        {"id": str(m.completion_model_id), "is_default": m.is_default}
-        for m in after.completion_models
-    ]
+    def _model_entries(policy: GovernancePolicy) -> list[dict[str, object]]:
+        # Sort by id so a reordered-but-identical model set is not logged as a
+        # change — the request order and the stored row order need not match.
+        return sorted(
+            (
+                {"id": str(m.completion_model_id), "is_default": m.is_default}
+                for m in policy.completion_models
+            ),
+            key=lambda entry: str(entry["id"]),
+        )
+
+    before_models = _model_entries(before)
+    after_models = _model_entries(after)
     if before.models_restriction_enabled != after.models_restriction_enabled:
         changes["models_restriction_enabled"] = {
             "old": before.models_restriction_enabled,
