@@ -9575,11 +9575,7 @@ export interface components {
      *                 "crawl_max_length": 14400,
      *                 "download_timeout": 90,
      *                 "download_max_size": 10485760,
-     *                 "dns_timeout": 30,
-     *                 "retry_times": 2,
      *                 "closespider_itemcount": 20000,
-     *                 "obey_robots": true,
-     *                 "autothrottle_enabled": true,
      *                 "tenant_worker_concurrency_limit": 4,
      *                 "crawl_stale_threshold_minutes": 30,
      *                 "crawl_heartbeat_interval_seconds": 300,
@@ -9588,7 +9584,7 @@ export interface components {
      *                 "crawl_feeder_batch_size": 10,
      *                 "crawl_job_max_age_seconds": 1800
      *             },
-     *             "overrides": ["download_timeout", "dns_timeout"],
+     *             "overrides": ["download_timeout"],
      *             "updated_at": "2025-10-22T10:00:00+00:00"
      *         }
      */
@@ -9603,7 +9599,6 @@ export interface components {
        * Settings
        * @description Current effective settings (tenant overrides + env defaults)
        * @example {
-       *       "autothrottle_enabled": true,
        *       "closespider_itemcount": 20000,
        *       "crawl_feeder_batch_size": 10,
        *       "crawl_feeder_enabled": false,
@@ -9612,11 +9607,8 @@ export interface components {
        *       "crawl_job_max_age_seconds": 1800,
        *       "crawl_max_length": 14400,
        *       "crawl_stale_threshold_minutes": 30,
-       *       "dns_timeout": 30,
        *       "download_max_size": 10485760,
        *       "download_timeout": 90,
-       *       "obey_robots": true,
-       *       "retry_times": 2,
        *       "tenant_worker_concurrency_limit": 4
        *     }
        */
@@ -9628,7 +9620,7 @@ export interface components {
        * @description List of setting keys that have tenant-specific overrides
        * @example [
        *       "download_timeout",
-       *       "dns_timeout"
+       *       "crawl_max_length"
        *     ]
        */
       overrides: string[];
@@ -9652,11 +9644,7 @@ export interface components {
      *             "crawl_max_length": 14400,
      *             "download_timeout": 90,
      *             "download_max_size": 10485760,
-     *             "dns_timeout": 30,
-     *             "retry_times": 2,
      *             "closespider_itemcount": 20000,
-     *             "obey_robots": true,
-     *             "autothrottle_enabled": true,
      *             "tenant_worker_concurrency_limit": 4,
      *             "crawl_stale_threshold_minutes": 30,
      *             "crawl_heartbeat_interval_seconds": 300,
@@ -9668,8 +9656,7 @@ export interface components {
      *
      *     Example - Partial update (adjust timeouts only):
      *         {
-     *             "download_timeout": 120,
-     *             "dns_timeout": 45
+     *             "download_timeout": 120
      *         }
      */
     CrawlerSettingsUpdate: {
@@ -9692,35 +9679,11 @@ export interface components {
        */
       download_max_size?: number | null;
       /**
-       * Dns Timeout
-       * @description DNS resolution timeout in seconds (5s to 2 min)
-       * @example 30
-       */
-      dns_timeout?: number | null;
-      /**
-       * Retry Times
-       * @description Number of retry attempts per request (0 to 10)
-       * @example 2
-       */
-      retry_times?: number | null;
-      /**
        * Closespider Itemcount
        * @description Maximum pages to crawl before stopping (100 to 100k)
        * @example 20000
        */
       closespider_itemcount?: number | null;
-      /**
-       * Obey Robots
-       * @description Whether to respect robots.txt rules
-       * @example true
-       */
-      obey_robots?: boolean | null;
-      /**
-       * Autothrottle Enabled
-       * @description Enable automatic request throttling based on server response times
-       * @example true
-       */
-      autothrottle_enabled?: boolean | null;
       /**
        * Tenant Worker Concurrency Limit
        * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
@@ -10147,7 +10110,7 @@ export interface components {
      *         {
      *             "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
      *             "message": "Crawler settings reset to defaults",
-     *             "deleted_keys": ["download_timeout", "dns_timeout"]
+     *             "deleted_keys": ["download_timeout", "crawl_max_length"]
      *         }
      */
     DeleteSettingsResponse: {
