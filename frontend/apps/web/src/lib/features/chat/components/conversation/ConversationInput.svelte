@@ -9,6 +9,7 @@
   import MentionButton from "../mentions/MentionButton.svelte";
   import ChatModelSelect from "../switcher/ChatModelSelect.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
@@ -285,7 +286,14 @@
   const showWebSearch = $derived(
     chat.partner.type === "default-assistant" && featureFlags.showWebSearch
   );
-  const showModelSelect = $derived(chat.partner.type === "default-assistant");
+  // ChatModelSelect edits the personal space's default assistant via the
+  // SpacesManager context, which only the spaces route tree provides. Other
+  // mounts of the default assistant (e.g. a deep link into the dashboard chat)
+  // have no such context, so gate on its presence or the picker throws on init.
+  const spacesManager = getSpacesManager();
+  const showModelSelect = $derived(
+    chat.partner.type === "default-assistant" && Boolean(spacesManager)
+  );
 
   // Block sending while the local projection says the next message will
   // overflow the context window. Removes the need to round-trip the server

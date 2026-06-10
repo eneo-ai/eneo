@@ -172,6 +172,10 @@ export class ChatService {
 
   // Streaming buffer for smoother text rendering (rAF-based for frame alignment)
   #streamBuffer = "";
+  // Reasoning deltas share the same frame-aligned flush loop as answer text —
+  // thinking-heavy models emit hundreds of deltas/sec, so appending each one
+  // straight to reactive state would re-render the trace per token.
+  #reasoningBuffer = "";
   #streamAnimationFrame: number | null = null;
   #lastFlushTime = 0;
   #streamRef: ConversationMessage | null = null;
@@ -309,10 +313,16 @@ export class ChatService {
 
     const elapsed = timestamp - this.#lastFlushTime;
 
-    // Flush if enough time has passed
-    if (elapsed >= this.#streamFlushInterval && this.#streamBuffer) {
-      this.#streamRef.answer += this.#streamBuffer;
-      this.#streamBuffer = "";
+    // Flush answer and reasoning together when enough time has passed
+    if (elapsed >= this.#streamFlushInterval && (this.#streamBuffer || this.#reasoningBuffer)) {
+      if (this.#streamBuffer) {
+        this.#streamRef.answer += this.#streamBuffer;
+        this.#streamBuffer = "";
+      }
+      if (this.#reasoningBuffer) {
+        this.#appendReasoning(this.#streamRef, this.#reasoningBuffer);
+        this.#reasoningBuffer = "";
+      }
       this.#lastFlushTime = timestamp;
     }
 
@@ -321,6 +331,12 @@ export class ChatService {
       this.#streamAnimationFrame = requestAnimationFrame(this.#flushLoop);
     }
   };
+
+  #appendReasoning(ref: ConversationMessage, text: string) {
+    // `reasoning` is a runtime-only streaming property on the message.
+    (ref as { reasoning?: string }).reasoning =
+      ((ref as { reasoning?: string }).reasoning ?? "") + text;
+  }
 
   // Start the buffering loop for a message
   #startStreamBuffering(ref: ConversationMessage) {
@@ -346,9 +362,15 @@ export class ChatService {
     }
 
     // Flush any remaining content
-    if (this.#streamBuffer && this.#streamRef) {
-      this.#streamRef.answer += this.#streamBuffer;
-      this.#streamBuffer = "";
+    if (this.#streamRef) {
+      if (this.#streamBuffer) {
+        this.#streamRef.answer += this.#streamBuffer;
+        this.#streamBuffer = "";
+      }
+      if (this.#reasoningBuffer) {
+        this.#appendReasoning(this.#streamRef, this.#reasoningBuffer);
+        this.#reasoningBuffer = "";
+      }
     }
 
     this.#streamRef = null;
@@ -549,8 +571,20 @@ export class ChatService {
             onReasoning: (event) => {
               if (!ref || isStale()) return;
               if (!ensureCurrentSession(event)) return;
-              // @ts-expect-error - reasoning is a runtime property for streaming
-              ref.reasoning = ((ref.reasoning as string | undefined) ?? "") + event.reasoning;
+
+              if (!browser || typeof requestAnimationFrame !== "function") {
+                this.#appendReasoning(ref, event.reasoning);
+                return;
+              }
+
+              // Buffer through the same frame-aligned loop as answer text.
+              this.#reasoningBuffer += event.reasoning;
+              if (this.#reasoningBuffer.length >= this.#producerFlushThreshold) {
+                this.#appendReasoning(ref, this.#reasoningBuffer);
+                this.#reasoningBuffer = "";
+                this.#lastFlushTime = performance.now();
+              }
+              this.#startStreamBuffering(ref);
             },
             onImage: (image) => {
               if (!ref || isStale()) return;
@@ -860,7 +894,15 @@ function partnerRuntimeSignature(partner: ChatPartner | undefined) {
       models_enforced: effectiveConfig?.models_enforced ?? false,
       default_model_id: effectiveConfig?.default_model?.id ?? null,
       locked_model_id: effectiveConfig?.locked_model?.id ?? null,
-      available_model_ids: effectiveConfig?.available_models.map((model) => model.id) ?? []
+      available_model_ids: effectiveConfig?.available_models.map((model) => model.id) ?? [],
+      // Include the MCP and prompt dimensions: a policy edit that touches only
+      // these (same id + model) must still replace the partner, or the composer
+      // keeps listing stale MCP servers / a stale enforced-prompt state.
+      mcp_enforced: effectiveConfig?.mcp_enforced ?? false,
+      available_mcp_server_ids:
+        effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
+      default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
+      prompt_locked: effectiveConfig?.prompt_locked ?? false
     });
   }
 
