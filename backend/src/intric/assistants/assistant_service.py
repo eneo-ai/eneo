@@ -721,16 +721,17 @@ class AssistantService:
 
         return assistant, permissions
 
-    async def get_assistant(
-        self, assistant_id: UUID
-    ) -> tuple[Assistant, list[ResourcePermission]]:
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        assistant = space.get_assistant(assistant_id=assistant_id)
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
+    def _authorize_read_assistant(self, space: "Space", assistant: Assistant) -> None:
+        """Enforce read authorization for an assistant in a space.
 
-        # The personal chat is the personal space's default assistant — it is
-        # gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
-        # so a baseline role can use the chat without managing assistants.
+        The personal chat is the personal space's default assistant — it is
+        gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
+        so a baseline role can use the chat without managing assistants. Every
+        read path (get_assistant, the effective-config serialization, and the
+        preflight model resolution) must apply this same carve-out, or the exact
+        users this feature targets get a spurious 403.
+        """
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
         is_personal_default = (
             space.is_personal()
             and space.default_assistant is not None
@@ -752,6 +753,15 @@ class AssistantService:
                 },
             )
 
+    async def get_assistant(
+        self, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission]]:
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        self._authorize_read_assistant(space=space, assistant=assistant)
+
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(
             assistant=assistant
@@ -766,16 +776,7 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
-            raise UnauthorizedException(
-                "You do not have permission to read assistants in this space.",
-                code="forbidden_action",
-                context={
-                    "resource_type": "assistant",
-                    "action": "read",
-                    "auth_layer": "domain_policy",
-                },
-            )
+        self._authorize_read_assistant(space=space, assistant=assistant)
 
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(
             assistant=assistant
@@ -797,6 +798,10 @@ class AssistantService:
         """
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
+        # Preflight is reachable with an arbitrary assistant_id; enforce the same
+        # read authorization get_assistant() applies so it can't probe assistants
+        # the caller cannot access.
+        self._authorize_read_assistant(space=space, assistant=assistant)
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )

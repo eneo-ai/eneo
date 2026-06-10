@@ -521,3 +521,76 @@ async def test_update_guard_rejects_newly_added_disallowed_mcp_server():
             completion_model_id=None,
             mcp_server_ids=[uuid4()],
         )
+
+
+def _service_with_actor(actor, effective_config_service=None):
+    service = _service_with_effective_config(effective_config_service or AsyncMock())
+    service.actor_manager = MagicMock()
+    service.actor_manager.get_space_actor_from_space.return_value = actor
+    return service
+
+
+def _personal_default_space(assistant):
+    space = MagicMock()
+    space.is_personal.return_value = True
+    space.default_assistant = assistant
+    space.get_assistant.return_value = assistant
+    return space
+
+
+async def test_get_effective_completion_model_enforces_read_auth():
+    # Preflight is reachable with an arbitrary assistant_id; it must not return a
+    # model for an assistant the caller cannot read.
+    from intric.main.exceptions import UnauthorizedException
+
+    assistant = MagicMock()
+    assistant.is_default = False
+    assistant.completion_model = TEST_MODEL_CHATGPT
+
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.default_assistant = None
+    space.get_assistant.return_value = assistant
+
+    actor = MagicMock()
+    actor.can_read_assistants.return_value = False
+    actor.can_read_default_assistant.return_value = False
+
+    service = _service_with_actor(actor)
+    service.space_repo = AsyncMock()
+    service.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+
+    with pytest.raises(UnauthorizedException):
+        await service.get_effective_completion_model(assistant.id)
+
+
+async def test_get_effective_completion_model_allows_personal_default_for_baseline_user():
+    # A PERSONAL_CHAT-only user (no ASSISTANTS permission) can read their own
+    # personal default assistant via the carve-out.
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    assistant.is_default = True
+    assistant.completion_model = TEST_MODEL_CHATGPT
+
+    space = _personal_default_space(assistant)
+
+    actor = MagicMock()
+    actor.can_read_assistants.return_value = False
+    actor.can_read_default_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for = AsyncMock(
+        return_value=SimpleNamespace(
+            models_enforced=False,
+            available_models=[],
+            default_model=None,
+            locked_model=None,
+        )
+    )
+
+    service = _service_with_actor(actor, effective_config_service)
+    service.space_repo = AsyncMock()
+    service.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+
+    model = await service.get_effective_completion_model(assistant.id)
+    assert model is TEST_MODEL_CHATGPT
