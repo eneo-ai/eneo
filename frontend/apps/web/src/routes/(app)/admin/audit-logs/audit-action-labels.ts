@@ -436,6 +436,30 @@ const ACTION_MESSAGES = {
   audit_log_exported: {
     name: m.audit_action_audit_log_exported,
     description: m.audit_action_audit_log_exported_description
+  },
+  help_assistant_role_assigned: {
+    name: m.audit_action_help_assistant_role_assigned,
+    description: m.audit_action_help_assistant_role_assigned_description
+  },
+  help_assistant_role_unassigned: {
+    name: m.audit_action_help_assistant_role_unassigned,
+    description: m.audit_action_help_assistant_role_unassigned_description
+  },
+  help_assistant_role_toggled_enabled: {
+    name: m.audit_action_help_assistant_role_toggled_enabled,
+    description: m.audit_action_help_assistant_role_toggled_enabled_description
+  },
+  help_assistant_role_toggled_visible: {
+    name: m.audit_action_help_assistant_role_toggled_visible,
+    description: m.audit_action_help_assistant_role_toggled_visible_description
+  },
+  help_assistant_installed: {
+    name: m.audit_action_help_assistant_installed,
+    description: m.audit_action_help_assistant_installed_description
+  },
+  help_assistant_uninstalled: {
+    name: m.audit_action_help_assistant_uninstalled,
+    description: m.audit_action_help_assistant_uninstalled_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

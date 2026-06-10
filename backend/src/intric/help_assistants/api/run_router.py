@@ -188,6 +188,7 @@ def _to_json_response(response: HelperRunResponse) -> HelperRunResponsePublic:
 @router.post(
     "/runs/",
     response_model=HelperRunResponsePublic,
+    description="Start a new helper run for a target assistant (JSON or SSE).",
     responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
 )
 async def start_helper_run(
@@ -219,6 +220,7 @@ async def start_helper_run(
 @router.post(
     "/runs/{run_id}/turns/",
     response_model=HelperRunResponsePublic,
+    description="Follow-up turn on an existing helper run (JSON or SSE).",
     responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
 )
 async def continue_helper_run(
@@ -248,6 +250,7 @@ async def continue_helper_run(
 @router.patch(
     "/runs/{run_id}/",
     response_model=HelperRunPublic,
+    description="Transition a helper run to a terminal status (completed/abandoned/failed).",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_helper_run_status(
@@ -270,6 +273,8 @@ async def update_helper_run_status(
 @router.get(
     "/availability",
     response_model=AvailabilityResponse,
+    description="Pre-flight signal for whether the prompt-guide button should render.",
+    responses=responses.get_responses([403]),
 )
 async def get_helper_availability(
     kind: HelperKind,

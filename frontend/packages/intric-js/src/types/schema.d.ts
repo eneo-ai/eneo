@@ -5813,6 +5813,191 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/help-assistants/roles/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Roles
+     * @description List the Help-Assistant roles installed for the calling tenant.
+     */
+    get: operations["list_roles_api_v1_admin_help_assistants_roles__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Templates
+     * @description Shipped Help Assistant templates not yet installed for the tenant.
+     */
+    get: operations["list_templates_api_v1_admin_help_assistants_templates__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Active Role */
+    get: operations["get_active_role_api_v1_admin_help_assistants_roles__kind___get"];
+    put?: never;
+    /**
+     * Install Helper
+     * @description Install a shipped Help-Assistant template (blank helper + active role).
+     */
+    post: operations["install_helper_api_v1_admin_help_assistants_roles__kind___post"];
+    /**
+     * Uninstall Helper
+     * @description Uninstall the active helper for a kind (deletes its role and assistant).
+     */
+    delete: operations["uninstall_helper_api_v1_admin_help_assistants_roles__kind___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/enabled": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle Enabled
+     * @description Enable or disable a helper role for the tenant.
+     */
+    patch: operations["toggle_enabled_api_v1_admin_help_assistants_roles__kind__enabled_patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/visible": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle Visible
+     * @description Show or hide a helper role from end users.
+     */
+    patch: operations["toggle_visible_api_v1_admin_help_assistants_roles__kind__visible_patch"];
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start Helper Run
+     * @description Start a new helper run for a target assistant (JSON or SSE).
+     */
+    post: operations["start_helper_run_api_v1_help_assistants_runs__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/{run_id}/turns/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Continue Helper Run
+     * @description Follow-up turn on an existing helper run (JSON or SSE).
+     */
+    post: operations["continue_helper_run_api_v1_help_assistants_runs__run_id__turns__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/{run_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Helper Run Status
+     * @description Transition a helper run to a terminal status (completed/abandoned/failed).
+     */
+    patch: operations["update_helper_run_status_api_v1_help_assistants_runs__run_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/help-assistants/availability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Helper Availability
+     * @description Pre-flight signal for whether the prompt-guide button should render.
+     */
+    get: operations["get_helper_availability_api_v1_help_assistants_availability_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/ai-models/": {
     parameters: {
       query?: never;
@@ -7116,6 +7301,12 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "help_assistant_role_assigned"
+      | "help_assistant_role_unassigned"
+      | "help_assistant_role_toggled_enabled"
+      | "help_assistant_role_toggled_visible"
+      | "help_assistant_installed"
+      | "help_assistant_uninstalled"
       | "scim_user_provisioned"
       | "scim_user_reconciled"
       | "scim_user_reactivated"
@@ -8414,6 +8605,12 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Is Help Assistant
+       * @description True when this assistant currently fills a Help Assistant role (it has an active row in org_space_assistant_roles). Help assistants have logging permanently disabled; the edit UI uses this flag to surface that explanation. Only the single-assistant GET endpoint computes it; other responses default to False.
+       * @default false
+       */
+      is_help_assistant?: boolean;
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -8820,6 +9017,34 @@ export interface components {
     AuthUrlPublic: {
       /** Auth Url */
       auth_url: string;
+    };
+    /**
+     * AvailabilityResponse
+     * @description Cheap read-only signal for the prompt-guide toolbar button (PRD §5, §10).
+     *
+     *     Returned by ``GET /help-assistants/availability``. The frontend hides
+     *     the toolbar button whenever ``available`` is False; ``disabled_reason``
+     *     lets the admin UX surface the underlying cause without parsing a
+     *     human-readable message.
+     *
+     *     The helper assistant id is intentionally absent — the modal never
+     *     needs it (helper resolution is server-side per :class:`StartRunRequest`)
+     *     and exposing it here would defeat the "helper assistants are hidden
+     *     from every listing" invariant.
+     */
+    AvailabilityResponse: {
+      /** Available */
+      available: boolean;
+      /** Disabled Reason */
+      disabled_reason?:
+        | (
+            | "no_assignment"
+            | "role_disabled"
+            | "role_not_visible"
+            | "no_completion_model"
+            | "no_edit_rights"
+          )
+        | null;
     };
     /** Body_Login_api_v1_users_login_token__post */
     Body_Login_api_v1_users_login_token__post: {
@@ -9448,6 +9673,19 @@ export interface components {
      * @enum {string}
      */
     ContentDisposition: "attachment" | "inline";
+    /**
+     * ContinueTurnRequest
+     * @description Body for ``POST /runs/{run_id}/turns/`` — follow-up turn.
+     */
+    ContinueTurnRequest: {
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
@@ -10098,6 +10336,12 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Is Help Assistant
+       * @description True when this assistant currently fills a Help Assistant role (it has an active row in org_space_assistant_roles). Help assistants have logging permanently disabled; the edit UI uses this flag to surface that explanation. Only the single-assistant GET endpoint computes it; other responses default to False.
+       * @default false
+       */
+      is_help_assistant?: boolean;
     };
     /**
      * DeleteCredentialResponse
@@ -10587,7 +10831,8 @@ export interface components {
       | 9036
       | 9037
       | 9038
-      | 9039;
+      | 9039
+      | 9040;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11167,6 +11412,84 @@ export interface components {
       watchdog_stale_threshold_seconds: number;
       /** Heartbeat Ttl Expected Seconds */
       heartbeat_ttl_expected_seconds: number;
+    };
+    /**
+     * HelperKind
+     * @description Kinds of Help Assistants shipped with Eneo.
+     * @enum {string}
+     */
+    HelperKind: "prompt_guide";
+    /**
+     * HelperRunPublic
+     * @description One row of ``help_assistant_runs`` exposed to the client.
+     */
+    HelperRunPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      kind: components["schemas"]["HelperKind"];
+      /** Assistant Id */
+      assistant_id: string | null;
+      /** Target Type */
+      target_type: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Actor User Id */
+      actor_user_id: string | null;
+      status: components["schemas"]["HelperRunStatus"];
+      /** Completed At */
+      completed_at: string | null;
+      /** Created At */
+      created_at: string | null;
+      /** Updated At */
+      updated_at: string | null;
+    };
+    /**
+     * HelperRunResponsePublic
+     * @description Non-stream response body for the helper-run ask paths.
+     *
+     *     ``answer`` is the final completion text; ``references`` are the
+     *     info-blob chunks pulled into the helper assistant's prompt. ``run``
+     *     carries enough context for the modal to drive its Apply / Abandon
+     *     buttons (id + status).
+     */
+    HelperRunResponsePublic: {
+      run: components["schemas"]["HelperRunPublic"];
+      /** Answer */
+      answer: string;
+      /** References */
+      references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+      /** Error */
+      error?: string | null;
+    };
+    /**
+     * HelperRunStatus
+     * @enum {string}
+     */
+    HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+    /**
+     * HelperTemplatePublic
+     * @description A shipped Help Assistant template available to install.
+     *
+     *     Drives the admin "Add help assistant" picker — one entry per shipped
+     *     ``HelperKind`` that is not already installed for the tenant.
+     */
+    HelperTemplatePublic: {
+      kind: components["schemas"]["HelperKind"];
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
     };
     /** IconPublic */
     IconPublic: {
@@ -12752,6 +13075,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[HelperTemplatePublic] */
+    PaginatedResponse_HelperTemplatePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["HelperTemplatePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[InfoBlobPublicNoText] */
     PaginatedResponse_InfoBlobPublicNoText_: {
       /**
@@ -12850,6 +13186,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[RoleAssignmentPublic] */
+    PaginatedResponse_RoleAssignmentPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RoleAssignmentPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -13687,6 +14036,50 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
+    };
+    /**
+     * RoleAssignmentPublic
+     * @description One row of ``org_space_assistant_roles``.
+     *
+     *     ``assistant_name`` is a display convenience for the admin table: it is
+     *     resolved (via the assistant load) only on the read endpoints
+     *     (``list_roles`` / ``get_active_role``) the UI renders from. Mutation
+     *     responses leave it ``None`` because the admin page re-fetches the list
+     *     after every mutation, so the displayed name always comes from a read.
+     */
+    RoleAssignmentPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Org Space Id
+       * Format: uuid
+       */
+      org_space_id: string;
+      kind: components["schemas"]["HelperKind"];
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Assistant Name */
+      assistant_name?: string | null;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Is Visible To Users */
+      is_visible_to_users: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** RoleCreateRequest */
     RoleCreateRequest: {
@@ -14559,6 +14952,32 @@ export interface components {
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+    };
+    /**
+     * StartRunRequest
+     * @description Body for ``POST /runs/`` — start a new helper run.
+     *
+     *     ``target_type`` is currently always ``"assistant"`` (PRD §5). The
+     *     service validates it; the model keeps the field open-ended so a future
+     *     target kind (group chat, app run) can be added without a wire-format
+     *     bump.
+     */
+    StartRunRequest: {
+      kind: components["schemas"]["HelperKind"];
+      /** Target Type */
+      target_type: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
     };
     /**
      * StateFilter
@@ -15536,6 +15955,11 @@ export interface components {
       /** Favorite Providers */
       favorite_providers?: string[];
     };
+    /** ToggleRequest */
+    ToggleRequest: {
+      /** Value */
+      value: boolean;
+    };
     /** ToggleSettingUpdate */
     ToggleSettingUpdate: {
       /** Enabled */
@@ -15958,6 +16382,17 @@ export interface components {
     /** UpdateSpaceMemberRequest */
     UpdateSpaceMemberRequest: {
       role: components["schemas"]["SpaceRoleValue"];
+    };
+    /**
+     * UpdateStatusRequest
+     * @description Body for ``PATCH /runs/{run_id}/`` — terminal status transition.
+     *
+     *     The service rejects ``IN_PROGRESS`` (only terminal statuses transition)
+     *     and rejects repeat transitions, so the wire model accepts every value
+     *     and lets the service do the policy enforcement.
+     */
+    UpdateStatusRequest: {
+      status: components["schemas"]["HelperRunStatus"];
     };
     /** UseTools */
     UseTools: {
@@ -36373,6 +36808,711 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_roles_api_v1_admin_help_assistants_roles__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_RoleAssignmentPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_templates_api_v1_admin_help_assistants_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_HelperTemplatePublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_active_role_api_v1_admin_help_assistants_roles__kind___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"] | null;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  install_helper_api_v1_admin_help_assistants_roles__kind___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  uninstall_helper_api_v1_admin_help_assistants_roles__kind___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  toggle_enabled_api_v1_admin_help_assistants_roles__kind__enabled_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  toggle_visible_api_v1_admin_help_assistants_roles__kind__visible_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  start_helper_run_api_v1_help_assistants_runs__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StartRunRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunResponsePublic"];
+          "text/event-stream": {
+            run: components["schemas"]["HelperRunPublic"];
+            /** Answer */
+            answer: string;
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            /** Error */
+            error?: string | null;
+            $defs: {
+              /**
+               * HelperKind
+               * @description Kinds of Help Assistants shipped with Eneo.
+               * @enum {string}
+               */
+              HelperKind: "prompt_guide";
+              /**
+               * HelperRunPublic
+               * @description One row of ``help_assistant_runs`` exposed to the client.
+               */
+              HelperRunPublic: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                kind: components["schemas"]["HelperKind"];
+                /** Assistant Id */
+                assistant_id: string | null;
+                /** Target Type */
+                target_type: string;
+                /**
+                 * Target Id
+                 * Format: uuid
+                 */
+                target_id: string;
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Actor User Id */
+                actor_user_id: string | null;
+                status: components["schemas"]["HelperRunStatus"];
+                /** Completed At */
+                completed_at: string | null;
+                /** Created At */
+                created_at: string | null;
+                /** Updated At */
+                updated_at: string | null;
+              };
+              /**
+               * HelperRunStatus
+               * @enum {string}
+               */
+              HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  continue_helper_run_api_v1_help_assistants_runs__run_id__turns__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ContinueTurnRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunResponsePublic"];
+          "text/event-stream": {
+            run: components["schemas"]["HelperRunPublic"];
+            /** Answer */
+            answer: string;
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            /** Error */
+            error?: string | null;
+            $defs: {
+              /**
+               * HelperKind
+               * @description Kinds of Help Assistants shipped with Eneo.
+               * @enum {string}
+               */
+              HelperKind: "prompt_guide";
+              /**
+               * HelperRunPublic
+               * @description One row of ``help_assistant_runs`` exposed to the client.
+               */
+              HelperRunPublic: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                kind: components["schemas"]["HelperKind"];
+                /** Assistant Id */
+                assistant_id: string | null;
+                /** Target Type */
+                target_type: string;
+                /**
+                 * Target Id
+                 * Format: uuid
+                 */
+                target_id: string;
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Actor User Id */
+                actor_user_id: string | null;
+                status: components["schemas"]["HelperRunStatus"];
+                /** Completed At */
+                completed_at: string | null;
+                /** Created At */
+                created_at: string | null;
+                /** Updated At */
+                updated_at: string | null;
+              };
+              /**
+               * HelperRunStatus
+               * @enum {string}
+               */
+              HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_helper_run_status_api_v1_help_assistants_runs__run_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateStatusRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_helper_availability_api_v1_help_assistants_availability_get: {
+    parameters: {
+      query: {
+        kind: components["schemas"]["HelperKind"];
+        target_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AvailabilityResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {

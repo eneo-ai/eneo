@@ -81,6 +81,8 @@ async def _resolve_name(
 @router.get(
     "/roles/",
     response_model=PaginatedResponse[RoleAssignmentPublic],
+    description="List the Help-Assistant roles installed for the calling tenant.",
+    responses=responses.get_responses([403]),
 )
 async def list_roles(container: AdminContainer):
     service = container.org_space_assistant_role_service()
@@ -133,6 +135,7 @@ async def get_active_role(kind: HelperKind, container: AdminContainer):
     "/roles/{kind}/",
     response_model=RoleAssignmentPublic,
     status_code=status.HTTP_201_CREATED,
+    description="Install a shipped Help-Assistant template (blank helper + active role).",
     responses=responses.get_responses([400, 403]),
 )
 async def install_helper(kind: HelperKind, container: AdminContainer):
@@ -144,7 +147,8 @@ async def install_helper(kind: HelperKind, container: AdminContainer):
 
 @router.delete(
     "/roles/{kind}/",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=204,
+    description="Uninstall the active helper for a kind (deletes its role and assistant).",
     responses=responses.get_responses([400, 403]),
 )
 async def uninstall_helper(kind: HelperKind, container: AdminContainer):
@@ -156,6 +160,7 @@ async def uninstall_helper(kind: HelperKind, container: AdminContainer):
 @router.patch(
     "/roles/{kind}/enabled",
     response_model=RoleAssignmentPublic,
+    description="Enable or disable a helper role for the tenant.",
     responses=responses.get_responses([400, 403]),
 )
 async def toggle_enabled(
@@ -171,6 +176,7 @@ async def toggle_enabled(
 @router.patch(
     "/roles/{kind}/visible",
     response_model=RoleAssignmentPublic,
+    description="Show or hide a helper role from end users.",
     responses=responses.get_responses([400, 403]),
 )
 async def toggle_visible(
