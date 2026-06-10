@@ -71,7 +71,7 @@ from intric.completion_models.infrastructure.completion_service import Completio
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.completion_models.presentation import CompletionModelAssembler
 from intric.conversations.application.conversation_service import ConversationService
-from intric.crawler.crawler import Crawler
+from intric.crawler.remote_crawler import create_crawler
 from intric.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
@@ -1396,7 +1396,8 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         session=session,
     )
-    crawler = providers.Factory(Crawler)
+    # All crawl execution is delegated to the external crawler service
+    crawler = providers.Factory(create_crawler)
 
     # Worker dependent services
     app_service = providers.Factory(

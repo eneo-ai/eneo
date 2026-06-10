@@ -7,7 +7,6 @@ from functools import wraps
 from typing import Any, Callable, cast
 from uuid import UUID
 
-import crochet
 import sqlalchemy as sa
 from arq.cron import cron
 from dependency_injector import providers
@@ -199,7 +198,6 @@ class Worker:
         self.health_check_interval = 60  # seconds (default is 3600)
 
         # job_completion_wait: Time to wait for jobs to complete on shutdown
-        # Allows Scrapy/Twisted reactor cleanup via crochet
         self.job_completion_wait = 60  # seconds
 
         # ARQ lifecycle hooks for job observability
@@ -269,7 +267,6 @@ class Worker:
         init_observability()
 
         await lifespan.startup()
-        crochet.setup()
 
         # Log effective settings at startup for observability
         settings = get_settings()

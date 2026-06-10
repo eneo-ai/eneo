@@ -412,7 +412,7 @@ class Settings(BaseSettings):
     testing: bool = False
     dev: bool = False
 
-    # Crawl - Scrapy crawler settings
+    # Crawl settings
     # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
     # Otherwise the concurrency slot could expire before crawl completes
     # See validate_worker_settings() which enforces this constraint
@@ -422,6 +422,14 @@ class Settings(BaseSettings):
     obey_robots: bool = True  # Respect robots.txt rules
     autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
+
+    # External crawler service: all crawl execution is delegated to it,
+    # streamed back as NDJSON. Required for crawling (crawl jobs fail with a
+    # clear error when unset). The service always honors robots.txt;
+    # obey_robots, dns_timeout, retry_times and autothrottle are retained for
+    # settings-API compatibility but no longer affect crawl execution.
+    crawler_service_url: Optional[str] = None
+    crawler_service_api_key: Optional[str] = None
 
     # Crawl retry configuration
     crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl

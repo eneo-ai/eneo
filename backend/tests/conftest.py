@@ -104,8 +104,7 @@ def pytest_sessionfinish(
 
     The tests themselves complete in ~11s, but interpreter shutdown can
     intermittently hang while joining a non-daemon thread left running by the
-    test stack (a Twisted reactor started via Scrapy/crochet, or a leaked
-    async client). When that happens the process never exits, so CI and
+    test stack (e.g. a leaked async client). When that happens the process never exits, so CI and
     automated callers wait indefinitely with no result after the summary line
     has already printed.
 

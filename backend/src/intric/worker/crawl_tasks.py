@@ -978,7 +978,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
 
             # Create heartbeat monitor BEFORE crawl starts
-            # This allows heartbeat to run during the Scrapy crawl phase (which can take 30+ minutes)
+            # This allows heartbeat to run during the crawl phase (which can take 30+ minutes)
             heartbeat_monitor = HeartbeatMonitor(
                 job_id=job_id,
                 redis_client=redis_client,
@@ -988,7 +988,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 semaphore_ttl_seconds=semaphore_ttl_seconds,
             )
 
-            # Use Scrapy crawler to process website content
+            # Stream the crawl from the crawler service
             # Measure crawl and parse phase
             start = time.time()
             async with crawler.crawl(
@@ -997,9 +997,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 crawl_type=params.crawl_type,
                 http_user=crawl_context.http_auth_user or "",  # From bootstrap DTO
                 http_pass=crawl_context.http_auth_pass or "",  # From bootstrap DTO
-                # Pass tenant settings for tenant-aware Scrapy configuration
+                # Pass tenant settings for tenant-aware crawl limits
                 tenant_crawler_settings=tenant.crawler_settings if tenant else None,
-                # Pass heartbeat callback for liveness during Scrapy crawl phase
+                # Pass heartbeat callback for liveness during the crawl phase
                 heartbeat_callback=heartbeat_monitor.tick,
                 heartbeat_interval=float(heartbeat_interval_seconds),
             ) as crawl:
