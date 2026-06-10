@@ -11,14 +11,15 @@ This verifies the CRITICAL gap: that settings don't just store correctly,
 but actually propagate through all layers to affect worker behavior.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 from httpx import AsyncClient
 
 from intric.tenants.crawler_settings_helper import (
-    get_crawler_setting,
-    get_all_crawler_settings,
     CRAWLER_SETTING_SPECS,
+    get_all_crawler_settings,
+    get_crawler_setting,
 )
 
 
@@ -38,7 +39,7 @@ class TestSettingsPropagation:
         # 1. Store setting via API
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"download_timeout": 150, "retry_times": 5},
+            json={"download_timeout": 150, "crawl_page_batch_size": 50},
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 200
@@ -53,13 +54,13 @@ class TestSettingsPropagation:
                 "download_timeout",
                 tenant.crawler_settings,
             )
-            retries = get_crawler_setting(
-                "retry_times",
+            batch_size = get_crawler_setting(
+                "crawl_page_batch_size",
                 tenant.crawler_settings,
             )
 
             assert timeout == 150, "Helper should return tenant override, not default"
-            assert retries == 5, "Helper should return tenant override, not default"
+            assert batch_size == 50, "Helper should return tenant override, not default"
 
     async def test_unset_settings_return_defaults(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
@@ -82,12 +83,12 @@ class TestSettingsPropagation:
             )
             assert timeout == 90, "Should return hardcoded default when no override"
 
-            # Should return hardcoded default (2) from CRAWLER_SETTING_SPECS
-            retries = get_crawler_setting(
-                "retry_times",
+            # Should return hardcoded default (5) from CRAWLER_SETTING_SPECS
+            queued_stale = get_crawler_setting(
+                "queued_stale_threshold_minutes",
                 tenant.crawler_settings,
             )
-            assert retries == 2, "Should return hardcoded default when no override"
+            assert queued_stale == 5, "Should return hardcoded default when no override"
 
     async def test_get_all_settings_merges_correctly(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
@@ -98,7 +99,7 @@ class TestSettingsPropagation:
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "download_timeout": 200,
-                "dns_timeout": 60,
+                "crawl_max_length": 600,
             },
             headers={"X-API-Key": super_admin_token},
         )
@@ -112,11 +113,13 @@ class TestSettingsPropagation:
 
             # Verify overrides present
             assert all_settings["download_timeout"] == 200
-            assert all_settings["dns_timeout"] == 60
+            assert all_settings["crawl_max_length"] == 600
 
             # Verify defaults present for non-overridden settings
-            assert all_settings["retry_times"] == 2  # Hardcoded default
-            assert "crawl_max_length" in all_settings
+            assert (
+                all_settings["queued_stale_threshold_minutes"] == 5
+            )  # Hardcoded default
+            assert "closespider_itemcount" in all_settings
             assert "tenant_worker_concurrency_limit" in all_settings
 
             # Should have ALL settings from CRAWLER_SETTING_SPECS
@@ -171,8 +174,8 @@ class TestSettingsImmediateApplication:
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "download_timeout": 120,
-                "dns_timeout": 45,
-                "retry_times": 7,
+                "crawl_max_length": 450,
+                "crawl_page_batch_size": 70,
             },
             headers={"X-API-Key": super_admin_token},
         )
@@ -193,8 +196,12 @@ class TestSettingsImmediateApplication:
             assert all_settings["download_timeout"] == 180
 
             # Other settings should remain unchanged
-            assert all_settings["dns_timeout"] == 45, "dns_timeout should be preserved"
-            assert all_settings["retry_times"] == 7, "retry_times should be preserved"
+            assert all_settings["crawl_max_length"] == 450, (
+                "crawl_max_length should be preserved"
+            )
+            assert all_settings["crawl_page_batch_size"] == 70, (
+                "crawl_page_batch_size should be preserved"
+            )
 
 
 @pytest.mark.asyncio
@@ -237,13 +244,13 @@ class TestMultiTenantSettingsIsolation:
         # Set different settings for each tenant
         await client.put(
             f"/api/v1/sysadmin/tenants/{tenant_1_id}/crawler-settings",
-            json={"download_timeout": 100, "retry_times": 3},
+            json={"download_timeout": 100, "crawl_page_batch_size": 30},
             headers={"X-API-Key": super_admin_token},
         )
 
         await client.put(
             f"/api/v1/sysadmin/tenants/{tenant_2_id}/crawler-settings",
-            json={"download_timeout": 250, "retry_times": 8},
+            json={"download_timeout": 250, "crawl_page_batch_size": 80},
             headers={"X-API-Key": super_admin_token},
         )
 
@@ -259,19 +266,23 @@ class TestMultiTenantSettingsIsolation:
             t1_timeout = get_crawler_setting(
                 "download_timeout", tenant_1.crawler_settings
             )
-            t1_retries = get_crawler_setting("retry_times", tenant_1.crawler_settings)
+            t1_batch = get_crawler_setting(
+                "crawl_page_batch_size", tenant_1.crawler_settings
+            )
 
             # Tenant 2 settings
             t2_timeout = get_crawler_setting(
                 "download_timeout", tenant_2.crawler_settings
             )
-            t2_retries = get_crawler_setting("retry_times", tenant_2.crawler_settings)
+            t2_batch = get_crawler_setting(
+                "crawl_page_batch_size", tenant_2.crawler_settings
+            )
 
             # Verify complete isolation
             assert t1_timeout == 100, "Tenant 1 should have its own timeout"
             assert t2_timeout == 250, "Tenant 2 should have its own timeout"
-            assert t1_retries == 3, "Tenant 1 should have its own retry count"
-            assert t2_retries == 8, "Tenant 2 should have its own retry count"
+            assert t1_batch == 30, "Tenant 1 should have its own batch size"
+            assert t2_batch == 80, "Tenant 2 should have its own batch size"
 
 
 @pytest.mark.asyncio
@@ -282,14 +293,11 @@ class TestBooleanAndRangeSettings:
     async def test_boolean_settings_propagate(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """Boolean settings (obey_robots, autothrottle_enabled) work correctly."""
-        # Set boolean settings
+        """Boolean settings (crawl_feeder_enabled) round-trip correctly."""
+        # Set boolean setting
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={
-                "obey_robots": False,
-                "autothrottle_enabled": False,
-            },
+            json={"crawl_feeder_enabled": False},
             headers={"X-API-Key": super_admin_token},
         )
 
@@ -297,13 +305,11 @@ class TestBooleanAndRangeSettings:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            obey_robots = get_crawler_setting("obey_robots", tenant.crawler_settings)
-            autothrottle = get_crawler_setting(
-                "autothrottle_enabled", tenant.crawler_settings
+            feeder_enabled = get_crawler_setting(
+                "crawl_feeder_enabled", tenant.crawler_settings
             )
 
-            assert obey_robots is False
-            assert autothrottle is False
+            assert feeder_enabled is False
 
     async def test_concurrency_limit_setting_propagates(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container

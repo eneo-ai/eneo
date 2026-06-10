@@ -419,23 +419,13 @@ class Settings(BaseSettings):
     crawl_max_length: int = 60 * 60 * 10  # 10 hour crawls max (large municipal sites)
     closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
-    obey_robots: bool = True  # Respect robots.txt rules
-    autothrottle_enabled: bool = True  # Enable automatic request throttling
     using_crawl: bool = True  # Enable/disable crawling feature globally
 
     # External crawler service: all crawl execution is delegated to it,
     # streamed back as NDJSON. Required for crawling (crawl jobs fail with a
-    # clear error when unset). The service always honors robots.txt;
-    # obey_robots, dns_timeout, retry_times and autothrottle are retained for
-    # settings-API compatibility but no longer affect crawl execution.
+    # clear error when unset). The service always honors robots.txt.
     crawler_service_url: Optional[str] = None
     crawler_service_api_key: Optional[str] = None
-
-    # Crawl retry configuration
-    crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
-    crawl_page_retry_delay: float = (
-        1.0  # Initial retry delay in seconds (exponential backoff)
-    )
 
     # Crawl job age limit (prevents infinite retry loops)
     crawl_job_max_age_seconds: int = 1800  # Maximum retry window (30 minutes)

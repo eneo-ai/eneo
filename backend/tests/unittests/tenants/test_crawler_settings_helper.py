@@ -4,13 +4,14 @@ Tests the single source of truth (CRAWLER_SETTING_SPECS) and helper functions
 for tenant-specific crawler settings with hierarchical override support.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from intric.tenants.crawler_settings_helper import (
     CRAWLER_SETTING_SPECS,
-    get_crawler_setting,
     get_all_crawler_settings,
+    get_crawler_setting,
     validate_crawler_setting,
 )
 
@@ -40,8 +41,8 @@ class TestCrawlerSettingSpecs:
             assert has_default or has_env_attr, f"{name} needs 'default' or 'env_attr'"
 
     def test_expected_settings_count(self):
-        """Verify we have all 18 crawler settings."""
-        assert len(CRAWLER_SETTING_SPECS) == 18
+        """Verify we have all 14 crawler settings."""
+        assert len(CRAWLER_SETTING_SPECS) == 14
 
     def test_known_settings_present(self):
         """Verify all known settings are present."""
@@ -49,11 +50,7 @@ class TestCrawlerSettingSpecs:
             "crawl_max_length",
             "download_timeout",
             "download_max_size",
-            "dns_timeout",
-            "retry_times",
             "closespider_itemcount",
-            "obey_robots",
-            "autothrottle_enabled",
             "tenant_worker_concurrency_limit",
             "crawl_stale_threshold_minutes",
             "crawl_heartbeat_interval_seconds",
@@ -107,8 +104,6 @@ class TestGetCrawlerSetting:
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
             mock_settings.download_max_size = 10485760
-            mock_settings.obey_robots = True
-            mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
             mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
@@ -144,8 +139,6 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
             mock_settings.download_max_size = 10485760
-            mock_settings.obey_robots = True
-            mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
             mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
@@ -160,7 +153,7 @@ class TestGetAllCrawlerSettings:
             result = get_all_crawler_settings({})
             assert "download_timeout" in result
             assert "crawl_max_length" in result
-            assert len(result) == 18
+            assert len(result) == 14
 
     def test_tenant_overrides_merged_correctly(self):
         """Tenant-specific values override defaults."""
@@ -169,8 +162,6 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
             mock_settings.download_max_size = 10485760
-            mock_settings.obey_robots = True
-            mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
             mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
@@ -180,12 +171,10 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_job_max_age_seconds = 1800
             mock.return_value = mock_settings
 
-            tenant_settings = {"download_timeout": 200, "dns_timeout": 60}
+            tenant_settings = {"download_timeout": 200, "crawl_max_length": 7200}
             result = get_all_crawler_settings(tenant_settings)
             assert result["download_timeout"] == 200
-            assert result["dns_timeout"] == 60
-            # Non-overridden should have defaults
-            assert result["retry_times"] == 2
+            assert result["crawl_max_length"] == 7200
 
     def test_handles_none_input(self):
         """Works correctly with None input."""
@@ -194,8 +183,6 @@ class TestGetAllCrawlerSettings:
             mock_settings.crawl_max_length = 14400
             mock_settings.closespider_itemcount = 20000
             mock_settings.download_max_size = 10485760
-            mock_settings.obey_robots = True
-            mock_settings.autothrottle_enabled = True
             mock_settings.tenant_worker_concurrency_limit = 4
             mock_settings.crawl_stale_threshold_minutes = 30
             mock_settings.crawl_heartbeat_interval_seconds = 300
@@ -208,7 +195,7 @@ class TestGetAllCrawlerSettings:
             mock.return_value = mock_settings
 
             result = get_all_crawler_settings(None)
-            assert len(result) == 18
+            assert len(result) == 14
 
 
 class TestValidateCrawlerSetting:
@@ -247,14 +234,14 @@ class TestValidateCrawlerSetting:
 
     def test_valid_boolean_setting(self):
         """Valid boolean returns no errors."""
-        errors = validate_crawler_setting("obey_robots", True)
+        errors = validate_crawler_setting("crawl_feeder_enabled", True)
         assert errors == []
-        errors = validate_crawler_setting("obey_robots", False)
+        errors = validate_crawler_setting("crawl_feeder_enabled", False)
         assert errors == []
 
     def test_boolean_wrong_type(self):
         """Non-boolean for boolean setting returns error."""
-        errors = validate_crawler_setting("obey_robots", "true")
+        errors = validate_crawler_setting("crawl_feeder_enabled", "true")
         assert len(errors) == 1
         assert "must be bool" in errors[0]
 

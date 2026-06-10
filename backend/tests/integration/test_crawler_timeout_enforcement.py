@@ -1,7 +1,8 @@
 """Integration tests for crawler timeout settings enforcement.
 
-Tests that timeout settings (download_timeout, dns_timeout, crawl_max_length)
-are correctly configured and ready for enforcement by the crawler:
+Tests that timeout settings (download_timeout, crawl_max_length,
+crawl_job_max_age_seconds) are correctly configured and ready for
+enforcement by the crawler:
 - Settings flow from API through database to worker code
 - Worker retrieves correct timeout values for each tenant
 - Timeout values are within valid ranges and properly typed
@@ -16,8 +17,8 @@ import pytest
 from httpx import AsyncClient
 
 from intric.tenants.crawler_settings_helper import (
-    get_crawler_setting,
     CRAWLER_SETTING_SPECS,
+    get_crawler_setting,
 )
 
 
@@ -60,15 +61,15 @@ class TestTimeoutConfiguration:
             assert isinstance(configured_timeout, int)
             assert 10 <= configured_timeout <= 300, "Timeout must be in valid range"
 
-    async def test_dns_timeout_configured_correctly(
+    async def test_job_max_age_configured_correctly(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """dns_timeout setting flows from API to worker retrieval."""
-        # Set custom DNS timeout
-        timeout_value = 15  # 15 seconds
+        """crawl_job_max_age_seconds setting flows from API to worker retrieval."""
+        # Set custom job max age
+        max_age_value = 900  # 15 minutes
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"dns_timeout": timeout_value},
+            json={"crawl_job_max_age_seconds": max_age_value},
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 200
@@ -78,14 +79,16 @@ class TestTimeoutConfiguration:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            configured_timeout = get_crawler_setting(
-                "dns_timeout",
+            configured_max_age = get_crawler_setting(
+                "crawl_job_max_age_seconds",
                 tenant.crawler_settings,
             )
 
-            assert configured_timeout == timeout_value
-            assert isinstance(configured_timeout, int)
-            assert 5 <= configured_timeout <= 120, "DNS timeout must be in valid range"
+            assert configured_max_age == max_age_value
+            assert isinstance(configured_max_age, int)
+            assert 300 <= configured_max_age <= 7200, (
+                "Job max age must be in valid range"
+            )
 
     async def test_crawl_max_length_configured_correctly(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
@@ -175,14 +178,14 @@ class TestTimeoutRangeValidation:
         )
         assert response.status_code == 200
 
-    async def test_dns_timeout_range_validation(
+    async def test_job_max_age_range_validation(
         self, client: AsyncClient, test_tenant, super_admin_token
     ):
-        """dns_timeout must be within 5-120 seconds."""
+        """crawl_job_max_age_seconds must be within 300-7200 seconds."""
         # Below minimum
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"dns_timeout": 2},
+            json={"crawl_job_max_age_seconds": 100},
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 422
@@ -190,7 +193,7 @@ class TestTimeoutRangeValidation:
         # Above maximum
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"dns_timeout": 150},
+            json={"crawl_job_max_age_seconds": 10000},
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 422
@@ -198,7 +201,7 @@ class TestTimeoutRangeValidation:
         # Valid range
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"dns_timeout": 30},
+            json={"crawl_job_max_age_seconds": 3600},
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 200
@@ -261,10 +264,10 @@ class TestTimeoutDefaultBehavior:
             assert default_timeout == expected_default
             assert default_timeout == 90, "Hardcoded default should be 90s"
 
-    async def test_dns_timeout_defaults_correctly(
+    async def test_queued_stale_threshold_defaults_correctly(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """When not set, dns_timeout should return hardcoded default (30s)."""
+        """When not set, queued_stale_threshold_minutes returns hardcoded default."""
         await client.delete(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             headers={"X-API-Key": super_admin_token},
@@ -274,14 +277,16 @@ class TestTimeoutDefaultBehavior:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            default_timeout = get_crawler_setting(
-                "dns_timeout",
+            default_threshold = get_crawler_setting(
+                "queued_stale_threshold_minutes",
                 tenant.crawler_settings,
             )
 
-            expected_default = CRAWLER_SETTING_SPECS["dns_timeout"]["default"]
-            assert default_timeout == expected_default
-            assert default_timeout == 30, "Hardcoded default should be 30s"
+            expected_default = CRAWLER_SETTING_SPECS["queued_stale_threshold_minutes"][
+                "default"
+            ]
+            assert default_threshold == expected_default
+            assert default_threshold == 5, "Hardcoded default should be 5 minutes"
 
 
 @pytest.mark.asyncio
@@ -329,7 +334,7 @@ class TestMultiTenantTimeoutIsolation:
             f"/api/v1/sysadmin/tenants/{tenant_1['id']}/crawler-settings",
             json={
                 "download_timeout": 30,  # Fast timeout
-                "dns_timeout": 10,
+                "crawl_job_max_age_seconds": 600,
                 "crawl_max_length": 300,  # 5 minutes
             },
             headers={"X-API-Key": super_admin_token},
@@ -340,7 +345,7 @@ class TestMultiTenantTimeoutIsolation:
             f"/api/v1/sysadmin/tenants/{tenant_2['id']}/crawler-settings",
             json={
                 "download_timeout": 200,  # Slow timeout
-                "dns_timeout": 90,
+                "crawl_job_max_age_seconds": 7200,
                 "crawl_max_length": 7200,  # 2 hours
             },
             headers={"X-API-Key": super_admin_token},
@@ -353,21 +358,25 @@ class TestMultiTenantTimeoutIsolation:
             # Get tenant 1
             t1 = await tenant_repo.get(tenant_1["id"])
             t1_download = get_crawler_setting("download_timeout", t1.crawler_settings)
-            t1_dns = get_crawler_setting("dns_timeout", t1.crawler_settings)
+            t1_max_age = get_crawler_setting(
+                "crawl_job_max_age_seconds", t1.crawler_settings
+            )
             t1_max_length = get_crawler_setting("crawl_max_length", t1.crawler_settings)
 
             # Get tenant 2
             t2 = await tenant_repo.get(tenant_2["id"])
             t2_download = get_crawler_setting("download_timeout", t2.crawler_settings)
-            t2_dns = get_crawler_setting("dns_timeout", t2.crawler_settings)
+            t2_max_age = get_crawler_setting(
+                "crawl_job_max_age_seconds", t2.crawler_settings
+            )
             t2_max_length = get_crawler_setting("crawl_max_length", t2.crawler_settings)
 
             # Verify complete isolation
             assert t1_download == 30, "Tenant 1 should have fast download timeout"
             assert t2_download == 200, "Tenant 2 should have slow download timeout"
 
-            assert t1_dns == 10, "Tenant 1 should have fast DNS timeout"
-            assert t2_dns == 90, "Tenant 2 should have slow DNS timeout"
+            assert t1_max_age == 600, "Tenant 1 should have short job max age"
+            assert t2_max_age == 7200, "Tenant 2 should have long job max age"
 
             assert t1_max_length == 300, "Tenant 1 should have short max length"
             assert t2_max_length == 7200, "Tenant 2 should have long max length"
@@ -424,7 +433,7 @@ class TestTimeoutUpdatePropagation:
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "download_timeout": 100,
-                "dns_timeout": 20,
+                "crawl_job_max_age_seconds": 1200,
                 "crawl_max_length": 1800,
             },
             headers={"X-API-Key": super_admin_token},
@@ -443,11 +452,13 @@ class TestTimeoutUpdatePropagation:
 
             # Verify only download_timeout changed
             download = get_crawler_setting("download_timeout", tenant.crawler_settings)
-            dns = get_crawler_setting("dns_timeout", tenant.crawler_settings)
+            max_age = get_crawler_setting(
+                "crawl_job_max_age_seconds", tenant.crawler_settings
+            )
             max_length = get_crawler_setting(
                 "crawl_max_length", tenant.crawler_settings
             )
 
             assert download == 250, "download_timeout should be updated"
-            assert dns == 20, "dns_timeout should remain unchanged"
+            assert max_age == 1200, "crawl_job_max_age_seconds should remain unchanged"
             assert max_length == 1800, "crawl_max_length should remain unchanged"

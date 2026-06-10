@@ -4,8 +4,10 @@ Tests the PUT/GET/DELETE endpoints for managing tenant-specific crawler settings
 Requires super_admin_token for authentication (system admin only).
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
+
 from intric.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 
@@ -26,7 +28,7 @@ class TestUpdateCrawlerSettings:
         assert data["settings"]["download_timeout"] == 150
         assert "download_timeout" in data["overrides"]
         # Other settings should remain at defaults
-        assert data["settings"]["dns_timeout"] == 30
+        assert data["settings"]["queued_stale_threshold_minutes"] == 5
 
     async def test_update_multiple_settings(
         self, client, test_tenant, super_admin_token
@@ -36,20 +38,20 @@ class TestUpdateCrawlerSettings:
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "download_timeout": 120,
-                "dns_timeout": 45,
-                "retry_times": 5,
+                "crawl_max_length": 450,
+                "crawl_page_batch_size": 50,
             },
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["settings"]["download_timeout"] == 120
-        assert data["settings"]["dns_timeout"] == 45
-        assert data["settings"]["retry_times"] == 5
+        assert data["settings"]["crawl_max_length"] == 450
+        assert data["settings"]["crawl_page_batch_size"] == 50
         assert set(data["overrides"]) >= {
             "download_timeout",
-            "dns_timeout",
-            "retry_times",
+            "crawl_max_length",
+            "crawl_page_batch_size",
         }
 
     async def test_empty_request_returns_current_settings(
@@ -134,13 +136,12 @@ class TestUpdateCrawlerSettings:
         """Boolean settings can be updated."""
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"obey_robots": False, "autothrottle_enabled": False},
+            json={"crawl_feeder_enabled": False},
             headers={"X-API-Key": super_admin_token},
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["settings"]["obey_robots"] is False
-        assert data["settings"]["autothrottle_enabled"] is False
+        assert data["settings"]["crawl_feeder_enabled"] is False
 
     async def test_update_download_max_size(
         self, client, test_tenant, super_admin_token
@@ -253,7 +254,7 @@ class TestDeleteCrawlerSettings:
         # First set some overrides
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"download_timeout": 200, "dns_timeout": 60},
+            json={"download_timeout": 200, "crawl_max_length": 600},
             headers={"X-API-Key": super_admin_token},
         )
         # Then delete
@@ -264,7 +265,7 @@ class TestDeleteCrawlerSettings:
         assert response.status_code == 200
         data = response.json()
         assert "download_timeout" in data["deleted_keys"]
-        assert "dns_timeout" in data["deleted_keys"]
+        assert "crawl_max_length" in data["deleted_keys"]
 
         # Verify settings are back to defaults
         get_response = await client.get(
@@ -376,14 +377,14 @@ class TestCrawlerSettingsWorkflow:
             headers={"X-API-Key": super_admin_token},
         )
 
-        # Update 2: set dns_timeout (should not affect download_timeout)
+        # Update 2: set crawl_page_batch_size (should not affect download_timeout)
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"dns_timeout": 50},
+            json={"crawl_page_batch_size": 50},
             headers={"X-API-Key": super_admin_token},
         )
 
         data = response.json()
         assert data["settings"]["download_timeout"] == 100
-        assert data["settings"]["dns_timeout"] == 50
-        assert set(data["overrides"]) >= {"download_timeout", "dns_timeout"}
+        assert data["settings"]["crawl_page_batch_size"] == 50
+        assert set(data["overrides"]) >= {"download_timeout", "crawl_page_batch_size"}

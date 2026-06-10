@@ -22,8 +22,6 @@ IntCrawlerSetting = Literal[
     "crawl_max_length",
     "download_timeout",
     "download_max_size",
-    "dns_timeout",
-    "retry_times",
     "closespider_itemcount",
     "tenant_worker_concurrency_limit",
     "crawl_stale_threshold_minutes",
@@ -36,11 +34,7 @@ IntCrawlerSetting = Literal[
     "crawl_page_batch_size",
 ]
 
-BoolCrawlerSetting = Literal[
-    "obey_robots",
-    "autothrottle_enabled",
-    "crawl_feeder_enabled",
-]
+BoolCrawlerSetting = Literal["crawl_feeder_enabled",]
 
 # Buffer time (5 minutes) between semaphore TTL and job max age
 # This ensures the flag doesn't expire before watchdog can kill stale jobs
@@ -70,36 +64,12 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "env_attr": "download_max_size",
         "description": "Maximum file size for crawler downloads in bytes (1MB to 1GB)",
     },
-    "dns_timeout": {
-        "type": int,
-        "min": 5,
-        "max": 120,
-        "default": 30,
-        "description": "DNS resolution timeout in seconds (5s to 2 min)",
-    },
-    "retry_times": {
-        "type": int,
-        "min": 0,
-        "max": 10,
-        "default": 2,
-        "description": "Number of retry attempts per request (0 to 10)",
-    },
     "closespider_itemcount": {
         "type": int,
         "min": 100,
         "max": 100000,
         "env_attr": "closespider_itemcount",
         "description": "Maximum pages to crawl before stopping (100 to 100k)",
-    },
-    "obey_robots": {
-        "type": bool,
-        "env_attr": "obey_robots",
-        "description": "Whether to respect robots.txt rules",
-    },
-    "autothrottle_enabled": {
-        "type": bool,
-        "env_attr": "autothrottle_enabled",
-        "description": "Enable automatic request throttling based on server response times",
     },
     "tenant_worker_concurrency_limit": {
         "type": int,

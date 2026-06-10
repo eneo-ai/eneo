@@ -48,11 +48,7 @@ class CrawlerSettingsUpdate(BaseModel):
             "crawl_max_length": 14400,
             "download_timeout": 90,
             "download_max_size": 10485760,
-            "dns_timeout": 30,
-            "retry_times": 2,
             "closespider_itemcount": 20000,
-            "obey_robots": true,
-            "autothrottle_enabled": true,
             "tenant_worker_concurrency_limit": 4,
             "crawl_stale_threshold_minutes": 30,
             "crawl_heartbeat_interval_seconds": 300,
@@ -64,8 +60,7 @@ class CrawlerSettingsUpdate(BaseModel):
 
     Example - Partial update (adjust timeouts only):
         {
-            "download_timeout": 120,
-            "dns_timeout": 45
+            "download_timeout": 120
         }
     """
 
@@ -91,23 +86,6 @@ class CrawlerSettingsUpdate(BaseModel):
         description=_SPECS["download_max_size"]["description"],
         examples=[10485760],
     )
-    dns_timeout: int | None = Field(
-        None,
-        ge=_SPECS["dns_timeout"]["min"],
-        le=_SPECS["dns_timeout"]["max"],
-        description=_SPECS["dns_timeout"]["description"],
-        examples=[30],
-    )
-
-    # Retry settings
-    retry_times: int | None = Field(
-        None,
-        ge=_SPECS["retry_times"]["min"],
-        le=_SPECS["retry_times"]["max"],
-        description=_SPECS["retry_times"]["description"],
-        examples=[2],
-    )
-
     # Item limits
     closespider_itemcount: int | None = Field(
         None,
@@ -115,18 +93,6 @@ class CrawlerSettingsUpdate(BaseModel):
         le=_SPECS["closespider_itemcount"]["max"],
         description=_SPECS["closespider_itemcount"]["description"],
         examples=[20000],
-    )
-
-    # Boolean settings
-    obey_robots: bool | None = Field(
-        None,
-        description=_SPECS["obey_robots"]["description"],
-        examples=[True],
-    )
-    autothrottle_enabled: bool | None = Field(
-        None,
-        description=_SPECS["autothrottle_enabled"]["description"],
-        examples=[True],
     )
 
     # Concurrency settings
@@ -199,11 +165,7 @@ class CrawlerSettingsResponse(BaseModel):
                 "crawl_max_length": 14400,
                 "download_timeout": 90,
                 "download_max_size": 10485760,
-                "dns_timeout": 30,
-                "retry_times": 2,
                 "closespider_itemcount": 20000,
-                "obey_robots": true,
-                "autothrottle_enabled": true,
                 "tenant_worker_concurrency_limit": 4,
                 "crawl_stale_threshold_minutes": 30,
                 "crawl_heartbeat_interval_seconds": 300,
@@ -212,7 +174,7 @@ class CrawlerSettingsResponse(BaseModel):
                 "crawl_feeder_batch_size": 10,
                 "crawl_job_max_age_seconds": 1800
             },
-            "overrides": ["download_timeout", "dns_timeout"],
+            "overrides": ["download_timeout"],
             "updated_at": "2025-10-22T10:00:00+00:00"
         }
     """
@@ -226,11 +188,7 @@ class CrawlerSettingsResponse(BaseModel):
                 "crawl_max_length": 14400,
                 "download_timeout": 90,
                 "download_max_size": 10485760,
-                "dns_timeout": 30,
-                "retry_times": 2,
                 "closespider_itemcount": 20000,
-                "obey_robots": True,
-                "autothrottle_enabled": True,
                 "tenant_worker_concurrency_limit": 4,
                 "crawl_stale_threshold_minutes": 30,
                 "crawl_heartbeat_interval_seconds": 300,
@@ -244,7 +202,7 @@ class CrawlerSettingsResponse(BaseModel):
     overrides: list[str] = Field(
         ...,
         description="List of setting keys that have tenant-specific overrides",
-        examples=[["download_timeout", "dns_timeout"]],
+        examples=[["download_timeout", "crawl_max_length"]],
     )
     updated_at: datetime | None = Field(
         None, description="Timestamp of last settings update"
@@ -259,7 +217,7 @@ class DeleteSettingsResponse(BaseModel):
         {
             "tenant_id": "123e4567-e89b-12d3-a456-426614174000",
             "message": "Crawler settings reset to defaults",
-            "deleted_keys": ["download_timeout", "dns_timeout"]
+            "deleted_keys": ["download_timeout", "crawl_max_length"]
         }
     """
 

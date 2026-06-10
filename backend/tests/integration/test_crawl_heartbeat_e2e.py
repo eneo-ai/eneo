@@ -346,18 +346,18 @@ class TestHeartbeatUseCases:
 class TestHeartbeatWithOtherSettings:
     """Tests heartbeat interval interaction with other crawler settings."""
 
-    async def test_heartbeat_independent_of_retry_settings(
+    async def test_heartbeat_independent_of_download_settings(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """Heartbeat interval is independent of retry configuration.
+        """Heartbeat interval is independent of download configuration.
 
-        Heartbeat is for job-level observability, not request-level retries.
+        Heartbeat is for job-level observability, not request-level downloads.
         """
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={
                 "crawl_heartbeat_interval_seconds": 120,
-                "retry_times": 5,
+                "download_timeout": 150,
                 "crawl_job_max_age_seconds": 3600,
             },
             headers={"X-API-Key": super_admin_token},
@@ -370,14 +370,14 @@ class TestHeartbeatWithOtherSettings:
             heartbeat = get_crawler_setting(
                 "crawl_heartbeat_interval_seconds", tenant.crawler_settings
             )
-            retries = get_crawler_setting("retry_times", tenant.crawler_settings)
+            timeout = get_crawler_setting("download_timeout", tenant.crawler_settings)
             max_age = get_crawler_setting(
                 "crawl_job_max_age_seconds", tenant.crawler_settings
             )
 
             # Verify all settings configured independently
             assert heartbeat == 120
-            assert retries == 5
+            assert timeout == 150
             assert max_age == 3600
 
     async def test_heartbeat_with_stale_threshold(

@@ -6,8 +6,9 @@ Tests PostgreSQL JSONB atomic merge operations for crawler settings:
 - Race condition prevention via atomic operations
 """
 
-import pytest
 import asyncio
+
+import pytest
 
 
 @pytest.mark.asyncio
@@ -41,12 +42,12 @@ class TestUpdateCrawlerSettings:
             # Second update with different key
             updated = await tenant_repo.update_crawler_settings(
                 tenant_id=test_tenant.id,
-                crawler_settings={"dns_timeout": 60},
+                crawler_settings={"crawl_max_length": 600},
             )
 
             # Both should exist (merge, not replace)
             assert updated.crawler_settings["download_timeout"] == 120
-            assert updated.crawler_settings["dns_timeout"] == 60
+            assert updated.crawler_settings["crawl_max_length"] == 600
 
     async def test_update_overwrites_existing_key(self, db_container, test_tenant):
         """Updating same key overwrites the value."""
@@ -76,14 +77,14 @@ class TestUpdateCrawlerSettings:
                 tenant_id=test_tenant.id,
                 crawler_settings={
                     "download_timeout": 150,
-                    "dns_timeout": 45,
-                    "retry_times": 5,
+                    "crawl_max_length": 450,
+                    "crawl_page_batch_size": 50,
                 },
             )
 
             assert updated.crawler_settings["download_timeout"] == 150
-            assert updated.crawler_settings["dns_timeout"] == 45
-            assert updated.crawler_settings["retry_times"] == 5
+            assert updated.crawler_settings["crawl_max_length"] == 450
+            assert updated.crawler_settings["crawl_page_batch_size"] == 50
 
 
 @pytest.mark.asyncio
@@ -113,8 +114,8 @@ class TestAtomicJSONBMerge:
             # Run 5 concurrent updates with different keys
             await asyncio.gather(
                 update_setting("download_timeout", 100),
-                update_setting("dns_timeout", 50),
-                update_setting("retry_times", 5),
+                update_setting("crawl_heartbeat_interval_seconds", 60),
+                update_setting("crawl_page_batch_size", 50),
                 update_setting("crawl_max_length", 7200),
                 update_setting("crawl_feeder_batch_size", 20),
             )
@@ -122,8 +123,8 @@ class TestAtomicJSONBMerge:
             # Verify ALL writes persisted (no lost updates)
             tenant = await tenant_repo.get(test_tenant.id)
             assert tenant.crawler_settings.get("download_timeout") == 100
-            assert tenant.crawler_settings.get("dns_timeout") == 50
-            assert tenant.crawler_settings.get("retry_times") == 5
+            assert tenant.crawler_settings.get("crawl_heartbeat_interval_seconds") == 60
+            assert tenant.crawler_settings.get("crawl_page_batch_size") == 50
             assert tenant.crawler_settings.get("crawl_max_length") == 7200
             assert tenant.crawler_settings.get("crawl_feeder_batch_size") == 20
 
@@ -168,7 +169,7 @@ class TestClearCrawlerSettings:
             # Set some settings
             await tenant_repo.update_crawler_settings(
                 tenant_id=test_tenant.id,
-                crawler_settings={"download_timeout": 120, "dns_timeout": 60},
+                crawler_settings={"download_timeout": 120, "crawl_max_length": 600},
             )
 
             # Verify settings exist
@@ -246,14 +247,20 @@ class TestCrawlerSettingsIntegrationWithHelper:
 
     async def test_get_all_settings_merges_correctly(self, db_container, test_tenant):
         """get_all_crawler_settings() merges tenant overrides with defaults."""
-        from intric.tenants.crawler_settings_helper import get_all_crawler_settings
+        from intric.tenants.crawler_settings_helper import (
+            CRAWLER_SETTING_SPECS,
+            get_all_crawler_settings,
+        )
 
         async with db_container() as container:
             tenant_repo = container.tenant_repo()
 
             await tenant_repo.update_crawler_settings(
                 tenant_id=test_tenant.id,
-                crawler_settings={"download_timeout": 175, "obey_robots": False},
+                crawler_settings={
+                    "download_timeout": 175,
+                    "crawl_feeder_enabled": False,
+                },
             )
 
             tenant = await tenant_repo.get(test_tenant.id)
@@ -261,11 +268,9 @@ class TestCrawlerSettingsIntegrationWithHelper:
 
             # Verify overrides
             assert all_settings["download_timeout"] == 175
-            assert all_settings["obey_robots"] is False
+            assert all_settings["crawl_feeder_enabled"] is False
 
             # Verify defaults still present
-            assert "dns_timeout" in all_settings
+            assert "queued_stale_threshold_minutes" in all_settings
             assert "crawl_max_length" in all_settings
-            assert (
-                len(all_settings) == 18
-            )  # Updated: now includes queued_stale_threshold_minutes
+            assert len(all_settings) == len(CRAWLER_SETTING_SPECS)
