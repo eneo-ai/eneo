@@ -22,6 +22,7 @@ import { invalidate } from "$app/navigation";
 import { m } from "$lib/paraglide/messages";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { Intric } from "@intric/intric-js";
+import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
 type CompletionModel = {
@@ -144,13 +145,18 @@ export class PolicyDraft {
     }
     this.mcpEnabled = policy.mcp_restriction.enabled;
     this.mcpSelections.clear();
+    // Skip grants whose server is no longer enabled — they cannot be rendered
+    // or re-saved (see #selectableServerIds), so carrying them would only break
+    // the save and inflate the summary count.
     for (const server of policy.mcp_restriction.servers) {
+      if (!this.#selectableServerIds.has(server.mcp_server_id)) continue;
       this.mcpSelections.set(server.mcp_server_id, {
         isDefaultEnabled: server.is_default_enabled
       });
     }
     this.disabledMcpToolIds.clear();
     for (const id of policy.mcp_restriction.disabled_tool_ids ?? []) {
+      if (!this.#selectableToolIds.has(id)) continue;
       this.disabledMcpToolIds.add(id);
     }
     this.promptEnabled = policy.prompt_enforcement.enabled;
@@ -159,6 +165,17 @@ export class PolicyDraft {
   }
 
   // ---- Derived inputs ------------------------------------------------------
+  // Servers/tools the policy can legally reference. `is_available` mirrors the
+  // backend's tenant-enablement (it computes to `is_org_enabled`), and the PUT
+  // is rejected for any server that is not currently enabled — so a grant for a
+  // since-disabled server is dead: invisible in the section yet, if kept in the
+  // payload, it 400s every save. We intersect seed, baseline and payload with
+  // this set so an orphaned grant neither bricks saving nor shows a phantom
+  // count; it is pruned from the policy on the next save that touches MCP.
+  #selectableServerIds = $derived(new SvelteSet(this.#allMcpServers.map((s) => s.id)));
+  #selectableToolIds = $derived(
+    new SvelteSet(this.#allMcpServers.flatMap((s) => (s.tools ?? []).map((t) => t.id)))
+  );
   // Only tools that exist on the remote and are globally enabled are offered —
   // globally disabled tools never run regardless of this policy.
   allMcpServers = $derived(
@@ -209,16 +226,22 @@ export class PolicyDraft {
       null
   );
   #initialProviderIds = $derived(new SvelteSet(this.#policy.models_restriction.provider_ids ?? []));
+  // Baselines intersect the selectable set so they match the filtered seed —
+  // an orphaned (since-disabled) server in the saved policy must not register
+  // as a pending change on a pristine load.
   #initialMcpServers = $derived(
     new SvelteMap(
-      this.#policy.mcp_restriction.servers.map((server) => [
-        server.mcp_server_id,
-        server.is_default_enabled
-      ])
+      this.#policy.mcp_restriction.servers
+        .filter((server) => this.#selectableServerIds.has(server.mcp_server_id))
+        .map((server) => [server.mcp_server_id, server.is_default_enabled])
     )
   );
   #initialDisabledToolIds = $derived(
-    new SvelteSet(this.#policy.mcp_restriction.disabled_tool_ids ?? [])
+    new SvelteSet(
+      (this.#policy.mcp_restriction.disabled_tool_ids ?? []).filter((id) =>
+        this.#selectableToolIds.has(id)
+      )
+    )
   );
 
   #modelsDirty = $derived(
@@ -337,7 +360,9 @@ export class PolicyDraft {
       this.mcpSelections.delete(id);
       // Tool overrides only make sense for allowed servers — drop them so a
       // later re-select starts from "all tools on".
-      const server = this.allMcpServers.find((s) => s.id === id);
+      // Use the unfiltered source so globally disabled / removed tools are
+      // cleared too; those tools are intentionally hidden in the UI.
+      const server = this.#allMcpServers.find((s) => s.id === id);
       for (const tool of server?.tools ?? []) this.disabledMcpToolIds.delete(tool.id);
     }
   };
@@ -408,7 +433,11 @@ export class PolicyDraft {
             mcp_server_id: id,
             is_default_enabled: v.isDefaultEnabled
           })),
-          disabled_tool_ids: Array.from(this.disabledMcpToolIds)
+          disabled_tool_ids: disabledToolIdsForSelectedServers(
+            this.#allMcpServers,
+            this.mcpSelections.keys(),
+            this.disabledMcpToolIds
+          )
         },
         prompt_enforcement: {
           enabled: this.promptEnabled,

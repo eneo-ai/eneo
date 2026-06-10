@@ -50,7 +50,11 @@ async def test_admin_get_auto_creates_empty_policy(client, admin_token):
         "models": [],
         "provider_ids": [],
     }
-    assert payload["mcp_restriction"] == {"enabled": False, "server_ids": []}
+    assert payload["mcp_restriction"] == {
+        "enabled": False,
+        "servers": [],
+        "disabled_tool_ids": [],
+    }
     assert payload["prompt_enforcement"] == {
         "enabled": False,
         "prompt_library_id": None,
@@ -82,12 +86,17 @@ async def test_model_restriction_requires_at_least_one_model(client, admin_token
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_mcp_restriction_allows_empty_deny_all(client, admin_token):
+async def test_mcp_restriction_rejects_empty_enabled_grant(client, admin_token):
     resp = await client.put(
         "/api/v1/admin/governance-policy/",
-        json={"mcp_restriction": {"enabled": True, "server_ids": []}},
+        json={
+            "mcp_restriction": {
+                "enabled": True,
+                "servers": [],
+                "disabled_tool_ids": [],
+            }
+        },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["mcp_restriction"] == {"enabled": True, "server_ids": []}
+    assert resp.status_code == 400, resp.text
