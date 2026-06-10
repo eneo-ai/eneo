@@ -77,14 +77,17 @@ async def service():
 def page(url: str, title: str = "", content: str = "innehåll", **extra) -> dict:
     return {
         "type": "page",
-        "url": url,
-        "title": title or url,
-        "content": content,
-        **extra,
+        "page": {
+            "url": url,
+            "title": title or url,
+            "raw_text": content,
+            "file_links": [],
+            **extra,
+        },
     }
 
 
-DONE = {"type": "done", "outcome": {"ok_count": 0, "termination_reason": "completed"}}
+DONE = {"type": "done", "status": "completed", "outcome": {"ok_count": 0}}
 
 
 class TestStreamHappyPath:
@@ -125,16 +128,20 @@ class TestStreamHappyPath:
 
         body = service.received_json
         assert body["crawl_type"] == "sitemap"
-        assert body["http_auth"] == {"username": "intern", "password": "hemligt"}
+        assert body["depth"] == 10
+        assert body["http_auth"] == {"user": "intern", "password": "hemligt"}
         assert body["limits"]["max_pages"] == 500
         assert body["limits"]["max_seconds"] == 3600
         assert body["delivery"] == {"mode": "stream"}
         assert service.received_headers["Authorization"] == "Bearer secret-key"
 
     @pytest.mark.asyncio
-    async def test_raw_text_field_and_missing_title_tolerated(self, service):
+    async def test_content_field_and_missing_title_tolerated(self, service):
         service.body = ndjson(
-            {"type": "page", "url": "https://k.se/x", "raw_text": "via raw_text"},
+            {
+                "type": "page",
+                "page": {"url": "https://k.se/x", "content": "via content"},
+            },
             DONE,
         )
         crawler = RemoteCrawler(base_url=service.base_url)
@@ -142,14 +149,14 @@ class TestStreamHappyPath:
         async with crawler.crawl(url="https://k.se") as crawl:
             (p,) = list(crawl.pages)
 
-        assert p.content == "via raw_text"
+        assert p.content == "via content"
         assert p.title == "https://k.se/x"
 
     @pytest.mark.asyncio
-    async def test_early_service_termination_marks_partial(self, service):
+    async def test_service_cancelled_status_marks_partial_timeout(self, service):
         service.body = ndjson(
             page("https://k.se/a"),
-            {"type": "done", "outcome": {"termination_reason": "max_seconds"}},
+            {"type": "done", "status": "cancelled", "outcome": {"ok_count": 1}},
         )
         crawler = RemoteCrawler(base_url=service.base_url)
 
@@ -157,7 +164,21 @@ class TestStreamHappyPath:
             list(crawl.pages)
 
         assert crawl.is_partial is True
-        assert crawl.termination_reason == "max_seconds"
+        assert crawl.termination_reason == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_service_failed_status_marks_partial_error(self, service):
+        service.body = ndjson(
+            page("https://k.se/a"),
+            {"type": "done", "status": "failed", "outcome": None, "error": "boom"},
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url="https://k.se") as crawl:
+            list(crawl.pages)
+
+        assert crawl.is_partial is True
+        assert crawl.termination_reason == "error"
 
     @pytest.mark.asyncio
     async def test_heartbeat_callback_invoked(self, service):

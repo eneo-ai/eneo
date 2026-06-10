@@ -4,9 +4,9 @@ Eneo owns crawl administration (websites, schedules, run history, circuit
 breaker, slots) but never executes crawls in-process: the crawl is POSTed to
 the crawler service, which streams results back as NDJSON events:
 
-    {"type": "page", "url": ..., "title": ..., "content": ..., "file_links": [...]}
-    {"type": "failed", "url": ..., "status": ...}
-    {"type": "done", "outcome": {...}}
+    {"type": "page", "page": {"url": ..., "title": ..., "raw_text": ..., "file_links": [...]}}
+    {"type": "failed", "url": ..., "status": ..., "error_message": ...}
+    {"type": "done", "status": "completed" | "cancelled" | "failed", "outcome": {...}}
 
 Pages are spooled to a temp JSONL file during streaming and iterated only
 after the stream ends; the worker consumes the resulting ``Crawl`` (file-backed
@@ -92,16 +92,19 @@ class RemoteCrawler:
         tenant_crawler_settings: dict[str, Any] | None,
         max_length: int,
         spool_path: str,
-    ) -> tuple[int, int, list[str], dict[str, Any] | None]:
+    ) -> tuple[int, int, list[str], dict[str, Any] | None, str | None]:
         """Consume the NDJSON stream into the spool file.
 
-        Returns (pages_count, failed_count, file_links, outcome).
+        Returns (pages_count, failed_count, file_links, outcome, done_status).
         """
         request_body = {
             "url": url,
             "crawl_type": crawl_type.value,
+            # Whole-site parity with Eneo's crawl semantics: the service
+            # defaults to depth 1; 10 is its maximum
+            "depth": 10,
             "http_auth": (
-                {"username": http_user, "password": http_pass}
+                {"user": http_user, "password": http_pass}
                 if http_user and http_pass
                 else None
             ),
@@ -120,6 +123,8 @@ class RemoteCrawler:
         file_links: list[str] = []
         seen_links: set[str] = set()
         outcome: dict[str, Any] | None = None
+        done_status: str | None = None
+        done_error: str | None = None
         event_counts: dict[str, int] = {}
 
         async with session.post(
@@ -158,15 +163,18 @@ class RemoteCrawler:
                         event_counts.get(str(event_type), 0) + 1
                     )
                     if event_type == "page":
-                        page_url = event.get("url")
-                        content = event.get("content") or event.get("raw_text") or ""
+                        page_obj = cast("dict[str, Any]", event.get("page") or {})
+                        page_url = page_obj.get("url")
+                        content = (
+                            page_obj.get("raw_text") or page_obj.get("content") or ""
+                        )
                         if not page_url:
                             continue
                         spool.write(
                             json.dumps(
                                 {
                                     "url": page_url,
-                                    "title": event.get("title") or page_url,
+                                    "title": page_obj.get("title") or page_url,
                                     "content": content,
                                 }
                             )
@@ -174,7 +182,7 @@ class RemoteCrawler:
                         )
                         pages_count += 1
                         if download_files:
-                            raw_links: list[object] = event.get("file_links") or []
+                            raw_links: list[object] = page_obj.get("file_links") or []
                             for link in raw_links:
                                 if isinstance(link, dict):
                                     link_url = cast("dict[str, object]", link).get(
@@ -193,16 +201,24 @@ class RemoteCrawler:
                         failed_count += 1
                     elif event_type == "done":
                         outcome = event.get("outcome") or {}
+                        done_status = event.get("status")
+                        done_error = event.get("error")
                     # Other event types (unchanged, robots, ...) are tolerated
                     # and ignored: the worker has no use for them today.
 
         logger.info(
-            "Crawler service stream consumed: url=%s events=%s outcome=%s",
+            "Crawler service stream consumed: url=%s events=%s status=%s outcome=%s",
             url,
             event_counts or "none",
+            done_status,
             outcome,
         )
-        return pages_count, failed_count, file_links, outcome
+        if done_status == "failed":
+            # Service-side crawl failure; pages already streamed stay valid
+            logger.warning(
+                "Crawler service reported failure for %s: %s", url, done_error
+            )
+        return pages_count, failed_count, file_links, outcome, done_status
 
     async def _download_files(
         self,
@@ -334,6 +350,7 @@ class RemoteCrawler:
                             failed_count,
                             file_links,
                             outcome,
+                            done_status,
                         ) = await self._stream_crawl(
                             session,
                             url=url,
@@ -345,14 +362,15 @@ class RemoteCrawler:
                             max_length=max_length,
                             spool_path=spool_path,
                         )
-                    if outcome and outcome.get("termination_reason") not in (
-                        None,
-                        "completed",
-                    ):
-                        # Service ended the crawl early (its own max_seconds /
-                        # max_pages); pages received so far are valid
+                    if done_status == "cancelled":
+                        # The service aborted the crawl itself (its
+                        # max_seconds wall clock); pages received so far are
+                        # valid, same salvage semantics as a local timeout
                         is_partial = True
-                        termination_reason = str(outcome["termination_reason"])
+                        termination_reason = "timeout"
+                    elif done_status == "failed":
+                        is_partial = True
+                        termination_reason = "error"
                     logger.info(
                         "Remote crawl stream finished",
                         extra={
