@@ -181,7 +181,6 @@ async def update_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
-    assembler = container.space_assembler()
     current_user = container.user()
 
     old_space = await service.get_space(id)
@@ -323,7 +322,11 @@ async def update_space(
         ),
     )
 
-    return assembler.from_space_to_model(space)
+    # Serialize through the shared path so a patched personal space keeps the
+    # default assistant's governance effective_config — frontend SpacesManager
+    # overwrites currentSpace with this response, and a None effective_config
+    # makes the chat UI drop policy filtering until the next full GET.
+    return await _space_response(container, space)
 
 
 @router.get(
