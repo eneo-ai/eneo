@@ -192,7 +192,7 @@ class TestFailureSemantics:
         service.body = ndjson(DONE)
         crawler = RemoteCrawler(base_url=service.base_url)
 
-        with pytest.raises(CrawlerException, match="no pages returned"):
+        with pytest.raises(CrawlerException, match="returned no pages"):
             async with crawler.crawl(url="https://k.se"):
                 pass
 

@@ -120,6 +120,7 @@ class RemoteCrawler:
         file_links: list[str] = []
         seen_links: set[str] = set()
         outcome: dict[str, Any] | None = None
+        event_counts: dict[str, int] = {}
 
         async with session.post(
             f"{self.base_url}/v1/crawls",
@@ -153,6 +154,9 @@ class RemoteCrawler:
                         continue
 
                     event_type = event.get("type")
+                    event_counts[str(event_type)] = (
+                        event_counts.get(str(event_type), 0) + 1
+                    )
                     if event_type == "page":
                         page_url = event.get("url")
                         content = event.get("content") or event.get("raw_text") or ""
@@ -192,6 +196,12 @@ class RemoteCrawler:
                     # Other event types (unchanged, robots, ...) are tolerated
                     # and ignored: the worker has no use for them today.
 
+        logger.info(
+            "Crawler service stream consumed: url=%s events=%s outcome=%s",
+            url,
+            event_counts or "none",
+            outcome,
+        )
         return pages_count, failed_count, file_links, outcome
 
     async def _download_files(
@@ -277,7 +287,9 @@ class RemoteCrawler:
         is_partial = False
         termination_reason = "completed"
         pages_count = 0
+        failed_count = 0
         file_links: list[str] = []
+        outcome: dict[str, Any] | None = None
 
         stream_done = asyncio.Event()
 
@@ -394,7 +406,11 @@ class RemoteCrawler:
 
                 if pages_count == 0:
                     _cleanup()
-                    raise CrawlerException(f"Crawl failed for {url}: no pages returned")
+                    raise CrawlerException(
+                        f"Crawl failed for {url}: crawler service at "
+                        f"{self.base_url} returned no pages "
+                        f"(failed_count={failed_count}, outcome={outcome})"
+                    )
 
                 if download_files and file_links:
                     await self._download_files(
