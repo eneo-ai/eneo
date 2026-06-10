@@ -6,6 +6,8 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from intric.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -24,6 +26,9 @@ if TYPE_CHECKING:
     from intric.governance_policy.domain.governance_policy_repo import (
         GovernancePolicyRepo,
     )
+
+
+_NAME_UNIQUE_CONSTRAINT = "uq_prompt_library_tenant_name"
 
 
 class PromptLibraryService:
@@ -62,6 +67,8 @@ class PromptLibraryService:
             raise BadRequestException("name cannot be empty")
         if not text.strip():
             raise BadRequestException("text cannot be empty")
+        # Pre-check for the friendly message in the common case; the IntegrityError
+        # below closes the TOCTOU race between this check and the insert.
         if await self.repo.exists_by_name(self.user.tenant_id, name):
             raise BadRequestException(f"A prompt named '{name}' already exists")
 
@@ -76,7 +83,10 @@ class PromptLibraryService:
             created_at=None,
             updated_at=None,
         )
-        return await self.repo.add(entry)
+        try:
+            return await self.repo.add(entry)
+        except IntegrityError as e:
+            raise self._name_collision_or_reraise(name, e)
 
     async def update_entry(
         self,
@@ -109,11 +119,23 @@ class PromptLibraryService:
         if create_version:
             entry.current_version = old_version + 1
 
-        return await self.repo.update(
-            entry,
-            create_version=create_version,
-            version_created_by_user_id=self.user.id,
-        )
+        try:
+            return await self.repo.update(
+                entry,
+                create_version=create_version,
+                version_created_by_user_id=self.user.id,
+            )
+        except IntegrityError as e:
+            raise self._name_collision_or_reraise(entry.name, e)
+
+    @staticmethod
+    def _name_collision_or_reraise(name: str, error: IntegrityError) -> Exception:
+        """Translate the tenant+name unique violation into the same 400 the
+        pre-check raises; re-raise anything else (e.g. an FK violation is a real
+        500, not a name collision)."""
+        if _NAME_UNIQUE_CONSTRAINT in str(error.orig):
+            return BadRequestException(f"A prompt named '{name}' already exists")
+        return error
 
     async def list_versions(self, id: UUID) -> list[PromptLibraryVersion]:
         validate_permission(self.user, Permission.ADMIN)

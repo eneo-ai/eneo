@@ -81,6 +81,48 @@ async def test_create_rejects_duplicate_name():
 
 
 @pytest.mark.asyncio
+async def test_create_translates_name_collision_integrity_error():
+    # Two admins racing the same name: exists_by_name passes for both, the
+    # second insert hits uq_prompt_library_tenant_name. It must surface as the
+    # same 400 the pre-check raises, not a raw 500.
+    from sqlalchemy.exc import IntegrityError
+
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.exists_by_name.return_value = False
+    repo.add.side_effect = IntegrityError(
+        statement="INSERT",
+        params={},
+        orig=Exception(
+            "duplicate key value violates unique constraint "
+            '"uq_prompt_library_tenant_name"'
+        ),
+    )
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    with pytest.raises(BadRequestException):
+        await service.create_entry(name="Standard", description=None, text="t")
+
+
+@pytest.mark.asyncio
+async def test_create_reraises_unrelated_integrity_error():
+    from sqlalchemy.exc import IntegrityError
+
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.exists_by_name.return_value = False
+    repo.add.side_effect = IntegrityError(
+        statement="INSERT",
+        params={},
+        orig=Exception("some_fk_constraint violated"),
+    )
+    service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
+
+    with pytest.raises(IntegrityError):
+        await service.create_entry(name="Standard", description=None, text="t")
+
+
+@pytest.mark.asyncio
 async def test_create_calls_repo_with_user_id_and_tenant_id():
     tenant_id = uuid4()
     user = _admin_user(tenant_id)
