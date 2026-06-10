@@ -12,6 +12,9 @@ services:
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
+      # Overrides any value in backend/.env (env vars beat dotenv in
+      # pydantic-settings); the kravla service below runs with auth disabled
+      - CRAWLER_SERVICE_URL=http://kravla:8080
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
@@ -38,6 +41,24 @@ services:
       - eneo
     volumes:
       - redis_data:/data
+
+  kravla:
+    # External crawler service; the backend reaches it at http://kravla:8080
+    # (set CRAWLER_SERVICE_URL=http://kravla:8080 in backend/.env).
+    # Pinned on purpose - bump deliberately after verifying a new release.
+    image: ghcr.io/oddly-even/kravla:0.1.0
+    # The published image is amd64-only; emulate on Apple Silicon until the
+    # release workflow builds multi-arch
+    platform: linux/amd64
+    networks:
+      - eneo
+    environment:
+      # Local dev only: run without bearer auth
+      - KRAVLA_AUTH_DISABLED=true
+    ports:
+      # Exposed on the host for curl/debugging; stop any manually started
+      # kravla instance on 8080 to avoid a port conflict
+      - "8080:8080"
 
 volumes:
   postgres_data:
