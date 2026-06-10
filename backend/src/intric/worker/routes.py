@@ -92,13 +92,19 @@ async def crawl(job_id: UUID, params: CrawlTask, container: Container):
 
 
 @worker.cron_job(
-    minute=0
-)  # Hourly at :00 - enables true ~24h scheduling for DAILY websites
+    minute=0,  # Hourly at :00 - enables true ~24h scheduling for DAILY websites
+    run_at_startup=True,  # Re-evaluate due websites on worker restart so failed
+    # crawls retry immediately instead of waiting for the next hourly tick
+)
 async def crawl_all_websites(container: Container) -> bool:
     """Hourly cron job to check and queue websites based on their update intervals.
 
     Why: Hourly checks ensure DAILY websites are scheduled ~24 hours after last crawl,
     not up to ~39 hours with single daily cron. Query is fast (indexed) and lightweight.
+
+    Also runs once at worker startup: the due-query is idempotent (skips websites
+    with active jobs or fresh last_crawled_at) and the Redis scheduler lock prevents
+    duplicate scheduling when multiple workers start together.
 
     Schedule handles:
     - DAILY: ~24 hours after last crawl
