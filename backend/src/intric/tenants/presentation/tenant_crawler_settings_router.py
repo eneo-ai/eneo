@@ -55,7 +55,8 @@ class CrawlerSettingsUpdate(BaseModel):
             "crawl_feeder_enabled": false,
             "crawl_feeder_interval_seconds": 10,
             "crawl_feeder_batch_size": 10,
-            "crawl_job_max_age_seconds": 1800
+            "crawl_job_max_age_seconds": 1800,
+            "crawl_page_batch_size": 100
         }
 
     Example - Partial update (adjust timeouts only):
@@ -148,6 +149,15 @@ class CrawlerSettingsUpdate(BaseModel):
         le=_SPECS["crawl_job_max_age_seconds"]["max"],
         description=_SPECS["crawl_job_max_age_seconds"]["description"],
         examples=[1800],
+    )
+
+    # Persistence settings
+    crawl_page_batch_size: int | None = Field(
+        None,
+        ge=_SPECS["crawl_page_batch_size"]["min"],
+        le=_SPECS["crawl_page_batch_size"]["max"],
+        description=_SPECS["crawl_page_batch_size"]["description"],
+        examples=[100],
     )
 
 
