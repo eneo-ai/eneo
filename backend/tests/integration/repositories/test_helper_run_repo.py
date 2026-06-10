@@ -414,13 +414,16 @@ async def test_update_status_does_not_touch_other_tenants_rows(
             )
         )
 
-        with pytest.raises(AssertionError):
-            await repo.update_status(
-                added.id,
-                tenant_id=second_tenant_user.tenant_id,
-                status=HelperRunStatus.COMPLETED,
-                completed_at=datetime.now(timezone.utc),
-            )
+        # Wrong tenant: no row matches the (id, tenant_id) filter, so the
+        # UPDATE is a no-op that returns None — it must not raise and must
+        # not touch the owning tenant's row.
+        result = await repo.update_status(
+            added.id,
+            tenant_id=second_tenant_user.tenant_id,
+            status=HelperRunStatus.COMPLETED,
+            completed_at=datetime.now(timezone.utc),
+        )
+        assert result is None
 
         unchanged = await repo.get_by_id(added.id, tenant_id=admin_user.tenant_id)
         assert unchanged is not None
