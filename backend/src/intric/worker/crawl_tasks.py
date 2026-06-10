@@ -13,12 +13,15 @@ from arq import Retry
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from intric.crawler.remote_crawler import ConditionalGetHint
+from intric.crawler.sitemap_check import probe_sitemap, state_is_fresh
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+from intric.websites.domain.crawl_run import CrawlType
 from intric.worker.crawl import (
     HeartbeatFailedError,
     HeartbeatMonitor,
@@ -230,6 +233,7 @@ async def queue_website_crawls(container: Container):
                             "url": website.url,
                             "download_files": website.download_files,
                             "crawl_type": website.crawl_type.value,
+                            "origin": "scheduled",
                         }
 
                         # Step 5: Add to pending queue with orphaning protection
@@ -286,7 +290,9 @@ async def queue_website_crawls(container: Container):
                         from intric.websites.domain.website import Website
 
                         crawl_service = container.crawl_service()
-                        await crawl_service.crawl(cast(Website, website))
+                        await crawl_service.crawl(
+                            cast(Website, website), origin="scheduled"
+                        )
                         successful_crawls += 1
 
                         logger.debug(f"Successfully queued crawl for {website.url}")
@@ -724,6 +730,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawl_context: CrawlContext
             existing_titles: list[str] = []
             existing_file_hashes: dict[str, bytes] = {}
+            existing_page_hashes: dict[str, bytes] = {}
+            conditional_gets: list[ConditionalGetHint] = []
+            stored_sitemap_state: dict[str, Any] | None = None
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -751,6 +760,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 website: Any = website_row
                 website_url = website_row.url  # Save for logging after session closes
+                stored_sitemap_state = website_row.sitemap_state
 
                 # CRITICAL: Verify tenant isolation
                 current_tenant = container.tenant()
@@ -909,17 +919,53 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     ),
                 )
 
-                # Fetch existing titles for stale detection and file hashes for skip optimization
-                stmt = sa.select(InfoBlobs.title, InfoBlobs.content_hash).where(
-                    InfoBlobs.website_id == params.website_id
-                )
+                # Fetch existing titles for stale detection, content hashes for
+                # the unchanged-skip optimization, and HTTP cache validators
+                # for conditional-GET hints to the crawler service
+                stmt = sa.select(
+                    InfoBlobs.title,
+                    InfoBlobs.content_hash,
+                    InfoBlobs.embedding_model_id,
+                    InfoBlobs.http_etag,
+                    InfoBlobs.http_last_modified,
+                ).where(InfoBlobs.website_id == params.website_id)
                 blob_result = await bootstrap_session.execute(stmt)
 
-                # Build lookups for O(1) operations
-                for title, hash_bytes in blob_result:
+                current_embedding_model_id = (
+                    embedding_model_spec.id if embedding_model_spec else None
+                )
+
+                # Build lookups for O(1) operations. Page blobs use the URL as
+                # title; file blobs use the filename.
+                for (
+                    title,
+                    hash_bytes,
+                    blob_embedding_model_id,
+                    blob_etag,
+                    blob_last_modified,
+                ) in blob_result:
                     existing_titles.append(title)
-                    # Only store hashes for files (not URLs)
-                    if hash_bytes is not None and not title.startswith("http"):
+                    if title.startswith("http"):
+                        # Hash-skip and 304-skip both mean "reuse the stored
+                        # embeddings", which is only valid when the blob was
+                        # embedded with the current model: after a model switch
+                        # the page must re-embed even if its content is unchanged
+                        if (
+                            current_embedding_model_id is None
+                            or blob_embedding_model_id != current_embedding_model_id
+                        ):
+                            continue
+                        if hash_bytes is not None:
+                            existing_page_hashes[title] = hash_bytes
+                        if blob_etag or blob_last_modified:
+                            conditional_gets.append(
+                                {
+                                    "url": title,
+                                    "etag": blob_etag,
+                                    "last_modified": blob_last_modified,
+                                }
+                            )
+                    elif hash_bytes is not None:
                         existing_file_hashes[title] = hash_bytes
 
             finally:
@@ -943,6 +989,116 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 },
             )
 
+            # Sitemap short-circuit: a scheduled sitemap crawl whose sitemap
+            # fingerprint matches the last completed crawl is skipped before
+            # any page is fetched. Manual recrawls always run, and a
+            # fingerprint older than the forced-recrawl window never skips.
+            new_sitemap_state: dict[str, Any] | None = None
+            if (
+                params.crawl_type == CrawlType.SITEMAP
+                and settings.crawl_sitemap_skip_enabled
+            ):
+                sitemap_probe = await probe_sitemap(
+                    params.url,
+                    http_user=crawl_context.http_auth_user,
+                    http_pass=crawl_context.http_auth_pass,
+                )
+                if sitemap_probe is not None:
+                    new_sitemap_state = sitemap_probe.to_state(
+                        crawled_at=datetime.now(timezone.utc)
+                    )
+                if (
+                    sitemap_probe is not None
+                    and sitemap_probe.supports_skip
+                    and params.origin == "scheduled"
+                    and stored_sitemap_state is not None
+                    and stored_sitemap_state.get("fingerprint")
+                    == sitemap_probe.fingerprint
+                    and state_is_fresh(
+                        stored_sitemap_state,
+                        max_age_hours=settings.crawl_sitemap_skip_max_age_hours,
+                    )
+                ):
+                    from intric.audit.domain.action_types import ActionType
+                    from intric.audit.domain.entity_types import EntityType
+                    from intric.database.tables.job_table import Jobs
+                    from intric.main.models import Status
+
+                    skip_message = "Sitemap unchanged; scheduled crawl skipped"
+
+                    async def _do_sitemap_skip_bookkeeping(sess: AsyncSession) -> None:
+                        # The check counts as the scheduled visit: advance
+                        # last_crawled_at so the next check follows the
+                        # website's interval, and reset the circuit breaker
+                        await sess.execute(
+                            sa.update(WebsitesTable)
+                            .where(WebsitesTable.id == params.website_id)
+                            .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
+                            .values(
+                                last_crawled_at=sa.func.now(),
+                                consecutive_failures=0,
+                                next_retry_at=None,
+                            )
+                        )
+                        await sess.execute(
+                            sa.update(Jobs)
+                            .where(Jobs.id == job_id)
+                            .values(
+                                status=Status.COMPLETE.value,
+                                finished_at=datetime.now(timezone.utc),
+                                result_location=skip_message,
+                            )
+                        )
+
+                    await execute_with_recovery(
+                        container=container,
+                        session_holder=session_holder,
+                        created_sessions=created_sessions,
+                        operation_name="sitemap_skip_bookkeeping",
+                        operation=_do_sitemap_skip_bookkeeping,
+                    )
+
+                    audit_service = container.audit_service()
+                    await audit_service.log_async(
+                        tenant_id=crawl_context.tenant_id,
+                        actor_id=crawl_context.user_id,
+                        action=ActionType.WEBSITE_CRAWLED,
+                        entity_type=EntityType.WEBSITE,
+                        entity_id=params.website_id,
+                        description=(
+                            f"Website crawl skipped (sitemap unchanged): {params.url}"
+                        ),
+                        metadata={
+                            "target": {
+                                "website_id": str(params.website_id),
+                                "url": params.url,
+                            },
+                            "crawl_stats": {
+                                "sitemap_unchanged": True,
+                                "sitemap_entries": sitemap_probe.entry_count,
+                                "successful": True,
+                            },
+                        },
+                    )
+
+                    logger.info(
+                        "Sitemap unchanged - skipping scheduled crawl",
+                        extra={
+                            "job_id": str(job_id),
+                            "website_id": str(params.website_id),
+                            "url": params.url,
+                            "sitemap_entries": sitemap_probe.entry_count,
+                            "metric_name": "crawl.sitemap.skipped_unchanged",
+                            "metric_value": 1,
+                        },
+                    )
+                    setattr(task_manager, "_job_already_handled", True)
+                    return {
+                        "status": "sitemap_unchanged",
+                        "job_id": str(job_id),
+                        "sitemap_entries": sitemap_probe.entry_count,
+                    }
+
             # Do task
             logger.info(f"Running crawl with params: {params}")
 
@@ -952,6 +1108,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             num_failed_files = 0
             num_deleted_blobs = 0
             num_skipped_files = 0  # Files with unchanged content (hash match)
+            num_skipped_pages = 0  # Pages with unchanged content (hash match)
+            num_not_modified_pages = 0  # Pages answered 304 (never downloaded)
 
             # Aggregate failure reasons across all batches
             # Maps FailureReason codes to counts for final storage in failure_summary
@@ -1002,12 +1160,20 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # Pass heartbeat callback for liveness during the crawl phase
                 heartbeat_callback=heartbeat_monitor.tick,
                 heartbeat_interval=float(heartbeat_interval_seconds),
+                # Cache validators from the previous crawl; URLs the server
+                # answers 304 for come back on crawl.unchanged_urls
+                conditional_gets=conditional_gets or None,
             ) as crawl:
                 timings["crawl_and_parse"] = time.time() - start
 
                 # Track partial completion status for logging
                 crawl_is_partial = crawl.is_partial
                 crawl_termination_reason = crawl.termination_reason
+
+                # 304-confirmed URLs: stored content and embeddings are still
+                # current. Mark as seen so stale cleanup keeps their blobs.
+                num_not_modified_pages = len(crawl.unchanged_urls)
+                crawled_titles.update(crawl.unchanged_urls)
 
                 if crawl_is_partial:
                     logger.warning(
@@ -1058,11 +1224,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "pages_crawled": num_pages,
                         }
 
+                    # Unchanged page: identical content was already embedded with
+                    # the current model, so skip re-chunking/re-embedding. Mark it
+                    # as seen so stale cleanup doesn't delete its blob.
+                    page_hash = hashlib.sha256(page.content.encode("utf-8")).digest()
+                    if existing_page_hashes.get(page.url) == page_hash:
+                        num_skipped_pages += 1
+                        crawled_titles.add(page.url)
+                        continue
+
                     # Buffer page as dict (primitives only!)
                     page_buffer.append(
                         {
                             "url": page.url,
                             "content": page.content,
+                            "etag": page.etag,
+                            "last_modified": page.last_modified,
                         }
                     )
 
@@ -1302,9 +1479,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 operation=_do_timestamp_update,
             )
 
-            # Calculate file skip rate for performance analysis
+            # Calculate skip rates for performance analysis
             file_skip_rate = (
                 (num_skipped_files / num_files * 100) if num_files > 0 else 0
+            )
+            page_skip_rate = (
+                (num_skipped_pages / num_pages * 100) if num_pages > 0 else 0
             )
 
             # Structured crawl summary for easy log scanning
@@ -1317,7 +1497,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "=" * 60,
                 f"{status_label}: {params.url}",
                 "-" * 60,
-                f"Pages:   {num_pages} crawled, {num_failed_pages} failed",
+                f"Pages:   {num_pages} fetched, {num_failed_pages} failed, "
+                f"{num_skipped_pages} unchanged ({page_skip_rate:.1f}%), "
+                f"{num_not_modified_pages} not-modified (304)",
                 f"Files:   {num_files} downloaded, {num_failed_files} failed, {num_skipped_files} skipped ({file_skip_rate:.1f}%)",
                 f"Cleanup: {num_deleted_blobs} stale entries removed",
             ]
@@ -1343,6 +1525,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "timings": timings,
                     "pages_crawled": num_pages,
                     "pages_failed": num_failed_pages,
+                    "pages_skipped": num_skipped_pages,
+                    "pages_not_modified": num_not_modified_pages,
+                    "page_skip_rate_percent": page_skip_rate,
                     "files_crawled": num_files,
                     "files_failed": num_failed_files,
                     "files_skipped": num_skipped_files,
@@ -1419,8 +1604,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Circuit breaker: Update failure tracking and exponential backoff
 
             # Determine if crawl was successful
-            # Success = at least one item (page or file) AND not everything failed
-            total_items = num_pages + num_files
+            # Success = at least one item (page, file, or 304-confirmed page)
+            # AND not everything failed. A fully-unchanged site streams zero
+            # pages but is the best possible outcome, not a failure.
+            total_items = num_pages + num_files + num_not_modified_pages
             total_failed = num_failed_pages + num_failed_files
             crawl_successful = total_items > 0 and total_failed < total_items
 
@@ -1519,6 +1706,33 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 operation=_do_circuit_breaker_update,
             )
 
+            # Persist the sitemap fingerprint only for complete, successful
+            # crawls: a partial crawl must not be fingerprinted as done.
+            # A failed probe (new_sitemap_state None) clears stale state so
+            # it can never match a future probe.
+            if (
+                params.crawl_type == CrawlType.SITEMAP
+                and settings.crawl_sitemap_skip_enabled
+                and crawl_successful
+                and not crawl_is_partial
+            ):
+
+                async def _do_sitemap_state_update(sess: AsyncSession) -> None:
+                    await sess.execute(
+                        sa.update(WebsitesTable)
+                        .where(WebsitesTable.id == params.website_id)
+                        .where(WebsitesTable.tenant_id == crawl_context.tenant_id)
+                        .values(sitemap_state=new_sitemap_state)
+                    )
+
+                await execute_with_recovery(
+                    container=container,
+                    session_holder=session_holder,
+                    created_sessions=created_sessions,
+                    operation_name="sitemap_state_update",
+                    operation=_do_sitemap_state_update,
+                )
+
             # Audit logging for website crawl
             from intric.audit.domain.action_types import ActionType
             from intric.audit.domain.entity_types import EntityType
@@ -1549,6 +1763,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "crawl_stats": {
                         "pages_crawled": num_pages,
                         "pages_failed": num_failed_pages,
+                        "pages_skipped": num_skipped_pages,
+                        "pages_not_modified": num_not_modified_pages,
                         "files_downloaded": num_files,
                         "files_failed": num_failed_files,
                         "files_skipped": num_skipped_files,

@@ -14,7 +14,7 @@ from intric.jobs.task_models import TaskParams, Transcription, UploadInfoBlob
 from intric.main.config import get_settings
 from intric.main.exceptions import FileNotSupportedException, FileTooLargeException
 from intric.users.user import UserInDB
-from intric.websites.crawl_dependencies.crawl_models import CrawlTask
+from intric.websites.crawl_dependencies.crawl_models import CrawlOrigin, CrawlTask
 from intric.websites.domain.crawl_run import CrawlType
 
 
@@ -130,6 +130,7 @@ class TaskService:
         crawl_type: CrawlType = CrawlType.CRAWL,
         website_id: UUID | None = None,
         enqueue: bool = True,
+        origin: CrawlOrigin = "manual",
     ) -> JobInDb:
         # CrawlTask.website_id is UUID (non-optional); callers always provide a value
         assert website_id is not None, "website_id is required for crawl tasks"
@@ -140,6 +141,7 @@ class TaskService:
             download_files=download_files,
             crawl_type=crawl_type,
             website_id=website_id,
+            origin=origin,
         )
 
         return await self.job_service.queue_job(

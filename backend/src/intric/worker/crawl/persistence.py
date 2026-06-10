@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 import sqlalchemy as sa
 from dependency_injector import providers
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
@@ -56,6 +56,10 @@ _embedding_semaphore: asyncio.Semaphore | None = None
 class CrawlPageData(TypedDict):
     url: str
     content: str
+    # HTTP cache validators from the fetch, persisted for the next crawl's
+    # conditional-GET hints
+    etag: NotRequired[str | None]
+    last_modified: NotRequired[str | None]
 
 
 def _get_embedding_semaphore() -> asyncio.Semaphore:
@@ -320,6 +324,8 @@ async def persist_batch(
                     website_id=ctx.website_id,
                     user_id=ctx.user_id,
                     embedding_model_id=embedding_model_id,
+                    etag=page_data.get("etag"),
+                    last_modified=page_data.get("last_modified"),
                 )
                 prepared_pages.append(prepared)
 
@@ -395,6 +401,8 @@ async def persist_batch(
                             "url": prepared.url,
                             "size": len(prepared.content.encode("utf-8")),
                             "content_hash": prepared.content_hash,
+                            "http_etag": prepared.etag,
+                            "http_last_modified": prepared.last_modified,
                             "user_id": prepared.user_id,
                             "tenant_id": prepared.tenant_id,
                             "website_id": prepared.website_id,

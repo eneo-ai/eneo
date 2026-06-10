@@ -256,6 +256,90 @@ class TestFailureSemantics:
                     pass
 
 
+class TestConditionalGets:
+    @pytest.mark.asyncio
+    async def test_hints_sent_and_validators_returned_on_pages(self, service):
+        service.body = ndjson(
+            page(
+                "https://k.se/a",
+                etag='W/"abc"',
+                last_modified="Tue, 09 Jun 2026 10:00:00 GMT",
+            ),
+            DONE,
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+        hints = [
+            {
+                "url": "https://k.se/a",
+                "etag": 'W/"old"',
+                "last_modified": None,
+            }
+        ]
+
+        async with crawler.crawl(url="https://k.se", conditional_gets=hints) as crawl:
+            pages = list(crawl.pages)
+
+        assert service.received_json["conditional_gets"] == hints
+        assert pages[0].etag == 'W/"abc"'
+        assert pages[0].last_modified == "Tue, 09 Jun 2026 10:00:00 GMT"
+
+    @pytest.mark.asyncio
+    async def test_no_hints_omits_conditional_gets_from_request(self, service):
+        service.body = ndjson(page("https://k.se/a"), DONE)
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url="https://k.se") as crawl:
+            list(crawl.pages)
+
+        assert "conditional_gets" not in service.received_json
+
+    @pytest.mark.asyncio
+    async def test_unchanged_events_collected(self, service):
+        service.body = ndjson(
+            {"type": "unchanged", "url": "https://k.se/a"},
+            page("https://k.se/b"),
+            {"type": "unchanged", "url": "https://k.se/c"},
+            DONE,
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url="https://k.se") as crawl:
+            pages = list(crawl.pages)
+
+        assert crawl.unchanged_urls == ["https://k.se/a", "https://k.se/c"]
+        assert [p.url for p in pages] == ["https://k.se/b"]
+
+    @pytest.mark.asyncio
+    async def test_all_unchanged_crawl_is_success_not_zero_pages(self, service):
+        service.body = ndjson(
+            {"type": "unchanged", "url": "https://k.se/a"},
+            {"type": "unchanged", "url": "https://k.se/b"},
+            DONE,
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url="https://k.se") as crawl:
+            pages = list(crawl.pages)
+
+        assert pages == []
+        assert crawl.pages_count == 0
+        assert crawl.unchanged_urls == ["https://k.se/a", "https://k.se/b"]
+        assert crawl.is_partial is False
+
+    @pytest.mark.asyncio
+    async def test_disconnect_with_only_unchanged_salvages(self, service):
+        service.body = ndjson({"type": "unchanged", "url": "https://k.se/a"})
+        service.abort_after_write = True
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url="https://k.se") as crawl:
+            pass
+
+        assert crawl.unchanged_urls == ["https://k.se/a"]
+        assert crawl.is_partial is True
+        assert crawl.termination_reason == "stream_interrupted"
+
+
 class TestFileDownloads:
     @pytest.mark.asyncio
     async def test_file_links_downloaded_into_files_dir(self, service):

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, String, and_, select
@@ -72,6 +72,15 @@ class Websites(BasePublic):
         TIMESTAMP(timezone=True),
         nullable=True,
         comment="Timestamp when website should be retried after failures",
+    )
+    sitemap_state: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment=(
+            "Sitemap fingerprint from the last completed crawl "
+            "(hash over url+lastmod entries); scheduled sitemap crawls are "
+            "skipped while the fingerprint is unchanged"
+        ),
     )
 
     # Foreign keys

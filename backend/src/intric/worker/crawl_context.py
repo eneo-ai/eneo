@@ -168,3 +168,8 @@ class PreparedPage:
     website_id: UUID
     user_id: UUID
     embedding_model_id: UUID
+
+    # HTTP cache validators from the fetch, persisted for the next crawl's
+    # conditional-GET hints
+    etag: str | None = None
+    last_modified: str | None = None

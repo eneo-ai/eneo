@@ -310,6 +310,14 @@ class Settings(BaseSettings):
         100  # Commit after every N pages during crawl (bounds data loss)
     )
 
+    # Sitemap short-circuit: scheduled sitemap crawls are skipped while the
+    # sitemap fingerprint (url+lastmod entries) matches the last completed
+    # crawl. Manual recrawls always run.
+    crawl_sitemap_skip_enabled: bool = True
+    crawl_sitemap_skip_max_age_hours: int = (
+        168  # Force a full crawl at least weekly even when unchanged
+    )
+
     # Audit log export configuration
     export_batch_size: int = 20000  # Records per DB fetch for streaming exports
     export_buffer_size: int = 50000  # Records to buffer before disk write

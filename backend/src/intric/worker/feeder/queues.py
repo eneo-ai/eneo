@@ -10,7 +10,7 @@ import json
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from intric.jobs.job_manager import job_manager
 from intric.main.logging import get_logger
@@ -29,6 +29,9 @@ class CrawlPendingJobData(TypedDict):
     url: str
     download_files: bool
     crawl_type: str
+    # "scheduled" | "manual"; absent in queue entries from older writers,
+    # which must be treated as manual (never sitemap-skipped)
+    origin: NotRequired[str]
 
 
 class PendingQueue:
@@ -220,6 +223,9 @@ class JobEnqueuer:
                 url=job_data["url"],
                 download_files=job_data["download_files"],
                 crawl_type=CrawlType(job_data["crawl_type"]),
+                origin=(
+                    "scheduled" if job_data.get("origin") == "scheduled" else "manual"
+                ),
             )
 
             await job_manager.enqueue(

@@ -22,6 +22,12 @@ class InfoBlobs(BasePublic):
         LargeBinary(length=32),
         comment="SHA-256 hash of normalized content for change detection",
     )
+    http_etag: Mapped[Optional[str]] = mapped_column(
+        comment="ETag from the crawl fetch, sent as If-None-Match on recrawl",
+    )
+    http_last_modified: Mapped[Optional[str]] = mapped_column(
+        comment="Last-Modified from the crawl fetch, sent as If-Modified-Since on recrawl",
+    )
 
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(

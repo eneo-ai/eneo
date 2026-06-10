@@ -4,7 +4,8 @@ Eneo owns crawl administration (websites, schedules, run history, circuit
 breaker, slots) but never executes crawls in-process: the crawl is POSTed to
 the crawler service, which streams results back as NDJSON events:
 
-    {"type": "page", "page": {"url": ..., "title": ..., "raw_text": ..., "file_links": [...]}}
+    {"type": "page", "page": {"url": ..., "title": ..., "raw_text": ..., "etag": ..., "last_modified": ..., "file_links": [...]}}
+    {"type": "unchanged", "url": ...}
     {"type": "failed", "url": ..., "status": ..., "error_message": ...}
     {"type": "done", "status": "completed" | "cancelled" | "failed", "outcome": {...}}
 
@@ -27,6 +28,7 @@ from typing import Any, Callable, Coroutine, Iterable, Optional, cast
 from urllib.parse import unquote, urlparse
 
 import aiohttp
+from typing_extensions import TypedDict
 
 from intric.crawler.models import Crawl, CrawledPage
 from intric.main.exceptions import CrawlerException, CrawlTimeoutError
@@ -34,6 +36,20 @@ from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.crawl_run import CrawlType
 
 logger = logging.getLogger(__name__)
+
+
+class ConditionalGetHint(TypedDict):
+    """Per-URL cache validators from a prior crawl. The service turns these
+    into If-None-Match / If-Modified-Since headers and answers 304s with an
+    ``unchanged`` event instead of re-downloading the body."""
+
+    url: str
+    etag: Optional[str]
+    last_modified: Optional[str]
+
+
+# Wire-contract cap on conditional_gets entries per crawl request
+_MAX_CONDITIONAL_GETS = 50_000
 
 # Margin on top of the service-side max_seconds before the client gives up
 # on the stream; the service is expected to terminate the crawl itself.
@@ -92,12 +108,18 @@ class RemoteCrawler:
         tenant_crawler_settings: dict[str, Any] | None,
         max_length: int,
         spool_path: str,
+        conditional_gets: list[ConditionalGetHint] | None,
+        unchanged_urls: list[str],
     ) -> tuple[int, int, list[str], dict[str, Any] | None, str | None]:
         """Consume the NDJSON stream into the spool file.
 
         Returns (pages_count, failed_count, file_links, outcome, done_status).
+
+        ``unchanged_urls`` is a caller-owned accumulator (not a return value)
+        so URLs already confirmed unchanged survive a mid-stream timeout or
+        disconnect, the same way spooled pages do.
         """
-        request_body = {
+        request_body: dict[str, Any] = {
             "url": url,
             "crawl_type": crawl_type.value,
             # Whole-site parity with Eneo's crawl semantics: the service
@@ -117,6 +139,18 @@ class RemoteCrawler:
             },
             "delivery": {"mode": "stream"},
         }
+        if conditional_gets:
+            if len(conditional_gets) > _MAX_CONDITIONAL_GETS:
+                logger.warning(
+                    "Truncating conditional_gets to wire-contract cap",
+                    extra={
+                        "url": url,
+                        "hints": len(conditional_gets),
+                        "cap": _MAX_CONDITIONAL_GETS,
+                    },
+                )
+                conditional_gets = conditional_gets[:_MAX_CONDITIONAL_GETS]
+            request_body["conditional_gets"] = conditional_gets
 
         pages_count = 0
         failed_count = 0
@@ -176,6 +210,8 @@ class RemoteCrawler:
                                     "url": page_url,
                                     "title": page_obj.get("title") or page_url,
                                     "content": content,
+                                    "etag": page_obj.get("etag"),
+                                    "last_modified": page_obj.get("last_modified"),
                                 }
                             )
                             + "\n"
@@ -197,13 +233,17 @@ class RemoteCrawler:
                                 ):
                                     seen_links.add(link_url)
                                     file_links.append(link_url)
+                    elif event_type == "unchanged":
+                        unchanged_url = event.get("url")
+                        if unchanged_url:
+                            unchanged_urls.append(unchanged_url)
                     elif event_type == "failed":
                         failed_count += 1
                     elif event_type == "done":
                         outcome = event.get("outcome") or {}
                         done_status = event.get("status")
                         done_error = event.get("error")
-                    # Other event types (unchanged, robots, ...) are tolerated
+                    # Other event types (robots, skipped_*, ...) are tolerated
                     # and ignored: the worker has no use for them today.
 
         logger.info(
@@ -290,10 +330,15 @@ class RemoteCrawler:
         tenant_crawler_settings: dict[str, Any] | None = None,
         heartbeat_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         heartbeat_interval: float = 60.0,
+        conditional_gets: list[ConditionalGetHint] | None = None,
     ):
         """Same contract as Crawler.crawl: yields a Crawl with file-backed
         iterators after the (remote) crawl finished, salvaging partial results
-        on timeout or stream interruption."""
+        on timeout or stream interruption.
+
+        ``conditional_gets`` carries per-URL cache validators from the prior
+        crawl; URLs the server answers 304 for come back on
+        ``Crawl.unchanged_urls`` instead of as pages."""
         max_length = get_crawler_setting("crawl_max_length", tenant_crawler_settings)
 
         with NamedTemporaryFile(delete=False) as tmp_file:
@@ -306,6 +351,7 @@ class RemoteCrawler:
         failed_count = 0
         file_links: list[str] = []
         outcome: dict[str, Any] | None = None
+        unchanged_urls: list[str] = []
 
         stream_done = asyncio.Event()
 
@@ -361,6 +407,8 @@ class RemoteCrawler:
                             tenant_crawler_settings=tenant_crawler_settings,
                             max_length=max_length,
                             spool_path=spool_path,
+                            conditional_gets=conditional_gets,
+                            unchanged_urls=unchanged_urls,
                         )
                     if done_status == "cancelled":
                         # The service aborted the crawl itself (its
@@ -383,9 +431,10 @@ class RemoteCrawler:
                 except TimeoutError:
                     # Client-side ceiling: service did not finish within
                     # max_seconds + margin. Salvage whatever reached the
-                    # spool, like any other early termination.
+                    # spool (and any 304-confirmed URLs), like any other
+                    # early termination.
                     pages_count = self._count_spool_lines(spool_path)
-                    if pages_count == 0:
+                    if pages_count == 0 and not unchanged_urls:
                         _cleanup()
                         raise CrawlTimeoutError(
                             url=url,
@@ -400,7 +449,7 @@ class RemoteCrawler:
                     termination_reason = "timeout"
                 except aiohttp.ClientError as exc:
                     pages_count = self._count_spool_lines(spool_path)
-                    if pages_count == 0:
+                    if pages_count == 0 and not unchanged_urls:
                         _cleanup()
                         raise CrawlerException(
                             f"Crawler service stream failed for {url}: {exc}"
@@ -422,7 +471,9 @@ class RemoteCrawler:
                         except asyncio.CancelledError:
                             pass
 
-                if pages_count == 0:
+                # An entirely-304 crawl is a legitimate success: zero pages
+                # streamed because nothing changed since the last crawl
+                if pages_count == 0 and not unchanged_urls:
                     _cleanup()
                     raise CrawlerException(
                         f"Crawl failed for {url}: crawler service at "
@@ -455,6 +506,7 @@ class RemoteCrawler:
                 is_partial=is_partial,
                 termination_reason=termination_reason,
                 pages_count=pages_count,
+                unchanged_urls=unchanged_urls,
             )
 
         finally:
