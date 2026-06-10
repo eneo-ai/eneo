@@ -41,10 +41,6 @@ class RoleAssignment(Entity):
         self.created_by_user_id = created_by_user_id
         self.updated_by_user_id = updated_by_user_id
 
-    def reassign_to(self, assistant_id: UUID, actor_user_id: UUID | None) -> None:
-        self.assistant_id = assistant_id
-        self.updated_by_user_id = actor_user_id
-
     def set_enabled(self, value: bool, actor_user_id: UUID | None) -> None:
         self.is_enabled = value
         self.updated_by_user_id = actor_user_id

@@ -78,7 +78,7 @@
             <!-- One bordered container, each helper a collapsible row — mirrors
                  the grouped-table look of the Models admin page. -->
             <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
-              {#each filteredRoles as role (role.kind)}
+              {#each filteredRoles as role (role.id)}
                 <HelpAssistantRow {role} intric={data.intric} />
               {/each}
             </div>

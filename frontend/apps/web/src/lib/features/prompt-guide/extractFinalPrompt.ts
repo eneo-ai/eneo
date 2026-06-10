@@ -27,6 +27,14 @@ function isFinalPromptLang(lang: string | undefined | null): boolean {
 }
 
 /**
+ * Upper bound on the applied prompt. A prompt-injected or simply confused
+ * model could emit a multi-megabyte fenced block; oversized blocks are
+ * skipped rather than returned. Mirrors the backend `question` max_length so
+ * the round-trip (apply -> save -> next run) stays within the same envelope.
+ */
+const MAX_FINAL_PROMPT_LENGTH = 100_000;
+
+/**
  * Extract the Prompt Guide's final, ready-to-use prompt from a markdown reply.
  *
  * Returns the text of the **last** fenced code block whose language tag is
@@ -74,7 +82,10 @@ export function extractFinalPrompt(markdown: string): string | null {
   collect(tokens);
 
   for (let i = codeBlocks.length - 1; i >= 0; i--) {
-    if (codeBlocks[i].trim().length > 0) return codeBlocks[i];
+    const block = codeBlocks[i];
+    if (block.trim().length === 0) continue;
+    if (block.length > MAX_FINAL_PROMPT_LENGTH) continue;
+    return block;
   }
   return null;
 }

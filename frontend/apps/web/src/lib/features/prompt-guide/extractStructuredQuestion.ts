@@ -174,9 +174,13 @@ function findUnclosedQuestionOpener(text: string): number | null {
     for (let j = i + 1; j < lines.length; j++) {
       if (lines[j].trimEnd() === "```") return null;
     }
-    // Compute the byte offset of the start of line i.
+    // Offset of the start of line i. CRLF-safe: `split("\n")` keeps the
+    // trailing \r inside each `lines[k]`, so `length + 1` (the +1 being the
+    // single stripped \n delimiter) reconstructs the exact offset for both
+    // "\n" and "\r\n" input. (Fence detection above uses trimEnd(), which
+    // drops the \r, so matching is unaffected.)
     let offset = 0;
-    for (let k = 0; k < i; k++) offset += lines[k].length + 1; // +1 for the \n
+    for (let k = 0; k < i; k++) offset += lines[k].length + 1;
     return offset;
   }
   return null;

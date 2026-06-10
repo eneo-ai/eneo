@@ -259,9 +259,9 @@ async def test_update_persists_field_changes(db_container, admin_user):
             )
         )
 
-        added.reassign_to(
-            assistant_id=replacement_assistant_id, actor_user_id=admin_user.id
-        )
+        # Reassignment is a plain attribute change now (no domain helper):
+        # the repo.update round-trip is what this test pins.
+        added.assistant_id = replacement_assistant_id
         added.set_enabled(False, actor_user_id=admin_user.id)
         added.set_visible_to_users(False, actor_user_id=admin_user.id)
 

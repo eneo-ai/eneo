@@ -40,6 +40,7 @@ from fastapi import APIRouter, Depends
 from sse_starlette import EventSourceResponse
 
 from intric.ai_models.completion_models.completion_model import Completion, ResponseType
+from intric.authentication.auth_dependencies import require_user_for_creation
 from intric.help_assistants.api.run_models import (
     AvailabilityResponse,
     ContinueTurnRequest,
@@ -58,11 +59,13 @@ from intric.info_blobs.info_blob import (
 )
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException, UnauthorizedException
+from intric.main.logging import get_logger
 from intric.main.models import ResourcePermission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 HelperRunContainer = Annotated[Container, Depends(get_container(with_user=True))]
 
@@ -119,14 +122,38 @@ def _to_event_stream(
     )
 
     async def event_stream():
-        async for chunk in answer:
-            if chunk.response_type == ResponseType.TEXT:
-                payload = HelperRunResponsePublic(
-                    run=run_public,
-                    answer=chunk.text or "",
-                    references=_chunk_references_or_default(chunk, references),
-                )
-                yield payload.model_dump_json()
+        try:
+            async for chunk in answer:
+                if chunk.response_type == ResponseType.ERROR:
+                    # The completion adapter yields an ERROR chunk (rather than
+                    # raising) when the provider fails mid-stream. Forward it as
+                    # a terminal error event so the client stops and marks the
+                    # run failed, instead of silently ending with a partial
+                    # answer.
+                    yield HelperRunResponsePublic(
+                        run=run_public,
+                        answer="",
+                        references=[],
+                        error=chunk.error or "completion_failed",
+                    ).model_dump_json()
+                    return
+                if chunk.response_type == ResponseType.TEXT:
+                    yield HelperRunResponsePublic(
+                        run=run_public,
+                        answer=chunk.text or "",
+                        references=_chunk_references_or_default(chunk, references),
+                    ).model_dump_json()
+        except Exception:
+            # Defense in depth: any unexpected mid-stream failure becomes a
+            # terminal error event, not a raw traceback that drops the SSE
+            # connection ambiguously.
+            logger.exception("Helper run %s stream failed mid-flight", run_public.id)
+            yield HelperRunResponsePublic(
+                run=run_public,
+                answer="",
+                references=[],
+                error="completion_failed",
+            ).model_dump_json()
 
     return EventSourceResponse(event_stream(), ping=15)
 
@@ -166,6 +193,7 @@ def _to_json_response(response: HelperRunResponse) -> HelperRunResponsePublic:
 async def start_helper_run(
     body: StartRunRequest,
     container: HelperRunContainer,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Start a new helper run.
 
@@ -197,6 +225,7 @@ async def continue_helper_run(
     run_id: UUID,
     body: ContinueTurnRequest,
     container: HelperRunContainer,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Follow-up turn on an existing helper run.
 

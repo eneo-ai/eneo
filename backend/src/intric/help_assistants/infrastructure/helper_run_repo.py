@@ -106,18 +106,29 @@ class HelperRunRepo:
         tenant_id: UUID,
         status: HelperRunStatus,
         completed_at: datetime | None,
-    ) -> HelperRun:
+        expected_status: HelperRunStatus | None = None,
+    ) -> HelperRun | None:
+        """Transition a run's status.
+
+        When ``expected_status`` is given, the UPDATE matches only a row
+        still in that status — the WHERE clause is the concurrency guard, so
+        two racing terminal transitions cannot both win. Returns ``None``
+        when no row matched (already transitioned out of ``expected_status``).
+        """
         stmt = (
             sa.update(HelpAssistantRuns)
-            .values(status=status.value, completed_at=completed_at)
             .where(
                 HelpAssistantRuns.id == id,
                 HelpAssistantRuns.tenant_id == tenant_id,
             )
+            .values(status=status.value, completed_at=completed_at)
             .returning(HelpAssistantRuns)
         )
+        if expected_status is not None:
+            stmt = stmt.where(HelpAssistantRuns.status == expected_status.value)
         row = await self.session.scalar(stmt)
-        assert row is not None
+        if row is None:
+            return None
         result = self._to_domain(row)
         assert result is not None
         return result

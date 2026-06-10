@@ -137,6 +137,14 @@ class HelperRunService:
         question: str,
         stream: bool = False,
     ) -> HelperRunResponse:
+        """Start a helper run for ``target_id`` on behalf of the calling user.
+
+        Concurrency: helper runs are not separately rate-limited — they flow
+        through the same ``completion_service`` as ordinary assistant chats and
+        are therefore bound by the same per-tenant model quota / provider rate
+        limits. A dedicated per-user in-flight cap can be added later if
+        helper-run abuse is observed in practice.
+        """
         if target_type not in _SUPPORTED_TARGET_TYPES:
             raise BadRequestException(
                 f"Unsupported helper-run target_type '{target_type}'."
@@ -366,12 +374,23 @@ class HelperRunService:
             )
 
         completed_at = datetime.now(timezone.utc)
-        return await self.helper_run_repo.update_status(
+        updated = await self.helper_run_repo.update_status(
             id=run_id,
             tenant_id=self.user.tenant_id,
             status=status,
             completed_at=completed_at,
+            expected_status=HelperRunStatus.IN_PROGRESS,
         )
+        if updated is None:
+            # Lost a race: another request moved this run out of IN_PROGRESS
+            # between the pre-check above and this UPDATE. The conditional
+            # UPDATE is the real guard; surface the same error as the
+            # pre-check so two terminal transitions cannot both "win".
+            raise BadRequestException(
+                f"Cannot transition helper run to '{status.value}'; "
+                "the run is no longer in progress."
+            )
+        return updated
 
     async def _load_run_for_actor(self, run_id: UUID) -> HelperRun:
         run = await self.helper_run_repo.get_by_id(run_id, self.user.tenant_id)

@@ -38,14 +38,14 @@ class StartRunRequest(BaseModel):
     kind: HelperKind
     target_type: str = Field(min_length=1, max_length=64)
     target_id: UUID
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=100_000)
     stream: bool = False
 
 
 class ContinueTurnRequest(BaseModel):
     """Body for ``POST /runs/{run_id}/turns/`` — follow-up turn."""
 
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=100_000)
     stream: bool = False
 
 
@@ -90,6 +90,10 @@ class HelperRunResponsePublic(BaseModel):
     run: HelperRunPublic
     answer: str
     references: list[InfoBlobAskAssistantPublic]
+    # Set on a streamed event when the completion provider fails mid-stream
+    # (the router converts an ERROR chunk / exception into a terminal error
+    # event). The client surfaces it and marks the run failed.
+    error: str | None = None
 
 
 class AvailabilityResponse(BaseModel):

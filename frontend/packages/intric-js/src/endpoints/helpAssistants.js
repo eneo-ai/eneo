@@ -67,6 +67,7 @@
  * @property {HelperRunPublic} run
  * @property {string} answer
  * @property {HelperRunReference[]} references
+ * @property {string | null} [error] Set on a terminal stream event when the completion provider fails mid-stream.
  */
 
 /**
@@ -239,6 +240,7 @@ export function initHelpAssistants(client) {
         }
 
         let answer = "";
+        let streamError = /** @type {string | null} */ (null);
         let response = /** @type {HelperRunResponsePublic} */ ({});
 
         await client.stream(
@@ -258,6 +260,13 @@ export function initHelpAssistants(client) {
               try {
                 const data = /** @type {HelperRunResponsePublic} */ (JSON.parse(ev.data));
                 response = data;
+                if (data.error) {
+                  // Backend emits a terminal error event on mid-stream
+                  // provider failure; capture it and throw after the stream
+                  // so the caller's catch surfaces it (not a silent partial).
+                  streamError = data.error;
+                  return;
+                }
                 if (data.answer) {
                   answer += data.answer;
                   if (onAnswer) onAnswer(data, controller);
@@ -270,6 +279,7 @@ export function initHelpAssistants(client) {
           abortController
         );
 
+        if (streamError) throw new Error(streamError);
         response.answer = answer;
         return response;
       },
@@ -307,6 +317,7 @@ export function initHelpAssistants(client) {
         }
 
         let answer = "";
+        let streamError = /** @type {string | null} */ (null);
         let response = /** @type {HelperRunResponsePublic} */ ({});
 
         await client.stream(
@@ -325,6 +336,13 @@ export function initHelpAssistants(client) {
               try {
                 const data = /** @type {HelperRunResponsePublic} */ (JSON.parse(ev.data));
                 response = data;
+                if (data.error) {
+                  // Backend emits a terminal error event on mid-stream
+                  // provider failure; capture it and throw after the stream
+                  // so the caller's catch surfaces it (not a silent partial).
+                  streamError = data.error;
+                  return;
+                }
                 if (data.answer) {
                   answer += data.answer;
                   if (onAnswer) onAnswer(data, controller);
@@ -337,6 +355,7 @@ export function initHelpAssistants(client) {
           abortController
         );
 
+        if (streamError) throw new Error(streamError);
         response.answer = answer;
         return response;
       },

@@ -24,6 +24,7 @@
 <script lang="ts">
   import { CircleAlert, RefreshCw, Sparkles } from "lucide-svelte";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
@@ -82,6 +83,10 @@
   let lastSend = $state<{ question: string; showUserTurn: boolean } | null>(null);
   let inputElement = $state<HTMLTextAreaElement | null>(null);
   let wasOpen = false;
+  // Overwrite-confirm dialog state (codebase AlertDialog, not window.confirm).
+  // pendingApplyText holds the prompt to apply once the user confirms.
+  let overwriteConfirmOpen = $state(false);
+  let pendingApplyText = $state<string | null>(null);
 
   // Apply only looks at the most recent completed assistant turn. The
   // structured-question parser reserves `eneo-question`-tagged blocks for
@@ -136,6 +141,8 @@
     errorMessage = null;
     didApply = false;
     lastSend = null;
+    overwriteConfirmOpen = false;
+    pendingApplyText = null;
   }
 
   async function abandonRunIfNeeded(runIdToAbandon: string) {
@@ -277,10 +284,16 @@
     // The textarea behind the dialog is unreachable while the modal is open,
     // so a stale `hasUnsavedPromptChanges = true` at apply time means the
     // user typed manually BEFORE opening the modal — Applying overwrites
-    // their work, so confirm first.
-    if (hasUnsavedPromptChanges && !window.confirm(m.prompt_guide_apply_overwrite_warning())) {
+    // their work, so confirm first via the codebase AlertDialog.
+    if (hasUnsavedPromptChanges) {
+      pendingApplyText = text;
+      overwriteConfirmOpen = true;
       return;
     }
+    applyNow(text);
+  }
+
+  function applyNow(text: string) {
     didApply = true;
     onApply(text);
     open = false;
@@ -350,3 +363,25 @@
     {/if}
   </Dialog.Content>
 </Dialog.Root>
+
+<AlertDialog.Root bind:open={overwriteConfirmOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.prompt_guide_apply_overwrite_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.prompt_guide_apply_overwrite_warning()}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        onclick={() => {
+          overwriteConfirmOpen = false;
+          if (pendingApplyText !== null) applyNow(pendingApplyText);
+        }}
+      >
+        {m.prompt_guide_apply_button()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

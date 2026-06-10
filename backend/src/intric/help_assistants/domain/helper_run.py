@@ -5,14 +5,14 @@ single Help-Assistant invocation. One-to-one with a ``sessions`` row.
 ``tenant_id`` is explicit (PRD §6) because every list/read of this table,
 and every retention sweep, hits it on the hot path.
 
-The terminal-state transitions (``mark_completed`` / ``mark_abandoned`` /
-``mark_failed``) stamp ``completed_at`` with the supplied timestamp (or
-``datetime.now(timezone.utc)`` if omitted). Pure Python: no DB calls.
+Status transitions are owned by the application/repository layer
+(``HelperRunService.set_status`` → a conditional UPDATE), not by the entity,
+so terminal moves stay atomic against concurrent requests.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from intric.base.base_entity import Entity
@@ -49,15 +49,3 @@ class HelperRun(Entity):
         self.actor_user_id = actor_user_id
         self.status = status
         self.completed_at = completed_at
-
-    def mark_completed(self, completed_at: datetime | None = None) -> None:
-        self.status = HelperRunStatus.COMPLETED
-        self.completed_at = completed_at or datetime.now(timezone.utc)
-
-    def mark_abandoned(self, completed_at: datetime | None = None) -> None:
-        self.status = HelperRunStatus.ABANDONED
-        self.completed_at = completed_at or datetime.now(timezone.utc)
-
-    def mark_failed(self, completed_at: datetime | None = None) -> None:
-        self.status = HelperRunStatus.FAILED
-        self.completed_at = completed_at or datetime.now(timezone.utc)
