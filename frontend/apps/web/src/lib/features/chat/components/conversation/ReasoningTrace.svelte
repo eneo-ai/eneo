@@ -19,7 +19,7 @@
     toolName: string;
     serverName: string;
     args?: Record<string, unknown>;
-    status: "running" | "complete" | "denied";
+    status: "preparing" | "running" | "complete" | "failed" | "denied";
   };
 
   let {
@@ -33,6 +33,11 @@
   } = $props();
 
   const hasReasoning = $derived(reasoning.trim().length > 0);
+
+  // Label each part as its own section only when both kinds of content are
+  // present — a mixed trace reads as distinct "Reasoning" / "Tools" sections,
+  // while a single-kind trace stays unlabelled (the collapsed header names it).
+  const showSections = $derived(hasReasoning && steps.length > 0);
 
   // Open while working; collapse once the answer arrives. A manual toggle wins
   // over the auto behaviour for the rest of the turn.
@@ -70,9 +75,19 @@
     {:else}
       <Wrench class="h-4 w-4 shrink-0" />
       <span class="font-medium">{m.chat_reasoning_tools_label()}</span>
+    {/if}
+
+    <!-- Tool-activity count, shown additively alongside the reasoning/working
+         summary so tool usage never disappears behind the "Thought for Ns"
+         label. The pure-tools branch above already carries the wrench as its
+         primary label, so the badge only repeats the icon in the other cases. -->
+    {#if steps.length > 0}
       <span
-        class="border-default bg-primary text-muted rounded-full border px-1.5 py-0.5 text-xs leading-none"
+        class="border-default bg-primary text-muted flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs leading-none"
       >
+        {#if working || hasReasoning}
+          <Wrench class="h-3 w-3 shrink-0" />
+        {/if}
         {steps.length}
       </span>
     {/if}
@@ -83,26 +98,41 @@
 
   {#if open}
     <div transition:slide={{ duration: 200 }}>
-      <div class="flex flex-col gap-3 pt-2 pl-1">
+      <div class="flex flex-col gap-4 pt-2 pl-1">
         {#if hasReasoning}
-          <div
-            class="border-dimmer text-muted border-l-2 pl-3 text-sm leading-relaxed whitespace-pre-wrap"
-          >
-            {reasoning}
+          <div class="flex flex-col gap-1.5">
+            {#if showSections}
+              <div class="text-muted flex items-center gap-1.5 text-xs font-semibold">
+                <Brain class="h-3.5 w-3.5 shrink-0" />
+                <span>{m.reasoning()}</span>
+              </div>
+            {/if}
+            <div
+              class="border-dimmer text-muted border-l-2 pl-3 text-sm leading-relaxed whitespace-pre-wrap"
+            >
+              {reasoning}
+            </div>
           </div>
         {/if}
 
         {#if steps.length > 0}
-          <div>
-            {#each steps as step, i (step.toolName + i)}
-              <ReasoningToolStep
-                toolName={step.toolName}
-                serverName={step.serverName}
-                args={step.args}
-                status={step.status}
-                last={i === steps.length - 1}
-              />
-            {/each}
+          <div class="flex flex-col gap-1.5">
+            {#if showSections}
+              <div class="text-muted flex items-center gap-1.5 text-xs font-semibold">
+                <Wrench class="h-3.5 w-3.5 shrink-0" />
+                <span>{m.chat_reasoning_tools_label()}</span>
+              </div>
+            {/if}
+            <div class="flex flex-col gap-2">
+              {#each steps as step, i (step.toolName + i)}
+                <ReasoningToolStep
+                  toolName={step.toolName}
+                  serverName={step.serverName}
+                  args={step.args}
+                  status={step.status}
+                />
+              {/each}
+            </div>
           </div>
         {/if}
       </div>

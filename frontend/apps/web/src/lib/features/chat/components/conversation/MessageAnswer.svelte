@@ -22,6 +22,10 @@
   const toolsStillExecuting = $derived(
     isLast() && chat.askQuestion.isLoading && message.answer.trim() === ""
   );
+  // Looser gate than toolsStillExecuting: tool calls can interleave with answer
+  // text (multi-round MCP), so "pending"/"approved" statuses stay live for the
+  // whole streaming turn, not just until the first text chunk.
+  const isStreamingTurn = $derived(isLast() && chat.askQuestion.isLoading);
 
   // Get MCP tool calls from the message
   // - mcp_tool_calls: runtime property added during streaming
@@ -34,6 +38,7 @@
           arguments?: Record<string, unknown>;
           tool_call_id?: string;
           approved?: boolean;
+          result_status?: string;
         }>
       | undefined
   );
@@ -69,13 +74,28 @@
   const tracedSteps = $derived(
     tracedToolCalls.map((tc, i) => {
       const denied =
-        (!!tc.tool_call_id && deniedToolIds.has(tc.tool_call_id)) || tc.approved === false;
+        (!!tc.tool_call_id && deniedToolIds.has(tc.tool_call_id)) ||
+        tc.approved === false ||
+        tc.result_status === "denied" ||
+        tc.result_status === "timeout_denied";
       const isLastTraced = i === tracedToolCalls.length - 1;
-      const status: "running" | "complete" | "denied" = denied
+      // "pending" = the model is still writing the call's arguments;
+      // "approved" = approved/auto-approved but the result hasn't landed yet.
+      // A pending call on a turn that is no longer streaming never executed
+      // (the stream died), so it is shown as failed rather than spinning forever.
+      const status: "preparing" | "running" | "complete" | "failed" | "denied" = denied
         ? "denied"
-        : toolsStillExecuting && isLastTraced
-          ? "running"
-          : "complete";
+        : tc.result_status === "failed"
+          ? "failed"
+          : tc.result_status === "pending"
+            ? isStreamingTurn
+              ? "preparing"
+              : "failed"
+            : tc.result_status === "approved" && isStreamingTurn
+              ? "running"
+              : toolsStillExecuting && isLastTraced
+                ? "running"
+                : "complete";
       return {
         toolName: tc.tool_name,
         serverName: tc.server_name,

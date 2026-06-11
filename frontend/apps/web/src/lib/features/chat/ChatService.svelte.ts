@@ -673,8 +673,29 @@ export class ChatService {
                 // @ts-expect-error - mcp_tool_calls is not in the static type
                 ref.mcp_tool_calls = [];
               }
-              // @ts-expect-error - mcp_tool_calls is a runtime property
-              ref.mcp_tool_calls.push(...event.tools);
+              // Merge by tool_call_id — a "pending" tool_call event may already
+              // have registered these calls, and a blind push would duplicate them.
+              for (const tool of event.tools as Array<{
+                tool_call_id?: string;
+                [key: string]: unknown;
+              }>) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property
+                const existingIndex = ref.mcp_tool_calls.findIndex(
+                  (t: { tool_call_id?: string }) =>
+                    t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                );
+                if (existingIndex >= 0) {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const mcpCalls = (ref as any).mcp_tool_calls;
+                  mcpCalls[existingIndex] = {
+                    ...mcpCalls[existingIndex],
+                    ...tool
+                  };
+                } else {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property
+                  ref.mcp_tool_calls.push(tool);
+                }
+              }
               // Set pending approval state - UI will show inline approval buttons
               this.pendingToolApproval = {
                 approvalId: event.approval_id,

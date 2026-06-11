@@ -1001,6 +1001,14 @@ class AssistantService:
                                         # Update existing entry with approval status
                                         existing.approved = tc.approved
                                         existing.result_status = tc.result_status
+                                        # Pending entries are emitted before the argument
+                                        # JSON is complete; fill arguments in once a later
+                                        # chunk carries them.
+                                        if tc.arguments is not None:
+                                            existing.arguments = cast(
+                                                dict[str, object] | None,
+                                                tc.arguments,
+                                            )
                                         # The TOOL_CALL chunk after execution carries the
                                         # tool output; keep it so later turns can replay.
                                         if tc.result is not None:
@@ -1028,19 +1036,41 @@ class AssistantService:
                             # Collect tool calls for approval flow (approval status will be updated later)
                             if chunk.tool_calls_metadata:
                                 for tc in chunk.tool_calls_metadata:
-                                    tool_calls.append(
-                                        ToolCallInfo(
-                                            server_name=tc.server_name,
-                                            tool_name=tc.tool_name,
-                                            arguments=cast(
-                                                dict[str, object] | None, tc.arguments
-                                            ),
-                                            tool_call_id=tc.tool_call_id,
-                                            approved=None,
-                                            result_status=tc.result_status,
-                                            mcp_tool_name=tc.mcp_tool_name,
-                                        )
+                                    # A "pending" TOOL_CALL chunk may already have
+                                    # registered this call — merge instead of
+                                    # duplicating it.
+                                    existing = next(
+                                        (
+                                            t
+                                            for t in tool_calls
+                                            if t.tool_call_id
+                                            and t.tool_call_id == tc.tool_call_id
+                                        ),
+                                        None,
                                     )
+                                    if existing:
+                                        existing.approved = None
+                                        existing.result_status = tc.result_status
+                                        if tc.arguments is not None:
+                                            existing.arguments = cast(
+                                                dict[str, object] | None,
+                                                tc.arguments,
+                                            )
+                                    else:
+                                        tool_calls.append(
+                                            ToolCallInfo(
+                                                server_name=tc.server_name,
+                                                tool_name=tc.tool_name,
+                                                arguments=cast(
+                                                    dict[str, object] | None,
+                                                    tc.arguments,
+                                                ),
+                                                tool_call_id=tc.tool_call_id,
+                                                approved=None,
+                                                result_status=tc.result_status,
+                                                mcp_tool_name=tc.mcp_tool_name,
+                                            )
+                                        )
                             yield chunk
 
                         if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
