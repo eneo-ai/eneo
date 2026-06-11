@@ -3378,5 +3378,6 @@
   "audit_category_integration_events_description": "Integration connections, knowledge sources, website crawling, MCP servers",
   "audit_category_security_events_description": "Security classification lifecycle events",
   "audit_category_system_actions_description": "Retention policies, encryption, maintenance",
-  "audit_category_user_actions_description": "Assistant, space, app operations, templates, model configs"
+  "audit_category_user_actions_description": "Assistant, space, app operations, templates, model configs",
+  "login_with_sso": "Log in with SSO"
 }

@@ -278,6 +278,10 @@ jobs:
     defaults:
       run:
         working-directory: frontend
+    env:
+      # env.ts validates at import time; build/test need a valid baseline
+      ENEO_BACKEND_URL: http://localhost:8123
+      SESSION_SECRET: ci-only-session-secret-32-chars-min!!
 
     steps:
       - name: Checkout

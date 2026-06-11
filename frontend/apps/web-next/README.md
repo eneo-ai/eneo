@@ -23,8 +23,19 @@ Create a local `.env` (or `.env.local`) from this template:
 # Server-side backend base URL (the browser never calls the backend directly)
 ENEO_BACKEND_URL=http://localhost:8123
 
-# Required from Phase 2: encrypts the session cookie (min 32 chars)
-# SESSION_SECRET=
+# Encrypts the session cookie (required, min 32 chars)
+SESSION_SECRET=
+
+# Origin the app is reached at; used for OIDC redirect URIs (default http://localhost:3100)
+# APP_ORIGIN=
+
+# OIDC login (enabled iff OIDC_ISSUER is set; any discovery-capable IdP).
+# The IdP must issue JWT-format access tokens with an email claim, and the
+# client may need offline tokens/consent enabled for the offline_access scope.
+# OIDC_ISSUER=
+# OIDC_CLIENT_ID=
+# OIDC_CLIENT_SECRET=
+# OIDC_SCOPES=openid profile email offline_access
 
 # Feature flags
 SHOW_HELP_CENTER=false
@@ -34,6 +45,18 @@ SHOW_HELP_CENTER=false
 
 Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
 `NEXT_PUBLIC_*` backend URL by design: all backend calls go through the server.
+
+## Auth
+
+Two login modes (see `docs/migration/02-auth-oidc.md`):
+
+- **OIDC**: the app is a confidential client riding the IdP session. Tokens
+  live in the encrypted httpOnly `eneo_session` cookie (JWE); `src/proxy.ts`
+  does optimistic gating and the sliding refresh. The backend accepts the IdP
+  access token directly when `OIDC_RESOURCE_SERVER_ENABLED` is on (RB-1).
+- **Password**: server action against the backend's OAuth2 password flow; the
+  backend-issued Eneo JWT lives in the same session cookie. No refresh until
+  RB-3 ships, so the session ends when the JWT expires.
 
 ## UI components
 

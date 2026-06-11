@@ -10,14 +10,18 @@
  *   - keys containing "." (next-intl treats dots as namespace separators)
  *   - apostrophes directly before "{" or "}" (ICU escape semantics differ)
  *
+ * Keys that exist only in web-next live in src/lib/i18n/extra/{locale}.json
+ * and are merged last (they win over converted keys).
+ *
  * Usage: node scripts/convert-paraglide-messages.mjs
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sourceDir = path.resolve(here, "..", "..", "web", "messages");
+const extraDir = path.resolve(here, "..", "src", "lib", "i18n", "extra");
 const targetDir = path.resolve(here, "..", "src", "lib", "i18n", "messages");
 const locales = ["sv", "en"];
 
@@ -45,6 +49,10 @@ for (const locale of locales) {
     }
     out[key] = value;
   }
+
+  const extraPath = path.join(extraDir, `${locale}.json`);
+  const extra = existsSync(extraPath) ? JSON.parse(readFileSync(extraPath, "utf8")) : {};
+  Object.assign(out, extra);
 
   writeFileSync(path.join(targetDir, `${locale}.json`), JSON.stringify(out, null, 2) + "\n");
   console.log(`${locale}: ${Object.keys(out).length} messages written`);

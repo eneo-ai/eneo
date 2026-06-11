@@ -3378,5 +3378,6 @@
   "audit_category_integration_events_description": "Integrationsanslutningar, kunskapskällor, webbcrawling, MCP-servrar",
   "audit_category_security_events_description": "Livscykelhändelser för säkerhetsklassificering",
   "audit_category_system_actions_description": "Retentionspolicyer, kryptering, underhåll",
-  "audit_category_user_actions_description": "Assistenter, Spaces, appar, mallar, modellkonfiguration"
+  "audit_category_user_actions_description": "Assistenter, Spaces, appar, mallar, modellkonfiguration",
+  "login_with_sso": "Logga in med SSO"
 }
