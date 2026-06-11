@@ -2,9 +2,11 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
+from intric.crawler.remote_crawler import create_crawler
 from intric.main.exceptions import (
     BadRequestException,
     CrawlAlreadyRunningException,
+    CrawlerException,
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
@@ -12,8 +14,10 @@ from intric.main.models import (  # Status used for job status check
     NOT_PROVIDED,
     NotProvided,
     Status,
+    is_provided,
 )
 from intric.tenants.crawler_settings_helper import get_crawler_setting
+from intric.websites.domain.crawl_run import CrawlType
 from intric.websites.domain.website import UpdateInterval, Website
 
 logger = get_logger(__name__)
@@ -24,7 +28,7 @@ if TYPE_CHECKING:
     from intric.spaces.space_service import SpaceService
     from intric.tenants.tenant_repo import TenantRepository
     from intric.users.user import UserInDB
-    from intric.websites.domain.crawl_run import CrawlRun, CrawlType
+    from intric.websites.domain.crawl_run import CrawlRun
     from intric.websites.domain.crawl_run_repo import CrawlRunRepository
     from intric.websites.domain.crawl_service import CrawlService
 
@@ -75,6 +79,13 @@ class WebsiteCRUDService:
         else:
             embedding_model = space.get_embedding_model(embedding_model_id)
 
+        if crawl_type == CrawlType.SITEMAP:
+            await self._require_valid_sitemap(
+                url=url,
+                http_user=http_auth_username,
+                http_pass=http_auth_password,
+            )
+
         website = Website.create(
             space_id=space.id,
             user=self.user,
@@ -124,6 +135,25 @@ class WebsiteCRUDService:
 
         website = space.get_website(website_id=id)
 
+        effective_crawl_type = (
+            crawl_type if is_provided(crawl_type) else website.crawl_type
+        )
+        if (
+            is_provided(crawl_type) or is_provided(url)
+        ) and effective_crawl_type == CrawlType.SITEMAP:
+            if is_provided(http_auth_username) and is_provided(http_auth_password):
+                http_user, http_pass = http_auth_username, http_auth_password
+            elif website.http_auth is not None:
+                http_user = website.http_auth.username
+                http_pass = website.http_auth.password
+            else:
+                http_user = http_pass = None
+            await self._require_valid_sitemap(
+                url=url if is_provided(url) else website.url,
+                http_user=http_user,
+                http_pass=http_pass,
+            )
+
         website.update(
             name=name,
             url=url,
@@ -137,6 +167,33 @@ class WebsiteCRUDService:
         await self.space_repo.update(space=space)
 
         return website
+
+    async def _require_valid_sitemap(
+        self,
+        *,
+        url: str,
+        http_user: Optional[str],
+        http_pass: Optional[str],
+    ) -> None:
+        """Reject sitemap-crawl configs for sites without a discoverable sitemap.
+
+        Discovery is the crawler service's call (robots.txt directives, then
+        de-facto locations), so the service's preview is asked rather than
+        re-implementing its rules here. Definitive negatives only: an
+        unconfigured service, a failed preview, or an unreachable site all
+        pass, and the crawl-time zero-pages error remains the backstop.
+        """
+        try:
+            crawler = create_crawler()
+        except CrawlerException:
+            return
+        validation = await crawler.validate_sitemap_source(
+            url, http_user=http_user, http_pass=http_pass
+        )
+        if not validation.valid:
+            raise BadRequestException(
+                f"Cannot use the sitemap crawl type for {url}: {validation.reason}."
+            )
 
     async def delete_website(self, id: UUID) -> None:
         owner_space = await self.space_service.get_space_by_website(id)

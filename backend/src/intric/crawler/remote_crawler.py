@@ -22,6 +22,7 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any, Callable, Coroutine, Iterable, Optional, cast
@@ -59,6 +60,26 @@ _CLIENT_TIMEOUT_MARGIN_SECONDS = 120
 # timeout (a crawl legitimately runs for hours).
 _CONNECT_TIMEOUT_SECONDS = 30
 
+# Total timeout for the /v1/preview dry-run used to validate sitemap configs;
+# it runs inline in API requests, so it must stay bounded.
+_PREVIEW_TIMEOUT_SECONDS = 30
+
+
+@dataclass(frozen=True)
+class SitemapValidation:
+    """Outcome of asking the crawler service whether a sitemap crawl of a
+    seed URL could yield pages.
+
+    ``valid`` is False only on definitive evidence: the seed is reachable and
+    the service's sitemap discovery found nothing. An unreachable seed or a
+    failed preview passes, so a flaky probe never blocks configuration — the
+    crawl-time zero-pages error remains the backstop.
+    """
+
+    valid: bool
+    reason: Optional[str] = None
+
+
 _FILENAME_SANITIZE = re.compile(r"[^A-Za-z0-9._-]+")
 _MAX_FILENAME_BYTES = 200
 
@@ -95,6 +116,89 @@ class RemoteCrawler:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
+
+    async def validate_sitemap_source(
+        self,
+        url: str,
+        *,
+        http_user: Optional[str] = None,
+        http_pass: Optional[str] = None,
+    ) -> SitemapValidation:
+        """Ask the service whether a sitemap crawl of ``url`` could yield pages.
+
+        Sitemap crawls treat the URL as a site seed: the service discovers
+        the sitemap itself, via robots.txt ``Sitemap:`` directives first and
+        de-facto locations (/sitemap.xml and friends) second. The /v1/preview
+        dry-run reports that discovery without running a crawl.
+        """
+        request_body: dict[str, Any] = {
+            "url": url,
+            "crawl_type": "sitemap",
+            # The preview runs a capped sample crawl alongside the sitemap
+            # probe; only the sitemap verdict is consumed here
+            "max_sample_fetches": 1,
+            "http_auth": (
+                {"user": http_user, "password": http_pass}
+                if http_user and http_pass
+                else None
+            ),
+        }
+        headers = {"accept": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/v1/preview",
+                    json=request_body,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=_PREVIEW_TIMEOUT_SECONDS),
+                ) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "Sitemap preview returned non-200; allowing configuration",
+                            extra={"url": url, "status": response.status},
+                        )
+                        return SitemapValidation(valid=True)
+                    data: dict[str, Any] = await response.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning(
+                "Sitemap preview unavailable; allowing configuration",
+                extra={"url": url, "error": str(exc)},
+            )
+            return SitemapValidation(valid=True)
+
+        sitemap: dict[str, Any] = data.get("sitemap") or {}
+        seed: dict[str, Any] = data.get("seed") or {}
+        if sitemap.get("found"):
+            # The service scopes sitemap entries to the seed URL's path: a
+            # seed pointing at the sitemap document itself (the pre-service
+            # convention) scope-filters out every page and yields nothing
+            if sitemap.get("url_count") == 0:
+                return SitemapValidation(
+                    valid=False,
+                    reason=(
+                        "a sitemap was found, but none of its URLs fall "
+                        "within the configured URL's path scope. Sitemap "
+                        "crawls treat the URL as the site (or section) to "
+                        "ingest, so use the site root (e.g. "
+                        "https://example.com) instead of the sitemap "
+                        "document itself"
+                    ),
+                )
+            return SitemapValidation(valid=True)
+        if not seed.get("reachable"):
+            # Host down right now; transient unreachability must not lock
+            # the operator out of a real sitemap
+            return SitemapValidation(valid=True)
+        return SitemapValidation(
+            valid=False,
+            reason=(
+                "no sitemap was found for the site (robots.txt declares "
+                "none and none exists at the common locations). Use the "
+                '"crawl" type instead'
+            ),
+        )
 
     async def _stream_crawl(
         self,

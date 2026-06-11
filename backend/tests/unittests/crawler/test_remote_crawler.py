@@ -36,6 +36,9 @@ class ServiceStub:
         self.received_json: dict | None = None
         self.received_headers: dict | None = None
         self.abort_after_write: bool = False
+        self.preview_response: dict = {}
+        self.preview_status: int = 200
+        self.preview_received_json: dict | None = None
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
         self.received_json = await request.json()
@@ -54,12 +57,19 @@ class ServiceStub:
         await response.write_eof()
         return response
 
+    async def handle_preview(self, request: web.Request) -> web.Response:
+        self.preview_received_json = await request.json()
+        if self.preview_status != 200:
+            return web.Response(status=self.preview_status, text="nope")
+        return web.json_response(self.preview_response)
+
 
 @pytest.fixture
 async def service():
     stub = ServiceStub()
     app = web.Application()
     app.router.add_post("/v1/crawls", stub.handle)
+    app.router.add_post("/v1/preview", stub.handle_preview)
 
     async def serve_file(request: web.Request) -> web.Response:
         size = int(request.match_info["size"])
@@ -404,6 +414,110 @@ class TestFilenameForLink:
 
     def test_fallback_for_extensionless_root(self):
         assert _filename_for_link("https://k.se/", set(), 7) == "file-7"
+
+
+class TestValidateSitemapSource:
+    """Rejection requires definitive evidence (seed reachable, discovery
+    empty); anything unverifiable passes so a flaky preview never blocks
+    configuration."""
+
+    PREVIEW_FOUND = {
+        "seed": {"reachable": True},
+        "sitemap": {
+            "found": True,
+            "locations": ["https://k.se/sitemap.xml"],
+            "url_count": 12,
+            "total_urls_in_sitemap": 12,
+        },
+    }
+    PREVIEW_OUT_OF_SCOPE = {
+        "seed": {"reachable": True},
+        "sitemap": {
+            "found": True,
+            "locations": ["https://k.se/sitemap.xml"],
+            "url_count": 0,
+            "total_urls_in_sitemap": 12,
+        },
+    }
+    PREVIEW_NOT_FOUND = {
+        "seed": {"reachable": True},
+        "sitemap": {"found": False, "locations": []},
+    }
+    PREVIEW_UNREACHABLE = {
+        "seed": {"reachable": False},
+        "sitemap": {"found": False, "locations": []},
+    }
+
+    @pytest.mark.asyncio
+    async def test_discovered_sitemap_is_valid(self, service):
+        service.preview_response = self.PREVIEW_FOUND
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        validation = await crawler.validate_sitemap_source("https://k.se")
+
+        assert validation.valid is True
+        assert service.preview_received_json["crawl_type"] == "sitemap"
+        assert service.preview_received_json["url"] == "https://k.se"
+
+    @pytest.mark.asyncio
+    async def test_reachable_site_without_sitemap_is_rejected(self, service):
+        service.preview_response = self.PREVIEW_NOT_FOUND
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        validation = await crawler.validate_sitemap_source("https://k.se")
+
+        assert validation.valid is False
+        assert "no sitemap" in (validation.reason or "")
+
+    @pytest.mark.asyncio
+    async def test_sitemap_with_no_urls_in_seed_scope_is_rejected(self, service):
+        service.preview_response = self.PREVIEW_OUT_OF_SCOPE
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        validation = await crawler.validate_sitemap_source("https://k.se/sitemap.xml")
+
+        assert validation.valid is False
+        assert "path scope" in (validation.reason or "")
+
+    @pytest.mark.asyncio
+    async def test_unreachable_site_passes(self, service):
+        service.preview_response = self.PREVIEW_UNREACHABLE
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        validation = await crawler.validate_sitemap_source("https://k.se")
+
+        assert validation.valid is True
+
+    @pytest.mark.asyncio
+    async def test_preview_error_passes(self, service):
+        service.preview_status = 500
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        validation = await crawler.validate_sitemap_source("https://k.se")
+
+        assert validation.valid is True
+
+    @pytest.mark.asyncio
+    async def test_unreachable_service_passes(self):
+        crawler = RemoteCrawler(base_url="http://127.0.0.1:1")
+
+        validation = await crawler.validate_sitemap_source("https://k.se")
+
+        assert validation.valid is True
+
+    @pytest.mark.asyncio
+    async def test_http_auth_uses_wire_field_names(self, service):
+        service.preview_response = self.PREVIEW_FOUND
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        await crawler.validate_sitemap_source(
+            "https://k.se", http_user="u", http_pass="p"
+        )
+
+        assert service.preview_received_json["http_auth"] == {
+            "user": "u",
+            "password": "p",
+        }
 
 
 class TestCreateCrawler:
