@@ -11,6 +11,18 @@ from intric.sessions.session import SessionInDB
 from tests.fixtures import TEST_MODEL_CHATGPT, TEST_MODEL_GPT4, TEST_USER
 
 
+def _not_helper_role_repo():
+    repo = AsyncMock()
+    repo.exists_active_for_assistant.return_value = False
+    return repo
+
+
+def _not_helper_history_repo():
+    repo = AsyncMock()
+    repo.exists_for_assistant.return_value = False
+    return repo
+
+
 def _service_with_effective_config(effective_config_service: AsyncMock):
     return AssistantService(
         repo=AsyncMock(),
@@ -31,6 +43,8 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
         effective_config_service=effective_config_service,
     )
 
@@ -99,6 +113,8 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -177,6 +193,8 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
         effective_config_service=effective_config_service,
     )
 
@@ -257,6 +275,8 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -330,6 +350,8 @@ async def test_ask_respects_disabled_mcp_server_ids():
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
