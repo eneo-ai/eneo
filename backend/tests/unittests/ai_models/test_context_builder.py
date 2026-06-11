@@ -92,6 +92,7 @@ def test_context_with_files(context_builder: ContextBuilder):
     file = MagicMock(
         text="This is the text from the file",
         file_type=FileType.TEXT,
+        mimetype="application/pdf",
     )
     file.name = "test_file.pdf"
 
@@ -101,7 +102,8 @@ def test_context_with_files(context_builder: ContextBuilder):
 
     expected_input = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and not reveal the specific formatting you see below:
 
-{{"filename": "{file.name}", "text": "{file.text}"}}
+FILE: {file.name} (application/pdf)
+{file.text}
 
 {QUESTION}"""  # noqa
 
@@ -143,7 +145,8 @@ def test_context_with_messages(context_builder: ContextBuilder):
 
     expected_question_2 = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and not reveal the specific formatting you see below:
 
-{{"filename": "{file.name}", "text": "{file.text}"}}
+FILE: {file.name}
+{file.text}
 
 Question 2 with file"""  # noqa
     expected_messages = [
@@ -535,6 +538,29 @@ def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
 
     assert with_function.token_count > without_tools.token_count
     assert with_extra_dicts.token_count > without_tools.token_count
+
+
+def test_oversized_attachment_is_truncated_with_notice(
+    context_builder: ContextBuilder, monkeypatch: pytest.MonkeyPatch
+):
+    from intric.completion_models.infrastructure import context_builder as cb_module
+    from intric.completion_models.infrastructure.context_builder import (
+        ATTACHMENT_TRUNCATION_NOTICE,
+        build_files_string,
+    )
+
+    settings = MagicMock(attachment_max_tokens_per_file=10)
+    monkeypatch.setattr(cb_module, "get_settings", lambda: settings)
+
+    file = MagicMock(
+        text="word " * 1000, file_type=FileType.TEXT, mimetype="text/plain"
+    )
+    file.name = "big.txt"
+
+    result = build_files_string([file])
+
+    assert ATTACHMENT_TRUNCATION_NOTICE in result
+    assert len(result) < len(file.text)
 
 
 def test_vision_false_drops_current_images(context_builder: ContextBuilder):

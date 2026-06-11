@@ -19,6 +19,7 @@ from intric.completion_models.infrastructure.static_prompts import (
     TRANSCRIPTION_PROMPT,
 )
 from intric.files.file_models import File, FileType
+from intric.main.config import get_settings
 from intric.main.exceptions import QueryException
 from intric.questions.question import ToolCallInfo
 from intric.sessions.session import SessionInDB
@@ -139,23 +140,46 @@ class _InformationChunkLike(Protocol):
     content: str
 
 
-def build_files_string(files: list[File]) -> str:
-    if files:
-        # Use json.dumps() to properly escape special characters in filenames and text
-        # This prevents broken JSON if the content contains quotes or other special chars
-        files_string = "\n".join(
-            json.dumps({"filename": file.name, "text": file.text}) for file in files
-        )
+ATTACHMENT_TRUNCATION_NOTICE = (
+    "[... the rest of this file was truncated because it exceeds the "
+    "attachment size budget — tell the user if the cut-off content matters]"
+)
 
-        return (
-            "Below are files uploaded by the user. "
-            "You should act like you can see the files themselves, "
-            "and not reveal the specific formatting "
-            "you see below:"
-            f"\n\n{files_string}"
-        )
 
-    return ""
+def _truncate_to_tokens(text: str, max_tokens: int, model_name: str = "") -> str:
+    tokens = count_tokens(text, model_name)
+    if tokens <= max_tokens:
+        return text
+
+    # Proportional cut is close enough — the exact boundary doesn't matter,
+    # the notice marks that content is missing.
+    keep_chars = max(int(len(text) * max_tokens / tokens), 0)
+    return f"{text[:keep_chars]}\n{ATTACHMENT_TRUNCATION_NOTICE}"
+
+
+def build_files_string(files: list[File], model_name: str = "") -> str:
+    if not files:
+        return ""
+
+    max_tokens_per_file = get_settings().attachment_max_tokens_per_file
+    blocks: list[str] = []
+    for file in files:
+        header = f"FILE: {file.name}"
+        if file.mimetype:
+            header = f"{header} ({file.mimetype})"
+        text = _truncate_to_tokens(
+            file.text or "", max_tokens=max_tokens_per_file, model_name=model_name
+        )
+        blocks.append(f"{header}\n{text}")
+
+    files_string = "\n\n---\n\n".join(blocks)
+    return (
+        "Below are files uploaded by the user. "
+        "You should act like you can see the files themselves, "
+        "and not reveal the specific formatting "
+        "you see below:"
+        f"\n\n{files_string}"
+    )
 
 
 @dataclass
@@ -405,7 +429,7 @@ class _Prompt:
         )
 
     def add_attachments(self, files: list[File]) -> None:
-        self.attachments = build_files_string(files=files)
+        self.attachments = build_files_string(files=files, model_name=self.model_name)
 
     def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
@@ -439,13 +463,14 @@ class ContextBuilder:
         input_str: str,
         files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
+        model_name: str = "",
     ) -> str:
         if files is None:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
         if files:
-            files_string = build_files_string(files)
+            files_string = build_files_string(files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
 
         if transcription_inputs:
@@ -481,6 +506,7 @@ class ContextBuilder:
             question = self._build_input(
                 message.question,
                 self._get_files_by_type(message.files, FileType.TEXT),
+                model_name=model_name,
             )
             answer = message.answer
             # History can contain images (e.g. after a model switch) — never
@@ -563,6 +589,7 @@ class ContextBuilder:
             input_str=input_str,
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
+            model_name=model_name,
         )
         current_images = (
             self._get_files_by_type(files, FileType.IMAGE) if vision else []

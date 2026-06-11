@@ -369,6 +369,10 @@ class Settings(BaseSettings):
     pdf_attachment_image_extraction: bool = True
     pdf_attachment_max_images: int = 8
 
+    # Per-file token cap when attachments are inlined into the prompt; larger
+    # files are cut with a visible truncation notice instead of erroring
+    attachment_max_tokens_per_file: int = 20000
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 
