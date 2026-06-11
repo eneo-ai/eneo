@@ -10,7 +10,7 @@ land in a later step. This migration is schema-only: the column plus a
 partial index that keeps the small "system users" set cheap to look up.
 
 Revision ID: 202605211000
-Revises: 20260501_backfill_model_costs
+Revises: 1d60c8c457d3
 Create Date: 2026-05-21
 """
 
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202605211000"
-down_revision = "20260501_backfill_model_costs"
+down_revision = "1d60c8c457d3"
 branch_labels = None
 depends_on = None
 
