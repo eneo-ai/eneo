@@ -1,15 +1,18 @@
-"""Image normalization for vision input and image extraction from PDFs.
+"""Image normalization for vision input and image extraction from documents.
 
 Images sent to vision models are base64-encoded into the request payload, so
 oversized uploads waste tokens and bandwidth. Everything that ends up as a
-vision image (direct uploads and PDF-derived images alike) is routed through
-downscale_image() so the stored blob matches what is sent and counted.
+vision image (direct uploads and document-derived images alike) is routed
+through downscale_image() so the stored blob matches what is sent and counted.
 """
 
 import io
 import logging
+import re
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 
@@ -31,15 +34,41 @@ _PROVIDER_SAFE_FORMATS = {"PNG", "JPEG", "WEBP"}
 MAX_IMAGE_DIMENSION = 2048
 JPEG_QUALITY = 85
 
-# Embedded PDF images smaller than this (in source pixels) are skipped —
+# Embedded images smaller than this (in source pixels) are skipped —
 # they are typically logos, icons or decorations.
-MIN_PDF_IMAGE_DIMENSION = 200
+MIN_EMBEDDED_IMAGE_DIMENSION = 200
+
+# Page-render resolution cap: small pages need not be rendered sharper than
+# print resolution even when they fit inside MAX_IMAGE_DIMENSION.
+_PAGE_RENDER_MAX_DPI = 300
+
+# Vector-graphics heuristics (see _page_has_visual_content). Tables and text
+# layout draw axis-aligned stroked lines/rects; charts and diagrams show up
+# as curves, diagonal lines, or clusters of filled rects (bars, heat maps).
+_MIN_CURVES_FOR_GRAPHICS = 10
+_MIN_DIAGONAL_LINES_FOR_GRAPHICS = 2
+_MIN_FILLED_RECTS_FOR_GRAPHICS = 5
+
+# OOXML archives keep embedded media under a fixed directory per format.
+_OFFICE_MEDIA_DIRS = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (
+        "word/media/"
+    ),
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": (
+        "ppt/media/"
+    ),
+}
+
+# Decompression-bomb guard: a zip entry may inflate far beyond the upload
+# size limit, and no legitimate embedded image needs this much.
+_MAX_EMBEDDED_MEDIA_BYTES = 30 * 1024 * 1024
 
 
 @dataclass
 class ProcessedImage:
     blob: bytes
     mimetype: str
+    page_number: int | None = None
 
 
 def downscale_image(blob: bytes, mimetype: str | None) -> ProcessedImage:
@@ -83,18 +112,94 @@ def downscale_image(blob: bytes, mimetype: str | None) -> ProcessedImage:
     return ProcessedImage(blob=processed, mimetype=new_mimetype)
 
 
+def _center_in_any_bbox(
+    obj: dict[str, Any], bboxes: list[tuple[float, float, float, float]]
+) -> bool:
+    center_x = (float(obj["x0"]) + float(obj["x1"])) / 2
+    center_y = (float(obj["top"]) + float(obj["bottom"])) / 2
+    return any(
+        x0 <= center_x <= x1 and top <= center_y <= bottom
+        for (x0, top, x1, bottom) in bboxes
+    )
+
+
+def _page_has_visual_content(page: Any, min_dimension: int) -> bool:
+    # pdfplumber ships no type stubs — treat the page as Any and pin the
+    # types we rely on at the boundaries.
+    for image_meta in page.images:
+        source_width, source_height = image_meta.get("srcsize", (None, None))
+        if (
+            source_width
+            and source_height
+            and source_width >= min_dimension
+            and source_height >= min_dimension
+        ):
+            return True
+
+    if len(page.curves) >= _MIN_CURVES_FOR_GRAPHICS:
+        return True
+
+    diagonal_lines: list[dict[str, Any]] = [
+        line
+        for line in page.lines
+        if abs(line["x1"] - line["x0"]) > 1 and abs(line["bottom"] - line["top"]) > 1
+    ]
+    if len(diagonal_lines) >= _MIN_DIAGONAL_LINES_FOR_GRAPHICS:
+        return True
+
+    filled_rects: list[dict[str, Any]] = [
+        rect for rect in page.rects if rect.get("fill")
+    ]
+    if len(filled_rects) >= _MIN_FILLED_RECTS_FOR_GRAPHICS:
+        # Shaded table cells are filled rects too — only fills outside
+        # detected tables count as graphics (bars, heat maps, infographics).
+        table_bboxes: list[tuple[float, float, float, float]] = [
+            tuple(table.bbox) for table in page.find_tables()
+        ]
+        outside = [
+            rect for rect in filled_rects if not _center_in_any_bbox(rect, table_bboxes)
+        ]
+        if len(outside) >= _MIN_FILLED_RECTS_FOR_GRAPHICS:
+            return True
+
+    return False
+
+
+def _render_page(page: Any) -> ProcessedImage | None:
+    width_inches = float(page.width) / 72
+    height_inches = float(page.height) / 72
+    if width_inches <= 0 or height_inches <= 0:
+        return None
+
+    # Cap the longest rendered edge — bounds render memory even for
+    # degenerate page sizes (a 200-inch page renders tiny, not huge).
+    resolution = int(MAX_IMAGE_DIMENSION / max(width_inches, height_inches))
+    resolution = max(min(resolution, _PAGE_RENDER_MAX_DPI), 1)
+
+    rendered = page.to_image(resolution=resolution)
+    buffer = io.BytesIO()
+    rendered.original.convert("RGB").save(buffer, format="JPEG", quality=JPEG_QUALITY)
+    processed = downscale_image(buffer.getvalue(), "image/jpeg")
+    return ProcessedImage(
+        blob=processed.blob,
+        mimetype=processed.mimetype,
+        page_number=int(page.page_number),
+    )
+
+
 def extract_images_from_pdf(
     filepath: Path,
     *,
     max_images: int,
-    min_dimension: int = MIN_PDF_IMAGE_DIMENSION,
+    min_dimension: int = MIN_EMBEDDED_IMAGE_DIMENSION,
 ) -> list[ProcessedImage]:
-    """Extract embedded images from a PDF by rendering their page regions.
+    """Render the PDF pages that carry visual content, for vision input.
 
-    Rendering the bounding box (rather than decoding the raw image stream)
-    sidesteps PDF codec variety — CCITT/JBIG2/JPX streams all come out as
-    plain bitmaps. Scanned pages are covered too: the scan is one embedded
-    image spanning the page, so its region is the whole page.
+    Whole-page rendering (rather than decoding embedded image streams)
+    sidesteps PDF codec variety — CCITT/JBIG2/JPX all come out as plain
+    bitmaps — and also captures vector graphics: charts, diagrams and
+    drawings that exist only as draw operations with no embedded raster.
+    Scanned pages are one embedded image spanning the page.
 
     Never raises: extraction is best-effort enrichment of a text upload.
     """
@@ -105,56 +210,88 @@ def extract_images_from_pdf(
         with pdfplumber.open(filepath) as pdf:
             for page in pdf.pages:
                 if len(extracted) >= max_images:
-                    break
-                for image_meta in page.images:
-                    if len(extracted) >= max_images:
-                        break
-
-                    source_width, source_height = image_meta.get(
-                        "srcsize", (None, None)
+                    logger.info(
+                        f"Page-image cap ({max_images}) reached for "
+                        f"'{filepath.name}'; later pages were not scanned"
                     )
-                    if (
-                        not source_width
-                        or not source_height
-                        or source_width < min_dimension
-                        or source_height < min_dimension
-                    ):
+                    break
+                try:
+                    if not _page_has_visual_content(page, min_dimension):
                         continue
-
-                    # Clamp the image bbox to the page bbox — embedded images
-                    # can bleed outside it, which crop() rejects.
-                    x0 = max(image_meta["x0"], page.bbox[0])
-                    top = max(image_meta["top"], page.bbox[1])
-                    x1 = min(image_meta["x1"], page.bbox[2])
-                    bottom = min(image_meta["bottom"], page.bbox[3])
-                    if x1 - x0 <= 1 or bottom - top <= 1:
-                        continue
-
-                    try:
-                        # Render at a resolution that roughly reproduces the
-                        # source pixel density, capped by the vision limit.
-                        bbox_width_inches = (x1 - x0) / 72
-                        resolution = min(
-                            int(source_width / bbox_width_inches),
-                            int(MAX_IMAGE_DIMENSION / bbox_width_inches),
-                        )
-                        resolution = max(resolution, 72)
-                        cropped = page.crop((x0, top, x1, bottom))
-                        rendered = cropped.to_image(resolution=resolution)
-
-                        buffer = io.BytesIO()
-                        rendered.original.convert("RGB").save(
-                            buffer, format="JPEG", quality=JPEG_QUALITY
-                        )
-                        extracted.append(
-                            downscale_image(buffer.getvalue(), "image/jpeg")
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Skipping unrenderable image on page {page.page_number} "
-                            f"of '{filepath.name}': {e}"
-                        )
+                    rendered = _render_page(page)
+                    if rendered is not None:
+                        extracted.append(rendered)
+                except Exception as e:
+                    logger.warning(
+                        f"Skipping unrenderable page {page.page_number} "
+                        f"of '{filepath.name}': {e}"
+                    )
     except Exception as e:
         logger.warning(f"PDF image extraction failed for '{filepath.name}': {e}")
+
+    return extracted
+
+
+def _natural_sort_key(name: str) -> tuple[str | int, ...]:
+    return tuple(
+        int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)
+    )
+
+
+def extract_images_from_office(
+    filepath: Path,
+    *,
+    mimetype: str,
+    max_images: int,
+    min_dimension: int = MIN_EMBEDDED_IMAGE_DIMENSION,
+) -> list[ProcessedImage]:
+    """Extract embedded raster images from OOXML archives (DOCX/PPTX).
+
+    Vector media (EMF/WMF) and anything else Pillow cannot decode is
+    skipped. Never raises: extraction is best-effort enrichment.
+    """
+    media_dir = _OFFICE_MEDIA_DIRS.get(mimetype)
+    if media_dir is None:
+        return []
+
+    extracted: list[ProcessedImage] = []
+    try:
+        with zipfile.ZipFile(filepath) as archive:
+            entries = sorted(
+                (
+                    info
+                    for info in archive.infolist()
+                    if info.filename.startswith(media_dir)
+                ),
+                key=lambda info: _natural_sort_key(info.filename),
+            )
+            for entry in entries:
+                if len(extracted) >= max_images:
+                    logger.info(
+                        f"Embedded-image cap ({max_images}) reached for "
+                        f"'{filepath.name}'; later media entries were skipped"
+                    )
+                    break
+                if entry.file_size > _MAX_EMBEDDED_MEDIA_BYTES:
+                    logger.warning(
+                        f"Skipping oversized media entry '{entry.filename}' "
+                        f"({entry.file_size} bytes) in '{filepath.name}'"
+                    )
+                    continue
+
+                blob = archive.read(entry.filename)
+                try:
+                    with Image.open(io.BytesIO(blob)) as image:
+                        image.load()
+                        width, height = image.size
+                        media_mimetype = Image.MIME.get(image.format or "", "image/png")
+                except Exception:
+                    continue
+                if width < min_dimension or height < min_dimension:
+                    continue
+
+                extracted.append(downscale_image(blob, media_mimetype))
+    except Exception as e:
+        logger.warning(f"Office image extraction failed for '{filepath.name}': {e}")
 
     return extracted

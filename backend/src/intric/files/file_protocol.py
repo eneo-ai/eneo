@@ -13,6 +13,7 @@ from intric.files.image import ImageExtractor, ImageMimeTypes
 from intric.files.image_processing import (
     ProcessedImage,
     downscale_image,
+    extract_images_from_office,
     extract_images_from_pdf,
 )
 from intric.files.text import TextExtractor, TextMimeTypes
@@ -168,6 +169,7 @@ class FileProtocol:
             file.blob = processed.blob
             file.mimetype = processed.mimetype
             file.size = len(processed.blob)
+            file.checksum = hashlib.sha256(processed.blob).hexdigest()
 
         return file
 
@@ -177,16 +179,41 @@ class FileProtocol:
         max_size: int | None = None,
         limit_setting_name: str | None = None,
     ) -> tuple[FileBaseWithContent, list[FileBaseWithContent]]:
-        """Like to_domain, but PDFs also yield embedded images as derived files.
+        """Like to_domain, but document uploads (PDF/DOCX/PPTX) also yield
+        their visual content as derived image files.
 
         Image extraction is best-effort: it runs inside the upload's temp-file
         window (the stream is closed afterwards) and never breaks the upload.
         """
         settings = get_settings()
         content_type = (upload_file.content_type or "").split(";")[0].strip()
-        is_pdf = content_type == TextMimeTypes.PDF.value
 
-        if not is_pdf or not settings.pdf_attachment_image_extraction:
+        extractor: Callable[[Path], list[ProcessedImage]] | None = None
+        if settings.attachment_image_extraction:
+            if content_type == TextMimeTypes.PDF.value:
+
+                def _extract_pdf(filepath: Path) -> list[ProcessedImage]:
+                    return extract_images_from_pdf(
+                        filepath,
+                        max_images=settings.attachment_max_extracted_images,
+                    )
+
+                extractor = _extract_pdf
+            elif content_type in (
+                TextMimeTypes.DOCX.value,
+                TextMimeTypes.PPTX.value,
+            ):
+
+                def _extract_office(filepath: Path) -> list[ProcessedImage]:
+                    return extract_images_from_office(
+                        filepath,
+                        mimetype=content_type,
+                        max_images=settings.attachment_max_extracted_images,
+                    )
+
+                extractor = _extract_office
+
+        if extractor is None:
             return (
                 await self.to_domain(
                     upload_file,
@@ -197,13 +224,10 @@ class FileProtocol:
             )
 
         extracted: list[ProcessedImage] = []
+        extract = extractor
 
         def collect_images(filepath: Path) -> None:
-            extracted.extend(
-                extract_images_from_pdf(
-                    filepath, max_images=settings.pdf_attachment_max_images
-                )
-            )
+            extracted.extend(extract(filepath))
 
         file = await self.text_to_domain(
             upload_file,
@@ -212,17 +236,23 @@ class FileProtocol:
             on_disk_hook=collect_images,
         )
 
-        derivatives = [
-            FileBaseWithContent(
-                name=f"{file.name} (image {index})",
-                checksum=hashlib.sha256(image.blob).hexdigest(),
-                size=len(image.blob),
-                file_type=FileType.IMAGE,
-                mimetype=image.mimetype,
-                blob=image.blob,
+        derivatives: list[FileBaseWithContent] = []
+        for index, image in enumerate(extracted, start=1):
+            label = (
+                f"page {image.page_number}"
+                if image.page_number is not None
+                else f"image {index}"
             )
-            for index, image in enumerate(extracted, start=1)
-        ]
+            derivatives.append(
+                FileBaseWithContent(
+                    name=f"{file.name} ({label})",
+                    checksum=hashlib.sha256(image.blob).hexdigest(),
+                    size=len(image.blob),
+                    file_type=FileType.IMAGE,
+                    mimetype=image.mimetype,
+                    blob=image.blob,
+                )
+            )
         return file, derivatives
 
     async def audio_to_domain(
