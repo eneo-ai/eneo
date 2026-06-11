@@ -69,7 +69,7 @@ def test_tenant_models_expose_advanced_sampling_kwargs():
 
 def test_discovered_capabilities_are_snapshotted_explicitly():
     snapshot = snapshot_supported_model_kwargs(
-        ["temperature", "top_p", "reasoning_effort"]
+        ["temperature", "top_p", "reasoning_effort"], reasoning=False
     )
 
     assert snapshot.temperature.supported is True
@@ -77,6 +77,27 @@ def test_discovered_capabilities_are_snapshotted_explicitly():
     assert snapshot.reasoning_effort.supported is True
     assert snapshot.frequency_penalty.supported is False
     assert snapshot.top_k.supported is False
+
+
+def test_snapshot_honors_reasoning_flag_when_discovery_misses_it():
+    snapshot = snapshot_supported_model_kwargs(["temperature"], reasoning=True)
+
+    assert snapshot.reasoning_effort.supported is True
+    assert snapshot.reasoning_effort.options == ["low", "medium", "high"]
+    assert snapshot.temperature.supported is True
+
+
+def test_snapshot_fallback_honors_reasoning_flag():
+    snapshot = snapshot_supported_model_kwargs(None, reasoning=True)
+
+    assert snapshot.reasoning_effort.supported is True
+    assert snapshot.temperature.supported is False
+
+
+def test_snapshot_keeps_discovered_reasoning_options_over_fallback():
+    snapshot = snapshot_supported_model_kwargs(["reasoning_effort"], reasoning=True)
+
+    assert snapshot.reasoning_effort.options == ["none", "low", "medium", "high"]
 
 
 def test_capability_override_wins_over_model_name_and_reasoning_flag():

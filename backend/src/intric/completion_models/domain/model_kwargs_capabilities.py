@@ -49,15 +49,17 @@ def _slider_capability(
     )
 
 
+def _reasoning_effort_select() -> ModelKwargCapability:
+    return ModelKwargCapability(
+        supported=True,
+        control="select",
+        options=["low", "medium", "high"],
+    )
+
+
 def _default_supported_model_kwargs(*, reasoning: bool) -> SupportedModelKwargs:
     if reasoning:
-        return SupportedModelKwargs(
-            reasoning_effort=ModelKwargCapability(
-                supported=True,
-                control="select",
-                options=["low", "medium", "high"],
-            )
-        )
+        return SupportedModelKwargs(reasoning_effort=_reasoning_effort_select())
 
     return SupportedModelKwargs(
         temperature=_slider_capability(minimum=0, maximum=2, step=0.01)
@@ -82,18 +84,25 @@ def _tenant_supported_model_kwargs() -> SupportedModelKwargs:
 
 def snapshot_supported_model_kwargs(
     supported_params: list[str] | None,
+    *,
+    reasoning: bool,
 ) -> SupportedModelKwargs:
     """Convert LiteLLM discovery data into persisted Eneo capabilities.
 
     This is intended for model creation/update, not request-time lookup. The
     resulting snapshot keeps UI and execution behavior stable across dependency
     upgrades.
+
+    `reasoning` is the admin-declared model flag. It must be honored here:
+    discovery is name-based, so opaque routes (e.g. Azure deployment names)
+    miss reasoning support entirely, and the persisted snapshot acts as an
+    explicit override at resolve time which is never widened again.
     """
     if supported_params is None:
-        return _default_supported_model_kwargs(reasoning=False)
+        return _default_supported_model_kwargs(reasoning=reasoning)
 
     supported = set(supported_params)
-    return SupportedModelKwargs(
+    snapshot = SupportedModelKwargs(
         temperature=(
             _slider_capability(minimum=0, maximum=2, step=0.01)
             if "temperature" in supported
@@ -144,6 +153,11 @@ def snapshot_supported_model_kwargs(
             else ModelKwargCapability()
         ),
     )
+    if reasoning and not snapshot.reasoning_effort.supported:
+        snapshot = snapshot.model_copy(
+            update={"reasoning_effort": _reasoning_effort_select()}
+        )
+    return snapshot
 
 
 def _apply_model_capability_flags(

@@ -125,6 +125,8 @@ async def _unset_other_defaults(
 def _snapshot_completion_capabilities(
     provider_type: str,
     model_name: str,
+    *,
+    reasoning: bool,
 ) -> dict[str, object]:
     model_route = build_litellm_model_name(provider_type, model_name)
     try:
@@ -136,7 +138,9 @@ def _snapshot_completion_capabilities(
             exc_info=True,
         )
         supported_params = None
-    return snapshot_supported_model_kwargs(supported_params).model_dump()
+    return snapshot_supported_model_kwargs(
+        supported_params, reasoning=reasoning
+    ).model_dump()
 
 
 def _ensure_tenant_owned(model: Any) -> None:
@@ -257,6 +261,7 @@ class TenantCompletionModelService:
             else _snapshot_completion_capabilities(
                 provider.provider_type,
                 payload.name,
+                reasoning=payload.reasoning,
             )
         )
         new_model.input_cost_per_token = payload.input_cost_per_token
@@ -299,19 +304,6 @@ class TenantCompletionModelService:
         provided = payload.model_fields_set
         if payload.name is not None:
             model.name = payload.name
-            if model.provider_id is None:
-                raise BadRequestException(
-                    "Tenant completion model is missing its provider"
-                )
-            provider_repo = ModelProviderRepository(
-                session=self.session,
-                tenant_id=self.user.tenant_id,
-            )
-            provider = await provider_repo.get_by_id(model.provider_id)
-            model.model_kwargs_capabilities = _snapshot_completion_capabilities(
-                provider.provider_type,
-                payload.name,
-            )
         if payload.display_name is not None:
             await _validate_unique_display_name(
                 self.session,
@@ -344,6 +336,24 @@ class TenantCompletionModelService:
             model.input_cost_per_token = payload.input_cost_per_token
         if "output_cost_per_token" in provided:
             model.output_cost_per_token = payload.output_cost_per_token
+        # Name or reasoning changes invalidate the stored capability snapshot;
+        # re-discover with both fields settled. An explicit capability payload
+        # below still wins over the refreshed snapshot.
+        if payload.name is not None or payload.reasoning is not None:
+            if model.provider_id is None:
+                raise BadRequestException(
+                    "Tenant completion model is missing its provider"
+                )
+            provider_repo = ModelProviderRepository(
+                session=self.session,
+                tenant_id=self.user.tenant_id,
+            )
+            provider = await provider_repo.get_by_id(model.provider_id)
+            model.model_kwargs_capabilities = _snapshot_completion_capabilities(
+                provider.provider_type,
+                model.name,
+                reasoning=model.reasoning,
+            )
         if "model_kwargs_capabilities" in provided:
             model.model_kwargs_capabilities = (
                 payload.model_kwargs_capabilities.model_dump()
