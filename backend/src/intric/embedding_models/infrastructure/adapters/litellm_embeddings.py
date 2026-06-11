@@ -11,7 +11,6 @@ from typing_extensions import override
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.model_providers.infrastructure import litellm_transport
 from intric.model_providers.infrastructure.litellm_provider import (
@@ -127,7 +126,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     @retry(
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
-        retry=retry_if_not_exception_type(BadRequestException),
+        retry=retry_if_not_exception_type(
+            litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+        ),
         reraise=True,
     )
     async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:

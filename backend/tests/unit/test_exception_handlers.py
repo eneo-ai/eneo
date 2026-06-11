@@ -5,6 +5,7 @@ from intric.main.exceptions import (
     ErrorCodes,
     NotFoundException,
     OpenAIException,
+    ProviderRejectedRequestException,
     UnauthorizedException,
 )
 from intric.server.exception_handlers import add_exception_handlers
@@ -103,3 +104,21 @@ def test_openai_exception_preserves_structured_provider_error_for_api_clients():
         "reason": "provider_unavailable",
         "retryable": True,
     }
+
+
+def test_provider_rejected_request_maps_to_400_despite_openai_subclassing():
+    client = _make_client(
+        ProviderRejectedRequestException(
+            "The AI provider rejected the request.",
+            code="provider_rejected_request",
+            details={"reason": "provider_rejected_request", "retryable": False},
+        )
+    )
+
+    response = client.get("/boom")
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["intric_error_code"] == ErrorCodes.PROVIDER_REJECTED_REQUEST
+    assert payload["code"] == "provider_rejected_request"
+    assert payload["details"]["retryable"] is False

@@ -11,7 +11,6 @@ from tenacity import (
 )
 
 from intric.files.audio import AudioFile
-from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.model_providers.infrastructure import litellm_transport
 from intric.model_providers.infrastructure.litellm_provider import (
@@ -114,7 +113,9 @@ class LiteLLMTranscriptionAdapter:
     @retry(
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
-        retry=retry_if_not_exception_type(BadRequestException),
+        retry=retry_if_not_exception_type(
+            litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+        ),
         reraise=True,
     )
     async def _transcribe_chunk(self, file_path: Path) -> str:

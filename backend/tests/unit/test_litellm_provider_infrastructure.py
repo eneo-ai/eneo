@@ -1,9 +1,18 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from litellm.exceptions import BadRequestError
+from tenacity import wait_fixed
 
-from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
+from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
+    LiteLLMEmbeddingAdapter,
+)
+from intric.main.exceptions import (
+    APIKeyNotConfiguredException,
+    ProviderRejectedRequestException,
+)
+from intric.model_providers.infrastructure import litellm_transport
 from intric.model_providers.infrastructure.litellm_provider import (
     build_litellm_model_name,
     build_litellm_provider_kwargs,
@@ -66,7 +75,7 @@ def test_bad_request_error_does_not_leak_provider_details():
         llm_provider="openai",
     )
 
-    with pytest.raises(OpenAIException) as exc_info:
+    with pytest.raises(ProviderRejectedRequestException) as exc_info:
         raise_public_litellm_error(
             provider_error,
             provider_type="openai",
@@ -77,6 +86,40 @@ def test_bad_request_error_does_not_leak_provider_details():
     assert str(exc_info.value) == INVALID_REQUEST_MESSAGE
     assert "secret upstream" not in str(exc_info.value)
     assert exc_info.value.code == "provider_rejected_request"
+
+
+@pytest.mark.asyncio
+async def test_provider_rejected_embedding_request_is_not_retried(monkeypatch):
+    attempts = 0
+
+    async def rejecting_aembedding(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise BadRequestError(
+            message="invalid dimensions", model="m", llm_provider="openai"
+        )
+
+    monkeypatch.setattr(litellm_transport, "aembedding", rejecting_aembedding)
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=None,
+            max_input=None,
+        ),
+        credential_resolver=None,
+    )
+    # wait_fixed(0) keeps the test fast if the no-retry contract regresses
+    get_embeddings = LiteLLMEmbeddingAdapter._get_embeddings.retry_with(
+        wait=wait_fixed(0)
+    )
+
+    with pytest.raises(ProviderRejectedRequestException):
+        await get_embeddings(adapter, ["hello"])
+
+    assert attempts == 1
 
 
 def test_credential_resolution_error_does_not_leak_internal_details():

@@ -17,7 +17,12 @@ from litellm.exceptions import (
     Timeout,
 )
 
-from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
+from intric.main.exceptions import (
+    APIKeyNotConfiguredException,
+    BadRequestException,
+    OpenAIException,
+    ProviderRejectedRequestException,
+)
 
 INVALID_REQUEST_MESSAGE = "The AI provider rejected the request. Verify the model configuration and try again."
 PROVIDER_ERROR_MESSAGE = (
@@ -51,6 +56,14 @@ _PROVIDER_UNAVAILABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     socket.gaierror,
     ConnectionError,
     TimeoutError,
+)
+
+# Deterministic failures (invalid request/config, bad credentials) that adapter
+# retry policies must not re-attempt — a retry can never change the outcome.
+NON_RETRYABLE_PROVIDER_ERRORS: tuple[type[BaseException], ...] = (
+    BadRequestException,
+    ProviderRejectedRequestException,
+    APIKeyNotConfiguredException,
 )
 
 
@@ -132,7 +145,7 @@ def raise_public_litellm_error(
         ) from exc
 
     if isinstance(exc, BadRequestError):
-        raise OpenAIException(
+        raise ProviderRejectedRequestException(
             INVALID_REQUEST_MESSAGE,
             code="provider_rejected_request",
             details={"reason": "provider_rejected_request", "retryable": False},
