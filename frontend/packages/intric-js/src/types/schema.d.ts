@@ -12021,6 +12021,8 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
       /**
        * Num Tokens Question
        * @default 0
@@ -12059,6 +12061,8 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
       /**
        * Num Tokens Question
        * @default 0

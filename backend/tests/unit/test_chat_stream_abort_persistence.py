@@ -443,6 +443,133 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
 
 
 @pytest.mark.asyncio
+async def test_streaming_handle_response_persists_reasoning_separately_from_answer():
+    """REASONING chunks must accumulate into the persisted `reasoning` field, never
+    into the answer text."""
+
+    async def fake_completion_stream():
+        for reasoning in ["let me ", "think"]:
+            yield SimpleNamespace(
+                reasoning_token_count=0,
+                usage=None,
+                response_type=ResponseType.REASONING,
+                reasoning_content=reasoning,
+            )
+        yield SimpleNamespace(
+            reasoning_token_count=2,
+            usage=None,
+            response_type=ResponseType.TEXT,
+            text="ok",
+            reference_chunks=[],
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    datastore_result = SimpleNamespace(info_blobs=[], no_duplicate_chunks=[])
+
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from intric.assistants.assistant_service import AssistantService
+
+    gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=datastore_result,
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+    )
+
+    async for _ in gen:
+        pass
+
+    session_service_mock.complete_question_with_answer.assert_awaited_once()
+    update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
+    assert update_kwargs["answer"] == "ok"
+    assert update_kwargs["reasoning"] == "let me think"
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_partial_save_keeps_reasoning_on_abort():
+    """Aborting while the model is still thinking (no TEXT yet) must still schedule
+    a partial save carrying the streamed reasoning — the trace is part of the
+    transparency record even for interrupted turns."""
+
+    async def fake_completion_stream():
+        yield SimpleNamespace(
+            reasoning_token_count=0,
+            usage=None,
+            response_type=ResponseType.REASONING,
+            reasoning_content="thinking hard",
+        )
+        yield SimpleNamespace(
+            reasoning_token_count=0,
+            usage=None,
+            response_type=ResponseType.TEXT,
+            text="never reached",
+            reference_chunks=[],
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=0,
+        usage=None,
+        extended_logging=None,
+    )
+    datastore_result = SimpleNamespace(info_blobs=[], no_duplicate_chunks=[])
+
+    session_service_mock = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from intric.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=datastore_result,
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+        )
+
+        chunks = await _drain_until(gen, 1)
+        assert chunks[0].response_type == ResponseType.REASONING
+
+        await gen.aclose()
+        await asyncio.sleep(0)
+
+    assert len(persist_calls) == 1
+    assert persist_calls[0]["answer"] == ""
+    assert persist_calls[0]["reasoning"] == "thinking hard"
+
+    session_service_mock.complete_question_with_answer.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_streaming_handle_response_skips_partial_save_when_no_content():
     """When the stream is aborted *before* any TEXT chunk arrives — or the LLM
     raises before producing output — `response_string` is empty and an UPDATE

@@ -92,6 +92,10 @@ class QuestionAdd(QuestionBase):
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
+    # Model reasoning/thinking text captured during streaming. Persisted so the
+    # trace can be re-shown when a conversation is reloaded. None for turns
+    # produced before this field existed or by models without reasoning.
+    reasoning: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_session_id_and_service_id(self) -> "QuestionAdd":
@@ -139,6 +143,7 @@ class Message(QuestionBase, InDB):
     generated_files: list[FilePublic]
     web_search_references: list[WebSearchResultPublic]
     tool_calls: list[ToolCallInfo] = []
+    reasoning: Optional[str] = None
     # Default 0 keeps deserialization safe for rows persisted before token
     # measurement was introduced. The DB columns are NOT NULL int, so every
     # persisted row reads back as an integer. Clients that sum these values

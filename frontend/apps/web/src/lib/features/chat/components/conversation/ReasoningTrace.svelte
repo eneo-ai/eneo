@@ -69,8 +69,10 @@
       <span class="font-medium">{hasReasoning ? m.thinking() : m.chat_reasoning_working()}</span>
     {:else if hasReasoning}
       <Brain class="h-4 w-4 shrink-0" />
+      <!-- elapsedSec only exists when this turn streamed live; a reloaded
+           conversation has no timing, so fall back to the plain noun label. -->
       <span class="font-medium">
-        {elapsedSec ? m.chat_reasoning_thought_for({ seconds: elapsedSec }) : m.thinking()}
+        {elapsedSec ? m.chat_reasoning_thought_for({ seconds: elapsedSec }) : m.reasoning()}
       </span>
     {:else}
       <Wrench class="h-4 w-4 shrink-0" />

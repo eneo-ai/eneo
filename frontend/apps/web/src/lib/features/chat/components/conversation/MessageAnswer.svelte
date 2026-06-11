@@ -43,10 +43,10 @@
       | undefined
   );
 
-  // Reasoning/thinking text streamed for this message (runtime-only field,
-  // accumulated by ChatService; absent once a conversation is reloaded).
+  // Reasoning/thinking text for this message: accumulated by ChatService while
+  // streaming, served from the persisted `reasoning` field on reload.
   const reasoningText = $derived(
-    ((message as Record<string, unknown>).reasoning as string | undefined) ?? ""
+    ((message as Record<string, unknown>).reasoning as string | null | undefined) ?? ""
   );
 
   // Check if there's a pending tool approval for this message (only on last message)

@@ -942,6 +942,7 @@ class AssistantService:
             async def response_stream() -> AsyncGenerator[Completion, None]:
                 reasoning_token_count = 0
                 response_string = ""
+                reasoning_string = ""
                 generated_files: list[File] = []
                 tool_calls: list[ToolCallInfo] = []
                 stream_usage: TokenUsage | None = None
@@ -967,9 +968,12 @@ class AssistantService:
                             yield chunk
 
                         if chunk.response_type == ResponseType.REASONING:
-                            # Reasoning/thinking text — pass through to SSE. Not
-                            # appended to response_string so it never lands in the
-                            # persisted answer.
+                            # Reasoning/thinking text — pass through to SSE and
+                            # accumulate separately so it can be persisted on the
+                            # question without ever landing in the answer.
+                            reasoning_string = (
+                                f"{reasoning_string}{chunk.reasoning_content or ''}"
+                            )
                             yield chunk
 
                         if chunk.response_type == ResponseType.FILES:
@@ -1156,6 +1160,7 @@ class AssistantService:
                         or LoggingDetails(model_kwargs={}),
                         web_search_results=list(web_search_results or []),
                         tool_calls=tool_calls if tool_calls else None,
+                        reasoning=reasoning_string or None,
                     )
                     completed = True
 
@@ -1171,13 +1176,13 @@ class AssistantService:
                 finally:
                     # Stream did not reach normal completion: client abort, LLM
                     # error, network drop, etc. The placeholder row already captures
-                    # the user's question, so an empty `response_string` means there
-                    # is nothing further to persist — skip the redundant UPDATE.
-                    # Anything else (partial answer streamed before abort) must be
-                    # saved via a fresh DB session because the request-scoped
-                    # AsyncSession may already be torn down and `await` across
-                    # GeneratorExit is fragile.
-                    if not completed and response_string:
+                    # the user's question, so nothing streamed means there is
+                    # nothing further to persist — skip the redundant UPDATE.
+                    # Anything else (partial answer or reasoning streamed before
+                    # abort) must be saved via a fresh DB session because the
+                    # request-scoped AsyncSession may already be torn down and
+                    # `await` across GeneratorExit is fragile.
+                    if not completed and (response_string or reasoning_string):
                         from intric.sessions.session_service import (
                             persist_partial_question_answer,
                             safe_count_tokens,
@@ -1199,6 +1204,7 @@ class AssistantService:
                                 question_id=question_id,
                                 answer=response_string,
                                 num_tokens_answer=partial_tokens_answer,
+                                reasoning=reasoning_string or None,
                             )
                         )
                         logger.info(
@@ -1211,6 +1217,7 @@ class AssistantService:
         else:
             reasoning_token_count = 0
             final_answer = ""
+            final_reasoning: str | None = None
             generated_files: list[File] = []
 
             if response.completion is not None:
@@ -1220,6 +1227,7 @@ class AssistantService:
                 else:
                     reasoning_token_count = getattr(answer, "reasoning_token_count", 0)
                     final_answer = getattr(answer, "text", "")
+                    final_reasoning = getattr(answer, "reasoning_content", None)
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -1267,6 +1275,7 @@ class AssistantService:
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
                 web_search_results=list(web_search_results or []),
+                reasoning=final_reasoning,
             )
 
             return final_answer
