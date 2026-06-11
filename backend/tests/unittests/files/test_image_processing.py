@@ -49,6 +49,19 @@ def test_downscale_keeps_small_efficient_image_untouched():
     assert processed.mimetype == "image/png"
 
 
+def test_downscale_converts_heic_to_jpeg():
+    # HEIC must always be converted — providers reject image/heic payloads —
+    # even when the converted blob is larger than the original.
+    buffer = io.BytesIO()
+    Image.new("RGB", (640, 480), color=(50, 120, 60)).save(buffer, format="HEIF")
+
+    processed = downscale_image(buffer.getvalue(), "image/heic")
+
+    assert processed.mimetype == "image/jpeg"
+    with Image.open(io.BytesIO(processed.blob)) as result:
+        assert result.format == "JPEG"
+
+
 def test_downscale_returns_original_on_undecodable_blob():
     processed = downscale_image(b"not an image", "image/png")
 

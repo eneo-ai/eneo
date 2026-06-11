@@ -9,6 +9,8 @@ class ImageMimeTypes(MimeTypesBase):
     JPEG = "image/jpeg"
     WEBP = "image/webp"
     AVIF = "image/avif"
+    HEIC = "image/heic"
+    HEIF = "image/heif"
 
 
 class ImageExtractor:

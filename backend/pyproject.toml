@@ -20,6 +20,8 @@ dependencies = [
     "sse-starlette>=1.6.1,<2",
     "gunicorn>=23.0.0,<24",
     "pdfplumber>=0.11,<1",
+    "pillow>=10,<13",  # image downscaling for vision input (also transitive via pdfplumber)
+    "pillow-heif>=0.18,<2",  # HEIC/HEIF decode (iPhone photos) -> converted to JPEG
     "langchain-core>=1.2.22,<2",  # output parsers; >=1.2.22 fixes load_prompt path traversal
     "langchain-text-splitters>=1.1.2,<2",  # RecursiveCharacterTextSplitter; >=1.1.2 clears GHSA-fv5p
     "pydantic-settings>=2.1.0,<3",

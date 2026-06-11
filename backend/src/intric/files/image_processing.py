@@ -13,7 +13,18 @@ from pathlib import Path
 
 from PIL import Image
 
+try:
+    import pillow_heif  # pyright: ignore[reportMissingTypeStubs]  # no stubs published
+
+    pillow_heif.register_heif_opener()  # pyright: ignore[reportUnknownMemberType]
+except ImportError:  # pragma: no cover — optional decoder
+    pass
+
 logger = logging.getLogger(__name__)
+
+# Formats vision providers accept as-is; anything else (HEIC, AVIF, TIFF…)
+# must be converted even if conversion does not shrink the blob.
+_PROVIDER_SAFE_FORMATS = {"PNG", "JPEG", "WEBP"}
 
 # Max longest edge for vision input. Providers downscale anyway (OpenAI caps
 # at 2048px before tiling), so larger images only cost transfer size.
@@ -41,6 +52,7 @@ def downscale_image(blob: bytes, mimetype: str | None) -> ProcessedImage:
     try:
         with Image.open(io.BytesIO(blob)) as image:
             image.load()
+            needs_conversion = (image.format or "") not in _PROVIDER_SAFE_FORMATS
             needs_resize = max(image.size) > MAX_IMAGE_DIMENSION
             if needs_resize:
                 image.thumbnail(
@@ -66,7 +78,7 @@ def downscale_image(blob: bytes, mimetype: str | None) -> ProcessedImage:
         logger.warning(f"Could not process image for downscaling: {e}")
         return ProcessedImage(blob=blob, mimetype=mimetype or "image/png")
 
-    if not needs_resize and len(processed) >= len(blob):
+    if not needs_resize and not needs_conversion and len(processed) >= len(blob):
         return ProcessedImage(blob=blob, mimetype=mimetype or "image/png")
     return ProcessedImage(blob=processed, mimetype=new_mimetype)
 
