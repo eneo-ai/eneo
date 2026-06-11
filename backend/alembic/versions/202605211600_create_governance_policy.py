@@ -9,8 +9,8 @@ ON DELETE RESTRICT on default_prompt_library_id prevents admins from
 silently breaking 1000 chats by deleting a referenced prompt — the service
 surfaces a 409 first.
 
-Revision ID: 202605211200
-Revises: 202605211100
+Revision ID: 202605211600
+Revises: 202605211500
 Create Date: 2026-05-21
 """
 
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202605211200"
-down_revision = "202605211100"
+revision = "202605211600"
+down_revision = "202605211500"
 branch_labels = None
 depends_on = None
 

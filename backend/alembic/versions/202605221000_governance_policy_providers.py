@@ -7,7 +7,7 @@ under the whitelisted providers — so new models added to a whitelisted
 provider auto-inherit access until the admin removes the provider.
 
 Revision ID: 202605221000
-Revises: 202605211200
+Revises: 202605211600
 Create Date: 2026-05-22
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202605221000"
-down_revision = "202605211200"
+down_revision = "202605211600"
 branch_labels = None
 depends_on = None
 

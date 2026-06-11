@@ -7,8 +7,8 @@ Held deliberately separate from ``prompts`` because that table follows an
 immutable-history pattern (each update inserts a new row). Mixing both
 lifecycles in the same table would corrupt audit / insights flows.
 
-Revision ID: 202605211100
-Revises: 20260501_backfill_model_costs
+Revision ID: 202605211500
+Revises: 202605211400
 Create Date: 2026-05-21
 """
 
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202605211100"
-down_revision = "20260501_backfill_model_costs"
+revision = "202605211500"
+down_revision = "202605211400"
 branch_labels = None
 depends_on = None
 
