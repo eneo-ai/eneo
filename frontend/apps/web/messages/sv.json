@@ -1193,6 +1193,7 @@
   "no_model_found": "Ingen modell hittades",
   "select_completion_model": "Välj en completion modell",
   "model_group_system": "Systemmodeller",
+  "model_group_other": "Övriga modeller",
   "model_info_for": "Modellinformation för",
   "basic": "Grundläggande",
   "creative": "Kreativ",

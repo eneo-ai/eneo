@@ -3,6 +3,7 @@
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import MentionInput from "../mentions/MentionInput.svelte";
   import { initMentionInput } from "../mentions/MentionInput";
@@ -15,7 +16,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { ArrowUp, Square, Globe, AlertTriangle } from "lucide-svelte";
+  import { Globe, AlertTriangle } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   type McpServerSummary = {
@@ -308,12 +309,11 @@
   );
 </script>
 
-<form
-  onsubmit={async (e) => {
-    e.preventDefault();
-    await ask();
-  }}
-  class="bg-card border-input focus-within:border-ring focus-within:ring-ring/40 relative flex w-full max-w-[74ch] flex-col rounded-2xl border shadow-sm transition-colors focus-within:ring-[3px] md:w-full"
+<PromptInput.Root
+  status={chat.askQuestion.isLoading ? "streaming" : "ready"}
+  onSubmit={ask}
+  onStop={() => abortController?.abort("User cancelled")}
+  class="max-w-[74ch] md:w-full"
 >
   {#if !chat.hasCompletionModel}
     <div
@@ -326,7 +326,7 @@
     </div>
   {/if}
 
-  <div class="relative px-1.5 pt-1">
+  <PromptInput.Body>
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
     {#if chat.askQuestion.isLoading}
       <div
@@ -346,7 +346,7 @@
         </div>
       </div>
     {/if}
-  </div>
+  </PromptInput.Body>
 
   {#if inputError}
     <div
@@ -375,12 +375,9 @@
     </div>
   {/if}
 
-  <div class="flex items-center justify-between gap-2 px-2 pt-1 pb-2">
-    <!-- Left cluster -->
-    <div
-      class="flex items-center gap-1 {chat.askQuestion.isLoading
-        ? 'pointer-events-none opacity-40'
-        : ''}"
+  <PromptInput.Footer>
+    <PromptInput.Tools
+      class={chat.askQuestion.isLoading ? "pointer-events-none opacity-40" : undefined}
     >
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
@@ -396,19 +393,16 @@
       {/if}
 
       {#if showWebSearch}
-        <Button
+        <PromptInput.Button
           variant={useWebSearch ? "secondary" : "ghost"}
-          size="sm"
-          type="button"
-          class="h-9 gap-1.5 rounded-lg"
           onclick={() => (useWebSearch = !useWebSearch)}
           title={m.search()}
         >
           <Globe class="size-4" />
           <span class="hidden sm:inline">{m.search()}</span>
-        </Button>
+        </PromptInput.Button>
       {/if}
-    </div>
+    </PromptInput.Tools>
 
     <!-- Right cluster: model + send/stop -->
     <div class="flex items-center gap-2">
@@ -416,32 +410,7 @@
         <ChatModelSelect />
       {/if}
 
-      {#if chat.askQuestion.isLoading}
-        <Button
-          size="icon"
-          variant="secondary"
-          aria-label={m.cancel_your_request()}
-          type="button"
-          name="ask"
-          onclick={() => abortController?.abort("User cancelled")}
-          class="size-9 rounded-lg"
-          title={m.stop_answer()}
-        >
-          <Square class="size-4" />
-        </Button>
-      {:else}
-        <Button
-          size="icon"
-          disabled={isAskingDisabled}
-          aria-label={m.submit_your_question()}
-          type="submit"
-          name="ask"
-          class="size-9 rounded-lg"
-          title={m.send()}
-        >
-          <ArrowUp class="size-5" />
-        </Button>
-      {/if}
+      <PromptInput.Submit disabled={isAskingDisabled} name="ask" />
     </div>
-  </div>
-</form>
+  </PromptInput.Footer>
+</PromptInput.Root>
