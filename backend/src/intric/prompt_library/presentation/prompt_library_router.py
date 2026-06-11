@@ -78,6 +78,7 @@ async def list_prompt_library_entries(container: _ContainerWithUser):
     response_model=PromptLibraryEntryPublic,
     responses=responses.get_responses([400, 403]),
     status_code=201,
+    description="Create a prompt library entry",
 )
 async def create_prompt_library_entry(
     payload: PromptLibraryEntryCreate,
@@ -136,6 +137,7 @@ async def list_prompt_library_entry_versions(id: UUID, container: _ContainerWith
     "/{id}/",
     response_model=PromptLibraryEntryPublic,
     responses=responses.get_responses([400, 403, 404]),
+    description="Update a prompt library entry",
 )
 async def update_prompt_library_entry(
     id: UUID,
@@ -178,6 +180,7 @@ async def update_prompt_library_entry(
     "/{id}/",
     status_code=204,
     responses=responses.get_responses([403, 404, 409]),
+    description="Delete a prompt library entry",
 )
 async def delete_prompt_library_entry(id: UUID, container: _ContainerWithUser):
     service = container.prompt_library_service()

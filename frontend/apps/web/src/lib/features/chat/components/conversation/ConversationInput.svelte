@@ -422,6 +422,7 @@
           variant="secondary"
           aria-label={m.cancel_your_request()}
           type="button"
+          name="ask"
           onclick={() => abortController?.abort("User cancelled")}
           class="size-9 rounded-lg"
           title={m.stop_answer()}
@@ -434,6 +435,7 @@
           disabled={isAskingDisabled}
           aria-label={m.submit_your_question()}
           type="submit"
+          name="ask"
           class="size-9 rounded-lg"
           title={m.send()}
         >

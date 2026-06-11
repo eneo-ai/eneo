@@ -5642,7 +5642,10 @@ export interface paths {
     /** List Prompt Library Entries */
     get: operations["list_prompt_library_entries_api_v1_admin_prompt_library__get"];
     put?: never;
-    /** Create Prompt Library Entry */
+    /**
+     * Create Prompt Library Entry
+     * @description Create a prompt library entry
+     */
     post: operations["create_prompt_library_entry_api_v1_admin_prompt_library__post"];
     delete?: never;
     options?: never;
@@ -5659,10 +5662,16 @@ export interface paths {
     };
     /** Get Prompt Library Entry */
     get: operations["get_prompt_library_entry_api_v1_admin_prompt_library__id___get"];
-    /** Update Prompt Library Entry */
+    /**
+     * Update Prompt Library Entry
+     * @description Update a prompt library entry
+     */
     put: operations["update_prompt_library_entry_api_v1_admin_prompt_library__id___put"];
     post?: never;
-    /** Delete Prompt Library Entry */
+    /**
+     * Delete Prompt Library Entry
+     * @description Delete a prompt library entry
+     */
     delete: operations["delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete"];
     options?: never;
     head?: never;
@@ -5695,7 +5704,10 @@ export interface paths {
     };
     /** Get Governance Policy */
     get: operations["get_governance_policy_api_v1_admin_governance_policy__get"];
-    /** Update Governance Policy */
+    /**
+     * Update Governance Policy
+     * @description Update the personal assistant governance policy
+     */
     put: operations["update_governance_policy_api_v1_admin_governance_policy__put"];
     post?: never;
     delete?: never;

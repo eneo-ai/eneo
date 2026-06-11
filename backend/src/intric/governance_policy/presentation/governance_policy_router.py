@@ -124,6 +124,7 @@ async def get_governance_policy(container: _ContainerWithUser):
     "/",
     response_model=GovernancePolicyPublic,
     responses=responses.get_responses([400, 403]),
+    description="Update the personal assistant governance policy",
 )
 async def update_governance_policy(
     payload: GovernancePolicyUpdate,

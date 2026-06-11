@@ -57,7 +57,7 @@
 
   {#if promptEnabled}
     {#if promptOptions.length === 0}
-      <Alert.Root class="border-caution/35 bg-caution/8 dark:bg-caution/12">
+      <Alert.Root class="border-caution/35 bg-caution/8">
         <Info class="text-caution" />
         <Alert.Description class="text-secondary">
           {m.governance_prompt_library_empty()}
