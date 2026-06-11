@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Fallback estimates when litellm cannot tokenize (unknown model AND
 # unexpected tokenizer failure). ~4 chars/token for text, the OpenAI
-# base cost for an image, and the message-wrapper scaffolding.
-_FALLBACK_IMAGE_TOKENS = 85
+# high-detail cost of a 2048×1024 image (uploads are stored downscaled to
+# at most 2048px) for an image, and the message-wrapper scaffolding.
+_FALLBACK_IMAGE_TOKENS = 1105
 _FALLBACK_MESSAGE_OVERHEAD_TOKENS = 4
 
 

@@ -417,9 +417,16 @@ class TenantModelAdapter(CompletionModelAdapter):
             raise ValueError("Image file is missing blob data")
 
         image_data = base64.b64encode(blob).decode("utf-8")
+        # detail is explicit (not provider-default "auto") so token counting
+        # can mirror the real cost deterministically; uploads are already
+        # downscaled to MAX_IMAGE_DIMENSION, where auto resolves to high
+        # anyway.
         return {
             "type": "image_url",
-            "image_url": {"url": f"data:{file.mimetype};base64,{image_data}"},
+            "image_url": {
+                "url": f"data:{file.mimetype};base64,{image_data}",
+                "detail": "high",
+            },
         }
 
     def _build_content(

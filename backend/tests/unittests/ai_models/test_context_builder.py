@@ -488,6 +488,60 @@ def test_image_attachment_increases_token_count(context_builder: ContextBuilder)
     assert with_image.token_count >= without_image.token_count + 85
 
 
+def test_large_image_is_counted_at_high_detail(context_builder: ContextBuilder):
+    # Images are sent with detail "high"; a 2048×1024 image is tiled by
+    # OpenAI's formula to ~1105 tokens — make sure we don't count the flat
+    # 85-token "auto" estimate.
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2048, 1024), color=(40, 80, 120)).save(buffer, format="PNG")
+
+    without_image = context_builder.build_context(input_str=QUESTION, max_tokens=100000)
+    with_image = context_builder.build_context(
+        input_str=QUESTION,
+        files=[_image_file(blob=buffer.getvalue())],
+        max_tokens=100000,
+    )
+
+    assert with_image.token_count >= without_image.token_count + 1000
+
+
+def test_attachment_images_ride_on_current_message(context_builder: ContextBuilder):
+    attachment_image = _image_file()
+
+    context = context_builder.build_context(
+        input_str=QUESTION, prompt_files=[attachment_image], max_tokens=10000
+    )
+
+    assert context.images == [attachment_image]
+
+
+def test_attachment_images_dropped_without_vision(context_builder: ContextBuilder):
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        prompt_files=[_image_file()],
+        max_tokens=10000,
+        vision=False,
+    )
+
+    assert context.images == []
+
+
+def test_attachment_images_not_duplicated_with_current(
+    context_builder: ContextBuilder,
+):
+    image = _image_file()
+
+    context = context_builder.build_context(
+        input_str=QUESTION, files=[image], prompt_files=[image], max_tokens=10000
+    )
+
+    assert context.images == [image]
+
+
 def test_history_images_increase_token_count(context_builder: ContextBuilder):
     def _session(files):
         return MagicMock(

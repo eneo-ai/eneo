@@ -77,7 +77,7 @@ def test_count_message_tokens_fallback_when_litellm_fails():
         tokens = count_message_tokens(messages)
 
     # len//4 for the text + flat image estimate + per-message overhead
-    assert tokens == 100 + 4 + 85 + 4
+    assert tokens == 100 + 4 + 1105 + 4
 
 
 def test_count_tool_tokens_fallback_when_litellm_fails():

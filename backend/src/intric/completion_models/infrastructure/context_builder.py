@@ -93,13 +93,36 @@ def _countable_content(text: str, images: list[File]) -> str | list[dict[str, An
         content.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:{image.mimetype};base64,{image_data}"},
+                "image_url": {
+                    "url": f"data:{image.mimetype};base64,{image_data}",
+                    "detail": "high",
+                },
             }
         )
 
     if len(content) == 1 and content[0].get("type") == "text":
         return text
     return content
+
+
+def count_attachment_tokens(
+    text_files: list[File], image_files: list[File], model_name: str = ""
+) -> int:
+    """Tokens a set of attachments adds to a request.
+
+    Text files are inlined into the user message; image files ride along as
+    image_url blocks priced by the provider's image-token formula.
+    """
+    text = build_files_string(text_files, model_name=model_name)
+    if not image_files:
+        return count_tokens(text, model_name)
+
+    with_files = count_message_tokens(
+        [{"role": "user", "content": _countable_content(text, image_files)}],
+        model_name,
+    )
+    baseline = count_message_tokens([{"role": "user", "content": ""}], model_name)
+    return max(with_files - baseline, 0)
 
 
 def _countable_message_dicts(
@@ -591,9 +614,17 @@ class ContextBuilder:
             transcription_inputs=transcription_inputs,
             model_name=model_name,
         )
-        current_images = (
-            self._get_files_by_type(files, FileType.IMAGE) if vision else []
-        )
+        # Attachment images (prompt_files) travel with every request, the same
+        # way attachment text does — they ride on the current user message.
+        current_images: list[File] = []
+        if vision:
+            current_images = self._get_files_by_type(files, FileType.IMAGE)
+            seen_image_ids = {file.id for file in current_images}
+            current_images += [
+                file
+                for file in self._get_files_by_type(prompt_files, FileType.IMAGE)
+                if file.id not in seen_image_ids
+            ]
         tokens_used_input = count_message_tokens(
             [
                 {
