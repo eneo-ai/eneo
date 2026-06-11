@@ -739,12 +739,111 @@ class UserService:
         return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
-        username = self.auth_service.get_username_from_token(
-            token, get_settings().jwt_secret
-        )
+        try:
+            username = self.auth_service.get_username_from_token(
+                token, get_settings().jwt_secret
+            )
+        except AuthenticationException:
+            # Not an Eneo-issued HS256 JWT. In resource-server mode, the
+            # bearer token may instead be an IdP-issued RS256 access token.
+            if not get_settings().oidc_resource_server_enabled:
+                raise
+            return await self._get_user_from_idp_access_token(token)
         if username is None:
             return None
         return await self.repo.get_user_by_username(username)
+
+    async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
+        """Validate an IdP access token and resolve the user by email claim.
+
+        Email-to-user resolution (allowed domains, JIT provisioning, tenant
+        membership) is shared with the OIDC federation callback via
+        ``FederatedUserService``. Any token problem raises
+        ``AuthenticationException`` (401), never a 500.
+        """
+        from intric.authentication.federated_user_service import FederatedUserService
+        from intric.authentication.oidc_resource_server import (
+            validate_idp_access_token,
+        )
+
+        correlation_id = (
+            get_request_context().get("correlation_id") or "oidc-resource-server"
+        )
+
+        payload = await validate_idp_access_token(
+            token, auth_service=self.auth_service, correlation_id=correlation_id
+        )
+
+        email = payload.get("email")
+        if not email or not isinstance(email, str):
+            logger.warning(
+                "IdP access token missing email claim",
+                extra={
+                    "correlation_id": correlation_id,
+                    "payload_keys": list(payload.keys()),
+                },
+            )
+            raise AuthenticationException("Could not validate token credentials.")
+
+        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
+
+        federation_config = tenant.federation_config or {}
+        allowed_domains = cast(
+            "list[str] | None", federation_config.get("allowed_domains")
+        )
+
+        federated_user_service = FederatedUserService(
+            user_repo=self.repo,
+            tenant_repo=self.tenant_repo,
+            audit_service=self.audit_service,
+        )
+
+        return await federated_user_service.resolve_user(
+            email=email,
+            tenant_id=tenant.id,
+            allowed_domains=allowed_domains,
+            correlation_id=correlation_id,
+            tenant_slug=tenant.slug,
+        )
+
+    async def _resolve_tenant_for_idp_access_token(self, correlation_id: str):
+        """Pick the tenant IdP-token users belong to.
+
+        ``OIDC_TENANT_ID`` wins when configured (same setting the global OIDC
+        login uses for user creation); otherwise the first active tenant —
+        resource-server mode targets single-tenant deployments.
+        """
+        settings = get_settings()
+
+        if settings.oidc_tenant_id:
+            try:
+                tenant_id = UUID(settings.oidc_tenant_id)
+            except ValueError:
+                logger.error(
+                    "Invalid OIDC_TENANT_ID format",
+                    extra={"correlation_id": correlation_id},
+                )
+                raise AuthenticationException("Could not validate token credentials.")
+            tenant = await self.tenant_repo.get(tenant_id)
+            if tenant is None:
+                logger.error(
+                    "OIDC_TENANT_ID does not match an existing tenant",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                    },
+                )
+                raise AuthenticationException("Could not validate token credentials.")
+            return tenant
+
+        tenants = await self.tenant_repo.get_all_active()
+        if not tenants:
+            logger.error(
+                "No active tenant available for IdP token resolution",
+                extra={"correlation_id": correlation_id},
+            )
+            raise AuthenticationException("Could not validate token credentials.")
+        return tenants[0]
 
     async def _resolve_space_id_for_scope(
         self, scope_type: str, scope_id: UUID

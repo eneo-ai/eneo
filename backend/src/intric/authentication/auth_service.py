@@ -303,6 +303,7 @@ class AuthService:
         client_id: str,
         options: dict[str, Any] | None = None,
         correlation_id: str | None = None,
+        verify_at_hash: bool = True,
     ) -> dict[str, Any]:
         correlation_id = correlation_id or "no-correlation-id"
 
@@ -455,7 +456,7 @@ class AuthService:
         # If at_hash NOT present → Skip validation (valid per OIDC spec)
         # This allows compatibility with both MobilityGuard (includes at_hash)
         # and Entra ID (may omit at_hash in authorization code flow)
-        expected_at_hash = payload.get("at_hash")
+        expected_at_hash = payload.get("at_hash") if verify_at_hash else None
 
         if expected_at_hash:
             # at_hash present → MUST validate
@@ -517,6 +518,47 @@ class AuthService:
                 "at_hash not present - skipping validation (optional per OIDC spec)",
                 extra={"correlation_id": correlation_id},
             )
+
+        return payload
+
+    def get_payload_from_idp_access_token(
+        self,
+        *,
+        access_token: str,
+        key: jwt.PyJWK,
+        signing_algos: list[str],
+        audience: str,
+        issuer: str,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate an IdP-issued JWT access token (resource-server mode).
+
+        Reuses the OpenID JWT validation (signature, ``aud``, ``exp`` with the
+        configured clock leeway) and additionally enforces the ``iss`` claim.
+        ``at_hash`` validation is skipped — it cross-references an ID token,
+        which does not exist on this path.
+        """
+        payload = self.get_payload_from_openid_jwt(
+            id_token=access_token,
+            access_token=access_token,
+            key=key,
+            signing_algos=signing_algos,
+            client_id=audience,
+            correlation_id=correlation_id,
+            verify_at_hash=False,
+        )
+
+        token_issuer = payload.get("iss")
+        if token_issuer != issuer:
+            logger.error(
+                "JWT issuer validation failed",
+                extra={
+                    "correlation_id": correlation_id or "no-correlation-id",
+                    "expected_issuer": issuer,
+                    "token_issuer": token_issuer,
+                },
+            )
+            raise jwt.InvalidIssuerError("Invalid issuer")
 
         return payload
 

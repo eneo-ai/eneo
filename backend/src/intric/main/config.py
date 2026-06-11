@@ -333,6 +333,14 @@ class Settings(BaseSettings):
     strict_oidc_redirect_validation: bool = True
     oidc_clock_leeway_seconds: int = 120
 
+    # OIDC resource-server mode: accept IdP-issued access tokens as bearer auth
+    # alongside the HS256 Eneo JWT. The issuer is a discovery base URL
+    # ({issuer}/.well-known/openid-configuration must resolve).
+    oidc_resource_server_enabled: bool = False
+    oidc_accepted_issuer: Optional[str] = None
+    oidc_accepted_audience: Optional[str] = None
+    oidc_jwks_cache_ttl_seconds: int = 3600
+
     # Generic OIDC config (renamed from MOBILITYGUARD_*)
     oidc_discovery_endpoint: Optional[str] = None
     oidc_client_id: Optional[str] = None
