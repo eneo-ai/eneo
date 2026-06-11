@@ -1,7 +1,8 @@
+import base64
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional, Protocol, Sequence
+from typing import Any, Optional, Protocol, Sequence
 from uuid import UUID
 
 from typing_extensions import override
@@ -22,7 +23,9 @@ from intric.main.exceptions import QueryException
 from intric.questions.question import ToolCallInfo
 from intric.sessions.session import SessionInDB
 from intric.tokens.token_utils import (
+    count_message_tokens,
     count_tokens,  # noqa: F401 — re-exported for external callers
+    count_tool_tokens,
 )
 
 
@@ -60,15 +63,62 @@ def _replayable_tool_calls(
     return replayable
 
 
-def _tool_calls_token_count(tool_calls: list[MessageToolCall], model_name: str) -> int:
-    """Count tokens contributed by replayed tool_use + tool_result blocks."""
+def _tool_call_invocation_tokens(
+    tool_calls: list[MessageToolCall], model_name: str
+) -> int:
+    """Count tokens for the tool_use side of replayed calls (name + arguments).
+
+    The tool results are counted separately, as the `role: tool` messages they
+    are actually replayed in (see _countable_message_dicts).
+    """
     total = 0
     for tc in tool_calls:
-        arguments_json = json.dumps(tc.arguments) if tc.arguments is not None else ""
+        arguments_json = json.dumps(tc.arguments) if tc.arguments is not None else "{}"
         total += count_tokens(tc.tool_name, model_name)
         total += count_tokens(arguments_json, model_name)
-        total += count_tokens(tc.result, model_name)
     return total
+
+
+def _countable_content(text: str, images: list[File]) -> str | list[dict[str, Any]]:
+    """Mirror TenantModelAdapter._build_content so counting matches the payload."""
+    content: list[dict[str, Any]] = []
+    if text:
+        content.append({"type": "text", "text": text})
+
+    for image in images:
+        if image.blob is None:
+            continue
+        image_data = base64.b64encode(image.blob).decode("utf-8")
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{image.mimetype};base64,{image_data}"},
+            }
+        )
+
+    if len(content) == 1 and content[0].get("type") == "text":
+        return text
+    return content
+
+
+def _countable_message_dicts(
+    question: str,
+    answer: str | None,
+    images: list[File],
+    tool_calls: list[MessageToolCall],
+) -> list[dict[str, Any]]:
+    """Mirror TenantModelAdapter._create_messages_from_context for one Q&A turn."""
+    dicts: list[dict[str, Any]] = [
+        {"role": "user", "content": _countable_content(question, images)}
+    ]
+    if tool_calls:
+        for tc in tool_calls:
+            dicts.append({"role": "tool", "content": tc.result})
+        if answer:
+            dicts.append({"role": "assistant", "content": answer})
+    else:
+        dicts.append({"role": "assistant", "content": answer or "[image generated]"})
+    return dicts
 
 
 MIN_PERCENTAGE_KNOWLEDGE = (
@@ -318,7 +368,14 @@ class _Prompt:
 
     @property
     def num_tokens(self) -> int:
-        return count_tokens(str(self), self.model_name)
+        # The prompt is sent as a system message (when non-empty), so count it
+        # as one — message scaffolding included.
+        prompt_text = str(self)
+        if not prompt_text:
+            return 0
+        return count_message_tokens(
+            [{"role": "system", "content": prompt_text}], self.model_name
+        )
 
     def add_prompt(self, prompt: str, transcription: bool) -> None:
         if transcription and not prompt:
@@ -344,7 +401,7 @@ class _Prompt:
         chunk_list = list(chunks)
         self.knowledge = self._reconstruct_and_order_chunks(
             chunks=chunk_list,
-            max_tokens=max_tokens - self.num_tokens,
+            max_tokens=max_tokens,
         )
 
     def add_attachments(self, files: list[File]) -> None:
@@ -431,11 +488,15 @@ class ContextBuilder:
             )
             tool_calls = _replayable_tool_calls(message.tool_calls)
 
-            message_tokens = (
-                count_tokens(question, model_name)
-                + count_tokens(answer, model_name)
-                + _tool_calls_token_count(tool_calls, model_name)
-            )
+            message_tokens = count_message_tokens(
+                _countable_message_dicts(
+                    question=question,
+                    answer=answer,
+                    images=images + generated_images,
+                    tool_calls=tool_calls,
+                ),
+                model_name,
+            ) + _tool_call_invocation_tokens(tool_calls, model_name)
 
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
                 break
@@ -471,6 +532,7 @@ class ContextBuilder:
         use_image_generation: bool = False,
         web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
+        extra_tool_dicts: list[dict[str, Any]] | None = None,
     ) -> Context:
         if files is None:
             files = []
@@ -486,14 +548,48 @@ class ContextBuilder:
             mcp_tools = []
         tokens_used = 0
 
-        # Create the input, count the tokens.
+        # Create the input, count the tokens. The current question is sent as
+        # a user message carrying both the text and any attached images, so it
+        # is counted in exactly that shape.
         _input_string = self._build_input(
             input_str=input_str,
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
         )
-        tokens_used_input = count_tokens(_input_string, model_name)
+        current_images = self._get_files_by_type(files, FileType.IMAGE)
+        tokens_used_input = count_message_tokens(
+            [
+                {
+                    "role": "user",
+                    "content": _countable_content(_input_string, current_images),
+                }
+            ],
+            model_name,
+        )
         tokens_used += tokens_used_input
+
+        # Tool definitions occupy context space too — count them up front so
+        # the history and knowledge budgets shrink accordingly. extra_tool_dicts
+        # carries definitions merged later by the adapter (MCP proxy tools).
+        functions: list[FunctionDefinition] = []
+        if use_image_generation:
+            functions.extend(self._functions())
+        functions.extend(mcp_tools)
+
+        tool_dicts: list[dict[str, Any]] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": func_def.name,
+                    "description": func_def.description,
+                    "parameters": func_def.schema,
+                },
+            }
+            for func_def in functions
+        ]
+        if extra_tool_dicts:
+            tool_dicts.extend(extra_tool_dicts)
+        tokens_used += count_tool_tokens(tool_dicts, model_name)
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
@@ -540,17 +636,11 @@ class ContextBuilder:
         prompt_text = str(_prompt)
         tokens_used += _prompt.get_tokens_of_knowledge()
 
-        # Combine image generation tools with MCP tools
-        functions: list[FunctionDefinition] = []
-        if use_image_generation:
-            functions.extend(self._functions())
-        functions.extend(mcp_tools)
-
         return Context(
             input=_input_string,
             prompt=prompt_text,
             messages=messages,
-            images=self._get_files_by_type(files, FileType.IMAGE),
+            images=current_images,
             token_count=tokens_used,
             function_definitions=functions,
         )

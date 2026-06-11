@@ -454,6 +454,97 @@ def test_tool_result_tokens_reported_in_history_token_count(
     assert tokens_with > tokens_without
 
 
+_PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000d4944415478da63f8cfc000000301010018dd8db00000000049"
+    "454e44ae426082"
+)
+
+
+def _image_file(blob: bytes = _PNG_1PX) -> File:
+    return File(
+        id=uuid4(),
+        name="photo.png",
+        blob=blob,
+        mimetype="image/png",
+        checksum="",
+        size=len(blob),
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        file_type=FileType.IMAGE,
+    )
+
+
+def test_image_attachment_increases_token_count(context_builder: ContextBuilder):
+    without_image = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
+    with_image = context_builder.build_context(
+        input_str=QUESTION, files=[_image_file()], max_tokens=10000
+    )
+
+    # An image costs at least the provider base cost (85 tokens on OpenAI).
+    assert with_image.token_count >= without_image.token_count + 85
+
+
+def test_history_images_increase_token_count(context_builder: ContextBuilder):
+    def _session(files):
+        return MagicMock(
+            questions=[
+                MagicMock(
+                    question="Q",
+                    answer="A",
+                    files=files,
+                    generated_files=[],
+                    tool_calls=None,
+                )
+            ]
+        )
+
+    _, tokens_without = context_builder._build_messages(
+        session=_session([]), max_tokens=10000
+    )
+    _, tokens_with = context_builder._build_messages(
+        session=_session([_image_file()]), max_tokens=10000
+    )
+
+    assert tokens_with >= tokens_without + 85
+
+
+def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
+    without_tools = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
+    with_function = context_builder.build_context(
+        input_str=QUESTION, max_tokens=10000, use_image_generation=True
+    )
+    with_extra_dicts = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        extra_tool_dicts=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp__lookup",
+                    "description": "Look up a record in the registry by id.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"record_id": {"type": "string"}},
+                        "required": ["record_id"],
+                    },
+                },
+            }
+        ],
+    )
+
+    assert with_function.token_count > without_tools.token_count
+    assert with_extra_dicts.token_count > without_tools.token_count
+
+
+def test_message_scaffolding_overhead_is_counted(context_builder: ContextBuilder):
+    # The question is sent as a chat message, not raw text — the count must
+    # include the per-message wrapper, so it exceeds the bare text tokens.
+    context = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
+
+    assert context.token_count > count_tokens(QUESTION)
+
+
 def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
     info_blob_chunks = [
         MagicMock(

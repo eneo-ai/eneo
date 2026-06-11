@@ -1588,6 +1588,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
 
     @override
+    def get_litellm_model_name(self) -> str:
+        return self.litellm_model
+
+    @override
     def get_token_limit_of_model(self) -> int:
         """
         Get token limit for tenant model.

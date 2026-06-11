@@ -29,6 +29,9 @@ class _DummyAdapter:
     def get_token_limit_of_model(self) -> int:
         return self.model.token_limit
 
+    def get_litellm_model_name(self) -> str:
+        return self.litellm_model
+
     async def prepare_streaming(self, **kwargs):
         return SimpleNamespace(_eneo_context={"has_tools": False})
 
