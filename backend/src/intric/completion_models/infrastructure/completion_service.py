@@ -283,6 +283,7 @@ class CompletionService:
                 version=version,
                 use_image_generation=use_image_generation,
                 web_search_results=web_search_results,
+                vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()
                     if mcp_proxy and model.supports_tool_calling

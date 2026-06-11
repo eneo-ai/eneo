@@ -537,6 +537,34 @@ def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
     assert with_extra_dicts.token_count > without_tools.token_count
 
 
+def test_vision_false_drops_current_images(context_builder: ContextBuilder):
+    context = context_builder.build_context(
+        input_str=QUESTION, files=[_image_file()], max_tokens=10000, vision=False
+    )
+
+    assert context.images == []
+
+
+def test_vision_false_drops_history_images(context_builder: ContextBuilder):
+    session = MagicMock(
+        questions=[
+            MagicMock(
+                question="Q",
+                answer="A",
+                files=[_image_file()],
+                generated_files=[],
+                tool_calls=None,
+            )
+        ]
+    )
+
+    context = context_builder.build_context(
+        input_str=QUESTION, session=session, max_tokens=10000, vision=False
+    )
+
+    assert context.messages[0].images == []
+
+
 def test_message_scaffolding_overhead_is_counted(context_builder: ContextBuilder):
     # The question is sent as a chat message, not raw text — the count must
     # include the per-message wrapper, so it exceeds the bare text tokens.

@@ -41,6 +41,21 @@ class FileRepository:
 
         return files
 
+    async def get_by_parent_ids(
+        self, parent_ids: list[UUID], user_id: UUID
+    ) -> list[File]:
+        if not parent_ids:
+            return []
+
+        stmt = (
+            sa.select(Files)
+            .where(Files.parent_file_id.in_(parent_ids))
+            .where(Files.user_id == user_id)
+            .order_by(Files.created_at)
+        )
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
+
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
         if file is None:

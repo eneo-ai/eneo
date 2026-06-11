@@ -364,6 +364,11 @@ class Settings(BaseSettings):
     upload_max_file_size: int
     transcription_max_file_size: int
 
+    # Images embedded in PDF attachments are extracted as derived image files
+    # so vision models can read them (capped per document to bound token cost)
+    pdf_attachment_image_extraction: bool = True
+    pdf_attachment_max_images: int = 8
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 

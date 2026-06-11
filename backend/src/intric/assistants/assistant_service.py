@@ -19,6 +19,7 @@ from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReason
 from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
+from intric.files.file_models import FileType
 from intric.files.file_service import FileService
 from intric.help_assistants.application.ask_guard import assert_not_helper_assistant
 from intric.help_assistants.infrastructure.help_assistant_assignment_history_repo import (  # noqa: E501
@@ -1129,6 +1130,25 @@ class AssistantService:
 
             return final_answer
 
+    async def _expand_with_derived_images(
+        self, files: list["File"], assistant: "Assistant"
+    ) -> list["File"]:
+        """Attach images derived from the given files (e.g. PDF-extracted).
+
+        Derived images only exist to give vision models the visual content of
+        a document — when the model lacks vision they are silently left out,
+        so a PDF with images still works as a plain text attachment.
+        """
+        if not files:
+            return files
+        if assistant.completion_model is None or not assistant.completion_model.vision:
+            return files
+
+        parent_ids = [file.id for file in files if file.file_type == FileType.TEXT]
+        derived = await self.file_service.get_derived_images(parent_ids=parent_ids)
+        already_attached = {file.id for file in files}
+        return files + [file for file in derived if file.id not in already_attached]
+
     async def _check_assistant_models(self, assistant: "Assistant", space: "Space"):
         if assistant.completion_model is None:
             raise BadRequestException("Assistant has no completion model configured.")
@@ -1222,6 +1242,9 @@ class AssistantService:
 
         cleaned_question = clean_intric_tag(question)
         files = await self.file_service.get_files_by_ids(file_ids=file_ids or [])
+        files = await self._expand_with_derived_images(
+            files=files, assistant=assistant_to_ask
+        )
 
         if session_id is not None:
             if group_chat_id is not None:

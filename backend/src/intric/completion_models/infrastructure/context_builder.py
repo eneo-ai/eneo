@@ -469,6 +469,7 @@ class ContextBuilder:
         max_tokens: int,
         min_len: int = 3,
         model_name: str = "",
+        vision: bool = True,
     ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
@@ -482,10 +483,16 @@ class ContextBuilder:
                 self._get_files_by_type(message.files, FileType.TEXT),
             )
             answer = message.answer
-            images = self._get_files_by_type(message.files, FileType.IMAGE)
-            generated_images = self._get_files_by_type(
-                message.generated_files, FileType.IMAGE
-            )
+            # History can contain images (e.g. after a model switch) — never
+            # replay them to a model without vision.
+            if vision:
+                images = self._get_files_by_type(message.files, FileType.IMAGE)
+                generated_images = self._get_files_by_type(
+                    message.generated_files, FileType.IMAGE
+                )
+            else:
+                images = []
+                generated_images = []
             tool_calls = _replayable_tool_calls(message.tool_calls)
 
             message_tokens = count_message_tokens(
@@ -533,6 +540,7 @@ class ContextBuilder:
         web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
+        vision: bool = True,
     ) -> Context:
         if files is None:
             files = []
@@ -556,7 +564,9 @@ class ContextBuilder:
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
         )
-        current_images = self._get_files_by_type(files, FileType.IMAGE)
+        current_images = (
+            self._get_files_by_type(files, FileType.IMAGE) if vision else []
+        )
         tokens_used_input = count_message_tokens(
             [
                 {
@@ -619,6 +629,7 @@ class ContextBuilder:
             max_tokens=max_tokens_messages,
             min_len=3,
             model_name=model_name,
+            vision=vision,
         )
         tokens_used += tokens_used_messages
 

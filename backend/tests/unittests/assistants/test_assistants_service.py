@@ -566,3 +566,59 @@ async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setu
         await setup.service.publish_assistant(TEST_UUID, True)
 
     assert "Publishing assistants" in str(exc_info.value)
+
+
+def _attachment(file_type):
+    from intric.files.file_models import FileType as _FT  # noqa: F401
+
+    return MagicMock(id=uuid4(), file_type=file_type)
+
+
+async def test_expand_with_derived_images_appends_for_vision_model(setup: Setup):
+    from intric.files.file_models import FileType
+
+    pdf = _attachment(FileType.TEXT)
+    derived = _attachment(FileType.IMAGE)
+    assistant = MagicMock()
+    assistant.completion_model.vision = True
+    setup.service.file_service.get_derived_images.return_value = [derived]
+
+    result = await setup.service._expand_with_derived_images(
+        files=[pdf], assistant=assistant
+    )
+
+    assert result == [pdf, derived]
+    setup.service.file_service.get_derived_images.assert_awaited_once_with(
+        parent_ids=[pdf.id]
+    )
+
+
+async def test_expand_with_derived_images_silently_skips_without_vision(setup: Setup):
+    from intric.files.file_models import FileType
+
+    pdf = _attachment(FileType.TEXT)
+    assistant = MagicMock()
+    assistant.completion_model.vision = False
+
+    result = await setup.service._expand_with_derived_images(
+        files=[pdf], assistant=assistant
+    )
+
+    assert result == [pdf]
+    setup.service.file_service.get_derived_images.assert_not_awaited()
+
+
+async def test_expand_with_derived_images_deduplicates(setup: Setup):
+    from intric.files.file_models import FileType
+
+    pdf = _attachment(FileType.TEXT)
+    derived = _attachment(FileType.IMAGE)
+    assistant = MagicMock()
+    assistant.completion_model.vision = True
+    setup.service.file_service.get_derived_images.return_value = [derived]
+
+    result = await setup.service._expand_with_derived_images(
+        files=[pdf, derived], assistant=assistant
+    )
+
+    assert result == [pdf, derived]
