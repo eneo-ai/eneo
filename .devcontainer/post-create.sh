@@ -25,10 +25,13 @@ sudo apt-get install -y libmagic1 ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
-# The backend .venv is on a named Docker volume (see docker-compose.yml).
-# Docker creates named volume mount points as root:root, but post-create.sh
-# runs as vscode — without this chown, `uv sync` fails to write CACHEDIR.TAG.
-sudo chown vscode:vscode /workspace/backend/.venv
+# The backend .venv, frontend node_modules, and web-next .next cache are on
+# named Docker volumes (see docker-compose.yml). Docker creates named volume
+# mount points as root:root, but post-create.sh runs as vscode — without these
+# chowns, uv/bun/next fail to write into them.
+sudo chown vscode:vscode /workspace/backend/.venv \
+    /workspace/frontend/node_modules \
+    /workspace/frontend/apps/web-next/.next
 
 # Install Python dependencies
 # Use --reinstall-package to ensure the project entry points are up-to-date
@@ -49,6 +52,14 @@ pre-commit install --overwrite --install-hooks \
     --hook-type commit-msg \
     --hook-type pre-push
 
+# Install Node 22 via the nvm that ships in the base image
+# (apps/web-next runs Next.js, whose CLI requires Node >= 20.9; Bun alone is not enough)
+set +u # nvm.sh references unset variables
+source /usr/local/share/nvm/nvm.sh
+nvm install 22
+nvm alias default 22
+set -u
+
 # Install Bun
 curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
 
@@ -56,7 +67,10 @@ curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"
 export PATH="$HOME/.bun/bin:$PATH"
 
 # Clean frontend node_modules to prevent stale native binaries (e.g. esbuild)
-# after container rebuilds where the workspace mount persists
+# after container rebuilds where the workspace mount persists. The root
+# node_modules is a volume mount point, so empty its contents instead of
+# removing the directory itself.
 cd /workspace/frontend
-rm -rf node_modules packages/*/node_modules apps/*/node_modules
+find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+rm -rf packages/*/node_modules apps/*/node_modules
 bun run setup

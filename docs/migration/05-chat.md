@@ -40,7 +40,7 @@ Reasoning: today reasoning text arrives wrapped in `<intric_thinking>` tags insi
 - **State**: `useChat` owns messages; everything else (partner, history list, preflight) is Query state or local component state. No global chat store.
 
 ## Step-by-step
-1. Install `ai@^6`, `@ai-sdk/react@^3`, run `bunx ai-elements@latest` targeting the shared library so components land in `packages/ui-react/src/components/ai-elements/` (it installs through the shadcn registry, so the Phase 1 monorepo `components.json` wiring applies; verify placement on the first component before adding the rest). AI Elements components are editable source and count as primitives: customize them in the package, share them across the app, and build chat features by composing them rather than writing parallel chat UI.
+1. Install `ai@^6`, `@ai-sdk/react@^3`, run `bunx ai-elements@latest` so components land in `src/components/ai-elements/` (it installs through the shadcn registry, so the Phase 1 `components.json` wiring applies; verify placement on the first component before adding the rest). AI Elements components are editable source and count as primitives: customize them in place and build chat features by composing them rather than writing parallel chat UI.
 2. Define `EneoUIMessage` types (data-part schemas via zod) + persisted-message → UIMessage mapper with unit tests on captured fixtures.
 3. `/api/chat` route handler + test (mock upstream: header preserved, stream passthrough, abort propagation, 401).
 4. Chat page skeleton: partner resolution from query params (`type`, `id`, `session_id`, `tab` — keep URL contract so links/bookmarks from the old app port), `useChat` wiring, message rendering for text + sources + reasoning + files + tools.
@@ -53,7 +53,7 @@ Reasoning: today reasoning text arrives wrapped in `<intric_thinking>` tags insi
 ```
 src/app/api/chat/route.ts
 src/lib/chat/{types.ts, map-session.ts, transport.ts, use-preflight.ts}
-packages/ui-react/src/components/ai-elements/*   (CLI-vendored, shared)
+src/components/ai-elements/*   (CLI-vendored, editable)
 src/features/chat/{chat-view.tsx, history-panel.tsx, prompt-area.tsx, tool-approval.tsx, context-bar.tsx, attachments.tsx}
 src/app/(app)/spaces/[spaceId]/chat/page.tsx
 src/app/(app)/dashboard/[assistantId]/[[...sessionId]]/page.tsx

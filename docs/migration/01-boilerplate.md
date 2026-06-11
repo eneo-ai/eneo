@@ -1,9 +1,9 @@
-# Phase 1 — Boilerplate: Next.js app skeleton + shared component library
+# Phase 1 — Boilerplate: Next.js app skeleton + shadcn/ui setup
 
 ## Goal
-A bootable, CI-green Next.js 16 App Router app at `frontend/apps/web-next` plus a shared React component library at `frontend/packages/ui-react` (`@intric/ui-react`) holding all shadcn/ui primitives, themed with a fresh shadcn palette that carries over ONLY the Eneo accent color. TypeScript strict, next-intl scaffolding (sv + en), base layout, env handling, lint/format/test wiring, and a health endpoint.
+A bootable, CI-green Next.js 16 App Router app at `frontend/apps/web-next` (`@eneo/web-next`) with all shadcn/ui primitives CLI-installed app-locally under `src/components/ui`, themed with a fresh shadcn palette that carries over ONLY the Eneo accent color. TypeScript strict, next-intl scaffolding (sv + en), base layout, env handling, lint/format/test wiring, and a health endpoint.
 
-Standing rule established here for all later phases: every piece of UI is composed from shadcn/ui (and, from Phase 5, AI Elements) primitives living in `@intric/ui-react`. Missing primitives are installed into the package via the shadcn CLI; generic composites (data-table, form field, page header, confirm dialog, empty state, …) are added to the package as they emerge; apps never define their own primitives. No auth, no backend calls yet (except an optional unauthenticated `/version` smoke call).
+Standing rule established here for all later phases: every piece of UI is composed from shadcn/ui (and, from Phase 5, AI Elements) primitives living in `src/components/ui` / `src/components/ai-elements`. Missing primitives are installed via the shadcn CLI; generic composites (data-table, form field, page header, confirm dialog, empty state, …) are added under `src/components/composites` as they emerge; feature code never defines its own primitives. There is no shared UI workspace package: the web app is the only consumer, and new code uses the `eneo` name, never the legacy `@intric/*` prefix. No auth, no backend calls yet (except an optional unauthenticated `/version` smoke call).
 
 ## Prerequisites
 - Devcontainer running (`eneo_devcontainer-eneo-1`), Bun available at `/home/vscode/.bun/bin/bun`.
@@ -20,14 +20,14 @@ Standing rule established here for all later phases: every piece of UI is compos
 - Do NOT install `ai` / `ai-elements` yet (Phase 5).
 
 ## Scope
-**In**: app scaffold, the `@intric/ui-react` workspace package with shadcn monorepo wiring, fresh theme + dark mode (Eneo accent only carried over), base layout (header placeholder, sidebar placeholder, content area), i18n plumbing with ~20 seed messages, env module, `/healthz`, lint/format/typecheck/test scripts, CI job, dev port that does not collide with the SvelteKit app.
-**Out**: auth, API client, any real feature route, AI Elements (Phase 5 installs them into the same package), Dockerfile hardening (Phase 8), porting the full 3,383-key message catalogs (script lands here, full port is ongoing), porting the Svelte app's OKLCH token set (explicitly not done; see step 4).
+**In**: app scaffold, app-local shadcn/ui setup, fresh theme + dark mode (Eneo accent only carried over), base layout (header placeholder, sidebar placeholder, content area), i18n plumbing with ~20 seed messages, env module, `/healthz`, lint/format/typecheck/test scripts, CI job, dev port that does not collide with the SvelteKit app.
+**Out**: auth, API client, any real feature route, AI Elements (Phase 5 installs them into `src/components/ai-elements`), Dockerfile hardening (Phase 8), porting the full 3,383-key message catalogs (script lands here, full port is ongoing), porting the Svelte app's OKLCH token set (explicitly not done; see step 4).
 
 ## Step-by-step
-1. **Scaffold**: from `/workspace/frontend`, run `bunx create-next-app@latest apps/web-next` with: TypeScript, ESLint, Tailwind, `src/` dir, App Router, `@/*` alias, Turbopack default. Then align `package.json` name to `@intric/web-next` and add it to the Bun workspace (root `frontend/package.json` workspaces already globs `apps/*`; verify).
+1. **Scaffold**: from `/workspace/frontend`, run `bunx create-next-app@latest apps/web-next` with: TypeScript, ESLint, Tailwind, `src/` dir, App Router, `@/*` alias, Turbopack default. Then align `package.json` name to `@eneo/web-next` and add it to the Bun workspace (root `frontend/package.json` workspaces already globs `apps/*`; verify).
 2. **TS strict**: enable `strict`, `noUncheckedIndexedAccess` in `tsconfig.json`.
 3. **Dev port**: set dev script to `next dev -p 3100` (SvelteKit owns 3000). Production stays 3000 inside its own container later.
-4. **Shared component library + shadcn init**: create `frontend/packages/ui-react` (`@intric/ui-react`) and wire it per the shadcn monorepo guide (verify against ui.shadcn.com/docs/monorepo at execution time): `components.json` in both the package and the app, with the CLI run from the app installing primitives into the package under the `@intric/ui-react` import alias. Style: new-york, CSS variables mode, a neutral base (zinc or neutral, pick whichever reads best with the accent). Theme: a fresh, cohesive shadcn palette. The ONLY value carried over from the old design system is the Eneo accent color: read `accent-default` (and its on-fill/foreground pair) from `frontend/packages/ui/src/styles/` and map it to shadcn `--primary`/`--primary-foreground` (light and dark). Do NOT transcribe the rest of the Svelte token mapping; backgrounds, borders, muted tones, destructive, charts, etc. come from the stock shadcn palette tuned for cohesion with the accent. Install the initial primitive set the shell needs (button, dropdown-menu, avatar, sonner, skeleton, tooltip).
+4. **shadcn setup (app-local)**: standard single-app shadcn setup in `apps/web-next`: one `components.json` (aliases `@/components`, `@/components/ui`, `@/lib/utils`; css `src/app/globals.css`), primitives CLI-installed into `src/components/ui`. Style: new-york, CSS variables mode, a neutral base (zinc or neutral, pick whichever reads best with the accent). Theme: a fresh, cohesive shadcn palette. The ONLY value carried over from the old design system is the Eneo accent color: read `accent-default` (and its on-fill/foreground pair) from `frontend/packages/ui/src/styles/` and map it to shadcn `--primary`/`--primary-foreground` (light and dark). Do NOT transcribe the rest of the Svelte token mapping; backgrounds, borders, muted tones, destructive, charts, etc. come from the stock shadcn palette tuned for cohesion with the accent. Install the initial primitive set the shell needs (button, dropdown-menu, avatar, sonner, skeleton, tooltip).
 5. **Dark mode**: `next-themes` provider in root layout (`attribute="class"`, `defaultTheme="system"`, `enableSystem`, `suppressHydrationWarning` on `<html>`). Dark values are the stock shadcn dark palette plus the accent's dark-mode variant; nothing ported from the Svelte `[data-theme="dark"]` block.
 6. **i18n**: install next-intl (without i18n routing; locale from cookie, matching today's behavior where locale is a persisted preference, not a URL segment). Create `src/lib/i18n/` with `request.ts` (cookie → locale, default `sv`) and `messages/{sv,en}.json` seeded with ~20 keys needed by the shell. Write `scripts/convert-paraglide-messages.mjs` that converts `frontend/apps/web/messages/{sv,en}.json` (flat Paraglide format) to next-intl JSON, flagging non-ICU interpolations for manual review. Run it once and commit the output; later phases re-run it as they port routes.
 7. **Base layout**: root layout = theme + intl + (later) query providers; `(public)` and `(app)` route groups; `(app)/layout.tsx` renders a header with app name, theme switcher, and a placeholder profile area; an empty `(app)/dashboard/page.tsx` rendering a translated heading.
@@ -38,24 +38,19 @@ Standing rule established here for all later phases: every piece of UI is compos
 
 ## Files/structure created
 ```
-frontend/packages/ui-react/
-├─ src/components/ui/…            (shadcn CLI-installed primitives)
-├─ src/styles/globals.css         (Tailwind v4 @theme: fresh palette + Eneo accent)
-├─ components.json
-└─ package.json                   (@intric/ui-react)
-
 frontend/apps/web-next/
-├─ src/app/{layout.tsx, globals.css → imports @intric/ui-react styles}
+├─ src/app/{layout.tsx, globals.css}    (globals.css: Tailwind v4 theme, fresh palette + Eneo accent)
 ├─ src/app/(public)/healthz/route.ts
 ├─ src/app/(app)/{layout.tsx, dashboard/page.tsx}
+├─ src/components/ui/…                  (shadcn CLI-installed primitives)
 ├─ src/components/shell/{header.tsx, theme-switcher.tsx}   (compositions, not primitives)
-├─ src/lib/{env.ts, i18n/request.ts}
-├─ src/lib/i18n/messages/{sv,en}.json
+├─ src/lib/{env.ts, utils.ts, i18n/request.ts, i18n/locales.ts}
+├─ src/lib/i18n/messages/{sv,en}.json   (generated by the conversion script)
 ├─ scripts/convert-paraglide-messages.mjs
-├─ components.json                (CLI target config → installs into the package)
+├─ components.json
 ├─ eslint.config.mjs, vitest.config.ts, tsconfig.json, postcss.config.mjs
 ├─ .env.example
-└─ package.json
+└─ package.json                         (@eneo/web-next)
 ```
 
 ## VALIDATION GATE
@@ -67,7 +62,7 @@ All run via docker exec (pattern: `docker exec -u vscode eneo_devcontainer-eneo-
 5. `bun run build` — production build succeeds (Turbopack).
 6. `bun run dev` then `curl -s http://localhost:3100/healthz` → `{"status":"OK",...}`; `curl -s http://localhost:3100/dashboard` → 200 with the Swedish heading.
 7. Manual: open `http://localhost:3100/dashboard`, toggle dark mode, no flash-of-wrong-theme on reload; switch locale cookie to `en` and see English. Buttons/links render in the Eneo accent in both light and dark; everything else is the stock shadcn palette.
-8. `bunx shadcn@latest add dialog` (run from the app) lands the component in `packages/ui-react/src/components/ui/` and it imports cleanly from `@intric/ui-react` (prove the monorepo wiring; keep the component, Phase 4 needs it).
+8. `bunx shadcn@latest add dialog` lands the component in `src/components/ui/` and it imports cleanly from `@/components/ui/dialog` (prove the CLI wiring; keep the component, Phase 4 needs it).
 9. CI: the new job passes on the PR.
 
 ## Exit criteria
@@ -75,6 +70,6 @@ Gate green; SvelteKit app untouched and still running on 3000; conversion script
 
 ## Risks / unknowns
 - Bun + Next 16 dev-server quirks inside the devcontainer (file watching may need polling like the Vite setup). Mitigation: `WATCHPACK_POLLING=true` if HMR is flaky.
-- shadcn CLI monorepo wiring with Bun workspaces (the guide assumes pnpm/turbo in places); if the CLI misplaces files, fix `components.json` aliases rather than moving files by hand, so future `add` commands keep landing in the package.
+- shadcn CLI with Bun workspaces: if the CLI misplaces files, fix `components.json` aliases rather than moving files by hand, so future `add` commands keep landing in `src/components/ui`.
 - The accent color alone may clash with stock neutrals in edge surfaces (focus rings, charts); allow small accent-derived adjustments (ring, chart-1) but document every token that deviates from stock in a comment block at the top of `globals.css`.
 - Paraglide → ICU conversion edge cases (parameterized messages). The script flags them; do not bulk-fix in this phase.

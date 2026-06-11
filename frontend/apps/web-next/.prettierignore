@@ -1,0 +1,4 @@
+node_modules
+.next
+bun.lock
+src/lib/i18n/messages
