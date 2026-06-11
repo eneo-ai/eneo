@@ -3,6 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
   import { Button, Input, Tooltip } from "@intric/ui";
+  import { IconSparkles } from "@intric/icons/sparkles";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
@@ -15,6 +16,7 @@
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
+  import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { page } from "$app/state";
@@ -30,6 +32,14 @@
   import { untrack } from "svelte";
 
   let { data } = $props();
+
+  // Help assistants have logging permanently disabled (PRD §6); surface the
+  // explanation in the security section on their edit page. `is_help_assistant`
+  // is computed by the single-assistant GET endpoint and is not yet part of the
+  // generated OpenAPI schema, hence the local cast.
+  const isHelpAssistant = $derived(
+    (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
+  );
 
   const {
     state: { currentSpace },
@@ -137,6 +147,35 @@
     // For regular models, show changes if any kwargs changed
     return true;
   });
+
+  // Prompt Guide (help-assistants): an availability-gated toolbar action.
+  // The availability endpoint is the single source of truth for whether the
+  // helper is usable here (role assigned + enabled + visible + a usable
+  // completion model + caller has EDIT on this assistant) and is prefetched
+  // in `+page.ts` so the button renders with its real state on first paint —
+  // same cadence as the History button next to it, with no post-mount flash.
+  // SvelteKit re-runs the load on navigation between assistants, so the
+  // value tracks `data.assistant.id` automatically.
+  let isModalOpen = $state(false);
+  // Bound to the modal's active run so the Apply handler can mark it completed.
+  let promptGuideRunId = $state<string | null>(null);
+  const promptGuideAvailability = $derived(data.promptGuideAvailability);
+
+  function promptGuideDisabledTooltip(reason: string | null | undefined): string {
+    switch (reason) {
+      case "role_disabled":
+        return m.prompt_guide_disabled_role_disabled();
+      case "role_not_visible":
+        return m.prompt_guide_disabled_role_not_visible();
+      case "no_completion_model":
+        return m.prompt_guide_disabled_no_completion_model();
+      case "no_edit_rights":
+        return m.prompt_guide_disabled_no_edit_rights();
+      case "no_assignment":
+      default:
+        return m.prompt_guide_disabled_no_assignment();
+    }
+  }
 
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
@@ -275,7 +314,24 @@
           fullWidth
           let:aria
         >
-          <div slot="toolbar" class="text-secondary">
+          <div slot="toolbar" class="text-secondary flex items-center gap-1">
+            {#if promptGuideAvailability}
+              <Tooltip
+                text={promptGuideAvailability.available
+                  ? m.prompt_guide_button_tooltip()
+                  : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
+              >
+                <Button
+                  variant="simple"
+                  padding="icon-leading"
+                  disabled={!promptGuideAvailability.available}
+                  on:click={() => (isModalOpen = true)}
+                >
+                  <IconSparkles />
+                  {m.prompt_guide_button()}
+                </Button>
+              </Tooltip>
+            {/if}
             {#if !promptLocked}
               <PromptVersionDialog
                 title={m.prompt_history_for({ name: $resource.name })}
@@ -289,6 +345,32 @@
                 }}
               ></PromptVersionDialog>
             {/if}
+            <PromptGuideModal
+              bind:open={isModalOpen}
+              bind:runId={promptGuideRunId}
+              targetType="assistant"
+              targetId={data.assistant.id}
+              targetPrompt={$update.prompt.text}
+              hasUnsavedPromptChanges={$currentChanges.diff.prompt !== undefined}
+              onApply={(text) => {
+                // Apply only mutates local editor state (PRD §10): the produced
+                // prompt is written into $update.prompt.text and persisted later
+                // through the normal Save button (intric.assistants.update),
+                // exactly like a manual edit. There is no parallel
+                // apply-and-save path here.
+                $update.prompt.text = text;
+                $update.prompt.description = m.prompt_guide_apply_description({
+                  date: dayjs().format("YYYY-MM-DD HH:mm")
+                });
+                isModalOpen = false;
+                // Mark the Q&A run completed — best-effort, must not block Apply.
+                if (promptGuideRunId) {
+                  data.intric.helpAssistants.runs
+                    .setStatus({ run_id: promptGuideRunId, status: "completed" })
+                    .catch(() => {});
+                }
+              }}
+            />
           </div>
           {#if promptLocked}
             <p
@@ -514,6 +596,13 @@
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>
+        {#if isHelpAssistant}
+          <p
+            class="border-default bg-primary text-secondary mb-2 rounded-lg border px-3 py-2 text-sm"
+          >
+            {m.admin_help_assistants_edit_logging_explanation()}
+          </p>
+        {/if}
         <Settings.Row
           hasChanges={$currentChanges.diff.data_retention_days !== undefined}
           revertFn={() => {

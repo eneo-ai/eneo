@@ -127,6 +127,7 @@ class AssistantAssembler:
         assistant: Assistant,
         permissions: list["ResourcePermission"] | None = None,
         effective_config: "EffectiveConfig | None" = None,
+        is_help_assistant: bool = False,
     ) -> AssistantPublic:
         permissions = permissions or []
 
@@ -222,6 +223,7 @@ class AssistantAssembler:
             model_info=model_info,
             icon_id=assistant.icon_id,
             effective_config=effective_config_public,
+            is_help_assistant=is_help_assistant,
         )
 
     def from_assistant_to_default_assistant_model(

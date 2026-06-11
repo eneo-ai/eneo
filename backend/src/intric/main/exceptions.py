@@ -59,6 +59,8 @@ class ErrorCodes(int, Enum):
     # referenced by an active resource (assistants, apps, services,
     # assistant/app templates). Space membership alone does not block.
     MODEL_IN_USE = 9039
+    # System user protection
+    SYSTEM_USER_PROTECTED = 9040
 
 
 class NotFoundException(Exception):
@@ -349,6 +351,18 @@ class APIKeyNotConfiguredException(Exception):
     pass
 
 
+class SystemUserProtected(Exception):
+    """Raised when an admin path tries to delete or mutate a system user.
+
+    Per-tenant system users (``users.is_system_user = true``) own seeded
+    Help Assistant rows; deleting them would cascade-destroy the org-space's
+    Prompt Guide and audit history. The marker is authoritative — no admin
+    path is allowed to remove it.
+    """
+
+    pass
+
+
 class ProviderInactiveException(Exception):
     """Raised when attempting to use a model whose provider is inactive/disabled."""
 
@@ -479,4 +493,5 @@ EXCEPTION_MAP = {
         "Resource is not ready yet.",
         ErrorCodes.RESOURCE_NOT_READY,
     ),
+    SystemUserProtected: (403, None, ErrorCodes.SYSTEM_USER_PROTECTED),
 }

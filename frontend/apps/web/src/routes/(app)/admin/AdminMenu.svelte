@@ -15,6 +15,7 @@
   import { IconBulb } from "@intric/icons/bulb";
   import { IconHistory } from "@intric/icons/history";
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
+  import { IconSparkles } from "@intric/icons/sparkles";
   import { IconKey } from "@intric/icons/key";
   import { BookText, ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
   import { page } from "$app/stores";
@@ -61,6 +62,7 @@
         ...(settings?.using_templates
           ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
           : []),
+        navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/integrations", Cloud, m.integrations())
       ]

@@ -65,6 +65,14 @@ def setup_fixture():
     mock_space.get_assistant.return_value = mock_assistant
     space_repo.get_space_by_assistant.return_value = mock_space
 
+    # The helper-assistant guard checks both repos before every ``ask``;
+    # default them to "not a helper" so non-guard tests in this file don't
+    # incidentally trip the 403 path.
+    role_repo_mock = AsyncMock()
+    role_repo_mock.exists_active_for_assistant.return_value = False
+    history_repo_mock = AsyncMock()
+    history_repo_mock.exists_for_assistant.return_value = False
+
     service = AssistantService(
         repo=repo,
         space_repo=space_repo,
@@ -84,6 +92,8 @@ def setup_fixture():
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=role_repo_mock,
+        help_assistant_assignment_history_repo=history_repo_mock,
     )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
@@ -141,6 +151,23 @@ async def test_update_space_assistant_member(setup: Setup):
     await setup.service.update_assistant(assistant_update, TEST_UUID)
 
 
+async def test_is_help_assistant_true_when_active_role_exists(setup: Setup):
+    assistant_id = uuid4()
+    role_repo = setup.service.org_space_assistant_role_repo
+    role_repo.exists_active_for_assistant.return_value = True
+
+    assert await setup.service.is_help_assistant(assistant_id) is True
+    role_repo.exists_active_for_assistant.assert_awaited_once_with(assistant_id)
+
+
+async def test_is_help_assistant_false_when_no_active_role(setup: Setup):
+    assistant_id = uuid4()
+    role_repo = setup.service.org_space_assistant_role_repo
+    role_repo.exists_active_for_assistant.return_value = False
+
+    assert await setup.service.is_help_assistant(assistant_id) is False
+
+
 async def test_delete_space_assistant_not_member(setup: Setup):
     actor = MagicMock()
     actor.can_delete_assistants.return_value = False
@@ -187,6 +214,36 @@ async def test_update_assistant_completion_model_in_space(setup: Setup):
     setup.service.repo.update.return_value = MagicMock(prompt="new prompt!", id=uuid4())
 
     await setup.service.update_assistant(TEST_UUID)
+
+
+async def test_update_assistant_persists_empty_prompt_to_clear_it(setup: Setup):
+    # Regression: clearing the prompt textarea in the assistant edit page and
+    # pressing Save used to silently keep the old prompt because the service
+    # treated ``prompt.text == ""`` as "no prompt update" (truthy guard). An
+    # empty string here is a deliberate "clear the prompt" action, so the
+    # service must call create_prompt with the empty string just like it
+    # would for any other value.
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        prompt=PromptCreate(text="", description=""),
+    )
+
+    setup.service.prompt_service.create_prompt.assert_awaited_once()
+    create_args = setup.service.prompt_service.create_prompt.await_args
+    # text is the first positional arg; description the second.
+    assert create_args.args[0] == ""
+    assert create_args.args[1] == ""
+
+
+async def test_update_assistant_skips_prompt_creation_when_field_omitted(setup: Setup):
+    # Counterpart to the regression above — make sure the fix did not flip
+    # the other behaviour. A partial update that does NOT touch the prompt
+    # (``prompt=None``, the field's default) must NOT create a new prompt
+    # version, otherwise every unrelated edit (e.g. just renaming the
+    # assistant) would pollute the prompt history.
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+
+    setup.service.prompt_service.create_prompt.assert_not_awaited()
 
 
 def configure_personal_default_assistant(

@@ -114,6 +114,13 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
+    # Help Assistant Actions (6 actions)
+    ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_ENABLED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_INSTALLED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
     # System Actions (3 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",

@@ -361,6 +361,16 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "default assistants when a tenant policy applies."
         ),
     )
+    is_help_assistant: bool = Field(
+        default=False,
+        description=(
+            "True when this assistant currently fills a Help Assistant role "
+            "(it has an active row in org_space_assistant_roles). Help "
+            "assistants have logging permanently disabled; the edit UI uses "
+            "this flag to surface that explanation. Only the single-assistant "
+            "GET endpoint computes it; other responses default to False."
+        ),
+    )
 
 
 class DefaultAssistant(AssistantPublic):

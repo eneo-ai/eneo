@@ -2,7 +2,7 @@
 
 
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.group_chats_table import GroupChatsTable
+from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.questions_table import (
     InfoBlobReferences,
@@ -20,6 +21,33 @@ from intric.database.tables.questions_table import (
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.users_table import Users
 from intric.sessions.session import SessionInDB
+
+
+# IMPORTANT: every method in this repo that returns session/question rows or
+# aggregates derived from them must apply this filter. If you add a new such
+# method, either call this helper or document the explicit exception in a
+# comment on the new method. Mirrors
+# ``SessionRepository._exclude_helper_run_sessions`` — PRD §4 ("one rule, one
+# place"). Parametrised on the session-id column so both Sessions-scoped
+# (Sessions.id) and Questions-scoped (Questions.session_id) queries can apply
+# the same filter without joining Sessions.
+def _exclude_helper_run_sessions(
+    query: sa.Select[Any], session_id_col: Any
+) -> sa.Select[Any]:
+    """Exclude rows whose session is referenced by a ``help_assistant_runs`` row.
+
+    Helper conversations live in the regular ``sessions`` / ``questions``
+    tables so streaming, RAG, model selection, and tool calling all work — but
+    they must never appear in normal conversation / insights / analytics /
+    export endpoints. See PRD §4.
+    """
+    return query.where(
+        ~sa.exists(
+            sa.select(HelpAssistantRuns.id).where(
+                HelpAssistantRuns.session_id == session_id_col
+            )
+        )
+    )
 
 
 class AssistantMetadataRow(NamedTuple):
@@ -87,6 +115,12 @@ class AnalysisRepository:
             else:
                 stmt = stmt.join(Users).where(Users.tenant_id == tenant_id)
 
+        # Hide help-assistant runs from session/question totals (PRD §4).
+        if table == Sessions:
+            stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        elif table == Questions:
+            stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
+
         count = await self.session.scalar(stmt)
 
         return count
@@ -111,21 +145,21 @@ class AnalysisRepository:
             .where(Users.tenant_id == tenant_id)
             .scalar_subquery()
         )
-        session_count = (
+        session_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Sessions)
             .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
-            .scalar_subquery()
-        )
-        question_count = (
+            .where(Users.tenant_id == tenant_id),
+            Sessions.id,
+        ).scalar_subquery()
+        question_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Questions)
             .join(Sessions, Questions.session_id == Sessions.id)
             .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
-            .scalar_subquery()
-        )
+            .where(Users.tenant_id == tenant_id),
+            Sessions.id,
+        ).scalar_subquery()
         result = await self.session.execute(
             sa.select(assistant_count, session_count, question_count)
         )
@@ -154,6 +188,7 @@ class AnalysisRepository:
         stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
             Users.tenant_id == tenant_id
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -220,6 +255,7 @@ class AnalysisRepository:
         stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
             Users.tenant_id == tenant_id
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -342,6 +378,7 @@ class AnalysisRepository:
             .where(Sessions.created_at <= to_date)
             .where(Questions.question.isnot(None))
         )
+        base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
 
         if assistant_id is not None:
             base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
@@ -412,6 +449,7 @@ class AnalysisRepository:
             .where(Sessions.created_at <= to_date)
             .where(Questions.question.isnot(None))
         )
+        base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
         if query:
             normalized_query = query.strip()
             if normalized_query:
@@ -486,6 +524,9 @@ class AnalysisRepository:
         session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
             Sessions.assistant_id == assistant_id
         )
+        session_count_stmt = _exclude_helper_run_sessions(
+            session_count_stmt, Sessions.id
+        )
 
         if tenant_id is not None:
             session_count_stmt = session_count_stmt.join(
@@ -508,6 +549,9 @@ class AnalysisRepository:
             sa.select(sa.func.count(Questions.id))
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(Sessions.assistant_id == assistant_id)
+        )
+        question_count_stmt = _exclude_helper_run_sessions(
+            question_count_stmt, Sessions.id
         )
 
         if tenant_id is not None:
@@ -545,6 +589,7 @@ class AnalysisRepository:
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         return await self.session.scalar(stmt) or 0
 
     async def get_assistant_metadata_for_tenant(
@@ -598,6 +643,7 @@ class AnalysisRepository:
             .where(Users.tenant_id == tenant_id)
             .order_by(Sessions.created_at)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)
@@ -638,6 +684,7 @@ class AnalysisRepository:
             .where(Questions.tenant_id == tenant_id)
             .order_by(Questions.created_at)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
 
         if start_date is not None:
             stmt = stmt.where(Questions.created_at >= start_date)
@@ -694,6 +741,7 @@ class AnalysisRepository:
             .group_by(bucket)
             .order_by(bucket)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)
@@ -719,6 +767,7 @@ class AnalysisRepository:
             .group_by(bucket)
             .order_by(bucket)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
 
         if start_date is not None:
             stmt = stmt.where(Questions.created_at >= start_date)
@@ -746,6 +795,9 @@ class AnalysisRepository:
         session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
             Sessions.group_chat_id == group_chat_id
         )
+        session_count_stmt = _exclude_helper_run_sessions(
+            session_count_stmt, Sessions.id
+        )
 
         if tenant_id is not None:
             session_count_stmt = session_count_stmt.join(
@@ -768,6 +820,9 @@ class AnalysisRepository:
             sa.select(sa.func.count(Questions.id))
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(Sessions.group_chat_id == group_chat_id)
+        )
+        question_count_stmt = _exclude_helper_run_sessions(
+            question_count_stmt, Sessions.id
         )
 
         if tenant_id is not None:
@@ -805,6 +860,7 @@ class AnalysisRepository:
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         return await self.session.scalar(stmt) or 0
 
     async def get_active_assistant_count_for_tenant(
@@ -830,6 +886,7 @@ class AnalysisRepository:
             .where(Assistants.published.is_(True))
             .where(Assistants.insight_enabled.is_(True))
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)
@@ -882,6 +939,7 @@ class AnalysisRepository:
             .where(Users.deleted_at.is_(None))  # Exclude deleted users
             .where(Sessions.service_id.is_(None))  # Exclude service sessions
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)

@@ -228,10 +228,12 @@ async def _assistant_response(
         permissions,
         effective_config,
     ) = await service.get_assistant_with_effective_config(assistant_id=assistant_id)
+    is_help_assistant = await service.is_help_assistant(assistant_id=assistant_id)
     return assembler.from_assistant_to_model(
         assistant=assistant,
         permissions=permissions,
         effective_config=effective_config,
+        is_help_assistant=is_help_assistant,
     )
 
 
@@ -267,16 +269,24 @@ def _build_assistant_update_changes(
     if assistant.name and assistant.name != old_assistant.name:
         changes["name"] = {"old": old_assistant.name, "new": assistant.name}
 
-    # Prompt change
-    if assistant.prompt and assistant.prompt.text:
+    # Prompt change. Mirror the apps router: trigger on `prompt is not None`
+    # (the field was included in the request) and treat an empty new text
+    # as "prompt was cleared" rather than ignoring it — see the matching
+    # service-side comment in `assistant_service.update_assistant` for the
+    # bug this used to mask.
+    if assistant.prompt is not None:
+        new_prompt_text = assistant.prompt.text or ""
         old_prompt_text = old_assistant.prompt.text if old_assistant.prompt else ""
-        if assistant.prompt.text != old_prompt_text:
+        if new_prompt_text != old_prompt_text:
             prompt_preview = (
-                assistant.prompt.text[:50] + "..."
-                if len(assistant.prompt.text) > 50
-                else assistant.prompt.text
+                new_prompt_text[:50] + "..."
+                if len(new_prompt_text) > 50
+                else new_prompt_text
             )
-            changes["prompt"] = {"changed": True, "preview": prompt_preview}
+            changes["prompt"] = {
+                "changed": True,
+                "preview": prompt_preview if new_prompt_text else "Removed prompt",
+            }
 
     # Model change
     if (
