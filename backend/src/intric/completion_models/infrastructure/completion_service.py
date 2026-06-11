@@ -16,7 +16,6 @@ from intric.completion_models.infrastructure.context_builder import ContextBuild
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
-from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
 from intric.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
@@ -80,14 +79,11 @@ class CompletionService:
         All models must have a provider_id linking to a ModelProvider.
         Uses TenantModelAdapter which routes through LiteLLM.
         """
-        import sqlalchemy as sa
-
         from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
             TenantModelAdapter,
         )
-        from intric.database.tables.model_providers_table import ModelProviders
-        from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
-            TenantModelCredentialResolver,
+        from intric.model_providers.infrastructure.litellm_provider import (
+            load_active_litellm_provider,
         )
 
         # All models must have provider_id
@@ -113,32 +109,18 @@ class CompletionService:
                 "Please ensure the CompletionService is initialized with a database session."
             )
 
-        # Load provider data from database
-        stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-        result = await self.session.execute(stmt)
-        provider_db = result.scalar_one_or_none()
-
-        if provider_db is None:
-            raise ProviderNotFoundException(
-                f"Model provider '{model.provider_id}' not found. "
-                "The provider may have been deleted or is not accessible."
+        if self.tenant is None:
+            raise ValueError(
+                f"Model '{model.name}' requires tenant context to load its provider."
             )
 
-        if not provider_db.is_active:
-            raise ProviderInactiveException(
-                f"The model provider '{provider_db.name}' is currently inactive. "
-                "Please contact your administrator to enable the provider."
-            )
-
-        # Create credential resolver
-        provider_id = provider_db.id
-
-        credential_resolver = TenantModelCredentialResolver(
-            provider_id=provider_id,
-            provider_type=provider_db.provider_type,
-            credentials=provider_db.credentials,
-            config=provider_db.config,
-            encryption_service=self.encryption_service,
+        provider = await load_active_litellm_provider(
+            session=self.session,
+            provider_id=model.provider_id,
+            tenant_id=self.tenant.id,
+        )
+        credential_resolver = provider.create_credential_resolver(
+            self.encryption_service
         )
 
         logger.info(
@@ -147,7 +129,7 @@ class CompletionService:
                 "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
-                "provider_type": provider_db.provider_type,
+                "provider_type": provider.provider_type,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
             },
         )
@@ -155,7 +137,7 @@ class CompletionService:
         return TenantModelAdapter(
             model=model,
             credential_resolver=credential_resolver,
-            provider_type=provider_db.provider_type,
+            provider_type=provider.provider_type,
         )
 
     @staticmethod
@@ -273,7 +255,7 @@ class CompletionService:
             context = self.context_builder.build_context(
                 input_str=text_input,
                 max_tokens=max_tokens,
-                model_name=model_adapter.get_litellm_model_name(),
+                model_name=model_adapter.get_model_route(),
                 files=files,
                 prompt=prompt,
                 session=session,

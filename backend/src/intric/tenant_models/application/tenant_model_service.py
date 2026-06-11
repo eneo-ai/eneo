@@ -16,6 +16,7 @@ logging — live as private helpers on the module.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -30,6 +31,9 @@ from intric.audit.domain.entity_types import EntityType
 from intric.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    snapshot_supported_model_kwargs,
+)
 from intric.database.tables.ai_models_table import (
     CompletionModels,
     EmbeddingModels,
@@ -41,6 +45,12 @@ from intric.main.exceptions import (
     ModelInUseException,
     NotFoundException,
     UnauthorizedException,
+)
+from intric.model_providers.infrastructure.litellm_provider import (
+    build_litellm_model_name,
+)
+from intric.model_providers.infrastructure.litellm_transport import (
+    get_supported_openai_params,
 )
 from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -74,6 +84,8 @@ if TYPE_CHECKING:
     )
     from intric.users.user import UserInDB
 
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -82,7 +94,7 @@ if TYPE_CHECKING:
 
 async def _validate_active_provider(
     session: "AsyncSession", provider_id: UUID, tenant_id: UUID
-) -> None:
+) -> Any:
     """Confirm the provider exists in this tenant and is currently active.
 
     Raises `NotFoundException` (cross-tenant or unknown ID) or
@@ -92,6 +104,7 @@ async def _validate_active_provider(
     provider = await repo.get_by_id(provider_id)
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
+    return provider
 
 
 async def _unset_other_defaults(
@@ -107,6 +120,23 @@ async def _unset_other_defaults(
     """
     stmt = sa.update(table).where(table.tenant_id == tenant_id).values(is_default=False)
     await session.execute(stmt)
+
+
+def _snapshot_completion_capabilities(
+    provider_type: str,
+    model_name: str,
+) -> dict[str, object]:
+    model_route = build_litellm_model_name(provider_type, model_name)
+    try:
+        supported_params = get_supported_openai_params(model_route)
+    except Exception:
+        logger.warning(
+            "Could not discover model parameter capabilities; using conservative defaults",
+            extra={"model_route": model_route},
+            exc_info=True,
+        )
+        supported_params = None
+    return snapshot_supported_model_kwargs(supported_params).model_dump()
 
 
 def _ensure_tenant_owned(model: Any) -> None:
@@ -175,7 +205,7 @@ class TenantCompletionModelService:
         self.audit_service = audit_service
 
     async def create(self, payload: "TenantCompletionModelCreate") -> "CompletionModel":
-        await _validate_active_provider(
+        provider = await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
         await _validate_unique_display_name(
@@ -221,6 +251,14 @@ class TenantCompletionModelService:
         new_model.is_deprecated = False
         new_model.deployment_name = None
         new_model.base_url = None
+        new_model.model_kwargs_capabilities = (
+            payload.model_kwargs_capabilities.model_dump()
+            if payload.model_kwargs_capabilities is not None
+            else _snapshot_completion_capabilities(
+                provider.provider_type,
+                payload.name,
+            )
+        )
         new_model.input_cost_per_token = payload.input_cost_per_token
         new_model.output_cost_per_token = payload.output_cost_per_token
         new_model.is_enabled = payload.is_active
@@ -261,6 +299,19 @@ class TenantCompletionModelService:
         provided = payload.model_fields_set
         if payload.name is not None:
             model.name = payload.name
+            if model.provider_id is None:
+                raise BadRequestException(
+                    "Tenant completion model is missing its provider"
+                )
+            provider_repo = ModelProviderRepository(
+                session=self.session,
+                tenant_id=self.user.tenant_id,
+            )
+            provider = await provider_repo.get_by_id(model.provider_id)
+            model.model_kwargs_capabilities = _snapshot_completion_capabilities(
+                provider.provider_type,
+                payload.name,
+            )
         if payload.display_name is not None:
             await _validate_unique_display_name(
                 self.session,
@@ -293,6 +344,12 @@ class TenantCompletionModelService:
             model.input_cost_per_token = payload.input_cost_per_token
         if "output_cost_per_token" in provided:
             model.output_cost_per_token = payload.output_cost_per_token
+        if "model_kwargs_capabilities" in provided:
+            model.model_kwargs_capabilities = (
+                payload.model_kwargs_capabilities.model_dump()
+                if payload.model_kwargs_capabilities is not None
+                else None
+            )
         if "is_default" in provided and payload.is_default is not None:
             if payload.is_default:
                 await _unset_other_defaults(

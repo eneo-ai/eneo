@@ -20,6 +20,9 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
 )
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    snapshot_supported_model_kwargs,
+)
 from intric.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
@@ -62,6 +65,18 @@ def test_tenant_models_expose_advanced_sampling_kwargs():
     assert model.supported_model_kwargs.presence_penalty.supported is True
     assert model.supported_model_kwargs.frequency_penalty.supported is True
     assert model.supported_model_kwargs.top_k.supported is True
+
+
+def test_discovered_capabilities_are_snapshotted_explicitly():
+    snapshot = snapshot_supported_model_kwargs(
+        ["temperature", "top_p", "reasoning_effort"]
+    )
+
+    assert snapshot.temperature.supported is True
+    assert snapshot.top_p.supported is True
+    assert snapshot.reasoning_effort.supported is True
+    assert snapshot.frequency_penalty.supported is False
+    assert snapshot.top_k.supported is False
 
 
 def test_capability_override_wins_over_model_name_and_reasoning_flag():

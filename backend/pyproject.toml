@@ -7,7 +7,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi>=0,<1",
     "uvicorn[standard]>=0.30.0,<1",
-    "python-dotenv==1.0.1",  # pinned by litellm==1.83.10; low-sev GHSA-mf9w residual
+    "python-dotenv==1.2.2",
     "pydantic[email]>=2,<3",
     "tenacity>=8.2.1,<9",
     "tiktoken>=0,<1",
@@ -44,7 +44,7 @@ dependencies = [
     "sentry-sdk[fastapi]==2.8.0",
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.83.10",
+    "litellm==1.88.1",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
     "cryptography>=46.0.5,<47", # For Fernet encryption of HTTP auth passwords
     "httpx~=0.28.0",

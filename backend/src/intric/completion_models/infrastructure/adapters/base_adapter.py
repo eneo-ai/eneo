@@ -19,13 +19,17 @@ class CompletionModelAdapter(ABC):
     def get_token_limit_of_model(self) -> int:
         raise NotImplementedError()
 
-    def get_litellm_model_name(self) -> str:
-        """Model identifier as passed to litellm.
+    def get_model_route(self) -> str:
+        """Provider-qualified model identifier used for calls and token counting.
 
         Token counting must use the same identifier as the actual request,
-        otherwise litellm silently resolves a different (default) tokenizer.
+        otherwise the tokenizer may silently resolve a different model.
         """
         return self.model.name
+
+    def get_litellm_model_name(self) -> str:
+        """Backward-compatible alias for persisted/API code using the old name."""
+        return self.get_model_route()
 
     def get_logging_details(
         self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"

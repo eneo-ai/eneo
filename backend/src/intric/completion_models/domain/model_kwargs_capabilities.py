@@ -80,6 +80,72 @@ def _tenant_supported_model_kwargs() -> SupportedModelKwargs:
     )
 
 
+def snapshot_supported_model_kwargs(
+    supported_params: list[str] | None,
+) -> SupportedModelKwargs:
+    """Convert LiteLLM discovery data into persisted Eneo capabilities.
+
+    This is intended for model creation/update, not request-time lookup. The
+    resulting snapshot keeps UI and execution behavior stable across dependency
+    upgrades.
+    """
+    if supported_params is None:
+        return _default_supported_model_kwargs(reasoning=False)
+
+    supported = set(supported_params)
+    return SupportedModelKwargs(
+        temperature=(
+            _slider_capability(minimum=0, maximum=2, step=0.01)
+            if "temperature" in supported
+            else ModelKwargCapability()
+        ),
+        top_p=(
+            _slider_capability(minimum=0, maximum=1, step=0.01)
+            if "top_p" in supported
+            else ModelKwargCapability()
+        ),
+        reasoning_effort=(
+            ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["none", "low", "medium", "high"],
+            )
+            if "reasoning_effort" in supported
+            else ModelKwargCapability()
+        ),
+        verbosity=(
+            ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["low", "medium", "high"],
+            )
+            if "verbosity" in supported
+            else ModelKwargCapability()
+        ),
+        presence_penalty=(
+            _slider_capability(minimum=-2, maximum=2, step=0.1)
+            if "presence_penalty" in supported
+            else ModelKwargCapability()
+        ),
+        frequency_penalty=(
+            _slider_capability(minimum=-2, maximum=2, step=0.1)
+            if "frequency_penalty" in supported
+            else ModelKwargCapability()
+        ),
+        top_k=(
+            ModelKwargCapability(
+                supported=True,
+                control="slider",
+                minimum=1,
+                maximum=100,
+                step=1,
+            )
+            if "top_k" in supported
+            else ModelKwargCapability()
+        ),
+    )
+
+
 def _apply_model_capability_flags(
     supported_model_kwargs: SupportedModelKwargs,
     *,

@@ -12,6 +12,7 @@ from intric.ai_models.completion_models.completion_model import ResponseType
 from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
     PROVIDER_UNAVAILABLE_CODE,
     PROVIDER_UNAVAILABLE_MESSAGE,
+    PreparedModelStream,
     TenantModelAdapter,
 )
 from intric.main.exceptions import OpenAIException
@@ -64,6 +65,23 @@ def _text_chunk(text: str, finish_reason: str | None = None):
     return SimpleNamespace(choices=[choice])
 
 
+def _response(*, content=None, tool_calls=None, finish_reason="stop"):
+    message = SimpleNamespace(
+        content=content,
+        reasoning_content=None,
+        tool_calls=tool_calls,
+    )
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice], usage=None)
+
+
+def _response_tool_call(tool_call_id: str, arguments: str):
+    return SimpleNamespace(
+        id=tool_call_id,
+        function=SimpleNamespace(name="server__tool", arguments=arguments),
+    )
+
+
 class _FakeMCPProxy:
     def __init__(self):
         self.calls = []
@@ -101,6 +119,15 @@ def _make_completion_adapter() -> TenantModelAdapter:
 
 
 async def _collect(adapter: TenantModelAdapter, stream, **kwargs):
+    eneo_context = getattr(stream, "_eneo_context", None)
+    if eneo_context is not None:
+        stream = PreparedModelStream(
+            stream=stream,
+            messages=eneo_context["messages"],
+            kwargs=eneo_context["kwargs"],
+            mcp_proxy=eneo_context["mcp_proxy"],
+            has_tools=eneo_context["has_tools"],
+        )
     output = []
     async for chunk in adapter.iterate_stream(
         stream=stream,
@@ -211,8 +238,10 @@ async def test_unknown_stream_preparation_error_remains_unexpected():
         with pytest.raises(OpenAIException) as exc_info:
             await adapter.prepare_streaming(context=SimpleNamespace(), model_kwargs={})
 
-    assert str(exc_info.value) == "Unknown error occurred"
-    assert getattr(exc_info.value, "code", None) is None
+    assert str(exc_info.value) == (
+        "The AI provider could not process the request. Please try again later."
+    )
+    assert exc_info.value.code == "provider_error"
 
 
 @pytest.mark.asyncio
@@ -226,8 +255,72 @@ async def test_generic_timeout_word_remains_unexpected():
         with pytest.raises(OpenAIException) as exc_info:
             await adapter.prepare_streaming(context=SimpleNamespace(), model_kwargs={})
 
-    assert str(exc_info.value) == "Unknown error occurred"
-    assert getattr(exc_info.value, "code", None) is None
+    assert str(exc_info.value) == (
+        "The AI provider could not process the request. Please try again later."
+    )
+    assert exc_info.value.code == "provider_error"
+
+
+@pytest.mark.asyncio
+async def test_prepare_streaming_returns_explicit_context_wrapper():
+    adapter = _make_completion_adapter()
+    raw_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+
+    with patch(
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=raw_stream),
+    ):
+        prepared = await adapter.prepare_streaming(
+            context=SimpleNamespace(),
+            model_kwargs={},
+        )
+
+    assert isinstance(prepared, PreparedModelStream)
+    assert prepared.stream is raw_stream
+    assert prepared.messages == [{"role": "user", "content": "hello"}]
+    assert not hasattr(raw_stream, "_eneo_context")
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_supports_multiple_tool_rounds():
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[_response_tool_call("call_2", '{"q":"second"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(content="final answer"),
+    ]
+
+    with patch(
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "final answer"
+    assert completion.stop is True
+    assert completion_call.await_count == 3
+    assert mcp_proxy.calls == [
+        [("server__tool", {"q": "first"})],
+        [("server__tool", {"q": "second"})],
+    ]
+
+
+def test_models_without_tool_capability_receive_no_tools():
+    adapter = _make_adapter()
+    adapter.model.supports_tool_calling = False
+
+    assert adapter._merge_mcp_tools([{"type": "function"}], _FakeMCPProxy()) == []
 
 
 @pytest.mark.asyncio
@@ -249,7 +342,7 @@ async def test_mid_stream_provider_failure_yields_unavailable_event():
 
     with (
         patch(
-            "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+            "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
             AsyncMock(side_effect=httpx.ConnectError("Connection refused")),
         ),
         patch(
@@ -296,7 +389,7 @@ async def test_iterate_stream_stops_at_max_rounds():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -336,7 +429,7 @@ async def test_iterate_stream_yields_approval_required_and_blocks():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -389,7 +482,7 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
@@ -450,7 +543,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         await _collect(
@@ -501,7 +594,7 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
     )
 
     with patch(
-        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
         completions = await _collect(
