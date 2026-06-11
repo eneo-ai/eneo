@@ -3,6 +3,8 @@
 ## Goal
 A typed, auth-injecting data layer the rest of the migration builds on: OpenAPI-generated types + `openapi-fetch` client, a catch-all REST proxy route handler for client-side calls, TanStack Query v5 with the App Router hydration pattern, normalized error handling (error-code → i18n message, trace-id surfacing), and a first real page (`/dashboard` listing spaces/assistants from `GET /api/v1/dashboard/`) proving the stack end-to-end.
 
+This phase is the modernization/replacement of `@intric/intric-js`. Reuse only what that package got right (generating types from `/openapi.json`, the schema-drift CI idea); do NOT port its patterns — no hand-written endpoint wrapper class, no sprawling hand-patched `resources.d.ts` (use a minimal, documented `overrides.ts`), no silently-baked-in backend workarounds (every workaround gets an `// RB-5(x)` marker). If there is a better way to achieve the same goal than the old client's approach, take it.
+
 ## Prerequisites
 - Phase 2 gate green (`getAccessToken()` works for both session modes).
 - Backend reachable at `ENEO_BACKEND_URL` (dev: `http://localhost:8123` from the host; verify the in-container hostname, the Svelte app uses a separate `ENEO_BACKEND_SERVER_URL` for server-to-server calls; replicate that env split if the devcontainer network needs it).

@@ -11,7 +11,6 @@ const envSchema = z.object({
   ENEO_BACKEND_URL: z.url(),
   // Required from Phase 2 (encrypts the session cookie).
   SESSION_SECRET: z.string().min(32).optional(),
-  SHOW_WEB_SEARCH: boolFlag,
   SHOW_HELP_CENTER: boolFlag,
   HELP_CENTER_URL: z.url().optional(),
   REQUEST_INTEGRATION_FORM_URL: z.url().optional()
