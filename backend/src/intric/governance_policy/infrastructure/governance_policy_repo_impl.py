@@ -87,6 +87,22 @@ class GovernancePolicyRepoImpl:
             return None
         return await self._load_policy(row)
 
+    async def get_by_tenant_for_update(
+        self, tenant_id: UUID, *, scope: PolicyScope
+    ) -> GovernancePolicy | None:
+        stmt = (
+            sa.select(GovernancePolicies)
+            .where(
+                GovernancePolicies.tenant_id == tenant_id,
+                GovernancePolicies.scope == scope.value,
+            )
+            .with_for_update()
+        )
+        row = await self.session.scalar(stmt)
+        if row is None:
+            return None
+        return await self._load_policy(row)
+
     async def create_empty(
         self, tenant_id: UUID, *, scope: PolicyScope
     ) -> GovernancePolicy:

@@ -145,7 +145,7 @@ async def update_prompt_library_entry(
     container: _ContainerWithUser,
 ):
     service = container.prompt_library_service()
-    before = await service.get_entry(id)
+    before = await service.get_entry_for_update(id)
     entry = await service.update_entry(
         id,
         name=payload.name,

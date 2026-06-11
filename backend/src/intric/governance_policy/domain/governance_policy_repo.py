@@ -21,6 +21,10 @@ class GovernancePolicyRepo(Protocol):
         self, tenant_id: UUID, *, scope: PolicyScope
     ) -> GovernancePolicy | None: ...
 
+    async def get_by_tenant_for_update(
+        self, tenant_id: UUID, *, scope: PolicyScope
+    ) -> GovernancePolicy | None: ...
+
     async def create_empty(
         self, tenant_id: UUID, *, scope: PolicyScope
     ) -> GovernancePolicy: ...

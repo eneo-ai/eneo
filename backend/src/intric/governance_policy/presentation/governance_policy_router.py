@@ -132,7 +132,7 @@ async def update_governance_policy(
 ):
     service = container.governance_policy_service()
     assembler = container.governance_policy_assembler()
-    before = await service.get_policy()
+    before = await service.get_policy_for_update()
 
     models_restriction = None
     if payload.models_restriction is not None:

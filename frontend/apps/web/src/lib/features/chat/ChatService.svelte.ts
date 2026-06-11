@@ -4,7 +4,7 @@ import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
-import { SvelteSet } from "svelte/reactivity";
+import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
   type ConversationSparse,
   type Assistant,
@@ -127,19 +127,7 @@ export class ChatService {
     const partner = this.#chatPartner;
     if (!partner || !("completion_model" in partner)) return undefined;
 
-    const current = partner.completion_model ?? undefined;
-    const effectiveConfig = partner.effective_config;
-    if (!effectiveConfig?.models_enforced) return current;
-
-    const allowedIds = new SvelteSet(effectiveConfig.available_models.map((model) => model.id));
-    if (current && allowedIds.has(current.id)) return current;
-
-    return (
-      effectiveConfig.default_model ??
-      effectiveConfig.locked_model ??
-      effectiveConfig.available_models[0] ??
-      undefined
-    );
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
   }
 
   #partnerModelTokenLimit(): number | undefined {

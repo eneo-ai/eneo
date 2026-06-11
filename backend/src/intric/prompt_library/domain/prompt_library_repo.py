@@ -17,6 +17,10 @@ class PromptLibraryRepo(Protocol):
 
     async def get(self, id: UUID, tenant_id: UUID) -> PromptLibraryEntry | None: ...
 
+    async def get_for_update(
+        self, id: UUID, tenant_id: UUID
+    ) -> PromptLibraryEntry | None: ...
+
     async def list_by_tenant(self, tenant_id: UUID) -> list[PromptLibraryEntry]: ...
 
     async def update(

@@ -55,6 +55,13 @@ class PromptLibraryService:
             raise NotFoundException()
         return entry
 
+    async def get_entry_for_update(self, id: UUID) -> PromptLibraryEntry:
+        validate_permission(self.user, Permission.ADMIN)
+        entry = await self.repo.get_for_update(id=id, tenant_id=self.user.tenant_id)
+        if entry is None:
+            raise NotFoundException()
+        return entry
+
     async def create_entry(
         self,
         *,
@@ -96,8 +103,7 @@ class PromptLibraryService:
         description: str | None | NotProvided = NOT_PROVIDED,
         text: str | None = None,
     ) -> PromptLibraryEntry:
-        validate_permission(self.user, Permission.ADMIN)
-        entry = await self.get_entry(id)
+        entry = await self.get_entry_for_update(id)
 
         if name is not None and name != entry.name:
             if await self.repo.exists_by_name(

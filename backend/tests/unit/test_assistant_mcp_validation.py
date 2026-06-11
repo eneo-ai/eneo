@@ -14,9 +14,11 @@ from intric.main.exceptions import BadRequestException
 def _build_assistant_service_with_mocks():
     service = object.__new__(AssistantService)
     assistant_id = uuid4()
+    assistant = SimpleNamespace(id=assistant_id, is_default=True, mcp_servers=[])
     space = SimpleNamespace(
         id=uuid4(),
-        get_assistant=lambda **_: SimpleNamespace(id=assistant_id),
+        get_assistant=lambda **_: assistant,
+        is_personal=lambda: True,
     )
     actor = SimpleNamespace(
         can_edit_assistants=lambda: True,
@@ -32,8 +34,13 @@ def _build_assistant_service_with_mocks():
     service.actor_manager = SimpleNamespace(
         get_space_actor_from_space=MagicMock(return_value=actor)
     )
-    service.repo = SimpleNamespace(session=session, _set_mcp_servers=AsyncMock())
+    service.repo = SimpleNamespace(
+        session=session,
+        set_mcp_servers=AsyncMock(),
+        _set_mcp_servers=AsyncMock(),
+    )
     service.user = SimpleNamespace(tenant_id=uuid4())
+    service.effective_config_service = None
     return service, assistant_id, session
 
 
@@ -66,6 +73,38 @@ async def test_add_mcp_to_assistant_rejects_server_not_assigned_to_space():
         )
 
     assert session.scalar.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
+    service, assistant_id, session = _build_assistant_service_with_mocks()
+    mcp_server_id = uuid4()
+    assistant_in_db = SimpleNamespace(id=assistant_id)
+    service.effective_config_service = AsyncMock(
+        resolve_for=AsyncMock(
+            return_value=SimpleNamespace(
+                mcp_enforced=True,
+                available_mcp_servers=[SimpleNamespace(id=mcp_server_id)],
+            )
+        )
+    )
+    session.scalar.side_effect = [
+        SimpleNamespace(id=mcp_server_id),
+        assistant_in_db,
+    ]
+    result = MagicMock()
+    result.scalars.return_value = []
+    session.execute.return_value = result
+
+    await service.add_mcp_to_assistant(
+        assistant_id=assistant_id,
+        mcp_server_id=mcp_server_id,
+    )
+
+    assert session.scalar.await_count == 2
+    service.repo.set_mcp_servers.assert_awaited_once_with(
+        assistant_in_db, [mcp_server_id]
+    )
 
 
 @pytest.mark.asyncio

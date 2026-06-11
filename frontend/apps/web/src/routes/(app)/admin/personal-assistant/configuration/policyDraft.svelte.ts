@@ -64,6 +64,23 @@ type Policy = {
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
 };
 
+type PolicyUpdate = {
+  models_restriction?: {
+    enabled: boolean;
+    models: PolicyModel[];
+    provider_ids: string[];
+  };
+  mcp_restriction?: {
+    enabled: boolean;
+    servers: PolicyMcpServer[];
+    disabled_tool_ids: string[];
+  };
+  prompt_enforcement?: {
+    enabled: boolean;
+    prompt_library_id: string | null;
+  };
+};
+
 export type PolicyPageData = {
   intric: Intric;
   policy: Policy;
@@ -421,13 +438,16 @@ export class PolicyDraft {
     this.saveError = null;
     this.saveAnnouncement = "";
     try {
-      await this.#intric.governancePolicy.update({
-        models_restriction: {
+      const update: PolicyUpdate = {};
+      if (this.#modelsDirty) {
+        update.models_restriction = {
           enabled: this.modelsEnabled,
           models: this.selectedModels,
           provider_ids: Array.from(this.providerSelections)
-        },
-        mcp_restriction: {
+        };
+      }
+      if (this.#mcpDirty) {
+        update.mcp_restriction = {
           enabled: this.mcpEnabled,
           servers: Array.from(this.mcpSelections.entries()).map(([id, v]) => ({
             mcp_server_id: id,
@@ -438,12 +458,15 @@ export class PolicyDraft {
             this.mcpSelections.keys(),
             this.disabledMcpToolIds
           )
-        },
-        prompt_enforcement: {
+        };
+      }
+      if (this.#promptDirty) {
+        update.prompt_enforcement = {
           enabled: this.promptEnabled,
           prompt_library_id: this.promptEnabled ? this.selectedPromptId : null
-        }
-      });
+        };
+      }
+      await this.#intric.governancePolicy.update(update);
       await invalidate("admin:governance-policy");
       this.pendingConfirm = null;
       this.saveAnnouncement = m.governance_save_success();

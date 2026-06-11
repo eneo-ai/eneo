@@ -14,6 +14,7 @@
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { sortModels } from "$lib/features/ai-models/sortModels";
+  import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { m } from "$lib/paraglide/messages";
   import { Lock } from "lucide-svelte";
   import { SvelteMap } from "svelte/reactivity";
@@ -49,13 +50,13 @@
         : $currentSpace.completion_models
     )
   );
-
   const selectedModel = $derived.by(() => {
-    const current = defaultAssistant.completion_model;
-    if (!effectiveConfig?.models_enforced) return current;
-    if (current && policyAllowedModelIds?.has(current.id)) return current;
     return (
-      effectiveConfig.default_model ?? effectiveConfig.locked_model ?? visibleModels[0] ?? null
+      selectEffectiveChatModel(
+        defaultAssistant.completion_model,
+        effectiveConfig,
+        $currentSpace.completion_models
+      ) ?? null
     );
   });
   const selectedId = $derived(selectedModel?.id ?? "");

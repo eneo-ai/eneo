@@ -164,7 +164,7 @@ async def test_update_rejects_duplicate_name():
     tenant_id = uuid4()
     target = _entry(tenant_id, name="Old")
     repo = AsyncMock()
-    repo.get.return_value = target
+    repo.get_for_update.return_value = target
     repo.exists_by_name.return_value = True
     service = PromptLibraryService(user=_admin_user(tenant_id), repo=repo)
 
@@ -178,7 +178,7 @@ async def test_update_creates_new_version_when_text_changes():
     target = _entry(tenant_id, name="Old")
     user = _admin_user(tenant_id)
     repo = AsyncMock()
-    repo.get.return_value = target
+    repo.get_for_update.return_value = target
     repo.exists_by_name.return_value = False
     repo.update.side_effect = lambda entry, **_: entry
     service = PromptLibraryService(user=user, repo=repo)
@@ -186,6 +186,7 @@ async def test_update_creates_new_version_when_text_changes():
     result = await service.update_entry(target.id, text="new text")
 
     assert result.current_version == 2
+    repo.get_for_update.assert_awaited_once_with(id=target.id, tenant_id=tenant_id)
     repo.update.assert_awaited_once_with(
         target,
         create_version=True,
@@ -199,7 +200,7 @@ async def test_update_creates_new_version_when_metadata_changes():
     target = _entry(tenant_id, name="Old")
     user = _admin_user(tenant_id)
     repo = AsyncMock()
-    repo.get.return_value = target
+    repo.get_for_update.return_value = target
     repo.exists_by_name.return_value = False
     repo.update.side_effect = lambda entry, **_: entry
     service = PromptLibraryService(user=user, repo=repo)

@@ -92,6 +92,22 @@ class PromptLibraryRepoImpl:
             return None
         return self._to_domain(row)
 
+    async def get_for_update(
+        self, id: UUID, tenant_id: UUID
+    ) -> PromptLibraryEntry | None:
+        stmt = (
+            sa.select(PromptLibrary)
+            .where(
+                PromptLibrary.id == id,
+                PromptLibrary.tenant_id == tenant_id,
+            )
+            .with_for_update()
+        )
+        row = await self.session.scalar(stmt)
+        if row is None:
+            return None
+        return self._to_domain(row)
+
     async def list_by_tenant(self, tenant_id: UUID) -> list[PromptLibraryEntry]:
         stmt = (
             sa.select(PromptLibrary)

@@ -66,6 +66,20 @@ class GovernancePolicyService:
             return existing
         return await self.repo.create_empty(self.user.tenant_id, scope=scope)
 
+    async def get_policy_for_update(self) -> GovernancePolicy:
+        validate_permission(self.user, Permission.ADMIN)
+        scope = PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+        policy = await self.repo.get_by_tenant_for_update(
+            self.user.tenant_id, scope=scope
+        )
+        if policy is None:
+            await self.repo.create_empty(self.user.tenant_id, scope=scope)
+            policy = await self.repo.get_by_tenant_for_update(
+                self.user.tenant_id, scope=scope
+            )
+            assert policy is not None
+        return policy
+
     async def update_policy(
         self,
         *,
@@ -75,8 +89,7 @@ class GovernancePolicyService:
         mcp_restriction: (tuple[bool, list[PolicyMcpServer], list[UUID]] | None) = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
     ) -> GovernancePolicy:
-        validate_permission(self.user, Permission.ADMIN)
-        policy = await self.get_policy()
+        policy = await self.get_policy_for_update()
 
         if models_restriction is not None:
             enabled, models, provider_ids = models_restriction

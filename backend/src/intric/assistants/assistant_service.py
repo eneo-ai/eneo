@@ -1713,19 +1713,27 @@ class AssistantService:
         if mcp_server_db is None:
             raise BadRequestException("MCP server is not enabled for this tenant")
 
-        # Validate server is assigned to assistant's space
-        space_mapping_query = sa.select(SpacesMCPServersTable).where(
-            SpacesMCPServersTable.space_id == space.id,
-            SpacesMCPServersTable.mcp_server_id == mcp_server_id,
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
         )
-        space_mapping = await self.repo.session.scalar(space_mapping_query)
-        if space_mapping is None:
-            raise BadRequestException(
-                "MCP server is not assigned to this assistant's space"
+        mcp_governed = effective_config is not None and effective_config.mcp_enforced
+        if not mcp_governed:
+            space_mapping_query = sa.select(SpacesMCPServersTable).where(
+                SpacesMCPServersTable.space_id == space.id,
+                SpacesMCPServersTable.mcp_server_id == mcp_server_id,
             )
+            space_mapping = await self.repo.session.scalar(space_mapping_query)
+            if space_mapping is None:
+                raise BadRequestException(
+                    "MCP server is not assigned to this assistant's space"
+                )
 
-        await self._ensure_governance_policy_allows_mcp_server(
-            space=space, assistant=assistant, mcp_server_id=mcp_server_id
+        await self._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=None,
+            mcp_server_ids=[mcp_server_id],
+            effective_config=effective_config,
         )
 
         stmt = sa.select(AssistantMCPServers).where(
