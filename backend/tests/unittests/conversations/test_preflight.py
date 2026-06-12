@@ -282,6 +282,35 @@ async def test_preflight_includes_derived_images_for_image_only_pdf():
 
 
 @pytest.mark.asyncio
+async def test_preflight_counts_file_header_for_textless_documents():
+    """The real request inlines every document — a textless one still costs
+    its FILE header block and the shared preamble, so preflight must count it
+    even though it reports the file as excluded content-wise."""
+    pdf_file = MagicMock()
+    pdf_file.id = uuid4()
+    pdf_file.file_type = FileType.TEXT
+    pdf_file.text = None
+    pdf_file.name = "scan.pdf"
+    pdf_file.mimetype = "application/pdf"
+
+    service = _make_service(
+        assistant=_make_assistant(vision=False),
+        files=[pdf_file],
+    )
+
+    result = await service.preflight_tokens(
+        question="what is this?",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    expected_tokens = count_tokens(build_files_string([pdf_file]), "gpt-4o")
+    assert result.file_tokens == expected_tokens
+    assert result.file_tokens > 0
+    assert result.excluded_file_count == 1
+
+
+@pytest.mark.asyncio
 async def test_preflight_resolves_session_assistant_model():
     """Session-id path goes through session → assistant → model."""
     session_id = uuid4()

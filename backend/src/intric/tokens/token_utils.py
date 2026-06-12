@@ -7,8 +7,10 @@ tokenizer for each model (Anthropic, OpenAI, HuggingFace, etc.).
 Counting should mirror the payload actually sent to the provider: prefer
 count_message_tokens()/count_tool_tokens() over count_tokens() for anything
 that is sent as chat messages, since the messages= form includes per-message
-scaffolding overhead and image_url content (litellm applies the provider
-image-token formulas).
+scaffolding overhead. Images are priced from their pixel dimensions with the
+provider's documented formula — litellm's own image handling misprices
+Anthropic models (~30% too low) and requires the full base64 payload, which
+is expensive to build just for counting.
 """
 
 import base64
@@ -22,29 +24,30 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Fallback estimates when litellm cannot tokenize (unknown model AND
-# unexpected tokenizer failure). ~4 chars/token for text, the OpenAI
-# high-detail cost of a 2048×1024 image (uploads are stored downscaled to
-# at most 2048px) for an image, and the message-wrapper scaffolding.
-_FALLBACK_IMAGE_TOKENS = 1105
 _FALLBACK_MESSAGE_OVERHEAD_TOKENS = 4
 
-# litellm.token_counter prices every image with OpenAI's fixed tile formula,
-# even for Anthropic models — so Claude image costs come out ~30% too low.
-# Anthropic instead bills (width × height) / 750 after downscaling the long
-# edge to 1568px, so we count Claude images ourselves from their dimensions.
+# Anthropic bills (width × height) / 750 after downscaling the long edge to
+# 1568px. OpenAI bills a base cost plus a per-512px-tile cost at detail
+# "high", after fitting the image in 2048² and scaling the short side to
+# 768px. Both formulas are documented and stable.
 _ANTHROPIC_IMAGE_MAX_EDGE = 1568
 _ANTHROPIC_IMAGE_TOKEN_DIVISOR = 750
+_OPENAI_IMAGE_FIT_EDGE = 2048
+_OPENAI_IMAGE_SHORT_EDGE = 768
+_OPENAI_IMAGE_TILE_PX = 512
+_OPENAI_IMAGE_TILE_TOKENS = 170
+_OPENAI_IMAGE_BASE_TOKENS = 85
 
 
 def _is_anthropic_model(model_name: str) -> bool:
-    # TenantModelAdapter / preflight pass "<provider_type>/<name>", so the
-    # provider is the part before the first slash; tolerate a bare "claude-*"
-    # name for callers that don't prefix.
-    head, _, _ = model_name.partition("/")
+    # TenantModelAdapter / preflight pass "<provider_type>/<name>". Claude can
+    # also be served through openai-compatible or bedrock-style providers, so
+    # match the name segment too — "claude" in the model name means Anthropic
+    # image pricing regardless of the route.
+    head, _, tail = model_name.partition("/")
     if head.lower() == "anthropic":
         return True
-    return "/" not in model_name and model_name.lower().startswith("claude")
+    return "claude" in (tail or head).lower()
 
 
 def _anthropic_image_tokens(width: int, height: int) -> int:
@@ -57,26 +60,67 @@ def _anthropic_image_tokens(width: int, height: int) -> int:
     return math.ceil(width * height / _ANTHROPIC_IMAGE_TOKEN_DIVISOR)
 
 
-def _image_size_from_data_url(url: str) -> tuple[int, int] | None:
-    """Read pixel dimensions from a base64 data URL without decoding the pixels."""
+def _openai_image_tokens(width: int, height: int) -> int:
+    """OpenAI's documented high-detail cost: fit in 2048², short side to 768px, then 85 + 170 per tile."""
+    scale = min(1.0, _OPENAI_IMAGE_FIT_EDGE / max(width, height))
+    scaled_w, scaled_h = width * scale, height * scale
+    scale = min(1.0, _OPENAI_IMAGE_SHORT_EDGE / min(scaled_w, scaled_h))
+    scaled_w, scaled_h = scaled_w * scale, scaled_h * scale
+    tiles = math.ceil(scaled_w / _OPENAI_IMAGE_TILE_PX) * math.ceil(
+        scaled_h / _OPENAI_IMAGE_TILE_PX
+    )
+    return _OPENAI_IMAGE_BASE_TOKENS + _OPENAI_IMAGE_TILE_TOKENS * tiles
+
+
+# Fallback when an image's dimensions cannot be read: the cost of a 2048×1024
+# upload (files are stored downscaled to at most 2048px on the long edge).
+_FALLBACK_IMAGE_TOKENS = _openai_image_tokens(2048, 1024)
+
+
+def count_image_tokens(width: int, height: int, model_name: str = "") -> int:
+    """Tokens an image of the given pixel dimensions costs at detail "high"."""
+    if _is_anthropic_model(model_name):
+        return _anthropic_image_tokens(width, height)
+    return _openai_image_tokens(width, height)
+
+
+def _image_size_from_blob(blob: Optional[bytes]) -> tuple[int, int] | None:
+    """Read pixel dimensions from image bytes without decoding the pixels."""
+    if not blob:
+        return None
     try:
-        _, _, encoded = url.partition(",")
-        if not encoded:
-            return None
-        with Image.open(io.BytesIO(base64.b64decode(encoded))) as img:
+        with Image.open(io.BytesIO(blob)) as img:
             return img.size
     except Exception:
         return None
 
 
-def _split_anthropic_images(
-    messages: list[dict[str, Any]],
+def count_image_tokens_from_blob(blob: Optional[bytes], model_name: str = "") -> int:
+    """Price a stored image straight from its blob — no base64 round-trip."""
+    size = _image_size_from_blob(blob)
+    if size is None:
+        return _FALLBACK_IMAGE_TOKENS
+    return count_image_tokens(*size, model_name=model_name)
+
+
+def _image_size_from_data_url(url: str) -> tuple[int, int] | None:
+    try:
+        _, _, encoded = url.partition(",")
+        if not encoded:
+            return None
+        return _image_size_from_blob(base64.b64decode(encoded))
+    except Exception:
+        return None
+
+
+def _split_image_blocks(
+    messages: list[dict[str, Any]], model_name: str
 ) -> tuple[list[dict[str, Any]], int]:
-    """Strip image_url blocks out for litellm and price them via Anthropic's formula.
+    """Strip image_url blocks out for litellm and price them from dimensions.
 
     Returns the messages with images removed (so litellm counts only text +
-    scaffolding) and the total Anthropic image-token cost. Per-image failures
-    fall back to the flat estimate rather than dropping the image.
+    scaffolding) and the total image-token cost. Per-image failures fall back
+    to the flat estimate rather than dropping the image.
     """
     image_tokens = 0
     stripped: list[dict[str, Any]] = []
@@ -98,7 +142,9 @@ def _split_anthropic_images(
                     url = candidate
             size = _image_size_from_data_url(url)
             image_tokens += (
-                _anthropic_image_tokens(*size) if size else _FALLBACK_IMAGE_TOKENS
+                count_image_tokens(*size, model_name=model_name)
+                if size
+                else _FALLBACK_IMAGE_TOKENS
             )
         stripped.append({**message, "content": kept if kept else ""})
     return stripped, image_tokens
@@ -145,16 +191,11 @@ def count_message_tokens(messages: list[dict[str, Any]], model_name: str = "") -
         return 0
 
     try:
-        if _is_anthropic_model(model_name):
-            # litellm misprices images for Anthropic; count them ourselves and
-            # let litellm handle only the text + message scaffolding.
-            stripped, image_tokens = _split_anthropic_images(messages)
-            if image_tokens:
-                text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
-                    model=model_name, messages=stripped
-                )
-                return text_tokens + image_tokens
-        return litellm.token_counter(model=model_name, messages=messages)  # type: ignore[reportPrivateImportUsage]
+        stripped, image_tokens = _split_image_blocks(messages, model_name)
+        text_tokens = litellm.token_counter(  # type: ignore[reportPrivateImportUsage]
+            model=model_name, messages=stripped
+        )
+        return text_tokens + image_tokens
     except Exception as e:
         logger.error(
             f"Message token counting failed for model '{model_name}' "

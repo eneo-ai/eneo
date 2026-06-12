@@ -215,7 +215,6 @@ class ConversationService:
             # images, so key derived-image lookup on every document — not only
             # the ones with inlinable text.
             document_files = [f for f in files if f.file_type == FileType.TEXT]
-            text_files = [f for f in document_files if f.text]
             image_files = (
                 [f for f in files if f.file_type == FileType.IMAGE]
                 if model.vision
@@ -241,18 +240,22 @@ class ConversationService:
                     f.parent_file_id for f in derived if f.parent_file_id is not None
                 }
 
-            # A file is excluded only when it contributes nothing: no inlined
-            # text and (for documents on a vision model) no derived images.
+            # A file is excluded only when it contributes no content: no
+            # inlined text and (for documents on a vision model) no derived
+            # images. Its FILE header block is still sent — and counted below.
             counted_ids = (
-                {f.id for f in text_files}
+                {f.id for f in document_files if f.text}
                 | {f.id for f in image_files}
                 | derived_parent_ids
             )
             excluded_file_count = sum(1 for f in files if f.id not in counted_ids)
 
-            if text_files or image_files:
+            # The real request inlines every document — textless ones still
+            # cost their FILE header and the shared preamble — so count them
+            # all for parity with context_builder.
+            if document_files or image_files:
                 file_tokens = count_attachment_tokens(
-                    text_files=text_files,
+                    text_files=document_files,
                     image_files=image_files,
                     model_name=model_name,
                 )

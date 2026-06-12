@@ -617,6 +617,23 @@ def test_oversized_attachment_is_truncated_with_notice(
     assert len(result) < len(file.text)
 
 
+def test_truncation_stays_within_budget_including_notice():
+    from intric.completion_models.infrastructure.context_builder import (
+        ATTACHMENT_TRUNCATION_NOTICE,
+        _truncate_to_tokens,
+    )
+
+    max_tokens = 100
+    # Token-dense text (few chars per token) — the proportional cut alone
+    # would overshoot the budget.
+    text = "0123456789abcdef" * 2000
+
+    result = _truncate_to_tokens(text, max_tokens=max_tokens)
+
+    assert ATTACHMENT_TRUNCATION_NOTICE in result
+    assert count_tokens(result) <= max_tokens
+
+
 def test_vision_false_drops_current_images(context_builder: ContextBuilder):
     context = context_builder.build_context(
         input_str=QUESTION, files=[_image_file()], max_tokens=10000, vision=False

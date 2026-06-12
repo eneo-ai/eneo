@@ -7,6 +7,9 @@ from PIL import Image
 
 from intric.tokens.token_utils import (
     _anthropic_image_tokens,
+    _is_anthropic_model,
+    _openai_image_tokens,
+    count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,
     count_tool_tokens,
@@ -130,9 +133,51 @@ def test_anthropic_image_tokens_formula():
     assert _anthropic_image_tokens(1536, 2048) == 2459  # -> 1176x1568
 
 
-def test_count_message_tokens_anthropic_prices_images_by_dimensions():
-    # litellm prices any image with OpenAI's tile formula (~1105 for 2048x1024);
-    # Anthropic models must instead use the dimension formula (~1640).
+def test_openai_image_tokens_formula():
+    # Fit in 2048², short side scaled to 768, 85 base + 170 per 512px tile.
+    assert _openai_image_tokens(512, 512) == 85 + 170  # 1 tile
+    assert _openai_image_tokens(2048, 1024) == 1105  # -> 1536x768, 3x2 tiles
+    assert _openai_image_tokens(4096, 4096) == 85 + 170 * 4  # -> 768x768, 2x2 tiles
+
+
+def test_is_anthropic_model_matches_claude_behind_any_provider():
+    # Claude served through openai-compatible or bedrock-style routes must
+    # still get Anthropic image pricing.
+    assert _is_anthropic_model("anthropic/claude-3-5-haiku-20241022")
+    assert _is_anthropic_model("claude-3-5-sonnet")
+    assert _is_anthropic_model("openai/claude-3-5-sonnet")
+    assert _is_anthropic_model("azure/my-claude-deployment")
+    assert _is_anthropic_model("bedrock/anthropic.claude-v2")
+    assert not _is_anthropic_model("openai/gpt-4o")
+    assert not _is_anthropic_model("gpt-4o")
+    assert not _is_anthropic_model("")
+
+
+def _image_blob(width: int, height: int) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (230, 230, 230)).save(
+        buffer, format="JPEG", quality=85
+    )
+    return buffer.getvalue()
+
+
+def test_count_image_tokens_from_blob_uses_provider_formula():
+    blob = _image_blob(2048, 1024)
+    assert count_image_tokens_from_blob(blob, "openai/gpt-4o") == 1105
+    assert (
+        count_image_tokens_from_blob(blob, "anthropic/claude-3-5-haiku-20241022")
+        == 1640
+    )
+
+
+def test_count_image_tokens_from_blob_falls_back_on_unreadable_data():
+    assert count_image_tokens_from_blob(b"not an image") == 1105
+    assert count_image_tokens_from_blob(None) == 1105
+
+
+def test_count_message_tokens_prices_images_by_provider_formula():
+    # Each provider has its own documented image cost: OpenAI's tile formula
+    # gives ~1105 for 2048x1024, Anthropic's dimension formula ~1640.
     blank = [{"role": "user", "content": ""}]
     message = _image_message(2048, 1024)
 
@@ -144,4 +189,4 @@ def test_count_message_tokens_anthropic_prices_images_by_dimensions():
     ) - count_message_tokens(blank, "openai/gpt-4o")
 
     assert anthropic_delta == 1640
-    assert openai_delta < anthropic_delta  # litellm's OpenAI formula under-prices
+    assert openai_delta == 1105

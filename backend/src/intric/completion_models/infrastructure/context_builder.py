@@ -1,5 +1,3 @@
-import base64
-import json
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, Sequence
@@ -13,6 +11,10 @@ from intric.ai_models.completion_models.completion_model import (
     Message,
     MessageToolCall,
 )
+from intric.completion_models.infrastructure.message_payload import (
+    build_turn_messages,
+    countable_messages,
+)
 from intric.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
@@ -24,6 +26,7 @@ from intric.main.exceptions import QueryException
 from intric.questions.question import ToolCallInfo
 from intric.sessions.session import SessionInDB
 from intric.tokens.token_utils import (
+    count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,  # noqa: F401 — re-exported for external callers
     count_tool_tokens,
@@ -64,45 +67,10 @@ def _replayable_tool_calls(
     return replayable
 
 
-def _tool_call_invocation_tokens(
-    tool_calls: list[MessageToolCall], model_name: str
-) -> int:
-    """Count tokens for the tool_use side of replayed calls (name + arguments).
-
-    The tool results are counted separately, as the `role: tool` messages they
-    are actually replayed in (see _countable_message_dicts).
-    """
-    total = 0
-    for tc in tool_calls:
-        arguments_json = json.dumps(tc.arguments) if tc.arguments is not None else "{}"
-        total += count_tokens(tc.tool_name, model_name)
-        total += count_tokens(arguments_json, model_name)
-    return total
-
-
-def _countable_content(text: str, images: list[File]) -> str | list[dict[str, Any]]:
-    """Mirror TenantModelAdapter._build_content so counting matches the payload."""
-    content: list[dict[str, Any]] = []
-    if text:
-        content.append({"type": "text", "text": text})
-
-    for image in images:
-        if image.blob is None:
-            continue
-        image_data = base64.b64encode(image.blob).decode("utf-8")
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{image.mimetype};base64,{image_data}",
-                    "detail": "high",
-                },
-            }
-        )
-
-    if len(content) == 1 and content[0].get("type") == "text":
-        return text
-    return content
+def _image_files_tokens(images: list[File], model_name: str) -> int:
+    """Image cost depends on pixel dimensions alone — price straight from the
+    stored blobs instead of building base64 payloads just to count them."""
+    return sum(count_image_tokens_from_blob(image.blob, model_name) for image in images)
 
 
 def count_attachment_tokens(
@@ -114,35 +82,23 @@ def count_attachment_tokens(
     image_url blocks priced by the provider's image-token formula.
     """
     text = build_files_string(text_files, model_name=model_name)
-    if not image_files:
-        return count_tokens(text, model_name)
-
-    with_files = count_message_tokens(
-        [{"role": "user", "content": _countable_content(text, image_files)}],
-        model_name,
-    )
-    baseline = count_message_tokens([{"role": "user", "content": ""}], model_name)
-    return max(with_files - baseline, 0)
+    return count_tokens(text, model_name) + _image_files_tokens(image_files, model_name)
 
 
-def _countable_message_dicts(
+def _turn_tokens(
     question: str,
     answer: str | None,
     images: list[File],
     tool_calls: list[MessageToolCall],
-) -> list[dict[str, Any]]:
-    """Mirror TenantModelAdapter._create_messages_from_context for one Q&A turn."""
-    dicts: list[dict[str, Any]] = [
-        {"role": "user", "content": _countable_content(question, images)}
-    ]
-    if tool_calls:
-        for tc in tool_calls:
-            dicts.append({"role": "tool", "content": tc.result})
-        if answer:
-            dicts.append({"role": "assistant", "content": answer})
-    else:
-        dicts.append({"role": "assistant", "content": answer or "[image generated]"})
-    return dicts
+    model_name: str,
+) -> int:
+    """Count one Q&A turn in the same shape the adapter replays it."""
+    turn = build_turn_messages(
+        question=question, answer=answer, images=[], tool_calls=tool_calls
+    )
+    return count_message_tokens(
+        countable_messages(turn), model_name
+    ) + _image_files_tokens(images, model_name)
 
 
 MIN_PERCENTAGE_KNOWLEDGE = (
@@ -174,10 +130,17 @@ def _truncate_to_tokens(text: str, max_tokens: int, model_name: str = "") -> str
     if tokens <= max_tokens:
         return text
 
-    # Proportional cut is close enough — the exact boundary doesn't matter,
-    # the notice marks that content is missing.
-    keep_chars = max(int(len(text) * max_tokens / tokens), 0)
-    return f"{text[:keep_chars]}\n{ATTACHMENT_TRUNCATION_NOTICE}"
+    # The appended notice spends part of the budget too.
+    notice_tokens = count_tokens(ATTACHMENT_TRUNCATION_NOTICE, model_name)
+    budget = max(max_tokens - notice_tokens - 2, 1)
+    keep_chars = max(int(len(text) * budget / tokens), 0)
+    truncated = text[:keep_chars]
+    # The proportional ratio assumes uniform token density; token-dense text
+    # (CJK, base64 blobs) can survive the cut, so tighten until within budget.
+    while truncated and count_tokens(truncated, model_name) > budget:
+        keep_chars = int(keep_chars * 0.9)
+        truncated = text[:keep_chars]
+    return f"{truncated}\n{ATTACHMENT_TRUNCATION_NOTICE}"
 
 
 def build_files_string(files: list[File], model_name: str = "") -> str:
@@ -544,15 +507,13 @@ class ContextBuilder:
                 generated_images = []
             tool_calls = _replayable_tool_calls(message.tool_calls)
 
-            message_tokens = count_message_tokens(
-                _countable_message_dicts(
-                    question=question,
-                    answer=answer,
-                    images=images + generated_images,
-                    tool_calls=tool_calls,
-                ),
-                model_name,
-            ) + _tool_call_invocation_tokens(tool_calls, model_name)
+            message_tokens = _turn_tokens(
+                question=question,
+                answer=answer,
+                images=images + generated_images,
+                tool_calls=tool_calls,
+                model_name=model_name,
+            )
 
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
                 break
@@ -626,14 +587,8 @@ class ContextBuilder:
                 if file.id not in seen_image_ids
             ]
         tokens_used_input = count_message_tokens(
-            [
-                {
-                    "role": "user",
-                    "content": _countable_content(_input_string, current_images),
-                }
-            ],
-            model_name,
-        )
+            [{"role": "user", "content": _input_string}], model_name
+        ) + _image_files_tokens(current_images, model_name)
         tokens_used += tokens_used_input
 
         # Tool definitions occupy context space too — count them up front so
