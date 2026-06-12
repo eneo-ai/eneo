@@ -1,25 +1,26 @@
 <script lang="ts">
-  import { Button, Tooltip } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { getMentionInput } from "./MentionInput";
-  import { IconAtSymbol } from "@intric/icons/at-symbol";
+  import { AtSign } from "lucide-svelte";
+  import { m } from "$lib/paraglide/messages";
 
   const {
     showMentionPicker,
     states: { mentions }
   } = getMentionInput();
 
-  let mentionsDiabled = $derived($mentions.length > 0);
-  import { m } from "$lib/paraglide/messages";
+  const mentionsDisabled = $derived($mentions.length > 0);
 </script>
 
-<Tooltip text={mentionsDiabled ? m.one_mention_per_question() : undefined}>
-  <Button
-    unstyled
-    disabled={mentionsDiabled}
-    class="bg-secondary text-primary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center gap-1 rounded-lg pr-2 pl-1"
-    on:click={showMentionPicker}
-  >
-    <IconAtSymbol></IconAtSymbol>
-    {m.mention()}</Button
-  >
-</Tooltip>
+<Button
+  variant="ghost"
+  size="sm"
+  type="button"
+  disabled={mentionsDisabled}
+  onclick={showMentionPicker}
+  class="h-9 gap-1.5 rounded-lg"
+  title={mentionsDisabled ? m.one_mention_per_question() : m.mention()}
+>
+  <AtSign class="size-4" />
+  <span class="hidden sm:inline">{m.mention()}</span>
+</Button>

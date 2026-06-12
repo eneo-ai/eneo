@@ -37,6 +37,7 @@ class TokenUsage(BaseModel):
 
 class ResponseType(str, Enum):
     TEXT = "text"
+    REASONING = "reasoning"
     INTRIC_EVENT = "intric_event"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
@@ -87,6 +88,7 @@ class ToolCallMetadata:
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
+    reasoning_content: Optional[str] = None  # For REASONING events (thinking text)
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events

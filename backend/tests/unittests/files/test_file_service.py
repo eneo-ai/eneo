@@ -109,3 +109,28 @@ async def test_save_file_persists_pdf_derived_images_with_parent_id(
     assert child_create.parent_file_id == parent_id
     assert child_create.file_type == FileType.IMAGE
     assert child_create.name == "report.pdf (image 1)"
+
+
+@pytest.mark.asyncio
+async def test_with_derived_images_appends_and_dedupes(service, repo, user):
+    parent = MagicMock(id=uuid4(), file_type=FileType.TEXT)
+    already_attached = MagicMock(id=uuid4(), file_type=FileType.IMAGE)
+    new_derived = MagicMock(id=uuid4(), file_type=FileType.IMAGE)
+    repo.get_by_parent_ids.return_value = [already_attached, new_derived]
+
+    result = await service.with_derived_images([parent, already_attached])
+
+    assert result == [parent, already_attached, new_derived]
+    repo.get_by_parent_ids.assert_awaited_once_with(
+        parent_ids=[parent.id], user_id=user.id
+    )
+
+
+@pytest.mark.asyncio
+async def test_with_derived_images_skips_lookup_without_text_files(service, repo):
+    image = MagicMock(id=uuid4(), file_type=FileType.IMAGE)
+
+    result = await service.with_derived_images([image])
+
+    assert result == [image]
+    repo.get_by_parent_ids.assert_not_awaited()

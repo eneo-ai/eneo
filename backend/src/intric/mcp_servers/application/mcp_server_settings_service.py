@@ -1,6 +1,9 @@
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+import sqlalchemy as sa
+
+from intric.database.tables.mcp_server_table import MCPServerToolSettings
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -92,6 +95,24 @@ class MCPServerSettingsService:
         servers = await self.mcp_server_repo.query_by_tenant(
             tenant_id=self.user.tenant_id
         )
+        tool_ids = [tool.id for server in servers for tool in server.tools]
+        if tool_ids:
+            settings_stmt = sa.select(
+                MCPServerToolSettings.mcp_server_tool_id,
+                MCPServerToolSettings.is_enabled,
+            ).where(
+                MCPServerToolSettings.tenant_id == self.user.tenant_id,
+                MCPServerToolSettings.mcp_server_tool_id.in_(tool_ids),
+            )
+            settings_rows = (
+                await self.mcp_server_repo.session.execute(settings_stmt)
+            ).all()
+            tenant_settings = {tool_id: enabled for tool_id, enabled in settings_rows}
+            for server in servers:
+                for tool in server.tools:
+                    if tool.id in tenant_settings:
+                        tool.is_enabled_by_default = tenant_settings[tool.id]
+
         for server in servers:
             status = "missing"
             if server.env_vars:

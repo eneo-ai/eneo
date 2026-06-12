@@ -120,6 +120,20 @@ class FileService:
         )
         return [file for file in files if file.file_type == FileType.IMAGE]
 
+    async def with_derived_images(self, files: list[File]) -> list[File]:
+        """The given files plus the stored images derived from them.
+
+        Callers gate on model vision support — derived images exist solely
+        as vision input for the completion payload.
+        """
+        parent_ids = [file.id for file in files if file.file_type == FileType.TEXT]
+        if not parent_ids:
+            return files
+
+        derived = await self.get_derived_images(parent_ids=parent_ids)
+        present = {file.id for file in files}
+        return files + [file for file in derived if file.id not in present]
+
     async def get_file_infos(self, file_ids: list[UUID]):
         files = await self.repo.get_file_infos(file_ids)
 

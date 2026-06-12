@@ -26,6 +26,7 @@ from intric.sessions.session import (
     SSEFiles,
     SSEFirstChunk,
     SSEIntricEvent,
+    SSEReasoning,
     SSEText,
     SSETokenUsage,
     SSEToolApprovalRequired,
@@ -168,6 +169,12 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                 )
                 for blob in (chunk.reference_chunks or [])
             ],
+        )
+
+    elif chunk.response_type == ResponseType.REASONING:
+        data = SSEReasoning(
+            session_id=session_id,
+            reasoning=chunk.reasoning_content or "",
         )
 
     elif chunk.response_type == ResponseType.FILES:

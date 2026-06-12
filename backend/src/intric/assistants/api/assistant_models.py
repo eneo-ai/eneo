@@ -103,6 +103,30 @@ def _empty_mcp_tool_setting_list() -> list[MCPToolSetting]:
     return []
 
 
+class EffectiveConfigPublic(BaseModel):
+    """Frontend hint surface for personal-assistant governance.
+
+    Only meaningful on default assistants in personal spaces. `prompt_locked`
+    is exposed as a boolean — we never leak the admin-prompt text to the
+    user-facing API.
+    """
+
+    models_enforced: bool
+    available_models: list[CompletionModelSparse]
+    locked_model: CompletionModelSparse | None
+    default_model: CompletionModelSparse | None
+    mcp_enforced: bool
+    available_mcp_servers: list[MCPServerPublicDict] = Field(
+        default_factory=_empty_mcp_server_public_dict_list  # type: ignore[arg-type]
+    )
+    # Allowed servers that start switched OFF in the user's chat (UX seed
+    # only — the user can still enable them per conversation).
+    default_disabled_mcp_server_ids: list[UUID] = Field(
+        default_factory=_empty_uuid_list
+    )
+    prompt_locked: bool
+
+
 class AssistantBase(BaseModel):
     name: str
     completion_model_kwargs: ModelKwargs | None = Field(default_factory=ModelKwargs)
@@ -329,6 +353,13 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     metadata_json: Optional[dict[str, object]] = Field(
         default=None,
         description="Metadata for the assistant",
+    )
+    effective_config: Optional[EffectiveConfigPublic] = Field(
+        default=None,
+        description=(
+            "Personal-assistant governance hints. Only populated for personal "
+            "default assistants when a tenant policy applies."
+        ),
     )
     is_help_assistant: bool = Field(
         default=False,

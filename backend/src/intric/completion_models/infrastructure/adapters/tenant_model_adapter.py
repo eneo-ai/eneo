@@ -1,6 +1,5 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
-import base64
 import json
 import re
 import uuid
@@ -31,7 +30,10 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
-from intric.files.file_models import File
+from intric.completion_models.infrastructure.message_payload import (
+    build_content,
+    build_turn_messages,
+)
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
@@ -98,6 +100,7 @@ class _LiteLLMStreamToolCall(Protocol):
 
 class _LiteLLMDelta(Protocol):
     content: str | None
+    reasoning_content: str | None
     tool_calls: list[_LiteLLMStreamToolCall] | None
 
 
@@ -403,53 +406,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
         )
 
-    def _build_image(self, file: File) -> dict[str, Any]:
-        """
-        Build image content block for OpenAI-compatible format.
-
-        Args:
-            file: Image file with blob data
-
-        Returns:
-            dict: Image content in OpenAI format
-        """
-        blob = file.blob
-        if blob is None:
-            raise ValueError("Image file is missing blob data")
-
-        image_data = base64.b64encode(blob).decode("utf-8")
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:{file.mimetype};base64,{image_data}"},
-        }
-
-    def _build_content(
-        self, input: str, images: list[File]
-    ) -> list[dict[str, Any]] | str:
-        """
-        Build message content with text and images.
-
-        Args:
-            input: Text content
-            images: List of image files
-
-        Returns:
-            list[dict] | str: Content array if images present, otherwise string
-        """
-        # Build content array with text
-        content: list[dict[str, Any]] = []
-        if input:
-            content.append({"type": "text", "text": input})
-
-        # Add images
-        for image in images:
-            content.append(self._build_image(image))
-
-        # Return string if only text, array if images included
-        if len(content) == 1 and content[0].get("type") == "text":
-            return input
-        return content
-
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
         Build tools/functions array from context function definitions.
@@ -517,76 +473,23 @@ class TenantModelAdapter(CompletionModelAdapter):
         if context.prompt:
             messages.append({"role": "system", "content": context.prompt})
 
-        # Convert previous Q&A pairs to user/assistant messages (with images)
+        # Convert previous Q&A pairs to canonical replay messages (with images
+        # and tool calls) — the same shape token counting uses.
         for msg in context.messages:
-            # User message with question + images
-            messages.append(
-                {
-                    "role": "user",
-                    "content": self._build_content(
-                        input=msg.question,
-                        images=msg.images + msg.generated_images,
-                    ),
-                }
+            messages.extend(
+                build_turn_messages(
+                    question=msg.question,
+                    answer=msg.answer,
+                    images=msg.images + msg.generated_images,
+                    tool_calls=msg.tool_calls,
+                )
             )
-            # Assistant response. If the turn invoked tools, emit the canonical
-            # OpenAI shape: a pre-tool assistant message with only `tool_calls`,
-            # one `role: tool` entry per call, then a post-tool assistant
-            # message with the final answer. This matches what the live flow
-            # produces during generation and keeps causal order intact.
-            if msg.tool_calls:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": tc.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.tool_name,
-                                    "arguments": (
-                                        json.dumps(tc.arguments)
-                                        if tc.arguments is not None
-                                        else "{}"
-                                    ),
-                                },
-                            }
-                            for tc in msg.tool_calls
-                        ],
-                    }
-                )
-                for tc in msg.tool_calls:
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.tool_call_id,
-                            "content": tc.result,
-                        }
-                    )
-                if msg.answer:
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": msg.answer,
-                        }
-                    )
-            else:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": msg.answer or "[image generated]",
-                    }
-                )
 
         # Add current question with images
         messages.append(
             {
                 "role": "user",
-                "content": self._build_content(
-                    input=context.input,
-                    images=context.images,
-                ),
+                "content": build_content(context.input, context.images),
             }
         )
 
@@ -953,6 +856,21 @@ class TenantModelAdapter(CompletionModelAdapter):
                 else cast(AsyncIterator[_LiteLLMStreamChunk], stream)
             )
             mcp_proxy = prepared.mcp_proxy if prepared else None
+            mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
+            pending_allowed_tools: set[str] = (
+                mcp_proxy.get_allowed_tool_names()
+                if mcp_proxy is not None and mcp_tools_active
+                else set()
+            )
+
+            def _resolve_tool_names(name: str) -> tuple[str, str]:
+                info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
+                if info:
+                    return info
+                if "__" in name:
+                    server_name, tool_name = name.split("__", 1)
+                    return server_name, tool_name
+                return "", name
 
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
@@ -971,6 +889,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
+                pending_emitted: set[int] = set()
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
 
@@ -995,6 +914,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                     finish_reason = chunk.choices[0].finish_reason
                     logger.debug(f"[DEBUG] Delta: {delta}")
 
+                    # Forward provider reasoning/thinking deltas (e.g. Anthropic
+                    # extended thinking surfaced by LiteLLM as reasoning_content)
+                    # as REASONING chunks. Kept separate from text so it never
+                    # pollutes the persisted answer.
+                    reasoning_delta = getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        yield Completion(
+                            reasoning_content=reasoning_delta,
+                            response_type=ResponseType.REASONING,
+                        )
+
                     # Accumulate tool call deltas
                     if delta.tool_calls:
                         res.has_tool_calls = True
@@ -1018,6 +948,38 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     res.tool_calls_acc[idx]["function"][
                                         "arguments"
                                     ] += fn.arguments
+
+                        # Surface each call as a "pending" step as soon as its
+                        # name and id are known — argument JSON for many parallel
+                        # calls can take tens of seconds to generate, and the
+                        # stream is otherwise silent for that whole window.
+                        if mcp_tools_active:
+                            for idx, acc in res.tool_calls_acc.items():
+                                if idx in pending_emitted:
+                                    continue
+                                call_id = acc["id"]
+                                name = acc["function"]["name"]
+                                if (
+                                    not call_id
+                                    or not name
+                                    or name not in pending_allowed_tools
+                                ):
+                                    continue
+                                server_name, tool_name = _resolve_tool_names(name)
+                                pending_emitted.add(idx)
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL,
+                                    tool_calls_metadata=[
+                                        ToolCallMetadata(
+                                            server_name=server_name,
+                                            tool_name=tool_name,
+                                            arguments=None,
+                                            tool_call_id=call_id,
+                                            result_status="pending",
+                                            mcp_tool_name=name,
+                                        )
+                                    ],
+                                )
 
                     # Handle text content with thinking-block stripping
                     content = delta.content or ""

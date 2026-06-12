@@ -24,6 +24,7 @@ from intric.mcp_servers.infrastructure.proxy import (
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.settings.encryption_service import EncryptionService
+from intric.tokens.token_utils import log_token_count_drift
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -162,6 +163,12 @@ class CompletionService:
                 yield chunk
                 continue
 
+            # Pass through reasoning/thinking events directly (text=None, so the
+            # branches below would otherwise drop them before they reach SSE).
+            if chunk.response_type == ResponseType.REASONING:
+                yield chunk
+                continue
+
             # Pass through MCP tool call events directly
             if chunk.response_type == ResponseType.TOOL_CALL:
                 yield chunk
@@ -280,7 +287,7 @@ class CompletionService:
             else:
                 logging_details = None
         except BaseException:
-            # Context building can raise (e.g. QueryException when over budget).
+            # Context building can still raise on malformed input or dependencies.
             # The proxy is closed in the streaming/non-streaming paths below, but
             # those are never reached on failure here.
             if mcp_proxy:
@@ -381,12 +388,20 @@ class CompletionService:
 
             completion = self._handle_tool_call(streaming_wrapper())
 
+        usage = getattr(completion, "usage", None) if not stream else None
+        if usage is not None:
+            log_token_count_drift(
+                model_name=model_adapter.get_model_route(),
+                predicted=context.token_count,
+                actual=usage.prompt_tokens,
+            )
+
         return CompletionModelResponse(
             completion=completion,
             model=model_adapter.model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
-            usage=getattr(completion, "usage", None) if not stream else None,
+            usage=usage,
         )
 
 

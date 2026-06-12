@@ -63,7 +63,16 @@ class FileRepository:
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
+        # Derived files (parent_file_id set) are internal vision inputs and
+        # not part of the user's own upload library.
+        stmt = (
+            sa.select(Files)
+            .where(Files.user_id == user_id)
+            .where(Files.parent_file_id.is_(None))
+            .order_by(Files.created_at)
+        )
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(
