@@ -20,6 +20,46 @@ import { Label } from "@/components/ui/label";
  * Confirmation dialog for destructive actions. With `confirmValue` set, the
  * user must type it (e.g. the resource name) before the action is enabled.
  */
+/**
+ * Controlled confirmation dialog without a trigger, for actions launched from
+ * dropdown menus (the menu closes before the dialog opens).
+ */
+export function ConfirmDialogControlled({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel,
+  pending,
+  onConfirm
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  pending?: boolean;
+  onConfirm: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>{t("cancel")}</AlertDialogCancel>
+          <Button variant="destructive" disabled={pending} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function ConfirmDialog({
   trigger,
   title,
