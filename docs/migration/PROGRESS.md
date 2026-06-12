@@ -4,6 +4,17 @@ Status ledger for the web-next migration (branch `refactor/web-next`). Read this
 first in a new session; the phase docs (01–08) are the plans, this is what
 actually happened. Update this file when a phase lands.
 
+> **STOP POINT 2026-06-13 (`4b8cd627e`)** — Phase 6 in progress. Landed this
+> session: develop merged in (conflict-free) + schema regen, integrations
+> (list/wrapper pages, SharePoint import, sync history, OAuth connect),
+> assistants (list + editor incl. knowledge picker), group chat editor.
+> **Pick up next: Apps** (06-builders-and-knowledge.md; editor, run page with
+> dynamic input forms, results, dashboard routes), then Services. The
+> assistant-editor follow-ups list below is the polish backlog. Frontend QA
+> runs on the HOST (`bun run check/lint/test/build` in apps/web-next), never
+> `bun install` in the container; backend dev server + `bun run dev` (port
+> 3100) you start yourself in devcontainer terminals.
+
 ## Phase status
 
 | Phase | Status | Commits (key) |
