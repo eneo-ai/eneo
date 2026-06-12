@@ -210,25 +210,45 @@ class ConversationService:
             # User-scoped lookup matches the actual chat endpoint (assistant_service.ask
             # uses get_files_by_ids), so preflight refuses files the user can't send.
             files = await self.file_service.get_files_by_ids(file_ids=file_ids)
-            text_files = [f for f in files if f.file_type == FileType.TEXT and f.text]
+            # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
+            # has no extractable text of its own but still yields derived vision
+            # images, so key derived-image lookup on every document — not only
+            # the ones with inlinable text.
+            document_files = [f for f in files if f.file_type == FileType.TEXT]
+            text_files = [f for f in document_files if f.text]
             image_files = (
                 [f for f in files if f.file_type == FileType.IMAGE]
                 if model.vision
                 else []
             )
-            excluded_file_count = len(files) - len(text_files) - len(image_files)
 
-            if model.vision and text_files:
-                # The real request also carries images derived from document
-                # uploads (rendered PDF pages etc.) — price them in.
+            derived_parent_ids: set[UUID] = set()
+            if model.vision and document_files:
+                # The real request (with_derived_images) carries images derived
+                # from ALL document uploads — rendered PDF pages, embedded
+                # DOCX/PPTX images — regardless of extractable text. Price them
+                # the same way so an image-only PDF isn't reported as ~0 tokens.
                 present = {f.id for f in image_files}
-                image_files += [
+                derived = [
                     f
                     for f in await self.file_service.get_derived_images(
-                        parent_ids=[f.id for f in text_files]
+                        parent_ids=[f.id for f in document_files]
                     )
                     if f.id not in present
                 ]
+                image_files += derived
+                derived_parent_ids = {
+                    f.parent_file_id for f in derived if f.parent_file_id is not None
+                }
+
+            # A file is excluded only when it contributes nothing: no inlined
+            # text and (for documents on a vision model) no derived images.
+            counted_ids = (
+                {f.id for f in text_files}
+                | {f.id for f in image_files}
+                | derived_parent_ids
+            )
+            excluded_file_count = sum(1 for f in files if f.id not in counted_ids)
 
             if text_files or image_files:
                 file_tokens = count_attachment_tokens(

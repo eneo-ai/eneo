@@ -242,6 +242,46 @@ async def test_preflight_includes_derived_images_on_vision_model():
 
 
 @pytest.mark.asyncio
+async def test_preflight_includes_derived_images_for_image_only_pdf():
+    """An image-only PDF has no extractable text but still carries derived
+    vision images. They must be priced (not reported as ~0 tokens) and the PDF
+    must not be counted as an excluded file."""
+    pdf_file = MagicMock()
+    pdf_file.id = uuid4()
+    pdf_file.file_type = FileType.TEXT
+    pdf_file.text = None  # image-only document: nothing to inline
+    pdf_file.name = "tower.pdf"
+
+    derived_image = MagicMock()
+    derived_image.id = uuid4()
+    derived_image.file_type = FileType.IMAGE
+    derived_image.parent_file_id = pdf_file.id
+    derived_image.blob = _PNG_1PX
+    derived_image.mimetype = "image/png"
+
+    service = _make_service(
+        assistant=_make_assistant(vision=True),
+        files=[pdf_file],
+    )
+    service.file_service.get_derived_images = AsyncMock(return_value=[derived_image])
+
+    result = await service.preflight_tokens(
+        question="what is in the pdf?",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    # Derived images are fetched for the document even though it has no text...
+    service.file_service.get_derived_images.assert_awaited_once_with(
+        parent_ids=[pdf_file.id]
+    )
+    # ...their tokens are counted (image scaffolding alone is ~85+ tokens)...
+    assert result.file_tokens >= 85
+    # ...and the image-only PDF is not reported as excluded.
+    assert result.excluded_file_count == 0
+
+
+@pytest.mark.asyncio
 async def test_preflight_resolves_session_assistant_model():
     """Session-id path goes through session → assistant → model."""
     session_id = uuid4()
