@@ -16,7 +16,7 @@ or multi-origin deployments still register additional origins via the sysadmin
 API (``POST {api_prefix}/sysadmin/allowed-origins/``).
 
 Revision ID: 202606041200
-Revises: 20260603_transcription_migrate
+Revises: 202605061100
 Create Date: 2026-06-04
 """
 
@@ -30,7 +30,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202606041200"
-down_revision = "20260603_transcription_migrate"
+down_revision = "202605061100"
 branch_labels = None
 depends_on = None
 
