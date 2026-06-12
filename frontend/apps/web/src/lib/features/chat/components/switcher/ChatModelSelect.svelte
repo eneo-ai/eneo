@@ -18,6 +18,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Lock } from "lucide-svelte";
   import { SvelteMap } from "svelte/reactivity";
+  import ChatModelDetails from "./ChatModelDetails.svelte";
 
   const {
     state: { currentSpace },
@@ -61,6 +62,18 @@
   });
   const selectedId = $derived(selectedModel?.id ?? "");
   const selectedLabel = $derived(selectedModel?.nickname ?? m.select_a_model());
+  let selectorOpen = $state(false);
+  let previewedModelId = $state<string | null>(null);
+  const previewedModel = $derived(
+    visibleModels.find((model) => model.id === previewedModelId) ??
+      visibleModels.find((model) => model.id === selectedId) ??
+      visibleModels[0] ??
+      null
+  );
+
+  $effect(() => {
+    if (!selectorOpen) previewedModelId = null;
+  });
 
   function prettifyProviderType(type: string | null | undefined): string | null {
     if (!type) return null;
@@ -113,32 +126,46 @@
     <span class="max-w-[12rem] truncate font-medium">{selectedLabel}</span>
   </div>
 {:else}
-  <ModelSelector.Root>
+  <ModelSelector.Root bind:open={selectorOpen}>
     <ModelSelector.Trigger aria-label={m.choose_a_completion_model()}>
       {#if selectedModel}
         <ModelSelector.Logo provider={selectedModel.org ?? selectedModel.provider_type} />
       {/if}
       <ModelSelector.Name>{selectedLabel}</ModelSelector.Name>
     </ModelSelector.Trigger>
-    <ModelSelector.Content>
-      <ModelSelector.Input placeholder={m.search_models()} />
-      <ModelSelector.List>
-        <ModelSelector.Empty>{m.no_models_found()}</ModelSelector.Empty>
-        {#each modelGroups as group (group.label)}
-          <ModelSelector.Group heading={group.label}>
-            {#each group.models as model (model.id)}
-              <ModelSelector.Item
-                value={`${model.nickname ?? model.name} ${group.label}`}
-                selected={model.id === selectedId}
-                onSelect={() => selectModel(model.id)}
-              >
-                <ModelSelector.Logo provider={model.org ?? model.provider_type} />
-                <ModelSelector.Name>{model.nickname}</ModelSelector.Name>
-              </ModelSelector.Item>
+    <ModelSelector.Content
+      class="w-auto max-w-[calc(100vw-1rem)] border-0 bg-transparent p-0 shadow-none ring-0"
+      commandClass="size-auto overflow-visible rounded-none! bg-transparent p-0"
+    >
+      <div class="flex items-start gap-2">
+        <div
+          class="bg-popover/95 ring-foreground/10 w-72 shrink-0 overflow-hidden rounded-xl shadow-lg ring-1 backdrop-blur-xl"
+        >
+          <ModelSelector.Input placeholder={m.search_models()} />
+          <ModelSelector.List class="max-h-[20rem] p-1 pt-0">
+            <ModelSelector.Empty>{m.no_models_found()}</ModelSelector.Empty>
+            {#each modelGroups as group (group.label)}
+              <ModelSelector.Group heading={group.label}>
+                {#each group.models as model (model.id)}
+                  <ModelSelector.Item
+                    value={`${model.nickname ?? model.name} ${group.label}`}
+                    selected={model.id === selectedId}
+                    onSelect={() => selectModel(model.id)}
+                    onHighlight={() => (previewedModelId = model.id)}
+                    class="min-h-10"
+                  >
+                    <ModelSelector.Logo provider={model.org ?? model.provider_type} />
+                    <ModelSelector.Name>{model.nickname}</ModelSelector.Name>
+                  </ModelSelector.Item>
+                {/each}
+              </ModelSelector.Group>
             {/each}
-          </ModelSelector.Group>
-        {/each}
-      </ModelSelector.List>
+          </ModelSelector.List>
+        </div>
+        {#if previewedModel}
+          <ChatModelDetails model={previewedModel} />
+        {/if}
+      </div>
     </ModelSelector.Content>
   </ModelSelector.Root>
 {/if}

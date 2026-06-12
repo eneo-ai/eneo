@@ -25,6 +25,7 @@ from intric.mcp_servers.infrastructure.proxy import (
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.settings.encryption_service import EncryptionService
+from intric.tokens.token_utils import log_token_count_drift
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -266,35 +267,50 @@ class CompletionService:
             use_image_generation and stream and get_settings().using_image_generation
         )
 
-        context = self.context_builder.build_context(
-            input_str=text_input,
-            max_tokens=max_tokens,
-            model_name=model_adapter.model.name,
-            files=files,
-            prompt=prompt,
-            session=session,
-            info_blob_chunks=info_blob_chunks,
-            prompt_files=prompt_files,
-            transcription_inputs=transcription_inputs,
-            version=version,
-            use_image_generation=use_image_generation,
-            web_search_results=web_search_results,
-        )
-
-        if extended_logging:
-            logging_details = model_adapter.get_logging_details(
-                context=context, model_kwargs=model_kwargs
-            )
-        else:
-            logging_details = None
-
-        # Create MCP proxy session if servers provided
+        # Create MCP proxy session before building the context, so the tool
+        # definitions it will register can be counted toward the token budget.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
             mcp_proxy = self._mcp_proxy_factory.create(mcp_servers)
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )
+
+        try:
+            context = self.context_builder.build_context(
+                input_str=text_input,
+                max_tokens=max_tokens,
+                model_name=model_adapter.get_litellm_model_name(),
+                files=files,
+                prompt=prompt,
+                session=session,
+                info_blob_chunks=info_blob_chunks,
+                prompt_files=prompt_files,
+                transcription_inputs=transcription_inputs,
+                version=version,
+                use_image_generation=use_image_generation,
+                web_search_results=web_search_results,
+                vision=model.vision,
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm()
+                    if mcp_proxy and model.supports_tool_calling
+                    else None
+                ),
+            )
+
+            if extended_logging:
+                logging_details = model_adapter.get_logging_details(
+                    context=context, model_kwargs=model_kwargs
+                )
+            else:
+                logging_details = None
+        except BaseException:
+            # Context building can still raise on malformed input or dependencies.
+            # The proxy is closed in the streaming/non-streaming paths below, but
+            # those are never reached on failure here.
+            if mcp_proxy:
+                await mcp_proxy.close()
+            raise
 
         if not stream:
             try:
@@ -390,12 +406,20 @@ class CompletionService:
 
             completion = self._handle_tool_call(streaming_wrapper())
 
+        usage = getattr(completion, "usage", None) if not stream else None
+        if usage is not None:
+            log_token_count_drift(
+                model_name=model_adapter.get_litellm_model_name(),
+                predicted=context.token_count,
+                actual=usage.prompt_tokens,
+            )
+
         return CompletionModelResponse(
             completion=completion,
             model=model_adapter.model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
-            usage=getattr(completion, "usage", None) if not stream else None,
+            usage=usage,
         )
 
 

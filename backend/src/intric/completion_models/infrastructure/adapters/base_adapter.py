@@ -19,6 +19,14 @@ class CompletionModelAdapter(ABC):
     def get_token_limit_of_model(self) -> int:
         raise NotImplementedError()
 
+    def get_litellm_model_name(self) -> str:
+        """Model identifier as passed to litellm.
+
+        Token counting must use the same identifier as the actual request,
+        otherwise litellm silently resolves a different (default) tokenizer.
+        """
+        return self.model.name
+
     def get_logging_details(
         self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
     ) -> "LoggingDetails":

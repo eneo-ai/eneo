@@ -5,7 +5,7 @@
 from typing import TYPE_CHECKING, Optional
 
 from intric.completion_models.infrastructure.context_builder import (
-    build_files_string,
+    count_attachment_tokens,
     count_tokens,
 )
 from intric.completion_models.infrastructure.static_prompts import (
@@ -30,6 +30,15 @@ if TYPE_CHECKING:
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.space_service import SpaceService
+
+
+def _litellm_token_counter_name(model: "CompletionModel") -> str:
+    # TenantModelAdapter sends requests as "<provider_type>/<name>" — counting
+    # with the same identifier resolves the same litellm tokenizer instead of
+    # silently falling back to the default one.
+    if model.provider_id and model.provider_type:
+        return f"{model.provider_type}/{model.name}"
+    return model.name
 
 
 class ConversationService:
@@ -173,13 +182,16 @@ class ConversationService:
         group_chat_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
     ) -> PreflightResponse:
-        """Count the tokens this request would add to context, without sending.
+        """Estimate the tokens this request would add to context, without sending.
 
-        Returns the exact delta: the user's text plus the JSON-wrapped text-file
-        prefix that context_builder would prepend. Excludes knowledge/RAG and
-        web-search content because both are selected at request time and have
-        no stable cost to report up-front. Model name and context window are
-        echoed so the caller can compute percentage fill without a round-trip.
+        Returns the delta: the user's text, the text-file prefix that
+        context_builder would prepend, and — for vision models — attached
+        images plus images derived from document uploads, priced with the same
+        local formulas as the real request. Provider tokenization remains
+        authoritative. Excludes knowledge/RAG and web-search content because
+        both are selected at request time and have no stable cost to report
+        up-front. Model name and context window are echoed so the caller can
+        compute percentage fill without a round-trip.
         """
         model, selector_tokens = await self._resolve_preflight_model(
             question=question,
@@ -188,9 +200,10 @@ class ConversationService:
             group_chat_id=group_chat_id,
             tool_assistant_id=tool_assistant_id,
         )
+        model_name = _litellm_token_counter_name(model)
 
         # count_tokens already returns 0 for empty input — no need to short-circuit.
-        input_tokens = count_tokens(question, model.name) + selector_tokens
+        input_tokens = count_tokens(question, model_name) + selector_tokens
 
         file_tokens = 0
         excluded_file_count = 0
@@ -198,14 +211,55 @@ class ConversationService:
             # User-scoped lookup matches the actual chat endpoint (assistant_service.ask
             # uses get_files_by_ids), so preflight refuses files the user can't send.
             files = await self.file_service.get_files_by_ids(file_ids=file_ids)
-            # Only text files reach the LLM via the input string; binary/image
-            # files use provider-specific token accounting we can't preview here.
-            text_files = [f for f in files if f.file_type == FileType.TEXT and f.text]
-            excluded_file_count = len(files) - len(text_files)
-            if text_files:
-                # Mirror context_builder.build_files_string: that wrapper text
-                # is what actually gets tokenized when the request runs.
-                file_tokens = count_tokens(build_files_string(text_files), model.name)
+            # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
+            # has no extractable text of its own but still yields derived vision
+            # images, so key derived-image lookup on every document — not only
+            # the ones with inlinable text.
+            document_files = [f for f in files if f.file_type == FileType.TEXT]
+            image_files = (
+                [f for f in files if f.file_type == FileType.IMAGE]
+                if model.vision
+                else []
+            )
+
+            derived_parent_ids: set[UUID] = set()
+            if model.vision and document_files:
+                # The real request (with_derived_images) carries images derived
+                # from ALL document uploads — rendered PDF pages, embedded
+                # DOCX/PPTX images — regardless of extractable text. Price them
+                # the same way so an image-only PDF isn't reported as ~0 tokens.
+                present = {f.id for f in image_files}
+                derived = [
+                    f
+                    for f in await self.file_service.get_derived_images(
+                        parent_ids=[f.id for f in document_files]
+                    )
+                    if f.id not in present
+                ]
+                image_files += derived
+                derived_parent_ids = {
+                    f.parent_file_id for f in derived if f.parent_file_id is not None
+                }
+
+            # A file is excluded only when it contributes no content: no
+            # inlined text and (for documents on a vision model) no derived
+            # images. Its FILE header block is still sent — and counted below.
+            counted_ids = (
+                {f.id for f in document_files if f.text}
+                | {f.id for f in image_files}
+                | derived_parent_ids
+            )
+            excluded_file_count = sum(1 for f in files if f.id not in counted_ids)
+
+            # The real request inlines every document — textless ones still
+            # cost their FILE header and the shared preamble — so count them
+            # all for parity with context_builder.
+            if document_files or image_files:
+                file_tokens = count_attachment_tokens(
+                    text_files=document_files,
+                    image_files=image_files,
+                    model_name=model_name,
+                )
 
         return PreflightResponse(
             input_tokens=input_tokens,
@@ -313,7 +367,9 @@ class ConversationService:
         selection_prompt = self.group_chat_service.create_assistant_selection_prompt(
             question, group_chat.assistants
         )
-        selector_tokens = count_tokens(selection_prompt, selector_model.name)
+        selector_tokens = count_tokens(
+            selection_prompt, _litellm_token_counter_name(selector_model)
+        )
         return min(models, key=lambda model: model.token_limit), selector_tokens
 
     async def set_title_of_conversation(

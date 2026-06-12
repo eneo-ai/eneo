@@ -49,6 +49,7 @@ def _make_service(
 
     file_service = AsyncMock()
     file_service.get_files_by_ids = AsyncMock(return_value=files or [])
+    file_service.get_derived_images = AsyncMock(return_value=[])
 
     return ConversationService(
         assistant_service=assistant_service,
@@ -60,16 +61,26 @@ def _make_service(
     )
 
 
-def _make_completion_model(name: str = "gpt-4o", token_limit: int = 128000):
+def _make_completion_model(
+    name: str = "gpt-4o", token_limit: int = 128000, vision: bool = False
+):
     model = MagicMock()
     model.name = name
     model.token_limit = token_limit
+    model.vision = vision
+    # No tenant provider → preflight tokenizes with the bare model name.
+    model.provider_id = None
+    model.provider_type = None
     return model
 
 
-def _make_assistant(model_name: str = "gpt-4o", token_limit: int = 128000):
+def _make_assistant(
+    model_name: str = "gpt-4o", token_limit: int = 128000, vision: bool = False
+):
     assistant = MagicMock()
-    assistant.completion_model = _make_completion_model(model_name, token_limit)
+    assistant.completion_model = _make_completion_model(
+        model_name, token_limit, vision=vision
+    )
     return assistant
 
 
@@ -141,15 +152,15 @@ async def test_preflight_file_tokens_match_context_builder_output():
 
 
 @pytest.mark.asyncio
-async def test_preflight_skips_non_text_files():
-    """Image/binary files don't go through the input string path."""
+async def test_preflight_skips_image_files_without_vision():
+    """Images cost nothing on a non-vision model — they are never sent."""
     image_file = MagicMock()
     image_file.file_type = FileType.IMAGE
     image_file.text = None
     image_file.name = "cat.png"
 
     service = _make_service(
-        assistant=_make_assistant(),
+        assistant=_make_assistant(vision=False),
         files=[image_file],
     )
 
@@ -160,6 +171,143 @@ async def test_preflight_skips_non_text_files():
     )
 
     assert result.file_tokens == 0
+    assert result.excluded_file_count == 1
+
+
+_PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000d4944415478da63f8cfc000000301010018dd8db00000000049"
+    "454e44ae426082"
+)
+
+
+@pytest.mark.asyncio
+async def test_preflight_counts_image_files_on_vision_model():
+    """On a vision model attached images are priced like the real request."""
+    image_file = MagicMock()
+    image_file.file_type = FileType.IMAGE
+    image_file.text = None
+    image_file.name = "cat.png"
+    image_file.blob = _PNG_1PX
+    image_file.mimetype = "image/png"
+
+    service = _make_service(
+        assistant=_make_assistant(vision=True),
+        files=[image_file],
+    )
+
+    result = await service.preflight_tokens(
+        question="what is this",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    # At least the provider base cost for one image.
+    assert result.file_tokens >= 85
+    assert result.excluded_file_count == 0
+
+
+@pytest.mark.asyncio
+async def test_preflight_includes_derived_images_on_vision_model():
+    """Document uploads carry their derived images (rendered pages) too."""
+    text_file = MagicMock()
+    text_file.id = uuid4()
+    text_file.file_type = FileType.TEXT
+    text_file.text = "report body"
+    text_file.name = "report.pdf"
+
+    derived_image = MagicMock()
+    derived_image.id = uuid4()
+    derived_image.file_type = FileType.IMAGE
+    derived_image.blob = _PNG_1PX
+    derived_image.mimetype = "image/png"
+
+    service = _make_service(
+        assistant=_make_assistant(vision=True),
+        files=[text_file],
+    )
+    service.file_service.get_derived_images = AsyncMock(return_value=[derived_image])
+
+    result = await service.preflight_tokens(
+        question="summarize",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    text_only_tokens = count_tokens(build_files_string([text_file]), "gpt-4o")
+    assert result.file_tokens >= text_only_tokens + 85
+    service.file_service.get_derived_images.assert_awaited_once_with(
+        parent_ids=[text_file.id]
+    )
+
+
+@pytest.mark.asyncio
+async def test_preflight_includes_derived_images_for_image_only_pdf():
+    """An image-only PDF has no extractable text but still carries derived
+    vision images. They must be priced (not reported as ~0 tokens) and the PDF
+    must not be counted as an excluded file."""
+    pdf_file = MagicMock()
+    pdf_file.id = uuid4()
+    pdf_file.file_type = FileType.TEXT
+    pdf_file.text = None  # image-only document: nothing to inline
+    pdf_file.name = "tower.pdf"
+
+    derived_image = MagicMock()
+    derived_image.id = uuid4()
+    derived_image.file_type = FileType.IMAGE
+    derived_image.parent_file_id = pdf_file.id
+    derived_image.blob = _PNG_1PX
+    derived_image.mimetype = "image/png"
+
+    service = _make_service(
+        assistant=_make_assistant(vision=True),
+        files=[pdf_file],
+    )
+    service.file_service.get_derived_images = AsyncMock(return_value=[derived_image])
+
+    result = await service.preflight_tokens(
+        question="what is in the pdf?",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    # Derived images are fetched for the document even though it has no text...
+    service.file_service.get_derived_images.assert_awaited_once_with(
+        parent_ids=[pdf_file.id]
+    )
+    # ...their tokens are counted (image scaffolding alone is ~85+ tokens)...
+    assert result.file_tokens >= 85
+    # ...and the image-only PDF is not reported as excluded.
+    assert result.excluded_file_count == 0
+
+
+@pytest.mark.asyncio
+async def test_preflight_counts_file_header_for_textless_documents():
+    """The real request inlines every document — a textless one still costs
+    its FILE header block and the shared preamble, so preflight must count it
+    even though it reports the file as excluded content-wise."""
+    pdf_file = MagicMock()
+    pdf_file.id = uuid4()
+    pdf_file.file_type = FileType.TEXT
+    pdf_file.text = None
+    pdf_file.name = "scan.pdf"
+    pdf_file.mimetype = "application/pdf"
+
+    service = _make_service(
+        assistant=_make_assistant(vision=False),
+        files=[pdf_file],
+    )
+
+    result = await service.preflight_tokens(
+        question="what is this?",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    expected_tokens = count_tokens(build_files_string([pdf_file]), "gpt-4o")
+    assert result.file_tokens == expected_tokens
+    assert result.file_tokens > 0
+    assert result.excluded_file_count == 1
 
 
 @pytest.mark.asyncio

@@ -361,7 +361,7 @@ async def chat(
 @router.post(
     "/preflight",
     response_model=PreflightResponse,
-    description="Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).",
+    description="Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).",
     responses=responses.get_responses([400, 403, 404, 429]),
 )
 async def preflight_tokens(
@@ -371,11 +371,12 @@ async def preflight_tokens(
         get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
     ),
 ):
-    """Returns the exact token cost the next chat request will add.
+    """Returns an estimated token cost for the next chat request.
 
     Excludes knowledge/RAG and web-search content (selected at request time
-    and unknowable up-front). Designed to be called debounced from the input
-    field — the cost is dominated by tokenization (~5-20ms).
+    and unknowable up-front). Provider tokenization remains authoritative.
+    Designed to be called debounced from the input field — the cost is
+    dominated by tokenization (~5-20ms).
 
     Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
     ~150 req/min, so the limit catches scripted abuse while leaving multiple

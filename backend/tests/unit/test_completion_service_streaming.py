@@ -14,6 +14,7 @@ from intric.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from intric.completion_models.infrastructure.completion_service import CompletionService
+from intric.completion_models.infrastructure.context_builder import ContextBuilder
 
 
 class _DummyContextBuilder:
@@ -28,6 +29,9 @@ class _DummyAdapter:
 
     def get_token_limit_of_model(self) -> int:
         return self.model.token_limit
+
+    def get_litellm_model_name(self) -> str:
+        return self.litellm_model
 
     async def prepare_streaming(self, **kwargs):
         return SimpleNamespace(_eneo_context={"has_tools": False})
@@ -102,3 +106,34 @@ async def test_streaming_wrapper_cancels_pending_approval_ids():
     assert chunks[0].response_type == ResponseType.TEXT
     assert chunks[0].text == "hello"
     approval_manager.cancel_approval.assert_awaited_once_with("approval-123")
+
+
+@pytest.mark.asyncio
+async def test_estimated_context_overflow_is_still_sent_to_provider():
+    completion_model = _make_completion_model()
+    completion_model.max_input_tokens = 1
+    adapter = _DummyAdapter(model=completion_model)
+    adapter.prepare_streaming = AsyncMock(
+        return_value=SimpleNamespace(_eneo_context={"has_tools": False})
+    )
+
+    service = CompletionService(
+        context_builder=ContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="This request is intentionally longer than one token.",
+        stream=True,
+    )
+
+    assert response.total_token_count > completion_model.token_limit
+    adapter.prepare_streaming.assert_awaited_once()
+    assert (
+        adapter.prepare_streaming.await_args.kwargs["context"].token_count
+        == response.total_token_count
+    )

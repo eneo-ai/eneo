@@ -9,7 +9,6 @@
   import { buttonVariants } from "$lib/components/ui/button/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
 
   export let label = m.select_documents_to_attach();
   let fileInput: HTMLInputElement;
@@ -22,13 +21,9 @@
   function uploadFiles() {
     if (!fileInput.files?.length) return;
 
-    const errors = queueValidUploads([...fileInput.files]);
+    queueValidUploads([...fileInput.files]);
     // Reset so re-selecting the same file still fires `change`.
     fileInput.value = "";
-
-    if (errors) {
-      toast.error(errors.join("\n"));
-    }
   }
 </script>
 

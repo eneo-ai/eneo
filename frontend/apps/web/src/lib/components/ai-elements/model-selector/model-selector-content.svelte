@@ -6,15 +6,16 @@
 
   type Props = {
     class?: string;
+    commandClass?: string;
     align?: "start" | "center" | "end";
     children: Snippet;
   };
 
-  let { class: className, align = "end", children }: Props = $props();
+  let { class: className, commandClass, align = "end", children }: Props = $props();
 </script>
 
 <Popover.Content data-slot="model-selector-content" {align} class={cn("w-[320px] p-0", className)}>
-  <Command.Root>
+  <Command.Root class={commandClass}>
     {@render children()}
   </Command.Root>
 </Popover.Content>

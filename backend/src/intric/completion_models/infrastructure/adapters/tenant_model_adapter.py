@@ -1,6 +1,5 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
-import base64
 import json
 import re
 import socket
@@ -45,7 +44,10 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
-from intric.files.file_models import File
+from intric.completion_models.infrastructure.message_payload import (
+    build_content,
+    build_turn_messages,
+)
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
@@ -403,53 +405,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
         )
 
-    def _build_image(self, file: File) -> dict[str, Any]:
-        """
-        Build image content block for OpenAI-compatible format.
-
-        Args:
-            file: Image file with blob data
-
-        Returns:
-            dict: Image content in OpenAI format
-        """
-        blob = file.blob
-        if blob is None:
-            raise ValueError("Image file is missing blob data")
-
-        image_data = base64.b64encode(blob).decode("utf-8")
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:{file.mimetype};base64,{image_data}"},
-        }
-
-    def _build_content(
-        self, input: str, images: list[File]
-    ) -> list[dict[str, Any]] | str:
-        """
-        Build message content with text and images.
-
-        Args:
-            input: Text content
-            images: List of image files
-
-        Returns:
-            list[dict] | str: Content array if images present, otherwise string
-        """
-        # Build content array with text
-        content: list[dict[str, Any]] = []
-        if input:
-            content.append({"type": "text", "text": input})
-
-        # Add images
-        for image in images:
-            content.append(self._build_image(image))
-
-        # Return string if only text, array if images included
-        if len(content) == 1 and content[0].get("type") == "text":
-            return input
-        return content
-
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
         Build tools/functions array from context function definitions.
@@ -517,76 +472,23 @@ class TenantModelAdapter(CompletionModelAdapter):
         if context.prompt:
             messages.append({"role": "system", "content": context.prompt})
 
-        # Convert previous Q&A pairs to user/assistant messages (with images)
+        # Convert previous Q&A pairs to canonical replay messages (with images
+        # and tool calls) — the same shape token counting uses.
         for msg in context.messages:
-            # User message with question + images
-            messages.append(
-                {
-                    "role": "user",
-                    "content": self._build_content(
-                        input=msg.question,
-                        images=msg.images + msg.generated_images,
-                    ),
-                }
+            messages.extend(
+                build_turn_messages(
+                    question=msg.question,
+                    answer=msg.answer,
+                    images=msg.images + msg.generated_images,
+                    tool_calls=msg.tool_calls,
+                )
             )
-            # Assistant response. If the turn invoked tools, emit the canonical
-            # OpenAI shape: a pre-tool assistant message with only `tool_calls`,
-            # one `role: tool` entry per call, then a post-tool assistant
-            # message with the final answer. This matches what the live flow
-            # produces during generation and keeps causal order intact.
-            if msg.tool_calls:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": tc.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.tool_name,
-                                    "arguments": (
-                                        json.dumps(tc.arguments)
-                                        if tc.arguments is not None
-                                        else "{}"
-                                    ),
-                                },
-                            }
-                            for tc in msg.tool_calls
-                        ],
-                    }
-                )
-                for tc in msg.tool_calls:
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.tool_call_id,
-                            "content": tc.result,
-                        }
-                    )
-                if msg.answer:
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": msg.answer,
-                        }
-                    )
-            else:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": msg.answer or "[image generated]",
-                    }
-                )
 
         # Add current question with images
         messages.append(
             {
                 "role": "user",
-                "content": self._build_content(
-                    input=context.input,
-                    images=context.images,
-                ),
+                "content": build_content(context.input, context.images),
             }
         )
 
@@ -1630,6 +1532,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 response_type=ResponseType.ERROR,
                 stop=True,
             )
+
+    @override
+    def get_litellm_model_name(self) -> str:
+        return self.litellm_model
 
     @override
     def get_token_limit_of_model(self) -> int:

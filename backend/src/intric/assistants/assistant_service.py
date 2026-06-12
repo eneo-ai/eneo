@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
@@ -19,6 +20,7 @@ from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReason
 from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
+from intric.files.file_models import FileType
 from intric.files.file_service import FileService
 from intric.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
@@ -60,6 +62,7 @@ from intric.spaces.space_service import SpaceService
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
+from intric.tokens.token_utils import log_token_count_drift
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
 
@@ -1206,6 +1209,12 @@ class AssistantService:
                             stream_usage.prompt_tokens + assistant_selector_tokens
                         )
                         input_source = "provider"
+                        assert completion_model is not None
+                        log_token_count_drift(
+                            model_name=completion_model.name,
+                            predicted=response.total_token_count,
+                            actual=stream_usage.prompt_tokens,
+                        )
                     else:
                         num_tokens_question = (
                             response.total_token_count + assistant_selector_tokens
@@ -1360,6 +1369,74 @@ class AssistantService:
             )
 
             return final_answer
+
+    async def _with_vision_derivatives(
+        self,
+        files: list["File"],
+        session: "SessionInDB",
+        assistant: "Assistant",
+        completion_model: Optional["CompletionModel"],
+    ) -> list["File"]:
+        """Give the completion the images derived from document attachments.
+
+        Expands the current files, the assistant's fixed attachments and the
+        session history. Derived images are a completion-side concern only:
+        they are never persisted on the question or returned as user
+        attachments. Gates on the model that will actually answer — the
+        governance-effective model, which can differ from the assistant's own
+        in vision support. When that model lacks vision everything passes
+        through untouched, so a PDF with images still works as a plain text
+        attachment.
+        """
+        if completion_model is None or not completion_model.vision:
+            return files
+
+        if assistant.attachments:
+            assistant.attachments = await self.file_service.with_derived_images(
+                assistant.attachments
+            )
+
+        await self._attach_history_derivatives(session=session)
+
+        return await self.file_service.with_derived_images(files)
+
+    async def _attach_history_derivatives(self, session: "SessionInDB") -> None:
+        """Re-attach derived images to history messages for replay.
+
+        Derived images are not persisted on questions, so each ask rebuilds
+        them in memory from the parent files referenced by the history.
+        """
+        parent_ids = {
+            file.id
+            for question in session.questions
+            for file in question.files
+            if file.file_type == FileType.TEXT
+        }
+        if not parent_ids:
+            return
+
+        derived = await self.file_service.get_derived_images(
+            parent_ids=list(parent_ids)
+        )
+        if not derived:
+            return
+
+        by_parent: dict[UUID, list["File"]] = defaultdict(list)
+        for image in derived:
+            if image.parent_file_id is not None:
+                by_parent[image.parent_file_id].append(image)
+
+        for question in session.questions:
+            present = {file.id for file in question.files}
+            additions = [
+                image
+                for file in question.files
+                if file.file_type == FileType.TEXT
+                for image in by_parent.get(file.id, [])
+                if image.id not in present
+            ]
+            if additions:
+                question.files = list(question.files) + additions
 
     async def _check_assistant_models(self, assistant: "Assistant", space: "Space"):
         if assistant.completion_model is None:
@@ -1547,6 +1624,16 @@ class AssistantService:
         for _question in session.questions:
             _question.question = clean_intric_tag(_question.question)
 
+        # `files` (the user's own attachments) is what gets persisted and
+        # returned; `completion_files` additionally carries derived images
+        # (e.g. rendered PDF pages) that only the model should see.
+        completion_files = await self._with_vision_derivatives(
+            files=files,
+            session=session,
+            assistant=assistant_to_ask,
+            completion_model=effective_completion_model,
+        )
+
         # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
         # with the router's setup transaction (conversations_router.py line 300/328), so
         # the user's message is durable even if the stream is aborted mid-flight.
@@ -1569,7 +1656,7 @@ class AssistantService:
             completion_service=self.completion_service,
             references_service=self.references_service,
             session=session,
-            files=files,
+            files=completion_files,
             stream=stream,
             version=version,
             web_search_results=web_search_results,

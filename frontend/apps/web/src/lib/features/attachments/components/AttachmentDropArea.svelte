@@ -10,6 +10,9 @@
 
   export let isDragging: boolean;
   export let label = m.drop_files_here_to_upload();
+  // When true, drop validation errors surface via the manager's inline
+  // `uploadError` store (rendered by the consumer) instead of a toast.
+  export let inlineErrors = false;
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -36,7 +39,7 @@
   function uploadFiles(selectedFiles: FileList) {
     const errors = queueValidUploads([...selectedFiles]);
 
-    if (errors) {
+    if (errors && !inlineErrors) {
       toast.error(errors.join("\n"));
     }
   }
