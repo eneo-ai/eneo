@@ -215,19 +215,36 @@ Done (2026-06-13 session, assistants):
   documents it as only populated for personal default assistants, never for
   space assistants.
 
+Done (2026-06-13 session, continued — knowledge picker + group chats):
+- **Knowledge picker** (`src/features/knowledge/select/`): logic.ts is the
+  pure port of knowledgeOrigin + knowledgeIntegration + getAvailableKnowledge
+  (origin bucketing personal/org via the organization space id from the
+  spaces list, wrapper collapse rules, per-embedding-model sections with
+  dominant-model compatibility) — unit-tested. knowledge-picker.tsx renders
+  one origin (selected rows + Popover/Command combobox). Wired into the
+  assistant editor as KnowledgeSection (personal + organization rows, single
+  save; MCP mutual-exclusion warning/disable). The Svelte expandable
+  per-item blob list (lazy file/page listing) is deferred polish.
+- **Group chat editor** (`src/features/group-chats/` +
+  `group-chats/[groupChatId]/edit` route): name, icon, assistants picker
+  with per-assistant user_description override dialog, mentions +
+  response-label toggles (save-on-toggle), publishing + insights. Creating
+  a group chat now navigates straight to the editor (Svelte's default).
+- **IconField generalized** into `components/composites/icon-field.tsx`
+  (owns upload/delete against /api/v1/icons/; onSave persists the id on the
+  owning resource) — used by both editors and the tile via its iconUrl.
+
 Assistants follow-ups (deferred, in rough priority order):
-- Knowledge picker (groups/websites/integration knowledge; mutual exclusion
-  with MCP), MCP servers picker, attachments section, prompt version
-  history dialog, prompt-guide modal (help-assistants), API keys section.
+- MCP servers picker, attachments section, prompt version history dialog,
+  prompt-guide modal (help-assistants), API keys section, selected-knowledge
+  expandable blob list.
 - Templates: creation is blank-only; TemplateCreateAssistant flow +
-  TemplateCreateAssistantHint not ported. Group chat "open editor after
-  creation" switch omitted until the group-chat editor exists.
+  TemplateCreateAssistantHint not ported.
 
 Remaining for Phase 6 (in plan order):
-1. **Group chats** editor (+ assistants editor follow-ups above).
-2. **Apps** (editor, run page with dynamic input forms, results, dashboard
+1. **Apps** (editor, run page with dynamic input forms, results, dashboard
    routes).
-3. **Services** (CRUD + run).
+2. **Services** (CRUD + run).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in

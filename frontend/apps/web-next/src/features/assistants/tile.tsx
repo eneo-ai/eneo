@@ -3,11 +3,12 @@
 import { Bot, Users } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { iconUrl } from "@/components/composites/icon-field";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useSpace } from "@/features/spaces/use-space";
 import { ChatAppActions } from "./actions";
-import { chatPartnerHref, iconUrl, type ChatAppItem } from "./assistants";
+import { chatPartnerHref, type ChatAppItem } from "./assistants";
 
 /**
  * Grid tile for an assistant or group chat; clicking it opens the chat. The

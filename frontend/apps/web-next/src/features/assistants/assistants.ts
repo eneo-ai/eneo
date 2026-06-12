@@ -22,8 +22,3 @@ export function chatPartnerHref(
   const params = new URLSearchParams({ type: item.type, id: item.id });
   return `/spaces/${routeId}/chat?${params}`;
 }
-
-/** Icon uploads are served through the auth-injecting proxy. */
-export function iconUrl(iconId: string | null | undefined): string | null {
-  return iconId ? `/api/eneo/api/v1/icons/${iconId}/` : null;
-}

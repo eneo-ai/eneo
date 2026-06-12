@@ -129,9 +129,10 @@ export function CreateChatAppMenu() {
           body: { name }
         })
       ),
-    onSuccess: () => {
+    onSuccess: (groupChat) => {
       invalidate();
       setDialog(null);
+      router.push(`/spaces/${routeId}/group-chats/${groupChat.id}/edit`);
     },
     onError: (error) => toastApiError(error, t)
   });

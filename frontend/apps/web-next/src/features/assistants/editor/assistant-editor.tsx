@@ -12,6 +12,7 @@ import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
 import { InstructionsSection } from "./instructions-section";
+import { KnowledgeSection } from "./knowledge-section";
 import { PublishingSection } from "./publishing-section";
 import { SecuritySection } from "./security-section";
 import { assistantQueryOptions } from "./use-assistant";
@@ -47,6 +48,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       </div>
       <GeneralSection assistant={assistant} />
       <InstructionsSection assistant={assistant} />
+      <KnowledgeSection assistant={assistant} />
       <AiSection assistant={assistant} />
       <SecuritySection assistant={assistant} />
       <PublishingSection assistant={assistant} />
