@@ -6,11 +6,9 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
-import {
-  IntegrationItemsTable,
-  WrapperActions,
-  wrapperDisplayName
-} from "@/features/knowledge/integrations";
+import { WrapperActions } from "@/features/knowledge/integrations/actions";
+import { wrapperDisplayName } from "@/features/knowledge/integrations/grouping";
+import { IntegrationItemsTable } from "@/features/knowledge/integrations/table";
 import { useSpace } from "@/features/spaces/use-space";
 
 /**

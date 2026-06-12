@@ -3557,5 +3557,7 @@
   "web_search": "Webbsökning",
   "file_type_not_supported": "Filtypen stöds inte",
   "open_in_confluence": "Öppna i Confluence",
+  "sharepoint_import_hint": "Importera en webbplats från SharePoint",
+  "confluence_import_hint": "Importera ett Confluence-space till din kunskap",
   "chat_sovereignty_hint": "Data behandlas inom er infrastruktur"
 }

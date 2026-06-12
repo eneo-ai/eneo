@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { countSharePointItemTypes, groupIntegrationRows, wrapperDisplayName } from "./integrations";
-import type { IntegrationKnowledge } from "./knowledge";
+import type { IntegrationKnowledge } from "../knowledge";
+import { countSharePointItemTypes, groupIntegrationRows, wrapperDisplayName } from "./grouping";
 
 function makeItem(overrides: Partial<IntegrationKnowledge>): IntegrationKnowledge {
   return {

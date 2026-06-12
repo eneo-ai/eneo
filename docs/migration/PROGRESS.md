@@ -164,18 +164,34 @@ Done (2026-06-13 session):
   trigger intentionally NOT wired (status is plain text until the dialog
   lands).
 
+Done (2026-06-13 session, continued):
+- **Integrations restructured into modules** (`src/features/knowledge/
+  integrations/`): grouping.ts (pure, tested), vendor.tsx, queries.ts,
+  status.tsx, actions.tsx, table.tsx, tab.tsx, sync-history.tsx,
+  import/{selection.ts (pure, tested), folder-tree, sharepoint-import,
+  import-dialog}. Old single-file integrations.tsx removed.
+- **SyncHistoryDialog**: paginated 10/page (`GET /api/v1/integrations/
+  sync-logs/{id}/?skip&limit`), status cell now opens it.
+- **SharePoint import flow**: ImportKnowledgeDialog (select connected
+  integration; SharePoint-only, matching the Svelte knowledge layout filter —
+  Confluence import is effectively disabled there too) → site picker grouped
+  by category (my_teams/public_teams/other/onedrive) → one-level folder tree
+  with breadcrumbs → nested-selection dedupe (selection.ts) → wrapper name
+  required when >1 effective item → batch import + trackJob. New i18n keys
+  `sharepoint_import_hint`/`confluence_import_hint` (hardcoded English in
+  Svelte). Toolbar gated by `can("create","integrationKnowledge")`; personal
+  spaces get a connect CTA to /account/integrations, org spaces a hint
+  (tenant-app admin UI is Phase 7).
+
 Remaining for Phase 6 (in plan order):
-1. **Knowledge: integrations remaining** — `ImportKnowledgeDialog` +
-   confluence/sharepoint import dialogs (preview → import single/batch),
-   `SyncHistoryDialog` (paginated 10/page sync logs; then make the status
-   cell open it),
-   `IntegrationAuthService.svelte.ts` (OAuth popup: open about:blank popup
-   FIRST then set location from `GET
-   /api/v1/integrations/auth/{tenant_integration_id}/url/` with
-   state=tenant_integration_id; callback page posts
-   `{type:"intric/integration-callback", code, state, params}` to opener).
-   Available integrations: `GET /api/v1/integrations/spaces/{space_id}/available/`;
-   register code: `POST /api/v1/integrations/auth/callback/token/`. Port
+1. **OAuth connect popup flow** — the account/integrations connect button is
+   stubbed (`integrations.client.tsx`). Port IntegrationAuthService as a
+   React hook: open about:blank popup FIRST (Safari) then set location from
+   `GET /api/v1/integrations/auth/{tenant_integration_id}/url/` with
+   state=tenant_integration_id; window "message" listener accepts
+   `{type:"intric/integration-callback", code, state, params}` from
+   same-origin only; register code via `POST
+   /api/v1/integrations/auth/callback/token/`. Port
    `/integrations/callback/token` page popup-flow only — the service-account
    branch (sessionStorage `sharepoint_service_account_oauth` + admin
    endpoint) belongs to Phase 7 admin.

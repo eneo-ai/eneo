@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSpace } from "@/features/spaces/use-space";
 import { CollectionsTab } from "./collections";
-import { IntegrationsTab } from "./integrations";
+import { IntegrationsTab } from "./integrations/tab";
 import { WebsitesTab } from "./websites";
 
 /**
@@ -63,7 +63,7 @@ export function KnowledgePage() {
         )}
         {can("read", "integrationKnowledge") && (
           <TabsContent value="integrations" className="pt-4">
-            <IntegrationsTab />
+            <IntegrationsTab canCreate={can("create", "integrationKnowledge")} />
           </TabsContent>
         )}
       </Tabs>

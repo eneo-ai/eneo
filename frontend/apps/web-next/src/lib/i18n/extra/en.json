@@ -6,5 +6,7 @@
   "web_search": "Web search",
   "file_type_not_supported": "File type not supported",
   "open_in_confluence": "Open in Confluence",
+  "sharepoint_import_hint": "Import a site from SharePoint",
+  "confluence_import_hint": "Import a Confluence space into your knowledge",
   "chat_sovereignty_hint": "Data is processed within your infrastructure"
 }
