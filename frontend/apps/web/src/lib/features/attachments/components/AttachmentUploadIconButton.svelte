@@ -12,7 +12,7 @@
   import { toast } from "$lib/components/toast";
 
   export let label = m.select_documents_to_attach();
-  let selectedFiles: FileList;
+  let fileInput: HTMLInputElement;
 
   const {
     state: { attachmentRules },
@@ -20,9 +20,11 @@
   } = getAttachmentManager();
 
   function uploadFiles() {
-    if (!selectedFiles) return;
+    if (!fileInput.files?.length) return;
 
-    const errors = queueValidUploads([...selectedFiles]);
+    const errors = queueValidUploads([...fileInput.files]);
+    // Reset so re-selecting the same file still fires `change`.
+    fileInput.value = "";
 
     if (errors) {
       toast.error(errors.join("\n"));
@@ -39,7 +41,7 @@
   <input
     type="file"
     accept={$attachmentRules.acceptString}
-    bind:files={selectedFiles}
+    bind:this={fileInput}
     multiple
     on:change={uploadFiles}
     class="sr-only"
