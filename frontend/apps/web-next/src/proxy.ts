@@ -43,7 +43,23 @@ function loginRedirect(request: NextRequest) {
 }
 
 export async function proxy(request: NextRequest) {
-  if (isPublic(request.nextUrl.pathname)) return NextResponse.next();
+  const { pathname } = request.nextUrl;
+
+  // API routes handle auth themselves (401 JSON, not a login redirect), and
+  // /api/eneo needs its trailing slash intact for the backend.
+  if (pathname.startsWith("/api/")) return NextResponse.next();
+
+  // skipTrailingSlashRedirect (needed for /api/eneo) disables the built-in
+  // normalization, so page routes strip the trailing slash here instead.
+  // Plain URL on purpose: NextURL's pathname setter re-applies the original
+  // trailing slash, which would redirect to itself.
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    const url = new URL(request.url);
+    url.pathname = pathname.replace(/\/+$/, "");
+    return NextResponse.redirect(url, 308);
+  }
+
+  if (isPublic(pathname)) return NextResponse.next();
 
   const raw = request.cookies.get(SESSION_COOKIE)?.value;
   if (!raw) return loginRedirect(request);

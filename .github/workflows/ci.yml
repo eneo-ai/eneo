@@ -437,43 +437,54 @@ jobs:
         run: uv run python -c "import json; from intric.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
         working-directory: backend
 
-      - name: Regenerate schema.d.ts
+      - name: Regenerate schema.d.ts (intric-js)
         run: |
           bun x openapi-typescript /tmp/openapi.gen.json -o src/types/schema.d.ts --default-non-nullable=false
           bun x prettier --write src/types/schema.d.ts
         working-directory: frontend/packages/intric-js
 
+      - name: Regenerate schema.d.ts (web-next)
+        run: |
+          bun x openapi-typescript /tmp/openapi.gen.json -o src/lib/api/schema.d.ts --default-non-nullable=false
+          bun x prettier --write src/lib/api/schema.d.ts
+        working-directory: frontend/apps/web-next
+
       - name: Fail on schema drift
         run: |
-          SCHEMA=frontend/packages/intric-js/src/types/schema.d.ts
-          if git diff --quiet -- "$SCHEMA"; then
-            echo "$SCHEMA is in sync with the backend OpenAPI spec."
-            exit 0
-          fi
+          STATUS=0
+          for SCHEMA in \
+            frontend/packages/intric-js/src/types/schema.d.ts \
+            frontend/apps/web-next/src/lib/api/schema.d.ts; do
+            if git diff --quiet -- "$SCHEMA"; then
+              echo "$SCHEMA is in sync with the backend OpenAPI spec."
+              continue
+            fi
+            STATUS=1
 
-          echo "::error file=$SCHEMA::Out of sync with the backend OpenAPI spec — regenerate and commit it."
+            echo "::error file=$SCHEMA::Out of sync with the backend OpenAPI spec — regenerate and commit it."
 
-          # Render the drift in the job Summary so it's visible without opening raw logs.
-          {
-            echo "## ❌ schema.d.ts drift detected"
-            echo ""
-            echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
-            echo "Regenerate it (\`cd frontend/packages/intric-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
-            echo ""
-            echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
-            echo ""
-            echo '```diff'
-            git diff --no-color -- "$SCHEMA"
-            echo '```'
-            echo ""
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
+            # Render the drift in the job Summary so it's visible without opening raw logs.
+            {
+              echo "## ❌ schema.d.ts drift detected"
+              echo ""
+              echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
+              echo "Regenerate it (\`node update.js\` in intric-js / \`bun run gen:api\` in web-next against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+              echo ""
+              echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
+              echo ""
+              echo '```diff'
+              git diff --no-color -- "$SCHEMA"
+              echo '```'
+              echo ""
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
 
-          # Also surface it in the step log, collapsed.
-          echo "::group::schema.d.ts diff (committed vs. regenerated)"
-          git diff -- "$SCHEMA"
-          echo "::endgroup::"
-          exit 1
+            # Also surface it in the step log, collapsed.
+            echo "::group::$SCHEMA diff (committed vs. regenerated)"
+            git diff -- "$SCHEMA"
+            echo "::endgroup::"
+          done
+          exit $STATUS
 
   # Reports how well the tests cover the lines THIS PR changed (patch coverage),
   # for frontend and backend separately. Report-only: never fails the PR and is

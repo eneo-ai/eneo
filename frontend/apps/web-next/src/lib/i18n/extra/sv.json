@@ -1,3 +1,4 @@
 {
-  "login_with_sso": "Logga in med SSO"
+  "login_with_sso": "Logga in med SSO",
+  "trigger_error_demo": "Testa felhantering"
 }

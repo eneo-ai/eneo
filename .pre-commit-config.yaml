@@ -7,6 +7,9 @@ repos:
       - id: check-added-large-files
         stages: [pre-commit]
         args: [--maxkb=750]
+        # Generated OpenAPI schemas exceed the cap by design (~1 MB); the
+        # schema-drift CI job keeps them in sync with the backend.
+        exclude: ^frontend/(packages/intric-js/src/types|apps/web-next/src/lib/api)/schema\.d\.ts$
       - id: check-merge-conflict
         stages: [pre-commit]
       - id: detect-private-key
