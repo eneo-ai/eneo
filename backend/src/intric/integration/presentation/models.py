@@ -12,6 +12,7 @@ from intric.integration.infrastructure.content_service.types import (
     SkippedDetail,
     SyncMetadata,
 )
+from intric.jobs.job_models import Task
 from intric.jobs.task_models import ResourceTaskParams
 from intric.main.models import ResourcePermission
 
@@ -225,7 +226,9 @@ class IntegrationKnowledgePublic(BaseModel):
     )
     metadata: IntegrationKnowledgeMetaData
     integration_type: Literal["confluence", "sharepoint"]
-    task: Enum
+    # Annotating the bare Enum base class produced an empty enum (`never`) in
+    # the OpenAPI spec; the assembler always sets a Task member.
+    task: Task
 
 
 class SyncLog(BaseModel):
