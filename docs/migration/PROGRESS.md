@@ -183,23 +183,22 @@ Done (2026-06-13 session, continued):
   spaces get a connect CTA to /account/integrations, org spaces a hint
   (tenant-app admin UI is Phase 7).
 
-Remaining for Phase 6 (in plan order):
-1. **OAuth connect popup flow** — the account/integrations connect button is
-   stubbed (`integrations.client.tsx`). Port IntegrationAuthService as a
-   React hook: open about:blank popup FIRST (Safari) then set location from
-   `GET /api/v1/integrations/auth/{tenant_integration_id}/url/` with
-   state=tenant_integration_id; window "message" listener accepts
-   `{type:"intric/integration-callback", code, state, params}` from
-   same-origin only; register code via `POST
-   /api/v1/integrations/auth/callback/token/`. Port
-   `/integrations/callback/token` page popup-flow only — the service-account
-   branch (sessionStorage `sharepoint_service_account_oauth` + admin
-   endpoint) belongs to Phase 7 admin.
-2. **Assistants** (list/editor/publish/transfer/templates), verify via chat.
-3. **Group chats** editor.
-4. **Apps** (editor, run page with dynamic input forms, results, dashboard
+- **OAuth connect popup flow**: `src/features/integrations/`
+  (use-integration-auth.ts hook — popup FIRST then auth URL with
+  state=tenant_integration_id, same-origin message listener, code
+  registration; callback-message.ts contract) + popup-only callback page
+  `(public)/integrations/callback/token` (`/integrations/callback` was
+  already in proxy PUBLIC_PREFIXES). Account integrations connect button
+  wired. Service-account branch deferred to Phase 7 admin. Lint gotchas:
+  react-hooks/set-state-in-effect (defer via queueMicrotask) and
+  react-hooks/refs (latest-ref updates must happen inside useEffect).
+
+Remaining for Phase 6 (in plan order; knowledge/integrations is done):
+1. **Assistants** (list/editor/publish/transfer/templates), verify via chat.
+2. **Group chats** editor.
+3. **Apps** (editor, run page with dynamic input forms, results, dashboard
    routes).
-5. **Services** (CRUD + run).
+4. **Services** (CRUD + run).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in

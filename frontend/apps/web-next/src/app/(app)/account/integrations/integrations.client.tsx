@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { EmptyState } from "@/components/composites/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,8 +11,19 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { useIntegrationAuth } from "@/features/integrations/use-integration-auth";
 
-function IntegrationCard({ integration }: { integration: Schema<"UserIntegration"> }) {
+type UserIntegration = Schema<"UserIntegration">;
+
+function IntegrationCard({
+  integration,
+  onConnect,
+  connecting
+}: {
+  integration: UserIntegration;
+  onConnect: () => void;
+  connecting: boolean;
+}) {
   const t = useTranslations();
   const queryClient = useQueryClient();
 
@@ -22,7 +34,7 @@ function IntegrationCard({ integration }: { integration: Schema<"UserIntegration
           params: { path: { user_integration_id: integration.id ?? "" } }
         })
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["integrations", "me"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["integrations"] }),
     onError: (error) => toastApiError(error, t)
   });
 
@@ -38,14 +50,17 @@ function IntegrationCard({ integration }: { integration: Schema<"UserIntegration
           </span>
           <p className="text-muted-foreground text-sm">{integration.description}</p>
         </div>
-        {/* The OAuth connect popup flow lands in Phase 6 with the rest of integrations. */}
-        {integration.connected && (
+        {integration.connected ? (
           <Button
             variant="outline"
             disabled={disconnect.isPending}
             onClick={() => disconnect.mutate()}
           >
             {t("disconnect")}
+          </Button>
+        ) : (
+          <Button disabled={connecting} onClick={onConnect}>
+            {t("connect")}
           </Button>
         )}
       </CardContent>
@@ -55,12 +70,22 @@ function IntegrationCard({ integration }: { integration: Schema<"UserIntegration
 
 export function AccountIntegrations() {
   const t = useTranslations();
+  const queryClient = useQueryClient();
 
   const { data: integrations, isPending } = useQuery({
     queryKey: ["integrations", "me"],
     queryFn: async () => {
       const result = await unwrap(browserApi.GET("/api/v1/integrations/me/"));
       return result.items;
+    }
+  });
+
+  const { connect, isConnecting } = useIntegrationAuth((result) => {
+    if (result.success) {
+      toast.success(`${result.integration.name}: ${t("connected")}`);
+      void queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    } else {
+      toastApiError(result.error, t);
     }
   });
 
@@ -71,7 +96,12 @@ export function AccountIntegrations() {
   return (
     <div className="flex flex-col gap-3">
       {(integrations ?? []).map((integration) => (
-        <IntegrationCard key={integration.id ?? integration.name} integration={integration} />
+        <IntegrationCard
+          key={integration.id ?? integration.name}
+          integration={integration}
+          connecting={isConnecting(integration)}
+          onConnect={() => void connect(integration)}
+        />
       ))}
     </div>
   );
