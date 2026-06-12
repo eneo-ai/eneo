@@ -80,7 +80,7 @@ bun run dev
 **Terminal 3 - Worker (Optional, for document processing and for the crawler & apps to work):**
 ```bash
 cd backend
-uv run arq src.intric.worker.arq.WorkerSettings
+uv run worker
 ```
 
 ## Verify Installation
