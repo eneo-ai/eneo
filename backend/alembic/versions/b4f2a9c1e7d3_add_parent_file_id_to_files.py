@@ -1,6 +1,6 @@
 """add parent_file_id to files
 Revision ID: b4f2a9c1e7d3
-Revises: 3eb6a34b6733
+Revises: 202606111200
 Create Date: 2026-06-11 12:00:00.000000
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "b4f2a9c1e7d3"
-down_revision = "3eb6a34b6733"
+down_revision = "202606111200"
 branch_labels = None
 depends_on = None
 
