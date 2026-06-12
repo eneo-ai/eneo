@@ -41,6 +41,9 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
     router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
+from intric.governance_policy.presentation.governance_policy_router import (
+    router as governance_policy_router,
+)
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
 from intric.help_assistants.api.admin_router import (
@@ -74,6 +77,9 @@ from intric.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from intric.modules.module_router import router as module_router
+from intric.prompt_library.presentation.prompt_library_router import (
+    router as prompt_library_router,
+)
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -483,6 +489,18 @@ router.include_router(
     mcp_server_router,
     prefix="/mcp-servers",
     tags=["mcp-servers"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    prompt_library_router,
+    prefix="/admin/prompt-library",
+    tags=["admin", "prompt-library"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    governance_policy_router,
+    prefix="/admin/governance-policy",
+    tags=["admin", "governance-policy"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

@@ -47,8 +47,8 @@
   //   1. Locked input  — what was sent to the LLM last turn (system + MCP +
   //      RAG + history + question, lumped together in provider's prompt_tokens)
   //   2. Locked output — the model's previous reply
-  //   3. Pending text  — exact tokens for the text in the input right now
-  //   4. Pending files — exact tokens the attached files will add
+  //   3. Pending text  — locally estimated tokens for the current input
+  //   4. Pending files — locally estimated multimodal/file tokens
   const pendingTotal = $derived(chat.pendingInputTokens + chat.pendingFileTokens);
   const projectedTotal = $derived(chat.contextTokens + pendingTotal);
 
@@ -80,7 +80,7 @@
     });
   });
 
-  // Read from ChatService so the bar and the Send-button can't drift.
+  // Advisory estimate only; the provider validates the final payload.
   const willExceed = $derived(chat.willExceedContext);
   const projectedPercent = $derived(pct(projectedTotal));
 
@@ -116,19 +116,9 @@
 
   const fmt = (n: number) => n.toLocaleString();
 
-  const modelName = $derived.by(() => {
-    if (chat.pendingModelName) return chat.pendingModelName;
-
-    const messages = chat.currentConversation?.messages;
-    for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
-      const name = messages?.[i].completion_model?.name;
-      if (name) return name;
-    }
-    if (chat.partner && "completion_model" in chat.partner) {
-      return chat.partner.completion_model?.name ?? "";
-    }
-    return "";
-  });
+  // Single source of truth lives in ChatService so the label and the context
+  // window can't disagree about which model is active.
+  const modelName = $derived(chat.activeModelName);
 
   const hasUsage = $derived(chat.contextLimit > 0 && (chat.contextTokens > 0 || pendingTotal > 0));
   const showBar = $derived(hasUsage && isVisible);
@@ -192,7 +182,7 @@
         {#if willExceed}
           <AlertTriangle class="h-3 w-3" aria-hidden="true" />
         {/if}
-        {fmt(projectedTotal)} / {fmt(chat.contextLimit)} ({projectedPercent.toFixed(
+        ≈ {fmt(projectedTotal)} / {fmt(chat.contextLimit)} ({projectedPercent.toFixed(
           projectedPercent >= 10 ? 0 : 1
         )}%)
         <Info class="text-tertiary h-3 w-3" aria-hidden="true" />
@@ -201,9 +191,9 @@
 
     <Popover.Content side="top" class="w-[340px] p-0" align="end">
       <div class="border-default border-b px-4 py-3">
-        <p class="text-default text-sm font-medium">{m.context_usage()}</p>
+        <p class="text-default text-sm font-medium">{m.context_usage_estimate()}</p>
         <p class="text-secondary mt-0.5 text-xs tabular-nums">
-          {fmt(projectedTotal)} / {fmt(chat.contextLimit)}
+          ≈ {fmt(projectedTotal)} / {fmt(chat.contextLimit)}
           {m.chat_tokens_separator()}
           {projectedPercent.toFixed(1)}%
         </p>
@@ -299,7 +289,7 @@
             <div class="flex items-start gap-2">
               <AlertTriangle class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
               <span class="text-[11px] leading-snug">
-                {m.context_usage_will_exceed()}
+                {m.context_usage_will_exceed_estimate()}
               </span>
             </div>
             <button

@@ -62,6 +62,29 @@
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
 
+  const effectiveConfig = $derived($resource.effective_config);
+  const promptLocked = $derived(effectiveConfig?.prompt_locked === true);
+  const modelsEnforced = $derived(effectiveConfig?.models_enforced === true);
+  const policyAllowedModelIds = $derived(
+    modelsEnforced ? new Set(effectiveConfig?.available_models.map((model) => model.id)) : null
+  );
+  const availableModels = $derived(
+    policyAllowedModelIds
+      ? $currentSpace.completion_models.filter((model) => policyAllowedModelIds.has(model.id))
+      : $currentSpace.completion_models
+  );
+  const lockedModel = $derived(
+    modelsEnforced && effectiveConfig?.locked_model
+      ? ($currentSpace.completion_models.find(
+          (model) => model.id === effectiveConfig?.locked_model?.id
+        ) ?? effectiveConfig.locked_model)
+      : null
+  );
+  const mcpEnforced = $derived(effectiveConfig?.mcp_enforced === true);
+  const availableMCPServers = $derived(
+    mcpEnforced ? (effectiveConfig?.available_mcp_servers ?? []) : undefined
+  );
+
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id ?? null);
   let iconUploading = $state(false);
@@ -309,17 +332,19 @@
                 </Button>
               </Tooltip>
             {/if}
-            <PromptVersionDialog
-              title={m.prompt_history_for({ name: $resource.name })}
-              loadPromptVersionHistory={() => {
-                return data.intric.assistants.listPrompts({ id: data.assistant.id });
-              }}
-              onPromptSelected={(prompt) => {
-                const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
-                $update.prompt.text = prompt.text;
-                $update.prompt.description = `Restored prompt from ${restoredDate}`;
-              }}
-            ></PromptVersionDialog>
+            {#if !promptLocked}
+              <PromptVersionDialog
+                title={m.prompt_history_for({ name: $resource.name })}
+                loadPromptVersionHistory={() => {
+                  return data.intric.assistants.listPrompts({ id: data.assistant.id });
+                }}
+                onPromptSelected={(prompt) => {
+                  const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                  $update.prompt.text = prompt.text;
+                  $update.prompt.description = `Restored prompt from ${restoredDate}`;
+                }}
+              ></PromptVersionDialog>
+            {/if}
             <PromptGuideModal
               bind:open={isModalOpen}
               bind:runId={promptGuideRunId}
@@ -347,14 +372,23 @@
               }}
             />
           </div>
+          {#if promptLocked}
+            <p
+              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+            >
+              <span class="font-bold">{m.warning()}:&nbsp;</span>
+              {m.governance_assistant_prompt_locked_hint()}
+            </p>
+          {/if}
           <textarea
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
+            disabled={promptLocked}
             onchange={() => {
               $update.prompt.description = "";
             }}
-            class="border-default bg-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            class="border-default bg-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:opacity-60"
           ></textarea>
         </Settings.Row>
 
@@ -451,12 +485,26 @@
           }}
           let:aria
         >
-          <SelectAIModelV2
-            bind:selectedModel={$update.completion_model}
-            availableModels={$currentSpace.completion_models}
-            showCost={false}
-            {aria}
-          ></SelectAIModelV2>
+          {#if lockedModel}
+            <div class="border-default bg-secondary/30 rounded-lg border px-3 py-2">
+              <p class="text-default text-sm font-medium">
+                {lockedModel.nickname ?? lockedModel.name}
+              </p>
+              <p class="text-muted text-xs">{m.governance_assistant_locked_by_policy()}</p>
+            </div>
+          {:else}
+            <SelectAIModelV2
+              bind:selectedModel={$update.completion_model}
+              {availableModels}
+              showCost={false}
+              {aria}
+            ></SelectAIModelV2>
+            {#if modelsEnforced}
+              <p class="text-muted mt-2 text-xs">
+                {m.governance_assistant_models_filtered_hint()}
+              </p>
+            {/if}
+          {/if}
         </Settings.Row>
 
         <Settings.Row
@@ -519,13 +567,31 @@
               >{m.mcp_disabled_when_knowledge_active()}
             </p>
           {/if}
-          <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
-            <SelectMCPServers
-              bind:selectedMCPServers={$update.mcp_servers}
-              bind:selectedMCPTools={$update.mcp_tools}
-              selectedModel={$update.completion_model}
-            />
-          </div>
+          {#if mcpEnforced}
+            <!-- Policy GRANTs these servers to the personal assistant; they are
+                 applied automatically at ask-time, so the picker is read-only. -->
+            {#if availableMCPServers && availableMCPServers.length > 0}
+              <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
+                {#each availableMCPServers as server (server.id)}
+                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                {/each}
+              </div>
+            {:else}
+              <p class="text-muted text-sm">{m.governance_assistant_mcp_none()}</p>
+            {/if}
+            <p class="text-muted mt-2 text-xs">
+              {m.governance_assistant_mcp_provided_by_policy()}
+            </p>
+          {:else}
+            <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+              <SelectMCPServers
+                bind:selectedMCPServers={$update.mcp_servers}
+                bind:selectedMCPTools={$update.mcp_tools}
+                selectedModel={$update.completion_model}
+                allowedMCPServers={availableMCPServers}
+              />
+            </div>
+          {/if}
         </Settings.Row>
       </Settings.Group>
 

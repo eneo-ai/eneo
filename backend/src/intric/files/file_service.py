@@ -31,7 +31,9 @@ class FileService:
             yield
 
     async def save_file(self, upload_file: UploadFile):
-        file = await self.protocol.to_domain(upload_file)
+        file, derived_images = await self.protocol.to_domain_with_derivatives(
+            upload_file
+        )
 
         async with self._write_transaction():
             saved_file = await self.repo.add(
@@ -41,6 +43,15 @@ class FileService:
                     tenant_id=self.user.tenant_id,
                 )
             )
+            for derived in derived_images:
+                await self.repo.add(
+                    FileCreate(
+                        **derived.model_dump(),
+                        user_id=self.user.id,
+                        tenant_id=self.user.tenant_id,
+                        parent_file_id=saved_file.id,
+                    )
+                )
 
         # Don't calculate token count here - we don't know which model will be used
         # Token counting will happen when the file is used in an assistant context
@@ -101,6 +112,27 @@ class FileService:
 
     async def get_files(self) -> list[File]:
         return await self.repo.get_list_by_user(user_id=self.user.id)
+
+    async def get_derived_images(self, parent_ids: list[UUID]) -> list[File]:
+        """Get image files derived from the given files (e.g. PDF-extracted)."""
+        files = await self.repo.get_by_parent_ids(
+            parent_ids=parent_ids, user_id=self.user.id
+        )
+        return [file for file in files if file.file_type == FileType.IMAGE]
+
+    async def with_derived_images(self, files: list[File]) -> list[File]:
+        """The given files plus the stored images derived from them.
+
+        Callers gate on model vision support — derived images exist solely
+        as vision input for the completion payload.
+        """
+        parent_ids = [file.id for file in files if file.file_type == FileType.TEXT]
+        if not parent_ids:
+            return files
+
+        derived = await self.get_derived_images(parent_ids=parent_ids)
+        present = {file.id for file in files}
+        return files + [file for file in derived if file.id not in present]
 
     async def get_file_infos(self, file_ids: list[UUID]):
         files = await self.repo.get_file_infos(file_ids)

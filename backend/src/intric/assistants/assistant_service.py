@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
@@ -19,7 +20,11 @@ from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReason
 from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
+from intric.files.file_models import FileType
 from intric.files.file_service import FileService
+from intric.governance_policy.domain.policy_resolver import (
+    select_effective_completion_model,
+)
 from intric.help_assistants.application.ask_guard import assert_not_helper_assistant
 from intric.help_assistants.infrastructure.help_assistant_assignment_history_repo import (  # noqa: E501
     HelpAssistantAssignmentHistoryRepo,
@@ -57,6 +62,7 @@ from intric.spaces.space_service import SpaceService
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
+from intric.tokens.token_utils import log_token_count_drift
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
 
@@ -81,9 +87,14 @@ if TYPE_CHECKING:
         WebSearchResult,
     )
     from intric.files.file_models import File
+    from intric.governance_policy.application.effective_config_service import (
+        EffectiveConfigService,
+    )
+    from intric.governance_policy.domain.policy_resolver import EffectiveConfig
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.api.space_models import TemplateCreate
@@ -156,6 +167,7 @@ class AssistantService:
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
+        effective_config_service: "EffectiveConfigService | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -181,6 +193,7 @@ class AssistantService:
             help_assistant_assignment_history_repo
         )
         self.api_key_scope_revoker = api_key_scope_revoker
+        self.effective_config_service = effective_config_service
 
     @property
     async def web_search(self):
@@ -213,6 +226,89 @@ class AssistantService:
                 integration_knowledge_id=integration_knowledge.id
             ):
                 raise BadRequestException("Invalid integration knowledge")
+
+    async def _resolve_effective_config(
+        self, *, space: "Space", assistant: Assistant
+    ) -> "EffectiveConfig | None":
+        if (
+            self.effective_config_service is None
+            or not assistant.is_default
+            or not space.is_personal()
+        ):
+            return None
+        return await self.effective_config_service.resolve_for(
+            assistant, space_is_personal=space.is_personal()
+        )
+
+    async def _ensure_governance_policy_allows_update(
+        self,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        completion_model_id: UUID | None,
+        mcp_server_ids: list[UUID] | None,
+        prompt_changing: bool = False,
+        effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED,
+    ) -> None:
+        # Nothing to validate → skip resolving the policy (and its DB round-trip).
+        if (
+            completion_model_id is None
+            and mcp_server_ids is None
+            and not prompt_changing
+        ):
+            return
+
+        # _resolve_effective_config owns the is_default / personal-space / no-service
+        # short-circuits and returns None when the policy does not apply. Callers
+        # that already resolved it pass it in to avoid a second round-trip.
+        if isinstance(effective_config, NotProvided):
+            effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
+        if effective_config is None:
+            return
+
+        if prompt_changing and effective_config.prompt_enforced:
+            raise BadRequestException(
+                "Prompt is locked by personal assistant governance policy",
+            )
+
+        if completion_model_id is not None and effective_config.models_enforced:
+            current_model_id = (
+                assistant.completion_model.id
+                if assistant.completion_model is not None
+                else None
+            )
+            if completion_model_id != current_model_id:
+                allowed_ids = {m.id for m in effective_config.available_models}
+                if completion_model_id not in allowed_ids:
+                    raise BadRequestException(
+                        "Model not allowed by personal assistant governance policy",
+                    )
+
+        if mcp_server_ids is not None and effective_config.mcp_enforced:
+            allowed_ids = {s.id for s in effective_config.available_mcp_servers}
+            # Grandfather servers already attached: only newly-added servers
+            # must satisfy the policy, mirroring the completion-model rule
+            # above. This lets an admin tighten the whitelist without blocking
+            # re-saves of assistants that still reference a now-disallowed
+            # server.
+            current_ids = {s.id for s in assistant.mcp_servers}
+            disallowed = (set(mcp_server_ids) - current_ids) - allowed_ids
+            if disallowed:
+                raise BadRequestException(
+                    "MCP servers not allowed by personal assistant governance policy",
+                )
+
+    async def _ensure_governance_policy_allows_mcp_server(
+        self, *, space: "Space", assistant: Assistant, mcp_server_id: UUID
+    ) -> None:
+        await self._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=None,
+            mcp_server_ids=[mcp_server_id],
+        )
 
     async def create_assistant(
         self,
@@ -445,6 +541,20 @@ class AssistantService:
                 },
             )
 
+        update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
+        if prompt is not None:
+            update_effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
+            await self._ensure_governance_policy_allows_update(
+                space=space,
+                assistant=assistant,
+                completion_model_id=None,
+                mcp_server_ids=None,
+                prompt_changing=True,
+                effective_config=update_effective_config,
+            )
+
         prompt_obj: Prompt | None = None
         if prompt is not None:
             # When the update carries a `prompt` field, persist it — empty
@@ -503,6 +613,9 @@ class AssistantService:
             ]
 
         # Validate MCP server assignments against tenant + space boundaries.
+        mcp_effective_config: "EffectiveConfig | None | NotProvided" = (
+            update_effective_config
+        )
         if mcp_server_ids is not None:
             import sqlalchemy as sa
 
@@ -533,22 +646,48 @@ class AssistantService:
                     + ", ".join(missing_tenant_enabled_ids)
                 )
 
-            space_servers_query = sa.select(SpacesMCPServersTable.mcp_server_id).where(
-                SpacesMCPServersTable.space_id == space.id,
-                SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
-            )
-            space_servers_result = await self.repo.session.execute(space_servers_query)
-            space_server_ids = {row[0] for row in space_servers_result.fetchall()}
-            missing_space_ids = [
-                str(server_id)
-                for server_id in mcp_server_ids
-                if server_id not in space_server_ids
-            ]
-            if missing_space_ids:
-                raise BadRequestException(
-                    "MCP server(s) are not assigned to this assistant's space: "
-                    + ", ".join(missing_space_ids)
+            # For a personal default assistant under an active MCP policy, the
+            # governance whitelist (enforced just below) is the source of truth.
+            # Personal spaces are seeded with tenant MCP servers only at creation
+            # time and are not back-filled when a server is enabled later, so the
+            # space-assignment check would wrongly reject a policy-allowed server.
+            if isinstance(mcp_effective_config, NotProvided):
+                mcp_effective_config = await self._resolve_effective_config(
+                    space=space, assistant=assistant
                 )
+            mcp_governed = (
+                mcp_effective_config is not None and mcp_effective_config.mcp_enforced
+            )
+            if not mcp_governed:
+                space_servers_query = sa.select(
+                    SpacesMCPServersTable.mcp_server_id
+                ).where(
+                    SpacesMCPServersTable.space_id == space.id,
+                    SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
+                )
+                space_servers_result = await self.repo.session.execute(
+                    space_servers_query
+                )
+                space_server_ids = {row[0] for row in space_servers_result.fetchall()}
+                missing_space_ids = [
+                    str(server_id)
+                    for server_id in mcp_server_ids
+                    if server_id not in space_server_ids
+                ]
+                if missing_space_ids:
+                    raise BadRequestException(
+                        "MCP server(s) are not assigned to this assistant's space: "
+                        + ", ".join(missing_space_ids)
+                    )
+
+        await self._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=completion_model_id,
+            mcp_server_ids=mcp_server_ids,
+            prompt_changing=False,
+            effective_config=mcp_effective_config,
+        )
 
         # Store MCP server IDs and tool settings for repository to handle.
         setattr(assistant, "_mcp_server_ids", mcp_server_ids)
@@ -608,16 +747,17 @@ class AssistantService:
 
         return assistant, permissions
 
-    async def get_assistant(
-        self, assistant_id: UUID
-    ) -> tuple[Assistant, list[ResourcePermission]]:
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        assistant = space.get_assistant(assistant_id=assistant_id)
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
+    def _authorize_read_assistant(self, space: "Space", assistant: Assistant) -> None:
+        """Enforce read authorization for an assistant in a space.
 
-        # The personal chat is the personal space's default assistant — it is
-        # gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
-        # so a baseline role can use the chat without managing assistants.
+        The personal chat is the personal space's default assistant — it is
+        gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
+        so a baseline role can use the chat without managing assistants. Every
+        read path (get_assistant, the effective-config serialization, and the
+        preflight model resolution) must apply this same carve-out, or the exact
+        users this feature targets get a spurious 403.
+        """
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
         is_personal_default = (
             space.is_personal()
             and space.default_assistant is not None
@@ -639,12 +779,62 @@ class AssistantService:
                 },
             )
 
+    async def get_assistant(
+        self, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission]]:
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        self._authorize_read_assistant(space=space, assistant=assistant)
+
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(
             assistant=assistant
         )
 
         return assistant, permissions  # type: ignore[return-value]
+
+    async def get_assistant_with_effective_config(
+        self, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission], "EffectiveConfig | None"]:
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        self._authorize_read_assistant(space=space, assistant=assistant)
+
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+
+        return assistant, permissions, effective_config
+
+    async def get_effective_completion_model(
+        self, assistant_id: UUID
+    ) -> "CompletionModel | None":
+        """The model that will actually answer for this assistant, honoring a
+        personal-assistant models policy.
+
+        Mirrors the resolution `ask()` applies so read-time preflight and
+        ask-time enforcement never disagree about which model a request uses.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        # Preflight is reachable with an arbitrary assistant_id; enforce the same
+        # read authorization get_assistant() applies so it can't probe assistants
+        # the caller cannot access.
+        self._authorize_read_assistant(space=space, assistant=assistant)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        return select_effective_completion_model(
+            current_model=assistant.completion_model,
+            effective_config=effective_config,
+        )
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
@@ -836,6 +1026,7 @@ class AssistantService:
             async def response_stream() -> AsyncGenerator[Completion, None]:
                 reasoning_token_count = 0
                 response_string = ""
+                reasoning_string = ""
                 generated_files: list[File] = []
                 tool_calls: list[ToolCallInfo] = []
                 stream_usage: TokenUsage | None = None
@@ -857,6 +1048,15 @@ class AssistantService:
                                 response_string=response_string,
                                 info_blobs=datastore_result.info_blobs,
                                 version=version,
+                            )
+                            yield chunk
+
+                        if chunk.response_type == ResponseType.REASONING:
+                            # Reasoning/thinking text — pass through to SSE and
+                            # accumulate separately so it can be persisted on the
+                            # question without ever landing in the answer.
+                            reasoning_string = (
+                                f"{reasoning_string}{chunk.reasoning_content or ''}"
                             )
                             yield chunk
 
@@ -889,6 +1089,14 @@ class AssistantService:
                                         # Update existing entry with approval status
                                         existing.approved = tc.approved
                                         existing.result_status = tc.result_status
+                                        # Pending entries are emitted before the argument
+                                        # JSON is complete; fill arguments in once a later
+                                        # chunk carries them.
+                                        if tc.arguments is not None:
+                                            existing.arguments = cast(
+                                                dict[str, object] | None,
+                                                tc.arguments,
+                                            )
                                         # The TOOL_CALL chunk after execution carries the
                                         # tool output; keep it so later turns can replay.
                                         if tc.result is not None:
@@ -916,19 +1124,41 @@ class AssistantService:
                             # Collect tool calls for approval flow (approval status will be updated later)
                             if chunk.tool_calls_metadata:
                                 for tc in chunk.tool_calls_metadata:
-                                    tool_calls.append(
-                                        ToolCallInfo(
-                                            server_name=tc.server_name,
-                                            tool_name=tc.tool_name,
-                                            arguments=cast(
-                                                dict[str, object] | None, tc.arguments
-                                            ),
-                                            tool_call_id=tc.tool_call_id,
-                                            approved=None,
-                                            result_status=tc.result_status,
-                                            mcp_tool_name=tc.mcp_tool_name,
-                                        )
+                                    # A "pending" TOOL_CALL chunk may already have
+                                    # registered this call — merge instead of
+                                    # duplicating it.
+                                    existing = next(
+                                        (
+                                            t
+                                            for t in tool_calls
+                                            if t.tool_call_id
+                                            and t.tool_call_id == tc.tool_call_id
+                                        ),
+                                        None,
                                     )
+                                    if existing:
+                                        existing.approved = None
+                                        existing.result_status = tc.result_status
+                                        if tc.arguments is not None:
+                                            existing.arguments = cast(
+                                                dict[str, object] | None,
+                                                tc.arguments,
+                                            )
+                                    else:
+                                        tool_calls.append(
+                                            ToolCallInfo(
+                                                server_name=tc.server_name,
+                                                tool_name=tc.tool_name,
+                                                arguments=cast(
+                                                    dict[str, object] | None,
+                                                    tc.arguments,
+                                                ),
+                                                tool_call_id=tc.tool_call_id,
+                                                approved=None,
+                                                result_status=tc.result_status,
+                                                mcp_tool_name=tc.mcp_tool_name,
+                                            )
+                                        )
                             yield chunk
 
                         if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
@@ -979,6 +1209,12 @@ class AssistantService:
                             stream_usage.prompt_tokens + assistant_selector_tokens
                         )
                         input_source = "provider"
+                        assert completion_model is not None
+                        log_token_count_drift(
+                            model_name=completion_model.name,
+                            predicted=response.total_token_count,
+                            actual=stream_usage.prompt_tokens,
+                        )
                     else:
                         num_tokens_question = (
                             response.total_token_count + assistant_selector_tokens
@@ -1014,6 +1250,7 @@ class AssistantService:
                         or LoggingDetails(model_kwargs={}),
                         web_search_results=list(web_search_results or []),
                         tool_calls=tool_calls if tool_calls else None,
+                        reasoning=reasoning_string or None,
                     )
                     completed = True
 
@@ -1029,13 +1266,13 @@ class AssistantService:
                 finally:
                     # Stream did not reach normal completion: client abort, LLM
                     # error, network drop, etc. The placeholder row already captures
-                    # the user's question, so an empty `response_string` means there
-                    # is nothing further to persist — skip the redundant UPDATE.
-                    # Anything else (partial answer streamed before abort) must be
-                    # saved via a fresh DB session because the request-scoped
-                    # AsyncSession may already be torn down and `await` across
-                    # GeneratorExit is fragile.
-                    if not completed and response_string:
+                    # the user's question, so nothing streamed means there is
+                    # nothing further to persist — skip the redundant UPDATE.
+                    # Anything else (partial answer or reasoning streamed before
+                    # abort) must be saved via a fresh DB session because the
+                    # request-scoped AsyncSession may already be torn down and
+                    # `await` across GeneratorExit is fragile.
+                    if not completed and (response_string or reasoning_string):
                         from intric.sessions.session_service import (
                             persist_partial_question_answer,
                             safe_count_tokens,
@@ -1057,6 +1294,7 @@ class AssistantService:
                                 question_id=question_id,
                                 answer=response_string,
                                 num_tokens_answer=partial_tokens_answer,
+                                reasoning=reasoning_string or None,
                             )
                         )
                         logger.info(
@@ -1069,6 +1307,7 @@ class AssistantService:
         else:
             reasoning_token_count = 0
             final_answer = ""
+            final_reasoning: str | None = None
             generated_files: list[File] = []
 
             if response.completion is not None:
@@ -1078,6 +1317,7 @@ class AssistantService:
                 else:
                     reasoning_token_count = getattr(answer, "reasoning_token_count", 0)
                     final_answer = getattr(answer, "text", "")
+                    final_reasoning = getattr(answer, "reasoning_content", None)
 
             reference_chunks = get_references(
                 response_string=final_answer,
@@ -1125,9 +1365,78 @@ class AssistantService:
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
                 web_search_results=list(web_search_results or []),
+                reasoning=final_reasoning,
             )
 
             return final_answer
+
+    async def _with_vision_derivatives(
+        self,
+        files: list["File"],
+        session: "SessionInDB",
+        assistant: "Assistant",
+        completion_model: Optional["CompletionModel"],
+    ) -> list["File"]:
+        """Give the completion the images derived from document attachments.
+
+        Expands the current files, the assistant's fixed attachments and the
+        session history. Derived images are a completion-side concern only:
+        they are never persisted on the question or returned as user
+        attachments. Gates on the model that will actually answer — the
+        governance-effective model, which can differ from the assistant's own
+        in vision support. When that model lacks vision everything passes
+        through untouched, so a PDF with images still works as a plain text
+        attachment.
+        """
+        if completion_model is None or not completion_model.vision:
+            return files
+
+        if assistant.attachments:
+            assistant.attachments = await self.file_service.with_derived_images(
+                assistant.attachments
+            )
+
+        await self._attach_history_derivatives(session=session)
+
+        return await self.file_service.with_derived_images(files)
+
+    async def _attach_history_derivatives(self, session: "SessionInDB") -> None:
+        """Re-attach derived images to history messages for replay.
+
+        Derived images are not persisted on questions, so each ask rebuilds
+        them in memory from the parent files referenced by the history.
+        """
+        parent_ids = {
+            file.id
+            for question in session.questions
+            for file in question.files
+            if file.file_type == FileType.TEXT
+        }
+        if not parent_ids:
+            return
+
+        derived = await self.file_service.get_derived_images(
+            parent_ids=list(parent_ids)
+        )
+        if not derived:
+            return
+
+        by_parent: dict[UUID, list["File"]] = defaultdict(list)
+        for image in derived:
+            if image.parent_file_id is not None:
+                by_parent[image.parent_file_id].append(image)
+
+        for question in session.questions:
+            present = {file.id for file in question.files}
+            additions = [
+                image
+                for file in question.files
+                if file.file_type == FileType.TEXT
+                for image in by_parent.get(file.id, [])
+                if image.id not in present
+            ]
+            if additions:
+                question.files = list(question.files) + additions
 
     async def _check_assistant_models(self, assistant: "Assistant", space: "Space"):
         if assistant.completion_model is None:
@@ -1161,6 +1470,7 @@ class AssistantService:
         use_web_search: bool = False,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
+        disabled_mcp_server_ids: list["UUID"] | None = None,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -1223,6 +1533,70 @@ class AssistantService:
         cleaned_question = clean_intric_tag(question)
         files = await self.file_service.get_files_by_ids(file_ids=file_ids or [])
 
+        # Personal assistant governance runtime enforcement.
+        # Resolve before creating a session/question placeholder so invalid
+        # policy states fail without leaving empty conversation history behind.
+        completion_model_override: "CompletionModel | None" = None
+        mcp_servers_override: "list[MCPServer] | None" = None
+        prompt_override: str | None = None
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant_to_ask
+        )
+        if effective_config is not None:
+            if effective_config.models_enforced:
+                # Same resolution preflight uses, so the projected and actual
+                # models can't diverge. None here means the whitelist is empty.
+                resolved_model = select_effective_completion_model(
+                    current_model=assistant_to_ask.completion_model,
+                    effective_config=effective_config,
+                )
+                if resolved_model is None:
+                    raise BadRequestException(
+                        "Personal assistant governance policy has no allowed models — "
+                        "contact admin",
+                    )
+                # Only override when the policy steered away from the assistant's
+                # own (stale) model; otherwise leave it untouched.
+                if resolved_model is not assistant_to_ask.completion_model:
+                    completion_model_override = resolved_model  # type: ignore[assignment]
+
+            if effective_config.mcp_enforced:
+                # GRANT semantics: the policy provides its allowed MCP servers to
+                # the personal assistant directly. The user does not attach them
+                # on the assistant (the entity's own mcp_servers stay empty), so
+                # we hand the policy set straight to the completion call rather
+                # than intersecting with assistant_to_ask.mcp_servers.
+                mcp_servers_override = list(effective_config.available_mcp_servers)
+
+            if (
+                effective_config.prompt_enforced
+                and effective_config.enforced_prompt_text
+            ):
+                prompt_override = effective_config.enforced_prompt_text
+
+        # Per-request MCP opt-out from the composer toolbar: narrow whatever set
+        # is effective (policy-granted servers above, or the assistant's own) by
+        # the servers the user switched off for this message. Narrowing only — it
+        # can never enable a server that isn't already active.
+        disabled_ids = set(disabled_mcp_server_ids or [])
+        if disabled_ids:
+            base_mcp_servers = (
+                mcp_servers_override
+                if mcp_servers_override is not None
+                else list(assistant_to_ask.mcp_servers)
+            )
+            mcp_servers_override = [
+                server for server in base_mcp_servers if server.id not in disabled_ids
+            ]
+
+        effective_completion_model = (
+            completion_model_override or assistant_to_ask.completion_model
+        )
+        if effective_completion_model is None:
+            raise BadRequestException(
+                "No completion model configured for this conversation.",
+            )
+
         if session_id is not None:
             if group_chat_id is not None:
                 session = await self.session_service.get_session_by_uuid(
@@ -1250,6 +1624,16 @@ class AssistantService:
         for _question in session.questions:
             _question.question = clean_intric_tag(_question.question)
 
+        # `files` (the user's own attachments) is what gets persisted and
+        # returned; `completion_files` additionally carries derived images
+        # (e.g. rendered PDF pages) that only the model should see.
+        completion_files = await self._with_vision_derivatives(
+            files=files,
+            session=session,
+            assistant=assistant_to_ask,
+            completion_model=effective_completion_model,
+        )
+
         # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
         # with the router's setup transaction (conversations_router.py line 300/328), so
         # the user's message is durable even if the stream is aborted mid-flight.
@@ -1258,9 +1642,7 @@ class AssistantService:
             session=session,
             files=files,
             assistant_id=assistant_to_ask.id,
-            completion_model=cast(
-                "AICompletionModel | None", assistant_to_ask.completion_model
-            ),
+            completion_model=cast("AICompletionModel", effective_completion_model),
         )
 
         if use_web_search and version == 2:
@@ -1274,22 +1656,24 @@ class AssistantService:
             completion_service=self.completion_service,
             references_service=self.references_service,
             session=session,
-            files=files,
+            files=completion_files,
             stream=stream,
             version=version,
             web_search_results=web_search_results,
             require_tool_approval=require_tool_approval,
+            completion_model_override=completion_model_override,
+            mcp_servers_override=mcp_servers_override,
+            prompt_override=prompt_override,
         )
 
         # TODO: Separate the response based on stream true or false
 
-        assert assistant_to_ask.completion_model is not None
         answer = await self._handle_response(
             response=response,
             datastore_result=datastore_result,
             question=question,
             files=files,
-            completion_model=assistant_to_ask.completion_model,
+            completion_model=effective_completion_model,
             session=session,
             stream=stream,
             assistant_id=assistant_to_ask.id,
@@ -1311,7 +1695,7 @@ class AssistantService:
             session=session,
             answer=answer,
             info_blobs=info_blob_references,
-            completion_model=assistant_to_ask.completion_model,
+            completion_model=effective_completion_model,
             tools=UseTools(
                 assistants=[
                     ToolAssistant(id=assistant_to_ask.id, handle=assistant_to_ask.name)
@@ -1416,16 +1800,28 @@ class AssistantService:
         if mcp_server_db is None:
             raise BadRequestException("MCP server is not enabled for this tenant")
 
-        # Validate server is assigned to assistant's space
-        space_mapping_query = sa.select(SpacesMCPServersTable).where(
-            SpacesMCPServersTable.space_id == space.id,
-            SpacesMCPServersTable.mcp_server_id == mcp_server_id,
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
         )
-        space_mapping = await self.repo.session.scalar(space_mapping_query)
-        if space_mapping is None:
-            raise BadRequestException(
-                "MCP server is not assigned to this assistant's space"
+        mcp_governed = effective_config is not None and effective_config.mcp_enforced
+        if not mcp_governed:
+            space_mapping_query = sa.select(SpacesMCPServersTable).where(
+                SpacesMCPServersTable.space_id == space.id,
+                SpacesMCPServersTable.mcp_server_id == mcp_server_id,
             )
+            space_mapping = await self.repo.session.scalar(space_mapping_query)
+            if space_mapping is None:
+                raise BadRequestException(
+                    "MCP server is not assigned to this assistant's space"
+                )
+
+        await self._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=None,
+            mcp_server_ids=[mcp_server_id],
+            effective_config=effective_config,
+        )
 
         stmt = sa.select(AssistantMCPServers).where(
             AssistantMCPServers.assistant_id == assistant_id

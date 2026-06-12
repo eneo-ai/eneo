@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
@@ -41,6 +44,7 @@ class TenantCompletionModelCreate(BaseModel):
     # manually by the admin. NULL = not tracked.
     input_cost_per_token: Decimal | None = None
     output_cost_per_token: Decimal | None = None
+    model_kwargs_capabilities: SupportedModelKwargs | None = None
     security_classification: ModelId | None = None
 
 
@@ -58,6 +62,7 @@ class TenantCompletionModelUpdate(BaseModel):
     stability: str | None = None
     input_cost_per_token: Decimal | None = None
     output_cost_per_token: Decimal | None = None
+    model_kwargs_capabilities: SupportedModelKwargs | None = None
     # Cross-cutting fields that used to live on the legacy /models/{id} update
     # endpoint. Folded in so the edit dialog can save everything in one round
     # trip — partial-success ("display name saved, classification didn't")

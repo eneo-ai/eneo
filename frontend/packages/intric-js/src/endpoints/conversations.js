@@ -108,10 +108,12 @@ export function initConversations(client) {
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.useWebSearch] Should the assistant search the web? Defaults to false
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
+     * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
+     * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
      * @param {(data: import("../types/resources").SSE.Intric) => void} [params.callbacks.onIntricEvent] Callback to run when an intric event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
@@ -129,6 +131,7 @@ export function initConversations(client) {
       tools,
       useWebSearch,
       requireToolApproval,
+      disabledMcpServerIds,
       abortController,
       callbacks
     }) => {
@@ -166,7 +169,12 @@ export function initConversations(client) {
               tools,
               stream: true,
               use_web_search: useWebSearch,
-              require_tool_approval: requireToolApproval
+              require_tool_approval: requireToolApproval,
+              // Spread (not a direct property) so it doesn't trip excess-property
+              // checks until schema.d.ts is regenerated via `bun run update`.
+              ...(disabledMcpServerIds && disabledMcpServerIds.length > 0
+                ? { disabled_mcp_server_ids: disabledMcpServerIds }
+                : {})
             }
           }
         },
@@ -189,6 +197,10 @@ export function initConversations(client) {
                   response.answer += data.answer;
                   response.references = data.references;
                   callbacks?.onText?.(data);
+                  break;
+
+                case "reasoning":
+                  callbacks?.onReasoning?.(data);
                   break;
 
                 case "image":

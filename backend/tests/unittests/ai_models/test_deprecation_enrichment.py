@@ -139,8 +139,8 @@ class TestCompletionModelPublicDeprecation:
             public = CompletionModelPublic.from_domain(model)
 
         assert public.deprecation_date == "2025-06-13"
-        assert public.is_deprecated is True
-        assert public.can_access is False
+        assert public.is_deprecated is False
+        assert public.can_access is True
 
     def test_from_domain_no_deprecation_date(self):
         """from_domain should leave deprecation_date as None when not in litellm."""
@@ -185,8 +185,8 @@ class TestCompletionModelAssemblerDeprecation:
             public = assembler.from_completion_model_to_model(model)
 
         assert public.deprecation_date == "2025-06-13"
-        assert public.is_deprecated is True
-        assert public.can_access is False
+        assert public.is_deprecated is False
+        assert public.can_access is True
 
     def test_assembler_no_deprecation_date(self):
         """Assembler should leave deprecation_date as None when not in litellm."""
@@ -211,8 +211,8 @@ class TestEmbeddingModelPublicDeprecation:
             public = EmbeddingModelPublic.from_domain(model)
 
         assert public.deprecation_date == "2025-06-01"
-        assert public.is_deprecated is True
-        assert public.can_access is False
+        assert public.is_deprecated is False
+        assert public.can_access is True
 
     def test_from_domain_no_deprecation_date(self):
         """Should leave deprecation_date as None when model has no date in litellm."""
@@ -234,8 +234,8 @@ class TestTranscriptionModelPublicDeprecation:
             public = TranscriptionModelPublic.from_domain(model)
 
         assert public.deprecation_date == "2025-09-01"
-        assert public.is_deprecated is True
-        assert public.can_access is False
+        assert public.is_deprecated is False
+        assert public.can_access is True
 
     def test_from_domain_no_deprecation_date(self):
         """Should leave deprecation_date as None when model has no date in litellm."""

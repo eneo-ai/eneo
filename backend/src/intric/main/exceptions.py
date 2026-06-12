@@ -61,6 +61,8 @@ class ErrorCodes(int, Enum):
     MODEL_IN_USE = 9039
     # System user protection
     SYSTEM_USER_PROTECTED = 9040
+    # AI provider deterministically rejected the request (4xx upstream)
+    PROVIDER_REJECTED_REQUEST = 9041
 
 
 class NotFoundException(Exception):
@@ -167,6 +169,17 @@ class OpenAIException(Exception):
         self.code = code
         self.context = context
         self.details = details
+
+
+class ProviderRejectedRequestException(OpenAIException):
+    """The AI provider deterministically rejected the request (upstream 4xx).
+
+    Subclasses OpenAIException so existing provider-error handling keeps
+    catching it, but maps to 400 instead of 503: the request/configuration is
+    at fault, not provider availability, and retrying cannot succeed.
+    """
+
+    pass
 
 
 class ClaudeException(Exception):
@@ -429,6 +442,13 @@ EXCEPTION_MAP = {
     QuotaExceededException: (403, None, ErrorCodes.QUOTA_EXCEEDED),
     UniqueException: (400, None, ErrorCodes.UNIQUE_ERROR),
     OpenAIException: (503, None, ErrorCodes.OPENAI_ERROR),
+    # Starlette resolves handlers via MRO, so this subclass entry wins over
+    # the OpenAIException one for deterministic upstream rejections.
+    ProviderRejectedRequestException: (
+        400,
+        None,
+        ErrorCodes.PROVIDER_REJECTED_REQUEST,
+    ),
     ClaudeException: (503, None, ErrorCodes.CLAUDE_ERROR),
     ValidationException: (422, None, ErrorCodes.VALIDATION_ERROR),
     PydanticParseError: (500, None, ErrorCodes.PYDANTIC_PARSE_ERROR),

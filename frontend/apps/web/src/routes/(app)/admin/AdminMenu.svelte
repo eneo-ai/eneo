@@ -5,6 +5,8 @@
 -->
 
 <script lang="ts">
+  import type { Icon } from "@intric/icons";
+  import type { ComponentType } from "svelte";
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconAssistants } from "@intric/icons/assistants";
   import { IconThumb } from "@intric/icons/thumb";
@@ -12,117 +14,99 @@
   import { IconCPU } from "@intric/icons/CPU";
   import { IconBulb } from "@intric/icons/bulb";
   import { IconHistory } from "@intric/icons/history";
+  import { IconSpeechBubble } from "@intric/icons/speech-bubble";
   import { IconSparkles } from "@intric/icons/sparkles";
-  import { page } from "$app/stores";
-  import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
+  import { BookText, ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
+  import { page } from "$app/stores";
+  import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { localizeHref } from "$lib/paraglide/runtime";
+  import { deLocalizeHref, localizeHref } from "$lib/paraglide/runtime";
   import { getAppContext } from "$lib/core/AppContext.js";
 
   const { settings } = getAppContext();
 
-  let currentRoute = "";
-  $: currentRoute = $page.url.pathname;
+  const currentRoute = $derived(deLocalizeHref($page.url.pathname));
 
-  function isSelected(url: string, currentRoute: string) {
-    url = url.replaceAll("/admin", "");
-    currentRoute = currentRoute.replaceAll("/admin", "");
-    if (url === "") return currentRoute === "";
-    return currentRoute.startsWith(url);
+  function isSelected(url: string, route: string) {
+    const normalizedUrl = url.replace(/\/$/, "");
+    const normalizedRoute = route.replace(/\/$/, "");
+    if (normalizedUrl === "/admin") return normalizedRoute === "/admin";
+    return normalizedRoute === normalizedUrl || normalizedRoute.startsWith(`${normalizedUrl}/`);
   }
+
+  type NavItem = { route: string; href: string; icon: Icon | ComponentType; label: string };
+  type NavGroup = { label: string; items: NavItem[] };
+
+  function navItem(route: string, icon: Icon | ComponentType, label: string): NavItem {
+    return { route, href: localizeHref(route), icon, label };
+  }
+
+  const groups = $derived<NavGroup[]>([
+    {
+      label: m.admin_section_overview(),
+      items: [navItem("/admin", IconLibrary, m.organisation())]
+    },
+    {
+      label: m.admin_section_governance(),
+      items: [
+        navItem("/admin/personal-assistant", IconSpeechBubble, m.governance_title()),
+        navItem("/admin/prompt-library", BookText, m.governance_tab_prompts()),
+        navItem("/admin/security-classifications", ShieldCheck, m.security_classifications())
+      ]
+    },
+    {
+      label: m.admin_section_configuration(),
+      items: [
+        navItem("/admin/models", IconCPU, m.models()),
+        ...(settings?.using_templates
+          ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
+          : []),
+        navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
+        navItem("/admin/mcp-servers", Plug, m.mcp()),
+        navItem("/admin/integrations", Cloud, m.integrations())
+      ]
+    },
+    {
+      label: m.admin_section_analytics_logs(),
+      items: [
+        navItem("/admin/usage", ChartPie, m.usage()),
+        navItem("/admin/insights", IconBulb, m.insights()),
+        navItem("/admin/audit-logs", IconHistory, m.audit_logs())
+      ]
+    },
+    {
+      label: m.admin_section_access(),
+      items: [
+        navItem("/admin/users", IconAssistant, m.users()),
+        navItem("/admin/legacy/user-groups", IconAssistants, m.user_groups()),
+        navItem("/admin/legacy/roles", IconThumb, m.roles()),
+        navItem("/admin/api-keys", IconKey, m.api_keys())
+      ]
+    }
+  ]);
 </script>
 
-<Navigation.Menu>
-  <Navigation.Link
-    href={localizeHref("/admin")}
-    isActive={isSelected("/admin", currentRoute)}
-    icon={IconLibrary}
-    label={m.organisation()}
-  />
-
-  <div class="border-default my-2 border-b-[0.5px]"></div>
-  <Navigation.Link
-    href={localizeHref("/admin/models")}
-    isActive={isSelected("/admin/models", currentRoute)}
-    icon={IconCPU}
-    label={m.models()}
-  />
-  {#if settings?.using_templates}
-    <Navigation.Link
-      href={localizeHref("/admin/templates")}
-      isActive={isSelected("/admin/templates", currentRoute)}
-      icon={LayoutTemplate}
-      label={m.templates()}
-    />
-  {/if}
-  <Navigation.Link
-    href={localizeHref("/admin/help-assistants")}
-    isActive={isSelected("/admin/help-assistants", currentRoute)}
-    icon={IconSparkles}
-    label={m.admin_help_assistants_nav_label()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/security-classifications")}
-    isActive={isSelected("/admin/security-classifications", currentRoute)}
-    icon={ShieldCheck}
-    label={m.security()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/api-keys")}
-    isActive={isSelected("/admin/api-keys", currentRoute)}
-    icon={IconKey}
-    label={m.api_keys()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/mcp-servers")}
-    isActive={isSelected("/admin/mcp-servers", currentRoute)}
-    icon={Plug}
-    label={m.mcp()}
-  />
-  <Navigation.Link
-    href="/admin/audit-logs"
-    isActive={isSelected("/admin/audit-logs", currentRoute)}
-    icon={IconHistory}
-    label={m.audit_logs()}
-  />
-  <Navigation.Link
-    href="/admin/integrations"
-    isActive={isSelected("/admin/integrations", currentRoute)}
-    icon={Cloud}
-    label={m.integrations()}
-  />
-  <div class="border-default my-2 border-b-[0.5px]"></div>
-  <Navigation.Link
-    href={localizeHref("/admin/usage")}
-    isActive={isSelected("/admin/usage", currentRoute)}
-    icon={ChartPie}
-    label={m.usage()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/insights")}
-    isActive={isSelected("/admin/insights", currentRoute)}
-    icon={IconBulb}
-    label={m.insights()}
-  />
-  <div class="border-default my-2 border-b-[0.5px]"></div>
-  <Navigation.Link
-    href={localizeHref("/admin/users")}
-    isActive={isSelected("/admin/users", currentRoute)}
-    icon={IconAssistant}
-    label={m.users()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/legacy/user-groups")}
-    isActive={isSelected("/admin/legacy/user-groups", currentRoute)}
-    icon={IconAssistants}
-    label={m.user_groups()}
-  />
-  <Navigation.Link
-    href={localizeHref("/admin/legacy/roles")}
-    isActive={isSelected("/admin/legacy/roles", currentRoute)}
-    icon={IconThumb}
-    label={m.roles()}
-  />
-</Navigation.Menu>
+{#each groups as group (group.label)}
+  <Sidebar.Group>
+    <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel>
+    <Sidebar.GroupContent>
+      <Sidebar.Menu>
+        {#each group.items as item (item.href)}
+          {@const active = isSelected(item.route, currentRoute)}
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton isActive={active}>
+              {#snippet child({ props })}
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized hrefs built from typed route literals -->
+                <a href={item.href} {...props} aria-current={active ? "page" : undefined}>
+                  <item.icon class="size-4" />
+                  <span>{item.label}</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+        {/each}
+      </Sidebar.Menu>
+    </Sidebar.GroupContent>
+  </Sidebar.Group>
+{/each}

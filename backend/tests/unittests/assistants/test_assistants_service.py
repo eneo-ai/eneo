@@ -566,3 +566,116 @@ async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setu
         await setup.service.publish_assistant(TEST_UUID, True)
 
     assert "Publishing assistants" in str(exc_info.value)
+
+
+def _mock_file(file_type, parent_file_id=None):
+    return MagicMock(id=uuid4(), file_type=file_type, parent_file_id=parent_file_id)
+
+
+async def test_vision_derivatives_expand_completion_files_and_attachments(
+    setup: Setup,
+):
+    from intric.files.file_models import FileType
+
+    pdf = _mock_file(FileType.TEXT)
+    derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
+    attachment = _mock_file(FileType.TEXT)
+    attachment_image = _mock_file(FileType.IMAGE, parent_file_id=attachment.id)
+    assistant = MagicMock()
+    assistant.attachments = [attachment]
+    session = MagicMock(questions=[])
+    setup.service.file_service.with_derived_images.side_effect = [
+        [attachment, attachment_image],
+        [pdf, derived],
+    ]
+
+    result = await setup.service._with_vision_derivatives(
+        files=[pdf],
+        session=session,
+        assistant=assistant,
+        completion_model=MagicMock(vision=True),
+    )
+
+    assert result == [pdf, derived]
+    assert assistant.attachments == [attachment, attachment_image]
+
+
+async def test_vision_derivatives_skip_everything_without_vision(setup: Setup):
+    from intric.files.file_models import FileType
+
+    pdf = _mock_file(FileType.TEXT)
+    assistant = MagicMock()
+    session = MagicMock(questions=[])
+
+    result = await setup.service._with_vision_derivatives(
+        files=[pdf],
+        session=session,
+        assistant=assistant,
+        completion_model=MagicMock(vision=False),
+    )
+
+    assert result == [pdf]
+    setup.service.file_service.with_derived_images.assert_not_awaited()
+    setup.service.file_service.get_derived_images.assert_not_awaited()
+
+
+async def test_vision_derivatives_gate_on_effective_model_not_configured(
+    setup: Setup,
+):
+    """Governance can steer to a different model than the assistant's own —
+    derived images must follow the model that actually answers."""
+    from intric.files.file_models import FileType
+
+    pdf = _mock_file(FileType.TEXT)
+    derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
+    assistant = MagicMock()
+    assistant.completion_model.vision = False  # configured model lacks vision
+    assistant.attachments = []
+    session = MagicMock(questions=[])
+    setup.service.file_service.with_derived_images.return_value = [pdf, derived]
+
+    result = await setup.service._with_vision_derivatives(
+        files=[pdf],
+        session=session,
+        assistant=assistant,
+        completion_model=MagicMock(vision=True),  # policy-enforced model has it
+    )
+
+    assert result == [pdf, derived]
+
+
+async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
+    from intric.files.file_models import FileType
+
+    pdf_one = _mock_file(FileType.TEXT)
+    pdf_two = _mock_file(FileType.TEXT)
+    derived_one = _mock_file(FileType.IMAGE, parent_file_id=pdf_one.id)
+    derived_two = _mock_file(FileType.IMAGE, parent_file_id=pdf_two.id)
+    question_one = MagicMock(files=[pdf_one])
+    question_two = MagicMock(files=[pdf_two])
+    session = MagicMock(questions=[question_one, question_two])
+    setup.service.file_service.get_derived_images.return_value = [
+        derived_one,
+        derived_two,
+    ]
+
+    await setup.service._attach_history_derivatives(session=session)
+
+    assert question_one.files == [pdf_one, derived_one]
+    assert question_two.files == [pdf_two, derived_two]
+    (_, kwargs) = setup.service.file_service.get_derived_images.await_args
+    assert set(kwargs["parent_ids"]) == {pdf_one.id, pdf_two.id}
+
+
+async def test_history_derivatives_do_not_duplicate_present_images(setup: Setup):
+    from intric.files.file_models import FileType
+
+    pdf = _mock_file(FileType.TEXT)
+    derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
+    question = MagicMock(files=[pdf, derived])
+    session = MagicMock(questions=[question])
+    setup.service.file_service.get_derived_images.return_value = [derived]
+
+    await setup.service._attach_history_derivatives(session=session)
+
+    assert question.files == [pdf, derived]

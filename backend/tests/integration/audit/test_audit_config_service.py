@@ -203,7 +203,7 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == "admin_actions"
             )
-            assert admin_config.action_count == 42
+            assert admin_config.action_count == 46
 
     async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""

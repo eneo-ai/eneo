@@ -1,8 +1,5 @@
 from typing import TYPE_CHECKING, Optional
 
-import litellm
-from fastapi import HTTPException
-from litellm.exceptions import AuthenticationError, BadRequestError, RateLimitError
 from tenacity import (
     retry,
     retry_if_not_exception_type,
@@ -14,8 +11,11 @@ from typing_extensions import override
 from intric.embedding_models.infrastructure.adapters.base import EmbeddingModelAdapter
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException, OpenAIException
 from intric.main.logging import get_logger
+from intric.model_providers.infrastructure import litellm_transport
+from intric.model_providers.infrastructure.litellm_provider import (
+    build_litellm_provider_kwargs,
+)
 from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
@@ -126,7 +126,9 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     @retry(
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
-        retry=retry_if_not_exception_type(BadRequestException),
+        retry=retry_if_not_exception_type(
+            litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+        ),
         reraise=True,
     )
     async def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
@@ -158,20 +160,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             if self.credential_resolver:
                 provider = self.credential_resolver.provider_type
 
-                try:
-                    api_key = self.credential_resolver.get_api_key()
-                    logger.debug(
-                        f"[LiteLLM] {self.litellm_model}: Injecting tenant model API key for {provider}"
-                    )
-                    params["api_key"] = api_key
-                except ValueError as e:
-                    logger.error(
-                        f"[LiteLLM] {self.litellm_model}: Credential resolution failed: {e}"
-                    )
-                    raise HTTPException(
-                        status_code=503,
-                        detail=f"Embedding service unavailable: {str(e)}",
-                    )
+                params.update(build_litellm_provider_kwargs(self.credential_resolver))
 
                 # Inject endpoint for providers with custom endpoints
                 settings = get_settings()
@@ -180,31 +169,13 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 else:
                     endpoint_fallback = None
 
-                endpoint = self.credential_resolver.get_credential_field(
-                    field="endpoint",
-                    fallback=endpoint_fallback,
-                    required=(provider in {"infinity", "azure"}),
-                )
+                endpoint = params.get("api_base") or endpoint_fallback
 
                 if endpoint:
                     params["api_base"] = endpoint
                     logger.debug(
                         f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                     )
-
-                # Inject api_version for Azure embeddings
-                if provider == "azure":
-                    api_version = self.credential_resolver.get_credential_field(
-                        field="api_version",
-                        fallback=None,
-                        required=True,
-                    )
-
-                    if api_version:
-                        params["api_version"] = api_version
-                        logger.debug(
-                            f"[LiteLLM] {self.litellm_model}: Injecting api_version for Azure: {api_version}"
-                        )
 
             safe_params = {k: v for k, v in params.items() if k != "input"}
             logger.debug(
@@ -213,50 +184,27 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             )
 
             # Call LiteLLM API to get the embeddings
-            response = await litellm.aembedding(**params)  # pyright: ignore[reportUnknownMemberType] – litellm lacks complete stubs
+            response = await litellm_transport.aembedding(**params)
 
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Embedding request successful"
             )
 
-        except AuthenticationError:
-            provider = (
-                self.credential_resolver.provider_type
-                if self.credential_resolver
-                else "unknown"
-            )
-            provider_id = (
-                self.credential_resolver.provider_id
-                if self.credential_resolver
-                else None
-            )
-
-            logger.error(
-                "Tenant API credential authentication failed",
-                extra={
-                    "provider_id": str(provider_id) if provider_id else None,
-                    "provider": provider,
-                    "error_type": "AuthenticationError",
-                    "model": self.litellm_model,
-                },
-            )
-
-            raise HTTPException(
-                status_code=401,
-                detail=f"Invalid API credentials for provider {provider}. "
-                f"Please verify your API key configuration.",
-            )
-        except BadRequestError as e:
-            logger.exception(f"[LiteLLM] {self.litellm_model}: Bad request error:")
-            raise BadRequestException("Invalid input") from e
-        except RateLimitError as e:
-            logger.exception(f"[LiteLLM] {self.litellm_model}: Rate limit error:")
-            raise OpenAIException("LiteLLM Rate limit exception") from e
         except Exception as e:
             logger.exception(
                 f"[LiteLLM] {self.litellm_model}: Unknown LiteLLM exception:"
             )
-            raise OpenAIException("Unknown LiteLLM exception") from e
+            provider_type = (
+                self.credential_resolver.provider_type
+                if self.credential_resolver
+                else "unknown"
+            )
+            litellm_transport.raise_public_litellm_error(
+                e,
+                provider_type=provider_type,
+                is_unavailable=litellm_transport.is_provider_unavailable_error,
+                raise_unavailable=litellm_transport.raise_provider_unavailable,
+            )
 
         return [
             embedding["embedding"]  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType,reportUnknownArgumentType] – litellm EmbeddingResponse.data items lack full stubs

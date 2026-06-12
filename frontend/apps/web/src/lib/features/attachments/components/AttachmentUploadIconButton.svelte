@@ -5,13 +5,13 @@
 -->
 
 <script lang="ts">
-  import { IconAttachment } from "@intric/icons/attachment";
+  import { Paperclip } from "lucide-svelte";
+  import { buttonVariants } from "$lib/components/ui/button/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import { m } from "$lib/paraglide/messages";
 
   export let label = m.select_documents_to_attach();
-  import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
-  let selectedFiles: FileList;
+  let fileInput: HTMLInputElement;
 
   const {
     state: { attachmentRules },
@@ -19,30 +19,26 @@
   } = getAttachmentManager();
 
   function uploadFiles() {
-    if (!selectedFiles) return;
+    if (!fileInput.files?.length) return;
 
-    const errors = queueValidUploads([...selectedFiles]);
-
-    if (errors) {
-      toast.error(errors.join("\n"));
-    }
+    queueValidUploads([...fileInput.files]);
+    // Reset so re-selecting the same file still fires `change`.
+    fileInput.value = "";
   }
 </script>
 
-<div class="relative flex h-9 items-center overflow-hidden">
+<label
+  class={buttonVariants({ variant: "ghost", size: "icon" }) + " size-9 cursor-pointer rounded-lg"}
+  title={label}
+  aria-label={label}
+>
+  <Paperclip class="size-5" />
   <input
     type="file"
     accept={$attachmentRules.acceptString}
-    bind:files={selectedFiles}
-    aria-label={label}
+    bind:this={fileInput}
     multiple
-    id="fileInput"
     on:change={uploadFiles}
-    class="pointer-events-none absolute w-0 rounded-lg file:border-none file:bg-transparent file:text-transparent"
+    class="sr-only"
   />
-  <label
-    for="fileInput"
-    class="bg-secondary text-primary hover:bg-hover-stronger flex h-9 cursor-pointer items-center justify-center gap-1 rounded-lg pr-2 pl-1"
-    ><IconAttachment class="text-primary" />{m.attach_files()}</label
-  >
-</div>
+</label>
