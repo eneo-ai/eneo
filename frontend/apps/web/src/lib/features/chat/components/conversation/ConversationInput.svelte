@@ -16,9 +16,8 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { Globe, AlertTriangle } from "lucide-svelte";
+  import { Globe, AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { toast } from "$lib/components/toast";
 
   type McpServerSummary = {
     id: string;
@@ -31,9 +30,10 @@
   const { featureFlags } = getAppContext();
 
   const {
-    state: { attachments, isUploading },
+    state: { attachments, isUploading, uploadError },
     queueValidUploads,
-    clearUploads
+    clearUploads,
+    clearUploadError
   } = getAttachmentManager();
 
   const {
@@ -99,8 +99,8 @@
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
-    const errors = queueValidUploads([...event.clipboardData.files]);
-    if (errors) toast.error(errors.join("\n"));
+    // Validation errors surface inline via the manager's uploadError store.
+    queueValidUploads([...event.clipboardData.files]);
   }
 
   let inputError = $state<{ message: string; details?: string; isContextError?: boolean } | null>(
@@ -110,6 +110,7 @@
 
   const startNewConversation = () => {
     inputError = null;
+    clearUploadError();
     errorInputSnapshot = { question: "", attachmentIds: "" };
     if (onNewConversation) onNewConversation();
     else chat.newConversation();
@@ -349,6 +350,26 @@
       </div>
     {/if}
   </PromptInput.Body>
+
+  {#if $uploadError}
+    <div
+      class="text-destructive bg-destructive/10 mx-1.5 mt-1 flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-sm"
+      role="alert"
+    >
+      <div class="flex items-start gap-2">
+        <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <p class="whitespace-pre-line">{$uploadError}</p>
+      </div>
+      <button
+        type="button"
+        onclick={clearUploadError}
+        class="hover:bg-destructive/10 -mr-0.5 rounded p-0.5"
+        aria-label={m.dismiss()}
+      >
+        <X class="h-4 w-4" />
+      </button>
+    </div>
+  {/if}
 
   {#if inputError}
     <div

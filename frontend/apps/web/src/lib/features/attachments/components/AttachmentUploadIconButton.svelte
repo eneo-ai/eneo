@@ -9,7 +9,6 @@
   import { buttonVariants } from "$lib/components/ui/button/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
 
   export let label = m.select_documents_to_attach();
   let selectedFiles: FileList;
@@ -21,12 +20,9 @@
 
   function uploadFiles() {
     if (!selectedFiles) return;
-
-    const errors = queueValidUploads([...selectedFiles]);
-
-    if (errors) {
-      toast.error(errors.join("\n"));
-    }
+    // Validation errors surface inline via the manager's `uploadError` store
+    // (rendered next to the chat input), not as a transient toast.
+    queueValidUploads([...selectedFiles]);
   }
 </script>
 

@@ -37,7 +37,10 @@
       };
     })
   );
-  initAttachmentManager({ intric: getIntric(), options: { rules: attachmentRules } });
+  initAttachmentManager({
+    intric: getIntric(),
+    options: { rules: attachmentRules, inlineErrors: true }
+  });
 
   let scrollContainer = $state() as HTMLDivElement;
   let showScrollToBottom = $state(false);
@@ -138,7 +141,7 @@
   </div>
 </div>
 {#if isDragging}
-  <AttachmentDropArea bind:isDragging label={m.drop_files_here_conversation()} />
+  <AttachmentDropArea bind:isDragging label={m.drop_files_here_conversation()} inlineErrors />
 {/if}
 
 <style></style>

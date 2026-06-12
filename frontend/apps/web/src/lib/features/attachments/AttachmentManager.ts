@@ -49,6 +49,10 @@ type AttachmentManagerParams = {
     rules?: AttachmentRules | Readable<AttachmentRules>;
     /** Callback to run once a file has been uploaded to intric */
     onFileUploaded?: (file: UploadedFile) => void;
+    /** When true, upload/validation errors are exposed via the `uploadError`
+     * store for the consumer to render inline (e.g. next to the chat input)
+     * instead of being shown as a toast. */
+    inlineErrors?: boolean;
   };
 };
 
@@ -62,6 +66,7 @@ export { initAttachmentManager, getAttachmentManager };
 
 function createAttachmentManager(data: AttachmentManagerParams) {
   const { intric } = data;
+  const inlineErrors = data.options?.inlineErrors ?? false;
   const attachmentRules = (() => {
     const rules = data.options?.rules ?? {};
     if (
@@ -76,6 +81,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
 
   // Handling uploads ----------------------------------------
   const attachments = writable<Attachment[]>([]);
+  // The most recent upload/validation problem, held until the user fixes the
+  // input or dismisses it. Consumers that pass `inlineErrors` render this next
+  // to their input instead of relying on a transient toast.
+  const uploadError = writable<string | null>(null);
 
   const waitingUploads: string[] = [];
   const runningUploads: string[] = [];
@@ -173,7 +182,9 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           console.warn(`Cancelled upload for ${file.name}`);
         } else {
           const reason = getUploadErrorMessage(error);
-          toast.error(m.attachment_upload_failed({ fileName: file.name, reason }));
+          const message = m.attachment_upload_failed({ fileName: file.name, reason });
+          uploadError.set(message);
+          if (!inlineErrors) toast.error(message);
         }
         attachments.update(($attachments) => $attachments.filter((u) => u.id !== currentUpload));
       } finally {
@@ -186,11 +197,20 @@ function createAttachmentManager(data: AttachmentManagerParams) {
 
   function clearUploads() {
     attachments.set([]);
+    uploadError.set(null);
+  }
+
+  function clearUploadError() {
+    uploadError.set(null);
   }
 
   function queueValidUploadsDetailed(files: File[], rules?: AttachmentRules) {
     const errors: AttachmentValidationError[] = [];
     const selectedRules = rules ?? get(attachmentRules);
+
+    // A fresh attempt clears any stale problem (e.g. the user retries with a
+    // smaller file) before we re-evaluate this batch.
+    uploadError.set(null);
 
     for (const file of files) {
       const $attachments = get(attachments);
@@ -259,7 +279,11 @@ function createAttachmentManager(data: AttachmentManagerParams) {
       queueUploads([file]);
     }
 
-    return errors.length > 0 ? errors : null;
+    if (errors.length > 0) {
+      uploadError.set(errors.map((error) => error.message).join("\n"));
+      return errors;
+    }
+    return null;
   }
 
   function queueValidUploads(files: File[], rules?: AttachmentRules) {
@@ -274,7 +298,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
       isUploading: derived(attachments, ($attachments) =>
         $attachments.some((upload) => upload.status !== "completed")
       ),
-      attachmentRules
+      attachmentRules,
+      /** Latest upload/validation problem (or null); rendered inline by consumers
+       * that opt in via `options.inlineErrors`. */
+      uploadError: { subscribe: uploadError.subscribe }
     },
     /**
      * Will test the supplied files and upload the files passing the rule set.
@@ -284,6 +311,8 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     queueValidUploads,
     queueValidUploadsDetailed,
     /** Will reset the current attachment list */
-    clearUploads
+    clearUploads,
+    /** Dismiss the current inline upload error */
+    clearUploadError
   });
 }
