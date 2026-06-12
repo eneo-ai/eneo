@@ -30,6 +30,13 @@ def test_patch_based_models_use_multiplier():
     assert openai_image_tokens(1024, 1024, "o4-mini") == 1762  # 1024*1.72
 
 
+def test_gpt54_snapshot_uses_2500_patch_budget():
+    # A rendered A4 PDF page at 2048px long edge is patch-priced by GPT-5.4.
+    # The old broad "gpt-5" match incorrectly tile-priced this as 910 tokens.
+    assert openai_image_tokens(1448, 2048, "openai/gpt-5.4-2026-03-05") == 2478
+    assert openai_image_tokens(8000, 8000, "gpt-5.4") == 2500
+
+
 def test_patch_budget_caps_large_images():
     # A rendered A4 page at 2048px long edge: 46x64 = 2944 raw patches, scaled
     # down to fit the 1536-patch budget -> 32x46 = 1472 patches.
