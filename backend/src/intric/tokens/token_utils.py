@@ -22,99 +22,24 @@ from typing import Any, Optional, cast
 import litellm
 from PIL import Image
 
+from intric.tokens.anthropic_image_pricing import (
+    anthropic_image_tokens,
+    is_anthropic_model,
+)
+
 logger = logging.getLogger(__name__)
 
 _FALLBACK_MESSAGE_OVERHEAD_TOKENS = 4
 
-# Anthropic bills one token per 28×28 pixel patch after resizing the image to
-# fit both a long-edge limit and a per-image token budget (1568px/1568 tokens
-# on most models; 2576px/4784 tokens on the high-resolution Opus 4.7+ family).
 # OpenAI bills a base cost plus a per-512px-tile cost at detail "high", after
-# fitting the image in 2048² and scaling the short side to 768px. Both
-# formulas are documented; the drift alarm below catches them going stale.
-_ANTHROPIC_PATCH_PX = 28
-_ANTHROPIC_IMAGE_MAX_EDGE = 1568
-_ANTHROPIC_IMAGE_MAX_TOKENS = 1568
-_ANTHROPIC_HIGH_RES_MAX_EDGE = 2576
-_ANTHROPIC_HIGH_RES_MAX_TOKENS = 4784
-# Models with high-resolution image support (larger native limits). Future
-# model families are unknowable here — they fall back to the standard limits
-# and the drift alarm surfaces the mismatch.
-_ANTHROPIC_HIGH_RES_MARKERS = ("opus-4-7", "opus-4-8", "fable", "mythos")
+# fitting the image in 2048² and scaling the short side to 768px. Anthropic
+# prices differently — see anthropic_image_pricing.py. Both formulas are
+# documented; the drift alarm below catches them going stale.
 _OPENAI_IMAGE_FIT_EDGE = 2048
 _OPENAI_IMAGE_SHORT_EDGE = 768
 _OPENAI_IMAGE_TILE_PX = 512
 _OPENAI_IMAGE_TILE_TOKENS = 170
 _OPENAI_IMAGE_BASE_TOKENS = 85
-
-
-def _is_anthropic_model(model_name: str) -> bool:
-    # TenantModelAdapter / preflight pass "<provider_type>/<name>". Claude can
-    # also be served through openai-compatible or bedrock-style providers, so
-    # match the name segment too — "claude" in the model name means Anthropic
-    # image pricing regardless of the route.
-    head, _, tail = model_name.partition("/")
-    if head.lower() == "anthropic":
-        return True
-    return "claude" in (tail or head).lower()
-
-
-def _anthropic_patch_tokens(width: int, height: int) -> int:
-    return math.ceil(width / _ANTHROPIC_PATCH_PX) * math.ceil(
-        height / _ANTHROPIC_PATCH_PX
-    )
-
-
-def _anthropic_resized_size(
-    width: int, height: int, max_edge: int, max_tokens: int
-) -> tuple[int, int]:
-    """The size Anthropic resizes an image to before pricing.
-
-    Mirrors the reference implementation in Anthropic's vision docs: the
-    largest aspect-preserving size whose padded edges stay within max_edge
-    AND whose patch cost stays within max_tokens.
-    """
-
-    def fits(w: int, h: int) -> bool:
-        return (
-            math.ceil(w / _ANTHROPIC_PATCH_PX) * _ANTHROPIC_PATCH_PX <= max_edge
-            and math.ceil(h / _ANTHROPIC_PATCH_PX) * _ANTHROPIC_PATCH_PX <= max_edge
-            and _anthropic_patch_tokens(w, h) <= max_tokens
-        )
-
-    if fits(width, height):
-        return (width, height)
-    if height > width:
-        resized_h, resized_w = _anthropic_resized_size(
-            height, width, max_edge, max_tokens
-        )
-        return (resized_w, resized_h)
-
-    aspect_ratio = width / height
-    lo, hi = 1, width  # lo always fits; hi never fits
-    while lo + 1 < hi:
-        mid = (lo + hi) // 2
-        if fits(mid, max(round(mid / aspect_ratio), 1)):
-            lo = mid
-        else:
-            hi = mid
-    return (lo, max(round(lo / aspect_ratio), 1))
-
-
-def _anthropic_image_tokens(width: int, height: int, model_name: str = "") -> int:
-    """Anthropic's documented image cost: one token per 28×28 pixel patch,
-    after resizing to fit the model's edge and per-image token limits."""
-    name = model_name.lower()
-    if any(marker in name for marker in _ANTHROPIC_HIGH_RES_MARKERS):
-        max_edge, max_tokens = (
-            _ANTHROPIC_HIGH_RES_MAX_EDGE,
-            _ANTHROPIC_HIGH_RES_MAX_TOKENS,
-        )
-    else:
-        max_edge, max_tokens = _ANTHROPIC_IMAGE_MAX_EDGE, _ANTHROPIC_IMAGE_MAX_TOKENS
-    return _anthropic_patch_tokens(
-        *_anthropic_resized_size(width, height, max_edge, max_tokens)
-    )
 
 
 def _openai_image_tokens(width: int, height: int) -> int:
@@ -136,8 +61,10 @@ _FALLBACK_IMAGE_TOKENS = _openai_image_tokens(2048, 1024)
 
 def count_image_tokens(width: int, height: int, model_name: str = "") -> int:
     """Tokens an image of the given pixel dimensions costs at detail "high"."""
-    if _is_anthropic_model(model_name):
-        return _anthropic_image_tokens(width, height, model_name)
+    # The only dispatch into Anthropic-specific pricing — remove this branch
+    # together with anthropic_image_pricing.py to drop that special handling.
+    if is_anthropic_model(model_name):
+        return anthropic_image_tokens(width, height, model_name)
     return _openai_image_tokens(width, height)
 
 

@@ -1,13 +1,10 @@
 import base64
 import io
-import math
 from unittest.mock import patch
 
 from PIL import Image
 
 from intric.tokens.token_utils import (
-    _anthropic_image_tokens,
-    _is_anthropic_model,
     _openai_image_tokens,
     count_image_tokens_from_blob,
     count_message_tokens,
@@ -125,53 +122,11 @@ def test_count_tool_tokens_fallback_when_litellm_fails():
         assert count_tool_tokens(_TOOLS) > 0
 
 
-def test_anthropic_image_tokens_match_documented_table():
-    # Reference values from Anthropic's vision docs: one token per 28x28
-    # patch after resizing to fit 1568px long edge AND 1568 tokens.
-    assert _anthropic_image_tokens(200, 200) == 64
-    assert _anthropic_image_tokens(1000, 1000) == 1296
-    assert _anthropic_image_tokens(1092, 1092) == 1521
-    assert _anthropic_image_tokens(1920, 1080) == 1560  # -> 1456x819
-    assert _anthropic_image_tokens(2000, 1500) == 1564  # -> 1270x952
-    assert _anthropic_image_tokens(3840, 2160) == 1560  # -> 1456x819
-    # The A4 example: token budget binds before the edge limit.
-    assert _anthropic_image_tokens(1075, 1520) == 1551  # -> 924x1307
-
-
-def test_anthropic_image_tokens_never_exceed_per_image_cap():
-    # Token-budget cap: huge images cost at most ~1568 tokens, not (w*h)-scaled.
-    assert _anthropic_image_tokens(2048, 1024) == 1568  # -> 1568x784
-    assert _anthropic_image_tokens(1536, 2048) <= 1568
-    assert _anthropic_image_tokens(8000, 8000) <= 1568
-
-
-def test_anthropic_high_res_models_use_larger_limits():
-    # Opus 4.7+ family prices at native resolution up to 2576px / 4784 tokens.
-    assert _anthropic_image_tokens(
-        2048, 1024, "anthropic/claude-opus-4-8"
-    ) == math.ceil(2048 / 28) * math.ceil(1024 / 28)
-    # Documented 4K example: downscaled to 2576x1449 -> 4784 tokens.
-    assert _anthropic_image_tokens(3840, 2160, "claude-opus-4-7") == 4784
-
-
 def test_openai_image_tokens_formula():
     # Fit in 2048², short side scaled to 768, 85 base + 170 per 512px tile.
     assert _openai_image_tokens(512, 512) == 85 + 170  # 1 tile
     assert _openai_image_tokens(2048, 1024) == 1105  # -> 1536x768, 3x2 tiles
     assert _openai_image_tokens(4096, 4096) == 85 + 170 * 4  # -> 768x768, 2x2 tiles
-
-
-def test_is_anthropic_model_matches_claude_behind_any_provider():
-    # Claude served through openai-compatible or bedrock-style routes must
-    # still get Anthropic image pricing.
-    assert _is_anthropic_model("anthropic/claude-3-5-haiku-20241022")
-    assert _is_anthropic_model("claude-3-5-sonnet")
-    assert _is_anthropic_model("openai/claude-3-5-sonnet")
-    assert _is_anthropic_model("azure/my-claude-deployment")
-    assert _is_anthropic_model("bedrock/anthropic.claude-v2")
-    assert not _is_anthropic_model("openai/gpt-4o")
-    assert not _is_anthropic_model("gpt-4o")
-    assert not _is_anthropic_model("")
 
 
 def _image_blob(width: int, height: int) -> bytes:
