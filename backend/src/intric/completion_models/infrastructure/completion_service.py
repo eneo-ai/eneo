@@ -305,7 +305,7 @@ class CompletionService:
             else:
                 logging_details = None
         except BaseException:
-            # Context building can raise (e.g. QueryException when over budget).
+            # Context building can still raise on malformed input or dependencies.
             # The proxy is closed in the streaming/non-streaming paths below, but
             # those are never reached on failure here.
             if mcp_proxy:

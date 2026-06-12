@@ -1358,7 +1358,7 @@ export interface paths {
     put?: never;
     /**
      * Preflight Tokens
-     * @description Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).
+     * @description Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).
      */
     post: operations["preflight_tokens_api_v1_conversations_preflight_post"];
     delete?: never;
@@ -14074,11 +14074,12 @@ export interface components {
     };
     /**
      * PreflightResponse
-     * @description Exact token cost the next request will add to the context window.
+     * @description Estimated token cost the next request will add to the context window.
      *
      *     Excludes knowledge/RAG chunks and web-search results — those are selected
-     *     at request time. The frontend pairs this delta with the persisted history
-     *     tokens to project total context fill.
+     *     at request time. Provider tokenization is authoritative and can differ from
+     *     this local estimate, especially for multimodal inputs. The frontend pairs
+     *     this delta with the persisted history tokens to project total context fill.
      *
      *     `model_name` and `context_window` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model

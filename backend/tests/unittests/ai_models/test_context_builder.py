@@ -18,7 +18,6 @@ from intric.completion_models.infrastructure.static_prompts import (
     SHOW_REFERENCES_PROMPT,
 )
 from intric.files.file_models import File, FileType
-from intric.main.exceptions import QueryException
 from intric.questions.question import ToolCallInfo
 
 QUESTION = "I have a question"
@@ -217,21 +216,37 @@ def test_context_with_messages_and_images(context_builder: ContextBuilder):
     assert context.messages == expected_messages
 
 
-def test_get_error_on_too_long_question(context_builder: ContextBuilder):
+def test_too_long_question_is_forwarded_to_provider(context_builder: ContextBuilder):
     input_str = "This is a loooooong query, longer than 5 tokens"
 
-    with pytest.raises(QueryException):
-        context_builder.build_context(input_str=input_str, max_tokens=5)
+    context = context_builder.build_context(input_str=input_str, max_tokens=5)
+
+    assert context.input == input_str
+    assert context.token_count > 5
 
 
-def test_get_error_on_too_long_question_and_prompt(context_builder: ContextBuilder):
+def test_too_long_required_context_skips_knowledge(
+    context_builder: ContextBuilder,
+):
     input_str = "Short query"
     prompt_str = "This is a super long prompt string"
+    chunk = MagicMock(
+        text="knowledge that must not make an oversized request even larger",
+        chunk_no=1,
+        info_blob_id=uuid4(),
+        info_blob_title="Knowledge",
+    )
 
-    with pytest.raises(QueryException):
-        context_builder.build_context(
-            input_str=input_str, prompt=prompt_str, max_tokens=7
-        )
+    context = context_builder.build_context(
+        input_str=input_str,
+        prompt=prompt_str,
+        info_blob_chunks=[chunk],
+        max_tokens=7,
+    )
+
+    assert context.input == input_str
+    assert context.prompt == prompt_str
+    assert context.token_count > 7
 
 
 def _question_mock(question: str, answer: str, tool_calls=None) -> MagicMock:

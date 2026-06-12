@@ -18,6 +18,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { Globe, AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
     id: string;
@@ -116,17 +117,6 @@
     else chat.newConversation();
   };
 
-  function parseTokenError(errorMessage: string): { used: number; limit: number } | null {
-    const match = errorMessage.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
-    if (match) {
-      return {
-        used: parseInt(match[1].replace(/,/g, "")),
-        limit: parseInt(match[2].replace(/,/g, ""))
-      };
-    }
-    return null;
-  }
-
   async function ask() {
     if (isAskingDisabled) return;
     inputError = null;
@@ -157,25 +147,21 @@
       resetMentionInput();
       clearUploads();
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const lower = errorMessage.toLowerCase();
-      const isContextError =
-        lower.includes("context window") ||
-        lower.includes("context length") ||
-        lower.includes("tokens used") ||
-        lower.includes("too long");
-
-      if (isContextError) {
-        const tokenInfo = parseTokenError(errorMessage);
-        if (tokenInfo) {
-          const excess = tokenInfo.used - tokenInfo.limit;
+      const contextError = getContextErrorInfo(error);
+      if (contextError) {
+        if (contextError.used !== undefined && contextError.limit !== undefined) {
+          const excess = contextError.used - contextError.limit;
           inputError = {
             message: m.context_window_exceeded(),
-            details: `${tokenInfo.used.toLocaleString()} / ${tokenInfo.limit.toLocaleString()} tokens (${excess.toLocaleString()} ${m.over()})`,
+            details: `${contextError.used.toLocaleString()} / ${contextError.limit.toLocaleString()} tokens (${excess.toLocaleString()} ${m.over()}). ${m.context_window_input_preserved()}`,
             isContextError: true
           };
         } else {
-          inputError = { message: m.context_window_exceeded(), isContextError: true };
+          inputError = {
+            message: m.context_window_exceeded(),
+            details: m.context_window_input_preserved(),
+            isContextError: true
+          };
         }
       } else {
         inputError = { message: getErrorMessage(error) };
@@ -187,6 +173,7 @@
           .sort()
           .join(",")
       };
+      focusMentionInput();
     }
   }
 
@@ -299,16 +286,16 @@
     chat.partner.type === "default-assistant" && Boolean(spacesManager)
   );
 
-  // Block sending while the local projection says the next message will
-  // overflow the context window. Removes the need to round-trip the server
-  // error path for the obvious case; the server still validates as the
-  // authoritative source.
+  // Preflight is advisory. Keep Send enabled when only the estimate exceeds
+  // the context window and let the provider validate the final payload.
   const isAskingDisabled = $derived(
-    chat.askQuestion.isLoading ||
-      $isUploading ||
-      ($question === "" && $attachments.length === 0) ||
-      !chat.hasCompletionModel ||
-      chat.willExceedContext
+    isConversationSubmitDisabled({
+      isLoading: chat.askQuestion.isLoading,
+      isUploading: $isUploading,
+      hasContent: $question !== "" || $attachments.length > 0,
+      hasCompletionModel: chat.hasCompletionModel,
+      estimatedExceedsContext: chat.willExceedContext
+    })
   );
 </script>
 
@@ -374,6 +361,7 @@
   {#if inputError}
     <div
       class="text-destructive bg-destructive/10 mx-1.5 mt-1 flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-sm"
+      role="alert"
     >
       <div class="flex items-start gap-2">
         <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />

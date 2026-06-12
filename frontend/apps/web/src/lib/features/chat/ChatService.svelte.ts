@@ -110,9 +110,8 @@ export class ChatService {
     this.pendingModelName || this.#partnerModelName() || this.#latestMessageModelName() || ""
   );
 
-  // Single source of truth for "the next message would overflow context".
-  // Both the input (disable Send) and the usage bar (turn red) read from
-  // here so the two surfaces can't disagree.
+  // Advisory signal that the locally estimated next request may overflow.
+  // The composer does not block on this; provider tokenization is authoritative.
   willExceedContext = $derived<boolean>(
     this.contextLimit > 0 &&
       this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit

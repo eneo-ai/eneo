@@ -182,15 +182,16 @@ class ConversationService:
         group_chat_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
     ) -> PreflightResponse:
-        """Count the tokens this request would add to context, without sending.
+        """Estimate the tokens this request would add to context, without sending.
 
         Returns the delta: the user's text, the text-file prefix that
         context_builder would prepend, and — for vision models — attached
-        images plus images derived from document uploads, priced the same way
-        the real request counts them. Excludes knowledge/RAG and web-search
-        content because both are selected at request time and have no stable
-        cost to report up-front. Model name and context window are echoed so
-        the caller can compute percentage fill without a round-trip.
+        images plus images derived from document uploads, priced with the same
+        local formulas as the real request. Provider tokenization remains
+        authoritative. Excludes knowledge/RAG and web-search content because
+        both are selected at request time and have no stable cost to report
+        up-front. Model name and context window are echoed so the caller can
+        compute percentage fill without a round-trip.
         """
         model, selector_tokens = await self._resolve_preflight_model(
             question=question,

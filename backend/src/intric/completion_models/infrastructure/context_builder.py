@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, Sequence
@@ -22,7 +23,6 @@ from intric.completion_models.infrastructure.static_prompts import (
 )
 from intric.files.file_models import File, FileType
 from intric.main.config import get_settings
-from intric.main.exceptions import QueryException
 from intric.questions.question import ToolCallInfo
 from intric.sessions.session import SessionInDB
 from intric.tokens.token_utils import (
@@ -31,6 +31,8 @@ from intric.tokens.token_utils import (
     count_tokens,  # noqa: F401 — re-exported for external callers
     count_tool_tokens,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _replayable_tool_calls(
@@ -646,16 +648,21 @@ class ContextBuilder:
         )
         tokens_used += tokens_used_messages
 
-        # Check for worst case.
-        # Up until this point, all text will be
-        # assumed by the user to be there,
-        # and erroring is preferable to not
-        # including something.
+        # Local counting is an estimate. Do not reject a request solely because
+        # it crosses the configured limit: provider tokenization is authoritative
+        # and may accept it. Knowledge below receives no remaining budget, while
+        # the required prompt/input is still sent so the provider can decide.
         if tokens_used > max_tokens:
-            raise QueryException(tokens_used=tokens_used, token_limit=max_tokens)
+            logger.warning(
+                "Estimated context exceeds configured model limit: "
+                "%d estimated tokens vs %d configured tokens; sending request "
+                "to provider for authoritative validation",
+                tokens_used,
+                max_tokens,
+            )
 
         # Add the knowledge in all the space that is left.
-        tokens_left = max_tokens - tokens_used
+        tokens_left = max(max_tokens - tokens_used, 0)
         _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
         prompt_text = str(_prompt)
         tokens_used += _prompt.get_tokens_of_knowledge()
