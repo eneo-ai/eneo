@@ -1364,18 +1364,24 @@ class AssistantService:
             return final_answer
 
     async def _with_vision_derivatives(
-        self, files: list["File"], session: "SessionInDB", assistant: "Assistant"
+        self,
+        files: list["File"],
+        session: "SessionInDB",
+        assistant: "Assistant",
+        completion_model: Optional["CompletionModel"],
     ) -> list["File"]:
         """Give the completion the images derived from document attachments.
 
         Expands the current files, the assistant's fixed attachments and the
         session history. Derived images are a completion-side concern only:
         they are never persisted on the question or returned as user
-        attachments. When the model lacks vision everything passes through
-        untouched, so a PDF with images still works as a plain text
+        attachments. Gates on the model that will actually answer — the
+        governance-effective model, which can differ from the assistant's own
+        in vision support. When that model lacks vision everything passes
+        through untouched, so a PDF with images still works as a plain text
         attachment.
         """
-        if assistant.completion_model is None or not assistant.completion_model.vision:
+        if completion_model is None or not completion_model.vision:
             return files
 
         if assistant.attachments:
@@ -1615,7 +1621,10 @@ class AssistantService:
         # returned; `completion_files` additionally carries derived images
         # (e.g. rendered PDF pages) that only the model should see.
         completion_files = await self._with_vision_derivatives(
-            files=files, session=session, assistant=assistant_to_ask
+            files=files,
+            session=session,
+            assistant=assistant_to_ask,
+            completion_model=effective_completion_model,
         )
 
         # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
