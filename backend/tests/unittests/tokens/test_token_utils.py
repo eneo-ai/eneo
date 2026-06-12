@@ -125,13 +125,33 @@ def test_count_tool_tokens_fallback_when_litellm_fails():
         assert count_tool_tokens(_TOOLS) > 0
 
 
-def test_anthropic_image_tokens_formula():
-    # No downscale needed (long edge <= 1568): (w*h)/750 rounded up.
-    assert _anthropic_image_tokens(1024, 1024) == math.ceil(1024 * 1024 / 750)
-    assert _anthropic_image_tokens(800, 600) == 640
-    # Long edge > 1568 is scaled down to 1568 before pricing.
-    assert _anthropic_image_tokens(2048, 1024) == 1640  # -> 1568x784
-    assert _anthropic_image_tokens(1536, 2048) == 2459  # -> 1176x1568
+def test_anthropic_image_tokens_match_documented_table():
+    # Reference values from Anthropic's vision docs: one token per 28x28
+    # patch after resizing to fit 1568px long edge AND 1568 tokens.
+    assert _anthropic_image_tokens(200, 200) == 64
+    assert _anthropic_image_tokens(1000, 1000) == 1296
+    assert _anthropic_image_tokens(1092, 1092) == 1521
+    assert _anthropic_image_tokens(1920, 1080) == 1560  # -> 1456x819
+    assert _anthropic_image_tokens(2000, 1500) == 1564  # -> 1270x952
+    assert _anthropic_image_tokens(3840, 2160) == 1560  # -> 1456x819
+    # The A4 example: token budget binds before the edge limit.
+    assert _anthropic_image_tokens(1075, 1520) == 1551  # -> 924x1307
+
+
+def test_anthropic_image_tokens_never_exceed_per_image_cap():
+    # Token-budget cap: huge images cost at most ~1568 tokens, not (w*h)-scaled.
+    assert _anthropic_image_tokens(2048, 1024) == 1568  # -> 1568x784
+    assert _anthropic_image_tokens(1536, 2048) <= 1568
+    assert _anthropic_image_tokens(8000, 8000) <= 1568
+
+
+def test_anthropic_high_res_models_use_larger_limits():
+    # Opus 4.7+ family prices at native resolution up to 2576px / 4784 tokens.
+    assert _anthropic_image_tokens(
+        2048, 1024, "anthropic/claude-opus-4-8"
+    ) == math.ceil(2048 / 28) * math.ceil(1024 / 28)
+    # Documented 4K example: downscaled to 2576x1449 -> 4784 tokens.
+    assert _anthropic_image_tokens(3840, 2160, "claude-opus-4-7") == 4784
 
 
 def test_openai_image_tokens_formula():
@@ -167,7 +187,7 @@ def test_count_image_tokens_from_blob_uses_provider_formula():
     assert count_image_tokens_from_blob(blob, "openai/gpt-4o") == 1105
     assert (
         count_image_tokens_from_blob(blob, "anthropic/claude-3-5-haiku-20241022")
-        == 1640
+        == 1568
     )
 
 
@@ -199,7 +219,7 @@ def test_drift_logging_silent_within_threshold(caplog):
 
 def test_count_message_tokens_prices_images_by_provider_formula():
     # Each provider has its own documented image cost: OpenAI's tile formula
-    # gives ~1105 for 2048x1024, Anthropic's dimension formula ~1640.
+    # gives 1105 for 2048x1024, Anthropic's patch formula 1568 (capped).
     blank = [{"role": "user", "content": ""}]
     message = _image_message(2048, 1024)
 
@@ -210,5 +230,5 @@ def test_count_message_tokens_prices_images_by_provider_formula():
         message, "openai/gpt-4o"
     ) - count_message_tokens(blank, "openai/gpt-4o")
 
-    assert anthropic_delta == 1640
+    assert anthropic_delta == 1568
     assert openai_delta == 1105
