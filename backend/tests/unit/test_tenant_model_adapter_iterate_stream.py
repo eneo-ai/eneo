@@ -58,6 +58,28 @@ def _tool_call_chunk(
     return SimpleNamespace(choices=[choice])
 
 
+def _tool_call_delta_chunk(
+    *,
+    index: int = 0,
+    tool_call_id: str | None = None,
+    tool_name: str | None = None,
+    arguments: str | None = None,
+    finish_reason: str | None = None,
+):
+    delta = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            SimpleNamespace(
+                index=index,
+                id=tool_call_id,
+                function=SimpleNamespace(name=tool_name, arguments=arguments),
+            )
+        ],
+    )
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice])
+
+
 def _text_chunk(text: str, finish_reason: str | None = None):
     delta = SimpleNamespace(content=text, tool_calls=None)
     choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
@@ -76,7 +98,10 @@ class _FakeMCPProxy:
 
     async def call_tools_parallel(self, proxy_calls):
         self.calls.append(proxy_calls)
-        return [{"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}]
+        return [
+            {"content": [{"type": "text", "text": "tool-ok"}], "is_error": False}
+            for _ in proxy_calls
+        ]
 
 
 def _make_adapter() -> TenantModelAdapter:
@@ -272,6 +297,153 @@ async def test_mid_stream_provider_failure_yields_unavailable_event():
     assert errors[0].error_code == 503
     span.set_attribute.assert_any_call("gen_ai.request.stream", True)
     span.set_attribute.assert_any_call("error.type", PROVIDER_UNAVAILABLE_CODE)
+
+
+def _tool_call_events(completions):
+    return [
+        c
+        for c in completions
+        if c.response_type == ResponseType.TOOL_CALL and c.tool_calls_metadata
+    ]
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_emits_pending_event_before_arguments_complete():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_delta_chunk(tool_call_id="call_1", tool_name="server__tool"),
+            _tool_call_delta_chunk(arguments='{"q":'),
+            _tool_call_delta_chunk(arguments='"x"}', finish_reason="tool_calls"),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    tool_events = _tool_call_events(completions)
+    pending = [
+        e for e in tool_events if e.tool_calls_metadata[0].result_status == "pending"
+    ]
+    assert len(pending) == 1
+    meta = pending[0].tool_calls_metadata[0]
+    assert meta.tool_call_id == "call_1"
+    assert meta.server_name == "Server"
+    assert meta.tool_name == "tool"
+    assert meta.arguments is None
+    assert meta.mcp_tool_name == "server__tool"
+
+    # Pending must precede the approved/executed events for the same call
+    statuses = [e.tool_calls_metadata[0].result_status for e in tool_events]
+    assert statuses[0] == "pending"
+    assert "succeeded" in statuses
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_emits_pending_per_parallel_tool_call():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    mocked_acompletion = AsyncMock(return_value=follow_up_stream)
+
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="call_1", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(index=0, arguments='{"q":"a"}'),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="call_2", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(
+                index=1, arguments='{"q":"b"}', finish_reason="tool_calls"
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "intric.completion_models.infrastructure.adapters.tenant_model_adapter.litellm.acompletion",
+        mocked_acompletion,
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    pending_ids = [
+        e.tool_calls_metadata[0].tool_call_id
+        for e in _tool_call_events(completions)
+        if e.tool_calls_metadata[0].result_status == "pending"
+    ]
+    assert pending_ids == ["call_1", "call_2"]
+    assert mcp_proxy.calls == [
+        [("server__tool", {"q": "a"}), ("server__tool", {"q": "b"})]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_no_pending_event_for_disallowed_tool():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_delta_chunk(
+                tool_call_id="call_1",
+                tool_name="server__forbidden",
+                arguments="{}",
+                finish_reason="tool_calls",
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    completions = await _collect(
+        adapter,
+        stream,
+        require_tool_approval=False,
+        approval_manager=None,
+        approval_context=None,
+        pending_approval_ids=set(),
+    )
+
+    assert not _tool_call_events(completions)
+    assert any(c.response_type == ResponseType.ERROR for c in completions)
 
 
 @pytest.mark.asyncio

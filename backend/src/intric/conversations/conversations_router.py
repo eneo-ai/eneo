@@ -352,6 +352,7 @@ async def chat(
             version=version,
             use_web_search=request.use_web_search,
             require_tool_approval=request.require_tool_approval,
+            disabled_mcp_server_ids=request.disabled_mcp_server_ids,
         )
 
     return await to_conversation_response(response=response, stream=request.stream)

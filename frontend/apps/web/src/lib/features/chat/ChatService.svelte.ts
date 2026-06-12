@@ -4,6 +4,7 @@ import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
+import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
   type ConversationSparse,
   type Assistant,
@@ -24,17 +25,17 @@ export type PendingToolApproval = {
 };
 
 export type ChatPartner = GroupChat | Assistant;
+type SparseCompletionModel = NonNullable<Assistant["completion_model"]>;
 
 export class ChatService {
   #chatPartner = $state<ChatPartner>() as ChatPartner; // Needs typecast to get rid of undefined
   partner = $derived(this.#chatPartner);
-  hasCompletionModel = $derived(
-    this.#chatPartner &&
-      ("completion_model" in this.#chatPartner
-        ? this.#chatPartner.completion_model !== null &&
-          this.#chatPartner.completion_model !== undefined
-        : "tools" in this.#chatPartner && this.#chatPartner.tools?.assistants?.length > 0)
-  );
+  hasCompletionModel = $derived.by(() => {
+    const partner = this.#chatPartner;
+    if (!partner) return false;
+    if ("completion_model" in partner) return this.#partnerEffectiveModel() !== undefined;
+    return "tools" in partner && partner.tools?.assistants?.length > 0;
+  });
   #intric: Intric;
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
@@ -85,16 +86,28 @@ export class ChatService {
   pendingContextWindow = $state<number>(0);
   #preflightDebounce: ReturnType<typeof setTimeout> | null = null;
   #preflightGen = 0;
-  // Prefer the pending preflight model/window while the user is composing;
-  // otherwise use the model recorded on the most recent message (covers group
-  // chats where the active model varies per turn), then the partner's own
-  // completion model for fresh assistant conversations.
+  // Resolution order for the active model's context window:
+  //   1. preflight (server-resolved current model, set while composing)
+  //   2. for a single assistant, the partner's own model — it is global and
+  //      authoritative for the next turn, so it must win over history (opening
+  //      an old conversation must reflect the model that will actually answer,
+  //      i.e. what the picker shows, not whatever model answered last time)
+  //   3. the most recent message's model — only meaningful for group chats,
+  //      where the active model varies per turn
   contextLimit = $derived<number>(
     this.pendingContextWindow ||
+      this.#partnerModelTokenLimit() ||
       this.#latestMessageTokenLimit() ||
-      (this.#chatPartner && "completion_model" in this.#chatPartner
-        ? (this.#chatPartner.completion_model?.token_limit ?? 0)
-        : 0)
+      0
+  );
+
+  // The name of the model that will answer the next turn. Single source of
+  // truth for any "active model" label (e.g. the context bar) so it can never
+  // disagree with contextLimit — same precedence: live preflight, then the
+  // single assistant's own (global) model, then the latest message's model
+  // for group chats where the active model varies per turn.
+  activeModelName = $derived<string>(
+    this.pendingModelName || this.#partnerModelName() || this.#latestMessageModelName() || ""
   );
 
   // Single source of truth for "the next message would overflow context".
@@ -104,6 +117,26 @@ export class ChatService {
     this.contextLimit > 0 &&
       this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit
   );
+
+  // The current partner's effective model — set only for single assistants
+  // (group chats carry no single model, so this is undefined and the caller
+  // falls back to the latest-message model). Mirrors backend governance
+  // resolution: keep an allowed current model, otherwise use policy default,
+  // then the first allowed model.
+  #partnerEffectiveModel(): SparseCompletionModel | undefined {
+    const partner = this.#chatPartner;
+    if (!partner || !("completion_model" in partner)) return undefined;
+
+    return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  }
+
+  #partnerModelTokenLimit(): number | undefined {
+    return this.#partnerEffectiveModel()?.token_limit ?? undefined;
+  }
+
+  #partnerModelName(): string | undefined {
+    return this.#partnerEffectiveModel()?.name ?? undefined;
+  }
 
   #latestMessageTokenLimit(): number | undefined {
     const messages = this.currentConversation?.messages;
@@ -115,8 +148,22 @@ export class ChatService {
     return undefined;
   }
 
+  #latestMessageModelName(): string | undefined {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const name = messages[i].completion_model?.name;
+      if (name) return name;
+    }
+    return undefined;
+  }
+
   // Streaming buffer for smoother text rendering (rAF-based for frame alignment)
   #streamBuffer = "";
+  // Reasoning deltas share the same frame-aligned flush loop as answer text —
+  // thinking-heavy models emit hundreds of deltas/sec, so appending each one
+  // straight to reactive state would re-render the trace per token.
+  #reasoningBuffer = "";
   #streamAnimationFrame: number | null = null;
   #lastFlushTime = 0;
   #streamRef: ConversationMessage | null = null;
@@ -254,10 +301,16 @@ export class ChatService {
 
     const elapsed = timestamp - this.#lastFlushTime;
 
-    // Flush if enough time has passed
-    if (elapsed >= this.#streamFlushInterval && this.#streamBuffer) {
-      this.#streamRef.answer += this.#streamBuffer;
-      this.#streamBuffer = "";
+    // Flush answer and reasoning together when enough time has passed
+    if (elapsed >= this.#streamFlushInterval && (this.#streamBuffer || this.#reasoningBuffer)) {
+      if (this.#streamBuffer) {
+        this.#streamRef.answer += this.#streamBuffer;
+        this.#streamBuffer = "";
+      }
+      if (this.#reasoningBuffer) {
+        this.#appendReasoning(this.#streamRef, this.#reasoningBuffer);
+        this.#reasoningBuffer = "";
+      }
       this.#lastFlushTime = timestamp;
     }
 
@@ -266,6 +319,12 @@ export class ChatService {
       this.#streamAnimationFrame = requestAnimationFrame(this.#flushLoop);
     }
   };
+
+  #appendReasoning(ref: ConversationMessage, text: string) {
+    // `reasoning` is a runtime-only streaming property on the message.
+    (ref as { reasoning?: string }).reasoning =
+      ((ref as { reasoning?: string }).reasoning ?? "") + text;
+  }
 
   // Start the buffering loop for a message
   #startStreamBuffering(ref: ConversationMessage) {
@@ -291,9 +350,15 @@ export class ChatService {
     }
 
     // Flush any remaining content
-    if (this.#streamBuffer && this.#streamRef) {
-      this.#streamRef.answer += this.#streamBuffer;
-      this.#streamBuffer = "";
+    if (this.#streamRef) {
+      if (this.#streamBuffer) {
+        this.#streamRef.answer += this.#streamBuffer;
+        this.#streamBuffer = "";
+      }
+      if (this.#reasoningBuffer) {
+        this.#appendReasoning(this.#streamRef, this.#reasoningBuffer);
+        this.#reasoningBuffer = "";
+      }
     }
 
     this.#streamRef = null;
@@ -378,10 +443,23 @@ export class ChatService {
   }
 
   changeChatPartner(newPartner: ChatPartner) {
-    const oldPartner = this.#chatPartner;
+    // Compare by id, not object identity: switching the personal assistant's
+    // model replaces the partner object but keeps the same id, and that must
+    // not wipe the open conversation — the model is global, so a switch just
+    // changes which model answers the next turn. A different id is a genuine
+    // partner switch and resets. (Comparing the $state proxy with !== also
+    // trips Svelte's state_proxy_equality_mismatch warning.)
+    const current = this.#chatPartner;
+    const partnerChanged = current?.id !== newPartner?.id;
+    if (
+      !partnerChanged &&
+      partnerRuntimeSignature(current) === partnerRuntimeSignature(newPartner)
+    ) {
+      return;
+    }
     this.#chatPartner = newPartner;
 
-    if (oldPartner !== newPartner) {
+    if (partnerChanged) {
       this.newConversation();
       this.reloadHistory();
     }
@@ -394,7 +472,8 @@ export class ChatService {
       tools?: ConversationTools,
       useWebSearch?: boolean,
       requireToolApproval?: boolean,
-      abortController?: AbortController
+      abortController?: AbortController,
+      disabledMcpServerIds?: string[]
     ) => {
       // Clear preflight estimate — the message is leaving the input
       this.#clearPreflight();
@@ -424,6 +503,7 @@ export class ChatService {
           abortController,
           useWebSearch,
           requireToolApproval,
+          disabledMcpServerIds,
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;
@@ -475,6 +555,24 @@ export class ChatService {
               }
 
               ref.references = text.references;
+            },
+            onReasoning: (event) => {
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+
+              if (!browser || typeof requestAnimationFrame !== "function") {
+                this.#appendReasoning(ref, event.reasoning);
+                return;
+              }
+
+              // Buffer through the same frame-aligned loop as answer text.
+              this.#reasoningBuffer += event.reasoning;
+              if (this.#reasoningBuffer.length >= this.#producerFlushThreshold) {
+                this.#appendReasoning(ref, this.#reasoningBuffer);
+                this.#reasoningBuffer = "";
+                this.#lastFlushTime = performance.now();
+              }
+              this.#startStreamBuffering(ref);
             },
             onImage: (image) => {
               if (!ref || isStale()) return;
@@ -563,8 +661,29 @@ export class ChatService {
                 // @ts-expect-error - mcp_tool_calls is not in the static type
                 ref.mcp_tool_calls = [];
               }
-              // @ts-expect-error - mcp_tool_calls is a runtime property
-              ref.mcp_tool_calls.push(...event.tools);
+              // Merge by tool_call_id — a "pending" tool_call event may already
+              // have registered these calls, and a blind push would duplicate them.
+              for (const tool of event.tools as Array<{
+                tool_call_id?: string;
+                [key: string]: unknown;
+              }>) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property
+                const existingIndex = ref.mcp_tool_calls.findIndex(
+                  (t: { tool_call_id?: string }) =>
+                    t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                );
+                if (existingIndex >= 0) {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const mcpCalls = (ref as any).mcp_tool_calls;
+                  mcpCalls[existingIndex] = {
+                    ...mcpCalls[existingIndex],
+                    ...tool
+                  };
+                } else {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property
+                  ref.mcp_tool_calls.push(tool);
+                }
+              }
               // Set pending approval state - UI will show inline approval buttons
               this.pendingToolApproval = {
                 approvalId: event.approval_id,
@@ -770,6 +889,39 @@ export class ChatService {
 }
 
 export const [getChatService, initChatService] = createClassContext("Chat service", ChatService);
+
+function partnerRuntimeSignature(partner: ChatPartner | undefined) {
+  if (!partner) return "";
+
+  if ("completion_model" in partner) {
+    const effectiveConfig = partner.effective_config;
+    return JSON.stringify({
+      id: partner.id,
+      type: partner.type,
+      name: partner.name,
+      completion_model_id: partner.completion_model?.id ?? null,
+      models_enforced: effectiveConfig?.models_enforced ?? false,
+      default_model_id: effectiveConfig?.default_model?.id ?? null,
+      locked_model_id: effectiveConfig?.locked_model?.id ?? null,
+      available_model_ids: effectiveConfig?.available_models.map((model) => model.id) ?? [],
+      // Include the MCP and prompt dimensions: a policy edit that touches only
+      // these (same id + model) must still replace the partner, or the composer
+      // keeps listing stale MCP servers / a stale enforced-prompt state.
+      mcp_enforced: effectiveConfig?.mcp_enforced ?? false,
+      available_mcp_server_ids:
+        effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
+      default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
+      prompt_locked: effectiveConfig?.prompt_locked ?? false
+    });
+  }
+
+  return JSON.stringify({
+    id: partner.id,
+    type: partner.type,
+    name: partner.name,
+    assistant_ids: partner.tools?.assistants.map((assistant) => assistant.id) ?? []
+  });
+}
 
 function emptyMessage(partial?: Partial<ConversationMessage>): ConversationMessage {
   return {

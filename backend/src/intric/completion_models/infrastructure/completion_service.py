@@ -180,6 +180,12 @@ class CompletionService:
                 yield chunk
                 continue
 
+            # Pass through reasoning/thinking events directly (text=None, so the
+            # branches below would otherwise drop them before they reach SSE).
+            if chunk.response_type == ResponseType.REASONING:
+                yield chunk
+                continue
+
             # Pass through MCP tool call events directly
             if chunk.response_type == ResponseType.TOOL_CALL:
                 yield chunk

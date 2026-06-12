@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Annotated, cast
+from typing import TYPE_CHECKING, Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -59,6 +59,10 @@ from intric.sessions.session_protocol import (
     to_sessions_paginated_response,
 )
 from intric.spaces.api.space_models import TransferApplicationRequest
+
+if TYPE_CHECKING:
+    from intric.assistants.assistant import Assistant
+    from intric.main.models import NotProvided
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -208,6 +212,31 @@ async def get_assistants(
     return protocol.to_paginated_response(assistants)
 
 
+async def _assistant_response(
+    container: Container, assistant_id: UUID
+) -> AssistantPublic:
+    """Single serialization path for an assistant response.
+
+    Always resolves and attaches effective_config, so no endpoint can forget it
+    — a personal default assistant returned without it makes the chat UI drop
+    governance filtering (show every model/MCP server). Used by GET and update.
+    """
+    service = container.assistant_service()
+    assembler = container.assistant_assembler()
+    (
+        assistant,
+        permissions,
+        effective_config,
+    ) = await service.get_assistant_with_effective_config(assistant_id=assistant_id)
+    is_help_assistant = await service.is_help_assistant(assistant_id=assistant_id)
+    return assembler.from_assistant_to_model(
+        assistant=assistant,
+        permissions=permissions,
+        effective_config=effective_config,
+        is_help_assistant=is_help_assistant,
+    )
+
+
 @router.get(
     "/{id}/",
     response_model=AssistantPublic,
@@ -217,128 +246,22 @@ async def get_assistant(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    service = container.assistant_service()
-    assembler = container.assistant_assembler()
-
-    assistant, permissions = await service.get_assistant(assistant_id=id)
-    is_help_assistant = await service.is_help_assistant(assistant_id=id)
-
-    return assembler.from_assistant_to_model(
-        assistant=assistant,
-        permissions=permissions,
-        is_help_assistant=is_help_assistant,
-    )
+    return await _assistant_response(container, id)
 
 
-@router.post(
-    "/{id}/",
-    response_model=AssistantPublic,
-    description="Update an assistant. Omitted fields are not updated.",
-    responses=responses.get_responses([400, 403, 404]),
-)
-async def update_assistant(
-    id: UUID,
+def _build_assistant_update_changes(
+    *,
     assistant: AssistantUpdatePublic,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    """Omitted fields are not updated"""
-    service = container.assistant_service()
-    assembler = container.assistant_assembler()
-    current_user = container.user()
-
-    # Get old state for change tracking
-    old_assistant, _ = await service.get_assistant(assistant_id=id)
-
-    # Snapshot old MCP tool overrides before update (not on domain entity)
-    old_mcp_tool_overrides = None
-    if assistant.mcp_tools is not None:
-        import sqlalchemy as sa
-
-        from intric.database.tables.assistant_table import AssistantMCPServerTools
-
-        stmt = sa.select(
-            AssistantMCPServerTools.mcp_server_tool_id,
-            AssistantMCPServerTools.is_enabled,
-        ).where(AssistantMCPServerTools.assistant_id == id)
-        result = await service.repo.session.execute(stmt)
-        old_mcp_tool_overrides = {str(row[0]): row[1] for row in result.all()}
-
-    attachment_ids = None
-    if assistant.attachments is not None:
-        attachment_ids = [attachment.id for attachment in assistant.attachments]
-
-    groups = None
-    if assistant.groups is not None:
-        groups = [g.id for g in assistant.groups]
-
-    websites = None
-    if assistant.websites is not None:
-        websites = [w.id for w in assistant.websites]
-
-    integration_knowledge_ids = None
-    if assistant.integration_knowledge_list is not None:
-        integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
-
-    mcp_server_ids = None
-    if assistant.mcp_servers is not None:
-        mcp_server_ids = [m.id for m in assistant.mcp_servers]
-
-    mcp_tool_settings = None
-    if assistant.mcp_tools is not None:
-        mcp_tool_settings = [
-            (tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools
-        ]
-
-    completion_model_id = None
-    if assistant.completion_model is not None:
-        completion_model_id = assistant.completion_model.id
-
-    completion_model_kwargs = None
-    if assistant.completion_model_kwargs is not None:
-        completion_model_kwargs = assistant.completion_model_kwargs
-
-    # get original request dict to check if description was actually provided
-    # (@partial_model overrides NOT_PROVIDED with None)
-    request_dict = assistant.model_dump(exclude_unset=True)
-    description = assistant.description
-    metadata_json = assistant.metadata_json
-
-    # if description wasn't in the original request, use NOT_PROVIDED
-    if "description" not in request_dict:
-        description = NOT_PROVIDED
-
-    if "metadata_json" not in request_dict:
-        metadata_json = NOT_PROVIDED
-
-    data_retention_days = assistant.data_retention_days
-    if "data_retention_days" not in request_dict:
-        data_retention_days = NOT_PROVIDED
-
-    # Handle icon_id: check if it was provided in the request
-    icon_id = NOT_PROVIDED
-    if "icon_id" in request_dict:
-        icon_id = assistant.icon_id
-
-    updated_assistant, permissions = await service.update_assistant(
-        assistant_id=id,
-        name=assistant.name,
-        prompt=assistant.prompt,
-        completion_model_id=completion_model_id,
-        completion_model_kwargs=completion_model_kwargs,
-        logging_enabled=assistant.logging_enabled,
-        attachment_ids=attachment_ids,
-        groups=groups,
-        websites=websites,
-        integration_knowledge_ids=integration_knowledge_ids,
-        mcp_server_ids=mcp_server_ids,
-        mcp_tools=mcp_tool_settings,
-        description=description,
-        insight_enabled=assistant.insight_enabled,
-        data_retention_days=data_retention_days,
-        metadata_json=metadata_json,
-        icon_id=icon_id,
-    )
-
+    old_assistant: "Assistant",
+    updated_assistant: "Assistant",
+    completion_model_id: "UUID | None",
+    description: "str | NotProvided | None",
+    old_mcp_tool_overrides: "dict[str, bool] | None",
+) -> tuple[dict[str, object], list[str]]:
+    """Build the audit `changes` dict and human-readable summary for an
+    assistant update by diffing old vs updated state. Pure/presentation-
+    only: extracted from the endpoint to keep it readable.
+    """
     # Track ALL changes comprehensively
     changes: dict[str, object] = {}
 
@@ -643,6 +566,126 @@ async def update_assistant(
     if "mcp_tools" in changes:
         change_summary.append("MCP tools")
 
+    return changes, change_summary
+
+
+@router.post(
+    "/{id}/",
+    response_model=AssistantPublic,
+    responses=responses.get_responses([400, 403, 404]),
+    description="Update an assistant. Omitted fields are left unchanged.",
+)
+async def update_assistant(
+    id: UUID,
+    assistant: AssistantUpdatePublic,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Omitted fields are not updated"""
+    service = container.assistant_service()
+    current_user = container.user()
+
+    # Get old state for change tracking
+    old_assistant, _ = await service.get_assistant(assistant_id=id)
+
+    # Snapshot old MCP tool overrides before update (not on domain entity)
+    old_mcp_tool_overrides = None
+    if assistant.mcp_tools is not None:
+        import sqlalchemy as sa
+
+        from intric.database.tables.assistant_table import AssistantMCPServerTools
+
+        stmt = sa.select(
+            AssistantMCPServerTools.mcp_server_tool_id,
+            AssistantMCPServerTools.is_enabled,
+        ).where(AssistantMCPServerTools.assistant_id == id)
+        result = await service.repo.session.execute(stmt)
+        old_mcp_tool_overrides = {str(row[0]): row[1] for row in result.all()}
+
+    attachment_ids = None
+    if assistant.attachments is not None:
+        attachment_ids = [attachment.id for attachment in assistant.attachments]
+
+    groups = None
+    if assistant.groups is not None:
+        groups = [g.id for g in assistant.groups]
+
+    websites = None
+    if assistant.websites is not None:
+        websites = [w.id for w in assistant.websites]
+
+    integration_knowledge_ids = None
+    if assistant.integration_knowledge_list is not None:
+        integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
+
+    mcp_server_ids = None
+    if assistant.mcp_servers is not None:
+        mcp_server_ids = [m.id for m in assistant.mcp_servers]
+
+    mcp_tool_settings = None
+    if assistant.mcp_tools is not None:
+        mcp_tool_settings = [
+            (tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools
+        ]
+
+    completion_model_id = None
+    if assistant.completion_model is not None:
+        completion_model_id = assistant.completion_model.id
+
+    completion_model_kwargs = None
+    if assistant.completion_model_kwargs is not None:
+        completion_model_kwargs = assistant.completion_model_kwargs
+
+    # get original request dict to check if description was actually provided
+    # (@partial_model overrides NOT_PROVIDED with None)
+    request_dict = assistant.model_dump(exclude_unset=True)
+    description = assistant.description
+    metadata_json = assistant.metadata_json
+
+    # if description wasn't in the original request, use NOT_PROVIDED
+    if "description" not in request_dict:
+        description = NOT_PROVIDED
+
+    if "metadata_json" not in request_dict:
+        metadata_json = NOT_PROVIDED
+
+    data_retention_days = assistant.data_retention_days
+    if "data_retention_days" not in request_dict:
+        data_retention_days = NOT_PROVIDED
+
+    # Handle icon_id: check if it was provided in the request
+    icon_id = NOT_PROVIDED
+    if "icon_id" in request_dict:
+        icon_id = assistant.icon_id
+
+    updated_assistant, _ = await service.update_assistant(
+        assistant_id=id,
+        name=assistant.name,
+        prompt=assistant.prompt,
+        completion_model_id=completion_model_id,
+        completion_model_kwargs=completion_model_kwargs,
+        logging_enabled=assistant.logging_enabled,
+        attachment_ids=attachment_ids,
+        groups=groups,
+        websites=websites,
+        integration_knowledge_ids=integration_knowledge_ids,
+        mcp_server_ids=mcp_server_ids,
+        mcp_tools=mcp_tool_settings,
+        description=description,
+        insight_enabled=assistant.insight_enabled,
+        data_retention_days=data_retention_days,
+        metadata_json=metadata_json,
+        icon_id=icon_id,
+    )
+
+    changes, change_summary = _build_assistant_update_changes(
+        assistant=assistant,
+        old_assistant=old_assistant,
+        updated_assistant=updated_assistant,
+        completion_model_id=completion_model_id,
+        description=description,
+        old_mcp_tool_overrides=old_mcp_tool_overrides,
+    )
+
     # Get space for context
     space = None
     if updated_assistant.space_id:
@@ -677,7 +720,11 @@ async def update_assistant(
         ),
     )
 
-    return assembler.from_assistant_to_model(updated_assistant, permissions=permissions)
+    # Re-resolve through the shared response path so the body carries the
+    # governance effective_config (same as GET /{id}/ and the space endpoint).
+    # Without it a personal default-assistant update returns effective_config=None
+    # and the chat UI falls back to showing every model and MCP server.
+    return await _assistant_response(container, id)
 
 
 @router.delete(
@@ -1302,6 +1349,7 @@ async def add_mcp_to_assistant(
 ):
     """Add an MCP server to an assistant."""
     service = container.assistant_service()
+
     assistant, _permissions = await service.add_mcp_to_assistant(
         assistant_id=id,
         mcp_server_id=mcp_server_id,

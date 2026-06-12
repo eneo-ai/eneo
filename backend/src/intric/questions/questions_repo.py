@@ -142,6 +142,7 @@ class QuestionRepository:
         num_tokens_answer: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
+        reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
         web_search_results: list["WebSearchResult"] | None = None,
@@ -175,6 +176,8 @@ class QuestionRepository:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:
             update_values["tool_calls"] = [tc.model_dump() for tc in tool_calls]
+        if reasoning is not None:
+            update_values["reasoning"] = reasoning
         if logging_details_id is not None:
             update_values["logging_details_id"] = logging_details_id
 

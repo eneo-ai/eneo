@@ -1,21 +1,30 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
-  import { IconEnter } from "@intric/icons/enter";
-  import { IconStopCircle } from "@intric/icons/stop-circle";
-  import { Button, Input, Tooltip } from "@intric/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import MentionInput from "../mentions/MentionInput.svelte";
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
+  import ChatModelSelect from "../switcher/ChatModelSelect.svelte";
+  import ChatMcpServers from "./ChatMcpServers.svelte";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
-  import { IconWeb } from "@intric/icons/web";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
-  import { Wrench, AlertTriangle } from "lucide-svelte";
+  import { SvelteSet } from "svelte/reactivity";
+  import { Globe, AlertTriangle } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+
+  type McpServerSummary = {
+    id: string;
+    name: string;
+    description?: string | null;
+    icon_url?: string | null;
+  };
 
   const chat = getChatService();
   const { featureFlags } = getAppContext();
@@ -45,6 +54,12 @@
   const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
   let autoAcceptTools = $state(true);
   let hasHydratedToolApprovalPreference = $state(false);
+
+  // MCP servers the user has switched OFF in the toolbar popover for this
+  // conversation; everything else stays active. Sent with each ask request so
+  // the backend narrows the effective server set accordingly. Mutated in place
+  // by ChatMcpServers.
+  const disabledMcpServerIds = new SvelteSet<string>();
 
   onMount(() => {
     if (!browser) {
@@ -133,7 +148,8 @@
         tools,
         webSearchEnabled,
         toolApprovalEnabled,
-        abortController
+        abortController,
+        disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
       resetMentionInput();
       clearUploads();
@@ -193,6 +209,11 @@
   // Request a token preflight whenever the user input or attached files
   // change. Debounced inside ChatService; safe to fire on every keystroke.
   $effect(() => {
+    // Also re-run on a partner/model switch: the personal-chat model picker
+    // replaces the partner object, and the estimate (and its context window)
+    // must track the model that will actually answer, not the one that was
+    // active when the user started typing.
+    track(chat.partner);
     const fileIds = $attachments
       .map((a) => a.fileRef?.id)
       .filter((id): id is string => Boolean(id));
@@ -217,15 +238,63 @@
     return hasTools && isEnabled;
   });
 
-  // Check if the assistant has MCP servers/tools
-  const hasMcpTools = $derived.by(() => {
-    if (!chat.partner) return false;
-    // Check for mcp_servers array on the partner
-    if ("mcp_servers" in chat.partner && Array.isArray(chat.partner.mcp_servers)) {
-      return chat.partner.mcp_servers.length > 0;
+  // MCP servers available to the current partner (drives the toolbar popover).
+  // For the personal/default assistant the policy GRANTS servers that are not
+  // attached to the entity itself, so read them from effective_config (mirrors
+  // the backend); otherwise fall back to the assistant's own mcp_servers.
+  const mcpServers = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner) return [];
+    if ("effective_config" in partner && partner.effective_config?.mcp_enforced) {
+      return (partner.effective_config.available_mcp_servers ?? []) as Array<McpServerSummary>;
     }
-    return false;
+    if ("mcp_servers" in partner && Array.isArray(partner.mcp_servers)) {
+      return partner.mcp_servers as Array<McpServerSummary>;
+    }
+    return [];
   });
+
+  $effect(() => {
+    const validIds = new Set(mcpServers.map((server) => server.id));
+    for (const id of Array.from(disabledMcpServerIds)) {
+      if (!validIds.has(id)) disabledMcpServerIds.delete(id);
+    }
+  });
+
+  // Seed the toggles from the governance policy's per-server chat defaults.
+  // Keyed on the conversation OBJECT: ChatService replaces it on new/loaded
+  // conversations but mutates it while a conversation is running, so the seed
+  // never wipes toggles the user made mid-conversation.
+  let seededConversation: unknown = null;
+  $effect(() => {
+    const conversation = chat.currentConversation;
+    const partner = chat.partner;
+    if (conversation === seededConversation) return;
+    seededConversation = conversation;
+    untrack(() => {
+      disabledMcpServerIds.clear();
+      if (partner && "effective_config" in partner) {
+        for (const id of partner.effective_config?.default_disabled_mcp_server_ids ?? []) {
+          disabledMcpServerIds.add(id);
+        }
+      }
+    });
+  });
+
+  // Check if the assistant has MCP servers/tools
+  const hasMcpTools = $derived(mcpServers.length > 0);
+
+  const showWebSearch = $derived(
+    chat.partner.type === "default-assistant" && featureFlags.showWebSearch
+  );
+  // ChatModelSelect edits the personal space's default assistant via the
+  // SpacesManager context, which only the spaces route tree provides. Other
+  // mounts of the default assistant (e.g. a deep link into the dashboard chat)
+  // have no such context, so gate on its presence or the picker throws on init.
+  const spacesManager = getSpacesManager();
+  const showModelSelect = $derived(
+    chat.partner.type === "default-assistant" && Boolean(spacesManager)
+  );
 
   // Block sending while the local projection says the next message will
   // overflow the context window. Removes the need to round-trip the server
@@ -240,32 +309,30 @@
   );
 </script>
 
-<form
-  onsubmit={async (e) => {
-    e.preventDefault();
-    await ask();
-  }}
-  class="border-default bg-primary ring-dimmer relative flex w-[100%] max-w-[74ch] flex-col border-t p-1.5 shadow-md ring-offset-0 transition-all duration-300 md:w-full md:rounded-xl md:border {chat.hasCompletionModel
-    ? 'focus-within:border-stronger hover:border-stronger focus-within:shadow-lg hover:ring-4'
-    : ''}"
+<PromptInput.Root
+  status={chat.askQuestion.isLoading ? "streaming" : "ready"}
+  onSubmit={ask}
+  onStop={() => abortController?.abort("User cancelled")}
+  class="max-w-[74ch] md:w-full"
 >
   {#if !chat.hasCompletionModel}
     <div
-      class="bg-primary/80 absolute inset-0 z-10 flex items-center justify-center rounded-xl backdrop-blur-[1px]"
+      class="bg-card/80 absolute inset-0 z-10 flex items-center justify-center rounded-2xl backdrop-blur-[1px]"
     >
-      <div class="text-secondary flex items-center gap-2 px-4 text-sm">
+      <div class="text-muted-foreground flex items-center gap-2 px-4 text-sm">
         <AlertTriangle class="h-4 w-4 flex-shrink-0" />
         <p>{m.no_completion_model_description()}</p>
       </div>
     </div>
   {/if}
-  <div class="relative">
+
+  <PromptInput.Body>
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
     {#if chat.askQuestion.isLoading}
       <div
-        class="bg-primary/60 absolute inset-0 flex items-center justify-center rounded-lg backdrop-blur-[1px]"
+        class="bg-card/60 absolute inset-0 flex items-center justify-center rounded-lg backdrop-blur-[1px]"
       >
-        <div class="text-secondary flex items-center gap-2 text-sm">
+        <div class="text-muted-foreground flex items-center gap-2 text-sm">
           <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
             ></circle>
@@ -279,102 +346,71 @@
         </div>
       </div>
     {/if}
-  </div>
+  </PromptInput.Body>
 
   {#if inputError}
     <div
-      class="text-negative-stronger bg-negative-dimmer/30 mt-1 flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-sm"
+      class="text-destructive bg-destructive/10 mx-1.5 mt-1 flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-sm"
     >
       <div class="flex items-start gap-2">
         <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
         <div>
           <p class="font-medium">{inputError.message}</p>
           {#if inputError.details}
-            <p class="text-negative-stronger mt-0.5">{inputError.details}</p>
+            <p class="mt-0.5">{inputError.details}</p>
           {/if}
         </div>
       </div>
       {#if inputError.isContextError}
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           type="button"
           onclick={startNewConversation}
-          class="border-negative-stronger/40 hover:bg-negative-dimmer/50 ml-2 flex-shrink-0 self-center rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap transition-colors"
+          class="ml-2 h-7 flex-shrink-0 self-center whitespace-nowrap"
         >
           {m.new_conversation()}
-        </button>
+        </Button>
       {/if}
     </div>
   {/if}
 
-  <div class="mt-2 flex justify-between">
-    <div
-      class="flex items-center gap-2 {chat.askQuestion.isLoading
-        ? 'pointer-events-none opacity-40'
-        : ''}"
+  <PromptInput.Footer>
+    <PromptInput.Tools
+      class={chat.askQuestion.isLoading ? "pointer-events-none opacity-40" : undefined}
     >
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
         <MentionButton></MentionButton>
       {/if}
 
-      {#if chat.partner.type === "default-assistant" && featureFlags.showWebSearch}
-        <div
-          class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5"
-        >
-          <Input.Switch bind:value={useWebSearch} class="*:!cursor-pointer">
-            <span class="-mr-2 flex gap-1"><IconWeb></IconWeb>{m.search()}</span></Input.Switch
-          >
-        </div>
-      {/if}
-
       {#if hasMcpTools}
-        <Tooltip
-          text={autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
-          placement="top"
-        >
-          <div
-            class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {autoAcceptTools
-              ? 'bg-accent-dimmer text-accent-stronger border-accent-default'
-              : ''}"
-          >
-            <Input.Switch bind:value={autoAcceptTools} class="*:!cursor-pointer">
-              <span class="-mr-2 flex items-center gap-1"
-                ><Wrench class="h-5 w-5" />{m.auto_accept_tools()}</span
-              >
-            </Input.Switch>
-          </div>
-        </Tooltip>
+        <ChatMcpServers
+          servers={mcpServers}
+          disabledServerIds={disabledMcpServerIds}
+          bind:autoAcceptTools
+        />
       {/if}
-    </div>
 
-    <div class="flex items-center gap-2">
-      {#if chat.askQuestion.isLoading}
-        <Tooltip text={m.cancel_your_request()} placement="top" let:trigger asFragment>
-          <Button
-            unstyled
-            aria-label={m.cancel_your_request()}
-            type="button"
-            is={trigger}
-            onclick={() => abortController?.abort("User cancelled")}
-            name="ask"
-            class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
-          >
-            {m.stop_answer()}
-            <IconStopCircle />
-          </Button>
-        </Tooltip>
-      {:else}
-        <Button
-          disabled={isAskingDisabled}
-          aria-label={m.submit_your_question()}
-          type="submit"
-          name="ask"
-          class="bg-secondary hover:bg-hover-stronger disabled:bg-tertiary disabled:text-secondary flex h-9 items-center justify-center !gap-1 rounded-lg !pr-1 !pl-2"
+      {#if showWebSearch}
+        <PromptInput.Button
+          variant={useWebSearch ? "secondary" : "ghost"}
+          onclick={() => (useWebSearch = !useWebSearch)}
+          title={m.search()}
         >
-          {m.send()}
-          <IconEnter />
-        </Button>
+          <Globe class="size-4" />
+          <span class="hidden sm:inline">{m.search()}</span>
+        </PromptInput.Button>
       {/if}
+    </PromptInput.Tools>
+
+    <!-- Right cluster: model + send/stop -->
+    <div class="flex items-center gap-2">
+      {#if showModelSelect}
+        <ChatModelSelect />
+      {/if}
+
+      <PromptInput.Submit disabled={isAskingDisabled} name="ask" />
     </div>
-  </div>
-</form>
+  </PromptInput.Footer>
+</PromptInput.Root>

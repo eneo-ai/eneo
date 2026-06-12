@@ -116,19 +116,9 @@
 
   const fmt = (n: number) => n.toLocaleString();
 
-  const modelName = $derived.by(() => {
-    if (chat.pendingModelName) return chat.pendingModelName;
-
-    const messages = chat.currentConversation?.messages;
-    for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
-      const name = messages?.[i].completion_model?.name;
-      if (name) return name;
-    }
-    if (chat.partner && "completion_model" in chat.partner) {
-      return chat.partner.completion_model?.name ?? "";
-    }
-    return "";
-  });
+  // Single source of truth lives in ChatService so the label and the context
+  // window can't disagree about which model is active.
+  const modelName = $derived(chat.activeModelName);
 
   const hasUsage = $derived(chat.contextLimit > 0 && (chat.contextTokens > 0 || pendingTotal > 0));
   const showBar = $derived(hasUsage && isVisible);

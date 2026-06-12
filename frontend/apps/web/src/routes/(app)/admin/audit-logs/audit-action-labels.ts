@@ -113,6 +113,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_module_added_to_tenant,
     description: m.audit_action_module_added_to_tenant_description
   },
+  governance_policy_updated: {
+    name: m.audit_action_governance_policy_updated,
+    description: m.audit_action_governance_policy_updated_description
+  },
+  prompt_library_entry_created: {
+    name: m.audit_action_prompt_library_entry_created,
+    description: m.audit_action_prompt_library_entry_created_description
+  },
+  prompt_library_entry_updated: {
+    name: m.audit_action_prompt_library_entry_updated,
+    description: m.audit_action_prompt_library_entry_updated_description
+  },
+  prompt_library_entry_deleted: {
+    name: m.audit_action_prompt_library_entry_deleted,
+    description: m.audit_action_prompt_library_entry_deleted_description
+  },
   scim_user_provisioned: {
     name: m.audit_action_scim_user_provisioned,
     description: m.audit_action_scim_user_provisioned_description

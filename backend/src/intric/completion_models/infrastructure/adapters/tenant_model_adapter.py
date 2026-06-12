@@ -133,6 +133,7 @@ class _LiteLLMStreamToolCall(Protocol):
 
 class _LiteLLMDelta(Protocol):
     content: str | None
+    reasoning_content: str | None
     tool_calls: list[_LiteLLMStreamToolCall] | None
 
 
@@ -1124,6 +1125,23 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Get MCP context stored by prepare_streaming
             eneo_ctx = getattr(stream, "_eneo_context", None)
             mcp_proxy = eneo_ctx.get("mcp_proxy") if eneo_ctx else None
+            mcp_tools_active = bool(
+                mcp_proxy and eneo_ctx and eneo_ctx.get("has_tools")
+            )
+            pending_allowed_tools: set[str] = (
+                mcp_proxy.get_allowed_tool_names()
+                if mcp_proxy is not None and mcp_tools_active
+                else set()
+            )
+
+            def _resolve_tool_names(name: str) -> tuple[str, str]:
+                info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
+                if info:
+                    return info
+                if "__" in name:
+                    server_name, tool_name = name.split("__", 1)
+                    return server_name, tool_name
+                return "", name
 
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
@@ -1142,6 +1160,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
+                pending_emitted: set[int] = set()
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
 
@@ -1166,6 +1185,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                     finish_reason = chunk.choices[0].finish_reason
                     logger.debug(f"[DEBUG] Delta: {delta}")
 
+                    # Forward provider reasoning/thinking deltas (e.g. Anthropic
+                    # extended thinking surfaced by LiteLLM as reasoning_content)
+                    # as REASONING chunks. Kept separate from text so it never
+                    # pollutes the persisted answer.
+                    reasoning_delta = getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        yield Completion(
+                            reasoning_content=reasoning_delta,
+                            response_type=ResponseType.REASONING,
+                        )
+
                     # Accumulate tool call deltas
                     if delta.tool_calls:
                         res.has_tool_calls = True
@@ -1189,6 +1219,38 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     res.tool_calls_acc[idx]["function"][
                                         "arguments"
                                     ] += fn.arguments
+
+                        # Surface each call as a "pending" step as soon as its
+                        # name and id are known — argument JSON for many parallel
+                        # calls can take tens of seconds to generate, and the
+                        # stream is otherwise silent for that whole window.
+                        if mcp_tools_active:
+                            for idx, acc in res.tool_calls_acc.items():
+                                if idx in pending_emitted:
+                                    continue
+                                call_id = acc["id"]
+                                name = acc["function"]["name"]
+                                if (
+                                    not call_id
+                                    or not name
+                                    or name not in pending_allowed_tools
+                                ):
+                                    continue
+                                server_name, tool_name = _resolve_tool_names(name)
+                                pending_emitted.add(idx)
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL,
+                                    tool_calls_metadata=[
+                                        ToolCallMetadata(
+                                            server_name=server_name,
+                                            tool_name=tool_name,
+                                            arguments=None,
+                                            tool_call_id=call_id,
+                                            result_status="pending",
+                                            mcp_tool_name=name,
+                                        )
+                                    ],
+                                )
 
                     # Handle text content with thinking-block stripping
                     content = delta.content or ""
@@ -1276,13 +1338,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                         except json.JSONDecodeError:
                             args = None
-                        info = mcp_proxy.get_tool_info(name)
-                        if info:
-                            sname, tname = info
-                        elif "__" in name:
-                            sname, tname = name.split("__", 1)
-                        else:
-                            sname, tname = "", name
+                        sname, tname = _resolve_tool_names(name)
                         tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=sname,
@@ -1470,15 +1526,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "content": text,
                                 }
                             )
-                            tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
-                            if tool_info:
-                                server_name, tool_name = tool_info
-                            elif "__" in tc["function"]["name"]:
-                                server_name, tool_name = tc["function"]["name"].split(
-                                    "__", 1
-                                )
-                            else:
-                                server_name, tool_name = "", tc["function"]["name"]
+                            server_name, tool_name = _resolve_tool_names(
+                                tc["function"]["name"]
+                            )
                             execution_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
@@ -1514,15 +1564,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": json.dumps(denial_payload),
                             }
                         )
-                        tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
-                        if tool_info:
-                            server_name, tool_name = tool_info
-                        elif "__" in tc["function"]["name"]:
-                            server_name, tool_name = tc["function"]["name"].split(
-                                "__", 1
-                            )
-                        else:
-                            server_name, tool_name = "", tc["function"]["name"]
+                        server_name, tool_name = _resolve_tool_names(
+                            tc["function"]["name"]
+                        )
                         denied_metadata.append(
                             ToolCallMetadata(
                                 server_name=server_name,

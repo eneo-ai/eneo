@@ -81,6 +81,7 @@ async def persist_partial_question_answer(
     answer: str,
     num_tokens_answer: int,
     completion_model_id: UUID | None = None,
+    reasoning: str | None = None,
 ) -> None:
     """Persist the answer text on a previously-created placeholder question using a fresh
     DB session.
@@ -99,6 +100,7 @@ async def persist_partial_question_answer(
                 answer=answer,
                 num_tokens_answer=num_tokens_answer,
                 completion_model_id=completion_model_id,
+                reasoning=reasoning,
             )
         logger.info(
             "Persisted partial chat answer on stream abort",
@@ -334,6 +336,7 @@ class SessionService:
         logging_details: LoggingDetails | None = None,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
+        reasoning: str | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None
@@ -346,6 +349,7 @@ class SessionService:
                 num_tokens_answer=num_tokens_answer,
                 completion_model_id=completion_model_id,
                 tool_calls=tool_calls,
+                reasoning=reasoning,
                 info_blob_chunks=info_blob_chunks,
                 generated_files=list(generated_files) if generated_files else None,
                 web_search_results=list(web_search_results)

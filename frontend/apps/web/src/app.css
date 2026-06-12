@@ -126,6 +126,22 @@
   --color-input: oklch(61.87% 0.005 56.33);
 
   /* ---------------------------------------------------------------- */
+  /* Sidebar (vendored shadcn Sidebar, used by the admin navigation)   */
+  /* ---------------------------------------------------------------- */
+  /* The shadcn Sidebar component paints with a dedicated `--sidebar*` */
+  /* token family. We map it onto eneo's palette vars (same pattern as */
+  /* the shadcn tokens above) so the sidebar matches the app surfaces  */
+  /* and follows light/dark automatically.                             */
+  --color-sidebar: var(--background-primary);
+  --color-sidebar-foreground: var(--text-primary);
+  --color-sidebar-accent: var(--background-hover-default);
+  --color-sidebar-accent-foreground: var(--text-primary);
+  --color-sidebar-border: var(--border-default);
+  --color-sidebar-ring: var(--border-stronger);
+  --color-sidebar-primary: var(--accent-default);
+  --color-sidebar-primary-foreground: var(--text-on-fill);
+
+  /* ---------------------------------------------------------------- */
   /* Aliases for legacy class names used across the app                */
   /* ---------------------------------------------------------------- */
   /* Several features (api-keys, audit-logs, ...) were written with    */

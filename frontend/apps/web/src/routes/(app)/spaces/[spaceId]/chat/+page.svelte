@@ -6,7 +6,6 @@
   import ConversationView from "$lib/features/chat/components/conversation/ConversationView.svelte";
   import HistoryTable from "$lib/features/chat/components/history/HistoryTable.svelte";
   import AssistantSwitcher from "$lib/features/chat/components/switcher/AssistantSwitcher.svelte";
-  import DefaultAssistantModelSwitcher from "$lib/features/chat/components/switcher/DefaultAssistantModelSwitcher.svelte";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
@@ -60,6 +59,20 @@
       // If opening default assistant always open chat
       if (data.chatPartner.type === "default-assistant") {
         $currentTab = "chat";
+      }
+    });
+  });
+
+  // Single sync point for the personal chat: keep the chat partner pointed at
+  // the canonical default assistant held by SpacesManager. The page loader only
+  // snapshots it, so without this the partner (and its model) could drift from
+  // what the model picker writes. Same id, so this never resets the open
+  // conversation (see ChatService.changeChatPartner).
+  $effect(() => {
+    const canonical = $currentSpace.default_assistant;
+    untrack(() => {
+      if (canonical && chat.partner?.type === "default-assistant") {
+        chat.changeChatPartner(canonical);
       }
     });
   });
@@ -117,9 +130,7 @@
       </Page.Tabbar>
 
       <Page.Flex>
-        {#if chat.partner.type === "default-assistant"}
-          <DefaultAssistantModelSwitcher></DefaultAssistantModelSwitcher>
-        {:else if chat.partner.permissions?.includes("edit")}
+        {#if chat.partner.type !== "default-assistant" && chat.partner.permissions?.includes("edit")}
           <Button
             href={localizeHref(
               `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
