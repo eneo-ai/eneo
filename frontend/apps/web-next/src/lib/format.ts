@@ -41,6 +41,12 @@ export function daysSince(value: string | Date): number {
   return (Date.now() - target.getTime()) / (1000 * 60 * 60 * 24);
 }
 
+/** Hours from now until the given instant (negative when past). */
+export function hoursUntil(value: string | Date): number {
+  const target = typeof value === "string" ? new Date(value) : value;
+  return (target.getTime() - Date.now()) / (1000 * 60 * 60);
+}
+
 /** Duration between two instants, in the largest sensible unit. */
 export function formatDuration(start: string, end: string): string {
   const ms = Math.max(0, new Date(end).getTime() - new Date(start).getTime());

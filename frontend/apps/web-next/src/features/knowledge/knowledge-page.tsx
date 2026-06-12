@@ -7,12 +7,13 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSpace } from "@/features/spaces/use-space";
 import { CollectionsTab } from "./collections";
+import { IntegrationsTab } from "./integrations";
 import { WebsitesTab } from "./websites";
 
 /**
- * The space knowledge hub: collections / websites tabs (integrations follow
- * in a later slice), each gated by the corresponding read permission. The
- * active tab lives in ?tab= so links can target one directly.
+ * The space knowledge hub: collections / websites / integrations tabs, each
+ * gated by the corresponding read permission. The active tab lives in ?tab=
+ * so links can target one directly.
  */
 export function KnowledgePage() {
   const t = useTranslations();
@@ -21,7 +22,8 @@ export function KnowledgePage() {
 
   const tabs = [
     can("read", "collection") ? "collections" : null,
-    can("read", "website") ? "websites" : null
+    can("read", "website") ? "websites" : null,
+    can("read", "integrationKnowledge") ? "integrations" : null
   ].filter(Boolean) as string[];
 
   const requested = searchParams.get("tab");
@@ -45,6 +47,9 @@ export function KnowledgePage() {
             <TabsTrigger value="collections">{t("collections")}</TabsTrigger>
           )}
           {can("read", "website") && <TabsTrigger value="websites">{t("websites")}</TabsTrigger>}
+          {can("read", "integrationKnowledge") && (
+            <TabsTrigger value="integrations">{t("integrations")}</TabsTrigger>
+          )}
         </TabsList>
         {can("read", "collection") && (
           <TabsContent value="collections" className="pt-4">
@@ -54,6 +59,11 @@ export function KnowledgePage() {
         {can("read", "website") && (
           <TabsContent value="websites" className="pt-4">
             <WebsitesTab canCreate={can("create", "website")} />
+          </TabsContent>
+        )}
+        {can("read", "integrationKnowledge") && (
+          <TabsContent value="integrations" className="pt-4">
+            <IntegrationsTab />
           </TabsContent>
         )}
       </Tabs>

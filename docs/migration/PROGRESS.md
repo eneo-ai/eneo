@@ -88,6 +88,18 @@ actually happened. Update this file when a phase lands.
 - RB-5 inventory: `docs/migration/rb-5-issue-draft.md` (kept local —
   **never create GitHub issues from this migration work**; stealth POC).
 
+## Parity target moved by the develop merge (2026-06-12)
+
+- **Phase 7 scope grew**: governance (#417) added new Svelte admin areas —
+  `/admin/prompt-library` and `/admin/personal-assistant` (configuration +
+  policy). `07-admin.md` predates them; fold them into the Phase 7 plan.
+- **Phase 5 parity, small**: the Svelte model selector now shows model
+  details (#493); mirror in web-next's ModelSelector before the Phase 8
+  parity audit. Also check attachment same-file reselect (#491) in
+  use-attachments.
+- **Schema**: prompt-library + governance-policy endpoints exist now; run
+  `bun run gen:api` before the next build session.
+
 ## Manual gate items still open
 
 - Two-user walkthrough (admin vs plain member affordances) — needs a second
@@ -101,6 +113,12 @@ actually happened. Update this file when a phase lands.
   `docker exec -u vscode eneo_devcontainer-eneo-1 bash -i -c "cd /workspace/... && ..."`;
   bun needs `export PATH=/home/vscode/.bun/bin:$PATH` for spawned children
   (shadcn/ai-elements CLIs).
+- Frontend QA (check/lint/test/build) must run on the HOST: the container has
+  no node, so vitest falls back to bun's runtime and dies in tinypool.
+  Never `bun install` inside the container — it swaps platform binaries to
+  linux and breaks host tooling (reinstall on host + `git checkout bun.lock`
+  to recover). `bun run build` needs a `.env` (env.ts zod-validates at import
+  during page-data collection).
 - Backend dev server (uvicorn, port 8123) and `bun run dev` (port 3100) are
   run by the developer in devcontainer terminals. VS Code auto-forwards the
   ports; processes started via plain `docker exec` are NOT forwarded.
@@ -133,13 +151,24 @@ Done:
   no dayjs dep). `ConfirmDialogControlled` added to composites for
   dropdown-launched deletes.
 
+Done (2026-06-13 session):
+- **Knowledge: integrations tab, list slice**: `src/features/knowledge/
+  integrations.tsx` (groupIntegrationRows + countSharePointItemTypes pure +
+  unit-tested; wrapper rows ≥2 items, vendor logos copied as PNGs, status cell
+  with last-sync + SharePoint webhook state via `hoursUntil` in lib/format,
+  item/wrapper rename-sync-delete actions) + wrapper detail route
+  `knowledge/integrations/wrapper/[wrapperId]` (client-only, derives from the
+  space object; delete navigates back). Tab gated by
+  `can("read","integrationKnowledge")`. New i18n key `open_in_confluence` in
+  extra catalogs (Svelte used a hardcoded English fallback). Sync-history
+  trigger intentionally NOT wired (status is plain text until the dialog
+  lands).
+
 Remaining for Phase 6 (in plan order):
-1. **Knowledge: integrations tab** — sources studied, not built:
-   `IntegrationsTable.svelte` (SharePoint wrapper grouping: items sharing
-   `wrapper_id` with ≥2 items render as one folder row; wrapper detail page
-   `integrations/wrapper/[wrapperId]`), `ImportKnowledgeDialog` +
+1. **Knowledge: integrations remaining** — `ImportKnowledgeDialog` +
    confluence/sharepoint import dialogs (preview → import single/batch),
-   `SyncHistoryDialog` (paginated 10/page sync logs),
+   `SyncHistoryDialog` (paginated 10/page sync logs; then make the status
+   cell open it),
    `IntegrationAuthService.svelte.ts` (OAuth popup: open about:blank popup
    FIRST then set location from `GET
    /api/v1/integrations/auth/{tenant_integration_id}/url/` with
