@@ -4,5 +4,6 @@
   "days": "dagar",
   "security_classification_description": "Ange den lägsta säkerhetsklassning som krävs för modeller i detta space.",
   "web_search": "Webbsökning",
-  "file_type_not_supported": "Filtypen stöds inte"
+  "file_type_not_supported": "Filtypen stöds inte",
+  "chat_sovereignty_hint": "Data behandlas inom er infrastruktur"
 }

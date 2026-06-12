@@ -20,8 +20,8 @@ function NavLink({
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 items-center rounded-lg px-3 text-sm font-medium transition-colors",
-        active && "bg-muted text-foreground"
+        "text-muted-foreground hover:bg-accent hover:text-accent-foreground flex h-8 items-center rounded-md px-3 text-sm font-medium transition-colors",
+        active && "bg-secondary text-foreground hover:bg-secondary hover:text-foreground"
       )}
     >
       {children}

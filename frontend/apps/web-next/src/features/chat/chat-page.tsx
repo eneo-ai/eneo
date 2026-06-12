@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -78,7 +79,7 @@ export function ChatPage({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <aside className="hidden w-64 shrink-0 flex-col border-r p-3 lg:flex">
+      <aside className="bg-sidebar text-sidebar-foreground border-sidebar-border hidden w-64 shrink-0 flex-col border-r p-3 lg:flex">
         <HistoryPanel
           partner={partner}
           activeSessionId={active?.sessionId ?? pendingSessionId}
@@ -90,9 +91,17 @@ export function ChatPage({
         />
       </aside>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4">
-        {headerExtra && (
-          <div className="flex items-center justify-end gap-2 py-2">{headerExtra}</div>
-        )}
+        <div className="-mx-4 flex h-13 shrink-0 items-center gap-2.5 border-b px-4">
+          <span className="truncate text-sm font-semibold">{partner.name}</span>
+          <div className="ml-auto flex items-center gap-2">
+            {headerExtra ??
+              (partner.completionModel && (
+                <Badge variant="outline" className="text-foreground font-medium">
+                  {partner.completionModel.name}
+                </Badge>
+              ))}
+          </div>
+        </div>
         {active ? (
           <ChatView
             key={active.key}

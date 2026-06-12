@@ -4,5 +4,6 @@
   "days": "days",
   "security_classification_description": "Set the minimum security classification required for models used in this space.",
   "web_search": "Web search",
-  "file_type_not_supported": "File type not supported"
+  "file_type_not_supported": "File type not supported",
+  "chat_sovereignty_hint": "Data is processed within your infrastructure"
 }

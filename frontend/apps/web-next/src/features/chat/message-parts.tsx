@@ -3,7 +3,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
 import {
   Tool,
   ToolContent,
@@ -22,28 +21,46 @@ import type { EneoUIMessage, ToolApprovalData } from "@/lib/chat/types";
 
 type Part = EneoUIMessage["parts"][number];
 
+/** Numbered source chips, per the design's chat thread. */
 export function MessageSources({ parts }: { parts: Part[] }) {
   const sources = parts.filter((part) => part.type === "source-document");
   if (sources.length === 0) return null;
 
+  const chipClass =
+    "bg-card hover:border-ring hover:bg-accent flex max-w-full items-center gap-1.5 rounded-lg border py-1.5 pr-2.5 pl-2 text-xs transition-colors";
+
   return (
-    <Sources>
-      <SourcesTrigger count={sources.length} />
-      <SourcesContent>
-        {sources.map((source) => {
-          const eneo = (source.providerMetadata?.eneo ?? {}) as {
-            metadata?: { url?: string | null };
-          };
-          return (
-            <Source
-              key={source.sourceId}
-              href={eneo.metadata?.url ?? undefined}
-              title={source.title || source.sourceId}
-            />
-          );
-        })}
-      </SourcesContent>
-    </Sources>
+    <div className="mt-3 flex flex-wrap gap-2">
+      {sources.map((source, index) => {
+        const eneo = (source.providerMetadata?.eneo ?? {}) as {
+          metadata?: { url?: string | null };
+        };
+        const url = eneo.metadata?.url ?? undefined;
+        const body = (
+          <>
+            <span className="bg-secondary text-secondary-foreground flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[10px] font-bold">
+              {index + 1}
+            </span>
+            <span className="truncate">{source.title || source.sourceId}</span>
+          </>
+        );
+        return url ? (
+          <a
+            key={source.sourceId}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className={chipClass}
+          >
+            {body}
+          </a>
+        ) : (
+          <span key={source.sourceId} className={chipClass}>
+            {body}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

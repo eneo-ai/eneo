@@ -7,7 +7,7 @@ import { JobIndicator } from "@/features/jobs/job-indicator";
 
 export function Header() {
   return (
-    <header className="bg-background sticky top-0 z-10 flex h-14 items-center gap-4 border-b px-4">
+    <header className="bg-background/85 sticky top-0 z-10 flex h-14 items-center gap-4 border-b px-4 backdrop-blur-md">
       <Link href="/" className="text-foreground flex items-center">
         <EneoWordMark className="hidden h-7 w-auto md:block" />
         <EneoIcon className="block h-7 w-auto md:hidden" />

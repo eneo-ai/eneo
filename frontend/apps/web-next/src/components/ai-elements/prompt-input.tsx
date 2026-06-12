@@ -33,7 +33,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
-import { CornerDownLeftIcon, ImageIcon, Monitor, PlusIcon, SquareIcon, XIcon } from "lucide-react";
+import { ImageIcon, Monitor, PlusIcon, SendIcon, SquareIcon, XIcon } from "lucide-react";
 import { nanoid } from "nanoid";
 import type {
   ChangeEvent,
@@ -862,7 +862,9 @@ export const PromptInput = ({
         type="file"
       />
       <form className={cn("w-full", className)} onSubmit={handleSubmit} ref={formRef} {...props}>
-        <InputGroup className="overflow-hidden">{children}</InputGroup>
+        <InputGroup className="bg-card dark:bg-card overflow-hidden rounded-xl">
+          {children}
+        </InputGroup>
       </form>
     </>
   );
@@ -1129,7 +1131,7 @@ export const PromptInputSubmit = ({
 }: PromptInputSubmitProps) => {
   const isGenerating = status === "submitted" || status === "streaming";
 
-  let Icon = <CornerDownLeftIcon className="size-4" />;
+  let Icon = <SendIcon className="size-4" />;
 
   if (status === "submitted") {
     Icon = <Spinner />;

@@ -111,22 +111,26 @@ export function HistoryPanel({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <Button variant="outline" size="sm" onClick={onNew} className="justify-start">
+      <Button onClick={onNew} className="justify-start">
         <Plus className="size-4" /> {t("new_conversation")}
       </Button>
+      <div className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wider uppercase">
+        {t("conversations")}
+      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {history.items.map((session) => (
           <div
             key={session.id}
             className={cn(
-              "group hover:bg-muted flex items-center rounded-md",
-              session.id === activeSessionId && "bg-muted"
+              "group hover:bg-sidebar-accent/60 flex items-center rounded-lg transition-colors",
+              session.id === activeSessionId &&
+                "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent font-medium"
             )}
           >
             <button
               type="button"
               onClick={() => onSelect(session.id)}
-              className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm"
+              className="min-w-0 flex-1 truncate px-2.5 py-2 text-left text-[13px]"
               title={session.name}
             >
               {session.name}

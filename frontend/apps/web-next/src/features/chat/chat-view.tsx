@@ -2,17 +2,19 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Globe, Paperclip, X } from "lucide-react";
+import { Copy, Globe, Paperclip, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton
 } from "@/components/ai-elements/conversation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { MessageAction, MessageActions, MessageResponse } from "@/components/ai-elements/message";
 import { Context } from "@/components/ai-elements/context";
+import { useAppContext } from "@/components/providers/app-context";
 import {
   PromptInput,
   PromptInputBody,
@@ -35,11 +37,34 @@ import { browserApi } from "@/lib/api/browser";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
+import { cn } from "@/lib/utils";
 import { historyQueryKey } from "./history-panel";
 import { GeneratedFile, MessageSources, MessageTool, ToolApprovalCard } from "./message-parts";
 import { useAttachments } from "./use-attachments";
 
 const NO_MENTION = "__none__";
+
+/** Round initials avatar from the design's chat thread (36px circle). */
+function ChatAvatar({ label, className }: { label: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold select-none",
+        className
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** "anna.lindqvist@…" → "AL"; single-word names fall back to one letter. */
+function initialsOf(name: string) {
+  const parts = name.split(/[\s._-]+/).filter(Boolean);
+  const initials = ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase();
+  return initials || name.slice(0, 1).toUpperCase();
+}
 
 export function ChatView({
   partner,
@@ -54,7 +79,12 @@ export function ChatView({
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const { user } = useAppContext();
   const attachments = useAttachments(partner);
+
+  const userName = user.username ?? user.email.split("@")[0] ?? user.email;
+  const userInitials = initialsOf(userName);
+  const partnerInitial = partner.name.slice(0, 1).toUpperCase();
 
   const [input, setInput] = useState("");
   const [useWebSearch, setUseWebSearch] = useState(false);
@@ -158,63 +188,104 @@ export function ChatView({
       <Conversation className="min-h-0 flex-1">
         {/* Same column width as the prompt input: responses span the chat
             column (readable line length), not the full page. */}
-        <ConversationContent className="mx-auto w-full max-w-3xl px-0">
+        <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-0 py-6">
           {messages.length === 0 && (
             <ConversationEmptyState title={partner.name} description={t("ask_a_question")} />
           )}
-          {messages.map((message) => (
-            <Message
-              key={message.id}
-              from={message.role}
-              className={message.role === "assistant" ? "max-w-full" : undefined}
-            >
-              {/* Assistant content takes the full row so tool/approval boxes
-                  keep a stable width while streaming; user keeps the bubble. */}
-              <MessageContent className={message.role === "assistant" ? "w-full" : undefined}>
-                {message.role === "assistant" && <MessageSources parts={message.parts} />}
-                {message.parts.map((part, index) => {
-                  if (part.type === "text") {
-                    return message.role === "assistant" ? (
-                      <MessageResponse key={index}>{part.text}</MessageResponse>
-                    ) : (
-                      <span key={index}>{part.text}</span>
-                    );
+          {messages.map((message, messageIndex) => {
+            const isAssistant = message.role === "assistant";
+            const isStreamingThis = busy && messageIndex === messages.length - 1;
+            const textContent = message.parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("\n\n");
+            return (
+              <div key={message.id} className="flex items-start gap-3">
+                <ChatAvatar
+                  label={isAssistant ? partnerInitial : userInitials}
+                  className={
+                    isAssistant ? "bg-primary text-primary-foreground" : "bg-chart-5 text-white"
                   }
-                  if (part.type === "dynamic-tool") {
-                    return <MessageTool key={index} part={part} />;
-                  }
-                  if (part.type === "data-tool-approval") {
-                    return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
-                  }
-                  if (part.type === "file") {
-                    return part.mediaType.startsWith("image/") ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
-                      <img
-                        key={index}
-                        src={part.url}
-                        alt={part.filename ?? "generated"}
-                        className="max-h-96 rounded-lg border"
-                      />
-                    ) : null;
-                  }
-                  return null;
-                })}
-                {message.role === "user" && (message.metadata?.files?.length ?? 0) > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {message.metadata!.files!.map((file) => (
-                      <Badge key={file.id} variant="secondary">
-                        <Paperclip className="size-3" /> {file.name}
-                      </Badge>
-                    ))}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold">
+                    {isAssistant ? partner.name : userName}
                   </div>
-                )}
-                {message.role === "assistant" &&
-                  message.metadata?.generatedFiles?.map((file) => (
-                    <GeneratedFile key={file.id} file={file} />
-                  ))}
-              </MessageContent>
-            </Message>
-          ))}
+                  <div className="mt-1 flex flex-col gap-2 text-sm leading-relaxed">
+                    {message.parts.map((part, index) => {
+                      if (part.type === "text") {
+                        return isAssistant ? (
+                          <MessageResponse key={index}>{part.text}</MessageResponse>
+                        ) : (
+                          <span key={index} className="whitespace-pre-wrap">
+                            {part.text}
+                          </span>
+                        );
+                      }
+                      if (part.type === "dynamic-tool") {
+                        return <MessageTool key={index} part={part} />;
+                      }
+                      if (part.type === "data-tool-approval") {
+                        return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
+                      }
+                      if (part.type === "file") {
+                        return part.mediaType.startsWith("image/") ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
+                          <img
+                            key={index}
+                            src={part.url}
+                            alt={part.filename ?? "generated"}
+                            className="max-h-96 rounded-lg border"
+                          />
+                        ) : null;
+                      }
+                      return null;
+                    })}
+                    {!isAssistant && (message.metadata?.files?.length ?? 0) > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {message.metadata!.files!.map((file) => (
+                          <Badge key={file.id} variant="secondary">
+                            <Paperclip className="size-3" /> {file.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {isAssistant &&
+                      message.metadata?.generatedFiles?.map((file) => (
+                        <GeneratedFile key={file.id} file={file} />
+                      ))}
+                  </div>
+                  {isAssistant && <MessageSources parts={message.parts} />}
+                  {isAssistant && textContent && !isStreamingThis && (
+                    <MessageActions className="mt-2 -ml-1.5">
+                      <MessageAction
+                        tooltip={t("copy")}
+                        onClick={() => {
+                          navigator.clipboard.writeText(textContent);
+                          toast.success(t("copied"));
+                        }}
+                      >
+                        <Copy className="size-3.5" />
+                      </MessageAction>
+                    </MessageActions>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {status === "submitted" && (
+            <div className="flex items-start gap-3">
+              <ChatAvatar label={partnerInitial} className="bg-primary text-primary-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-semibold">{partner.name}</div>
+                <div className="mt-1 flex h-5 items-center gap-1">
+                  <span className="bg-muted-foreground size-1.5 animate-pulse rounded-full" />
+                  <span className="bg-muted-foreground size-1.5 animate-pulse rounded-full [animation-delay:200ms]" />
+                  <span className="bg-muted-foreground size-1.5 animate-pulse rounded-full [animation-delay:400ms]" />
+                </div>
+              </div>
+            </div>
+          )}
           {error && (
             <p className="text-destructive text-sm">{error.message || t("request_failed")}</p>
           )}
@@ -250,18 +321,20 @@ export function ChatView({
           <PromptInputFooter>
             <PromptInputTools>
               <PromptInputButton
+                variant="outline"
                 onClick={() => fileInput.current?.click()}
                 aria-label={t("attachments")}
               >
-                <Paperclip className="size-4" />
+                <Paperclip className="text-muted-foreground size-4" /> {t("attachments")}
               </PromptInputButton>
               {partner.type === "default-assistant" && (
                 <PromptInputButton
-                  variant={useWebSearch ? "default" : "ghost"}
+                  variant={useWebSearch ? "default" : "outline"}
                   onClick={() => setUseWebSearch((value) => !value)}
                   aria-label={t("web_search")}
                 >
-                  <Globe className="size-4" />
+                  <Globe className={cn("size-4", !useWebSearch && "text-muted-foreground")} />{" "}
+                  {t("web_search")}
                 </PromptInputButton>
               )}
               {partner.type === "group-chat" &&
@@ -298,6 +371,9 @@ export function ChatView({
             />
           </PromptInputFooter>
         </PromptInput>
+        <p className="text-muted-foreground mt-2.5 text-center text-[11.5px]">
+          {t("chat_sovereignty_hint")}
+        </p>
         <input
           ref={fileInput}
           type="file"
