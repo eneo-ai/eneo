@@ -3382,5 +3382,7 @@
   "login_with_sso": "Logga in med SSO",
   "trigger_error_demo": "Testa felhantering",
   "days": "dagar",
-  "security_classification_description": "Ange den lägsta säkerhetsklassning som krävs för modeller i detta space."
+  "security_classification_description": "Ange den lägsta säkerhetsklassning som krävs för modeller i detta space.",
+  "web_search": "Webbsökning",
+  "file_type_not_supported": "Filtypen stöds inte"
 }

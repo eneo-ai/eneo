@@ -3382,5 +3382,7 @@
   "login_with_sso": "Log in with SSO",
   "trigger_error_demo": "Trigger error demo",
   "days": "days",
-  "security_classification_description": "Set the minimum security classification required for models used in this space."
+  "security_classification_description": "Set the minimum security classification required for models used in this space.",
+  "web_search": "Web search",
+  "file_type_not_supported": "File type not supported"
 }
