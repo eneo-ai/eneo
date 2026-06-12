@@ -5,7 +5,6 @@ from unittest.mock import patch
 from PIL import Image
 
 from intric.tokens.token_utils import (
-    _openai_image_tokens,
     count_image_tokens_from_blob,
     count_message_tokens,
     count_tokens,
@@ -120,13 +119,6 @@ def test_count_tool_tokens_fallback_when_litellm_fails():
         side_effect=RuntimeError("boom"),
     ):
         assert count_tool_tokens(_TOOLS) > 0
-
-
-def test_openai_image_tokens_formula():
-    # Fit in 2048², short side scaled to 768, 85 base + 170 per 512px tile.
-    assert _openai_image_tokens(512, 512) == 85 + 170  # 1 tile
-    assert _openai_image_tokens(2048, 1024) == 1105  # -> 1536x768, 3x2 tiles
-    assert _openai_image_tokens(4096, 4096) == 85 + 170 * 4  # -> 768x768, 2x2 tiles
 
 
 def _image_blob(width: int, height: int) -> bytes:

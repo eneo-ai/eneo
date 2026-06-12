@@ -16,7 +16,6 @@ is expensive to build just for counting.
 import base64
 import io
 import logging
-import math
 from typing import Any, Optional, cast
 
 import litellm
@@ -26,46 +25,26 @@ from intric.tokens.anthropic_image_pricing import (
     anthropic_image_tokens,
     is_anthropic_model,
 )
+from intric.tokens.openai_image_pricing import openai_image_tokens
 
 logger = logging.getLogger(__name__)
 
 _FALLBACK_MESSAGE_OVERHEAD_TOKENS = 4
 
-# OpenAI bills a base cost plus a per-512px-tile cost at detail "high", after
-# fitting the image in 2048² and scaling the short side to 768px. Anthropic
-# prices differently — see anthropic_image_pricing.py. Both formulas are
-# documented; the drift alarm below catches them going stale.
-_OPENAI_IMAGE_FIT_EDGE = 2048
-_OPENAI_IMAGE_SHORT_EDGE = 768
-_OPENAI_IMAGE_TILE_PX = 512
-_OPENAI_IMAGE_TILE_TOKENS = 170
-_OPENAI_IMAGE_BASE_TOKENS = 85
-
-
-def _openai_image_tokens(width: int, height: int) -> int:
-    """OpenAI's documented high-detail cost: fit in 2048², short side to 768px, then 85 + 170 per tile."""
-    scale = min(1.0, _OPENAI_IMAGE_FIT_EDGE / max(width, height))
-    scaled_w, scaled_h = width * scale, height * scale
-    scale = min(1.0, _OPENAI_IMAGE_SHORT_EDGE / min(scaled_w, scaled_h))
-    scaled_w, scaled_h = scaled_w * scale, scaled_h * scale
-    tiles = math.ceil(scaled_w / _OPENAI_IMAGE_TILE_PX) * math.ceil(
-        scaled_h / _OPENAI_IMAGE_TILE_PX
-    )
-    return _OPENAI_IMAGE_BASE_TOKENS + _OPENAI_IMAGE_TILE_TOKENS * tiles
-
-
 # Fallback when an image's dimensions cannot be read: the cost of a 2048×1024
 # upload (files are stored downscaled to at most 2048px on the long edge).
-_FALLBACK_IMAGE_TOKENS = _openai_image_tokens(2048, 1024)
+_FALLBACK_IMAGE_TOKENS = openai_image_tokens(2048, 1024)
 
 
 def count_image_tokens(width: int, height: int, model_name: str = "") -> int:
-    """Tokens an image of the given pixel dimensions costs at detail "high"."""
-    # The only dispatch into Anthropic-specific pricing — remove this branch
-    # together with anthropic_image_pricing.py to drop that special handling.
+    """Tokens an image of the given pixel dimensions costs at detail "high".
+
+    Provider pricing lives in the *_image_pricing modules — this is the only
+    dispatch point into them.
+    """
     if is_anthropic_model(model_name):
         return anthropic_image_tokens(width, height, model_name)
-    return _openai_image_tokens(width, height)
+    return openai_image_tokens(width, height, model_name)
 
 
 def _image_size_from_blob(blob: Optional[bytes]) -> tuple[int, int] | None:
