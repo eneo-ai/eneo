@@ -24,6 +24,7 @@ from intric.conversations.conversation_models import (
     PreflightRequest,
     PreflightResponse,
 )
+from intric.conversations.ui_message_stream import to_ui_message_stream_response
 from intric.database.database import AsyncSession
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
@@ -274,7 +275,7 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
 async def chat(
     request: ConversationRequest,
     http_request: Request,
-    version: Annotated[int, Query(ge=1, le=2)] = 1,
+    version: Annotated[int, Query(ge=1, le=3)] = 1,
     container: Container = Depends(
         get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
     ),
@@ -339,7 +340,9 @@ async def chat(
         if request.tools is not None and request.tools.assistants:
             tool_assistant_id = request.tools.assistants[0].id
 
-        # Use the dedicated ConversationService to handle routing logic
+        # Use the dedicated ConversationService to handle routing logic.
+        # version=3 only changes the stream framing; retrieval and generation
+        # behave exactly like version=2.
         conversation_service = container.conversation_service()
         response = await conversation_service.ask_conversation(
             question=request.question,
@@ -349,9 +352,14 @@ async def chat(
             file_ids=file_ids,
             stream=request.stream,
             tool_assistant_id=tool_assistant_id,
-            version=version,
+            version=min(version, 2),
             use_web_search=request.use_web_search,
             require_tool_approval=request.require_tool_approval,
+        )
+
+    if version == 3 and request.stream:
+        return to_ui_message_stream_response(
+            response=response, base_url=str(http_request.base_url)
         )
 
     return await to_conversation_response(response=response, stream=request.stream)
