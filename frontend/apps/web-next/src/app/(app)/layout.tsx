@@ -2,6 +2,7 @@ import { AppContextProvider, type AppContextData } from "@/components/providers/
 import { Header } from "@/components/shell/header";
 import { unwrap } from "@/lib/api/errors";
 import { eneoApi } from "@/lib/api/server";
+import { JobsProvider } from "@/features/jobs/use-jobs";
 import packageJson from "../../../package.json";
 
 export default async function AppLayout({
@@ -29,12 +30,14 @@ export default async function AppLayout({
 
   return (
     <AppContextProvider value={value}>
-      {/* Viewport-locked shell: pages scroll inside main, so full-height
-          surfaces (chat) can pin their input to the bottom. */}
-      <div className="flex h-svh flex-col">
-        <Header />
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
-      </div>
+      <JobsProvider>
+        {/* Viewport-locked shell: pages scroll inside main, so full-height
+            surfaces (chat) can pin their input to the bottom. */}
+        <div className="flex h-svh flex-col">
+          <Header />
+          <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
+        </div>
+      </JobsProvider>
     </AppContextProvider>
   );
 }

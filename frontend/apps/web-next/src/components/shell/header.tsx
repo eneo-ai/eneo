@@ -3,6 +3,7 @@ import { EneoIcon, EneoWordMark } from "@/components/shell/eneo-logo";
 import { MainNav } from "@/components/shell/main-nav";
 import { ProfileMenu } from "@/components/shell/profile-menu";
 import { ThemeSwitcher } from "@/components/shell/theme-switcher";
+import { JobIndicator } from "@/features/jobs/job-indicator";
 
 export function Header() {
   return (
@@ -12,6 +13,7 @@ export function Header() {
         <EneoIcon className="block h-7 w-auto md:hidden" />
       </Link>
       <MainNav />
+      <JobIndicator />
       <ThemeSwitcher />
       <ProfileMenu />
     </header>
