@@ -1,5 +1,6 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { getTranslations } from "next-intl/server";
+import { PageHeader } from "@/components/composites/page-header";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import { DashboardList } from "./dashboard-list.client";
@@ -14,8 +15,8 @@ export default async function DashboardPage() {
   await queryClient.fetchQuery(dashboardQueryOptions(eneoApi()));
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">{t("dashboard")}</h1>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
+      <PageHeader title={t("dashboard")} />
       <HydrationBoundary state={dehydrate(queryClient)}>
         <DashboardList />
       </HydrationBoundary>

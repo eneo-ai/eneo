@@ -1,21 +1,38 @@
+import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { Header } from "@/components/shell/header";
-import { requireSession } from "@/lib/auth/session";
+import { unwrap } from "@/lib/api/errors";
+import { eneoApi } from "@/lib/api/server";
+import packageJson from "../../../package.json";
 
 export default async function AppLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await requireSession();
+  const api = eneoApi();
+  const [user, tenant, settings, limits, backendVersion] = await Promise.all([
+    unwrap(api.GET("/api/v1/users/me/")),
+    unwrap(api.GET("/api/v1/users/tenant/")),
+    unwrap(api.GET("/api/v1/settings/")),
+    unwrap(api.GET("/api/v1/limits/")),
+    // The spec types /version as unknown; it returns a bare string.
+    unwrap(api.GET("/version")).then((version) => (typeof version === "string" ? version : ""))
+  ]);
+
+  const value: AppContextData = {
+    user,
+    tenant,
+    settings,
+    limits,
+    versions: { frontend: packageJson.version, backend: backendVersion }
+  };
 
   return (
-    <div className="flex min-h-svh flex-col">
-      <Header userEmail={session.user.email} />
-      <div className="flex flex-1">
-        {/* Sidebar placeholder; navigation lands in Phase 4. */}
-        <aside className="bg-sidebar hidden w-56 border-r md:block" />
-        <main className="flex-1 p-6">{children}</main>
+    <AppContextProvider value={value}>
+      <div className="flex min-h-svh flex-col">
+        <Header />
+        <main className="flex flex-1 flex-col">{children}</main>
       </div>
-    </div>
+    </AppContextProvider>
   );
 }

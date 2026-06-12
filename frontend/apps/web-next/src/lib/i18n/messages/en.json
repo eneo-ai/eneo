@@ -3380,5 +3380,7 @@
   "audit_category_system_actions_description": "Retention policies, encryption, maintenance",
   "audit_category_user_actions_description": "Assistant, space, app operations, templates, model configs",
   "login_with_sso": "Log in with SSO",
-  "trigger_error_demo": "Trigger error demo"
+  "trigger_error_demo": "Trigger error demo",
+  "days": "days",
+  "security_classification_description": "Set the minimum security classification required for models used in this space."
 }
