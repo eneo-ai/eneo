@@ -33,7 +33,17 @@ export default ts.config(
     // `**/dev/**` routes are throwaway UI prototypes / previews (see their
     // READMEs); their demo copy is intentionally not translated, so exempt them
     // from the lint rules that would otherwise force paraglide messages.
-    ignores: ["build/", ".svelte-kit/", "dist/", "**/paraglide/", "**/dev/**"]
+    ignores: [
+      "build/",
+      ".svelte-kit/",
+      ".svelte-kit-e2e/",
+      "coverage/",
+      "playwright-report/",
+      "test-results/",
+      "dist/",
+      "**/paraglide/",
+      "**/dev/**"
+    ]
   },
   {
     // Block hardcoded human-facing text — every human-facing string must go
