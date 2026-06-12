@@ -112,8 +112,8 @@ export function ChatView({
     question: input,
     fileIds: attachments.fileIds,
     sessionId,
-    assistantId: partner.type === "group-chat" ? null : partner.id,
-    groupChatId: partner.type === "group-chat" ? partner.id : null
+    assistantId: sessionId || partner.type === "group-chat" ? null : partner.id,
+    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null
   });
 
   const usage = deriveContextUsage({
@@ -134,10 +134,13 @@ export function ChatView({
         ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
         : undefined;
 
+    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
+    // continuing a session identifies the partner through the session.
+    const continuing = sessionIdRef.current !== null;
     const body: ChatSendOptions = {
       session_id: sessionIdRef.current,
-      assistant_id: partner.type === "group-chat" ? null : partner.id,
-      group_chat_id: partner.type === "group-chat" ? partner.id : null,
+      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
+      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
       files: attachments.fileIds.map((id) => ({ id })),
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       use_web_search: useWebSearch || undefined,
@@ -153,13 +156,21 @@ export function ChatView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent>
+        {/* Same column width as the prompt input: responses span the chat
+            column (readable line length), not the full page. */}
+        <ConversationContent className="mx-auto w-full max-w-3xl px-0">
           {messages.length === 0 && (
             <ConversationEmptyState title={partner.name} description={t("ask_a_question")} />
           )}
           {messages.map((message) => (
-            <Message key={message.id} from={message.role}>
-              <MessageContent>
+            <Message
+              key={message.id}
+              from={message.role}
+              className={message.role === "assistant" ? "max-w-full" : undefined}
+            >
+              {/* Assistant content takes the full row so tool/approval boxes
+                  keep a stable width while streaming; user keeps the bubble. */}
+              <MessageContent className={message.role === "assistant" ? "w-full" : undefined}>
                 {message.role === "assistant" && <MessageSources parts={message.parts} />}
                 {message.parts.map((part, index) => {
                   if (part.type === "text") {

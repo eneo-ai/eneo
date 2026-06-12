@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
@@ -34,7 +33,6 @@ export function ChatPage({
   buildSessionUrl?: (sessionId: string | null) => string;
   headerExtra?: React.ReactNode;
 }) {
-  const router = useRouter();
   const [active, setActive] = useState<ActiveConversation | null>(
     initialSessionId ? null : { key: "new", sessionId: null, messages: [] }
   );
@@ -62,7 +60,10 @@ export function ChatPage({
   });
 
   function updateUrl(sessionId: string | null) {
-    if (buildSessionUrl) router.replace(buildSessionUrl(sessionId), { scroll: false });
+    // Shallow history update on purpose: router.replace would start an RSC
+    // navigation whose transition holds back streaming re-renders until the
+    // server render resolves (the answer would then paint in one chunk).
+    if (buildSessionUrl) window.history.replaceState(null, "", buildSessionUrl(sessionId));
   }
 
   function selectSession(sessionId: string) {

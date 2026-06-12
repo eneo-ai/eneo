@@ -29,9 +29,11 @@ export default async function AppLayout({
 
   return (
     <AppContextProvider value={value}>
-      <div className="flex min-h-svh flex-col">
+      {/* Viewport-locked shell: pages scroll inside main, so full-height
+          surfaces (chat) can pin their input to the bottom. */}
+      <div className="flex h-svh flex-col">
         <Header />
-        <main className="flex flex-1 flex-col">{children}</main>
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
       </div>
     </AppContextProvider>
   );

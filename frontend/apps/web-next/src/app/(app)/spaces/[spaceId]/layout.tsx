@@ -27,11 +27,11 @@ export default async function SpaceLayout({
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
       <SpaceProvider routeId={spaceId}>
-        <div className="flex flex-1">
-          <aside className="bg-sidebar hidden w-56 shrink-0 border-r p-3 md:block">
+        <div className="flex min-h-0 flex-1">
+          <aside className="bg-sidebar hidden w-56 shrink-0 overflow-y-auto border-r p-3 md:block">
             <SpaceNav />
           </aside>
-          <div className="flex min-w-0 flex-1 flex-col p-6">{children}</div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-6">{children}</div>
         </div>
       </SpaceProvider>
     </HydrationBoundary>

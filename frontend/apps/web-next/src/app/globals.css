@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Streamdown (MessageResponse markdown rendering) styles its output with
+ * Tailwind utility classes; Tailwind must scan the package output or the
+ * classes get purged and markdown renders as unstyled plain text. */
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
+@source "../../node_modules/@streamdown/cjk/dist/*.js";
+@source "../../node_modules/@streamdown/math/dist/*.js";
+@source "../../node_modules/@streamdown/mermaid/dist/*.js";
+
 /*
  * Theme: stock shadcn/ui zinc palette (new-york, CSS variables mode).
  *
