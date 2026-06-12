@@ -236,3 +236,27 @@ def count_assistant_prompt_tokens(prompt: Optional[str], model_name: str) -> int
         return 0
 
     return count_tokens(prompt, model_name)
+
+
+# Providers report the authoritative prompt token count in every response.
+# Comparing it against our estimate turns silent formula staleness (provider
+# pricing changes, tokenizer swaps, payload-shape drift) into a logged signal.
+_DRIFT_WARN_RATIO = 0.2
+
+
+def log_token_count_drift(
+    model_name: str, predicted: Optional[int], actual: Optional[int]
+) -> None:
+    """Warn when the local estimate drifts from the provider-reported count."""
+    if not predicted or not actual or predicted <= 0 or actual <= 0:
+        return
+    drift = abs(predicted - actual) / actual
+    if drift > _DRIFT_WARN_RATIO:
+        logger.warning(
+            "Token count drift for model '%s': predicted %d vs provider-reported "
+            "%d (%.0f%%) — counting formulas may be stale",
+            model_name,
+            predicted,
+            actual,
+            drift * 100,
+        )

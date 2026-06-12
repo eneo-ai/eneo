@@ -25,6 +25,7 @@ from intric.mcp_servers.infrastructure.proxy import (
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.settings.encryption_service import EncryptionService
+from intric.tokens.token_utils import log_token_count_drift
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -405,12 +406,20 @@ class CompletionService:
 
             completion = self._handle_tool_call(streaming_wrapper())
 
+        usage = getattr(completion, "usage", None) if not stream else None
+        if usage is not None:
+            log_token_count_drift(
+                model_name=model_adapter.get_litellm_model_name(),
+                predicted=context.token_count,
+                actual=usage.prompt_tokens,
+            )
+
         return CompletionModelResponse(
             completion=completion,
             model=model_adapter.model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
-            usage=getattr(completion, "usage", None) if not stream else None,
+            usage=usage,
         )
 
 

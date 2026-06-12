@@ -13,6 +13,7 @@ from intric.tokens.token_utils import (
     count_message_tokens,
     count_tokens,
     count_tool_tokens,
+    log_token_count_drift,
 )
 
 
@@ -173,6 +174,27 @@ def test_count_image_tokens_from_blob_uses_provider_formula():
 def test_count_image_tokens_from_blob_falls_back_on_unreadable_data():
     assert count_image_tokens_from_blob(b"not an image") == 1105
     assert count_image_tokens_from_blob(None) == 1105
+
+
+def test_drift_logging_warns_above_threshold(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="intric.tokens.token_utils"):
+        log_token_count_drift("openai/gpt-4o", predicted=1000, actual=1500)
+
+    assert any("Token count drift" in r.message for r in caplog.records)
+
+
+def test_drift_logging_silent_within_threshold(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="intric.tokens.token_utils"):
+        log_token_count_drift("openai/gpt-4o", predicted=1000, actual=1100)
+        log_token_count_drift("openai/gpt-4o", predicted=None, actual=1100)
+        log_token_count_drift("openai/gpt-4o", predicted=1000, actual=None)
+        log_token_count_drift("openai/gpt-4o", predicted=0, actual=0)
+
+    assert not caplog.records
 
 
 def test_count_message_tokens_prices_images_by_provider_formula():

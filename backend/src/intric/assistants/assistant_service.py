@@ -62,6 +62,7 @@ from intric.spaces.space_service import SpaceService
 from intric.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
+from intric.tokens.token_utils import log_token_count_drift
 from intric.users.user import UserInDB
 from intric.workflows.step_repo import StepRepository
 
@@ -1208,6 +1209,12 @@ class AssistantService:
                             stream_usage.prompt_tokens + assistant_selector_tokens
                         )
                         input_source = "provider"
+                        assert completion_model is not None
+                        log_token_count_drift(
+                            model_name=completion_model.name,
+                            predicted=response.total_token_count,
+                            actual=stream_usage.prompt_tokens,
+                        )
                     else:
                         num_tokens_question = (
                             response.total_token_count + assistant_selector_tokens
