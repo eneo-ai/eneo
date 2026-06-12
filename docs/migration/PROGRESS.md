@@ -193,12 +193,41 @@ Done (2026-06-13 session, continued):
   react-hooks/set-state-in-effect (defer via queueMicrotask) and
   react-hooks/refs (latest-ref updates must happen inside useEffect).
 
-Remaining for Phase 6 (in plan order; knowledge/integrations is done):
-1. **Assistants** (list/editor/publish/transfer/templates), verify via chat.
-2. **Group chats** editor.
-3. **Apps** (editor, run page with dynamic input forms, results, dashboard
+Done (2026-06-13 session, assistants):
+- **Assistants list** (`src/features/assistants/`): tile grid at
+  `/spaces/[spaceId]/assistants` (assistants + group chats merged and
+  name-sorted like SpacesManager), published/drafts sections for users with
+  publish permission, create split-button (blank assistant → editor; group
+  chat stays on list), actions (edit/publish/move/delete; group chats have
+  no move). PublishDialog is shared and reusable for apps later.
+  MoveResourceDialog gained a children slot (assistant "include knowledge"
+  switch) + optional hint.
+- **Assistant editor** (`src/features/assistants/editor/`): per-section save
+  like space-settings (the Svelte global draft/diff editor was intentionally
+  NOT ported — sanctioned redesign). Sections: general (name/description/
+  icon via POST /api/v1/icons/ multipart through the proxy), instructions
+  (prompt), AI settings (model select + behaviour presets creative 1.25/
+  default null/deterministic 0.25/custom + model-specific kwargs driven by
+  supported_model_kwargs capabilities — pure module model-kwargs.ts,
+  unit-tested), security (retention, inherits space), publishing (status +
+  insights toggle gated by insight_toggle permission).
+- Governance effective_config branches intentionally skipped: the schema
+  documents it as only populated for personal default assistants, never for
+  space assistants.
+
+Assistants follow-ups (deferred, in rough priority order):
+- Knowledge picker (groups/websites/integration knowledge; mutual exclusion
+  with MCP), MCP servers picker, attachments section, prompt version
+  history dialog, prompt-guide modal (help-assistants), API keys section.
+- Templates: creation is blank-only; TemplateCreateAssistant flow +
+  TemplateCreateAssistantHint not ported. Group chat "open editor after
+  creation" switch omitted until the group-chat editor exists.
+
+Remaining for Phase 6 (in plan order):
+1. **Group chats** editor (+ assistants editor follow-ups above).
+2. **Apps** (editor, run page with dynamic input forms, results, dashboard
    routes).
-4. **Services** (CRUD + run).
+3. **Services** (CRUD + run).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in

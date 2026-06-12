@@ -24,9 +24,9 @@ import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
- * Move a knowledge resource to another accessible space. The hint warns that
- * assistants in the current space lose access; the transfer itself fails if
- * the target lacks a matching embedding model.
+ * Move a resource to another accessible space. The hint warns about what the
+ * move breaks; the transfer itself fails if the target lacks matching models.
+ * Extra rows (e.g. the assistant "include knowledge" switch) go in children.
  */
 export function MoveResourceDialog({
   open,
@@ -35,15 +35,17 @@ export function MoveResourceDialog({
   hint,
   confirmLabel,
   pending,
-  onMove
+  onMove,
+  children
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  hint: string;
+  hint?: string;
   confirmLabel: string;
   pending: boolean;
   onMove: (targetSpaceId: string) => void;
+  children?: React.ReactNode;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -72,10 +74,13 @@ export function MoveResourceDialog({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground text-sm">
-            <span className="font-medium">{t("hint")}: </span>
-            {hint}
-          </p>
+          {children}
+          {hint && (
+            <p className="text-muted-foreground text-sm">
+              <span className="font-medium">{t("hint")}: </span>
+              {hint}
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
