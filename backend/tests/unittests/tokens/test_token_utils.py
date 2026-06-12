@@ -1,10 +1,43 @@
+import base64
+import io
+import math
 from unittest.mock import patch
 
+from PIL import Image
+
 from intric.tokens.token_utils import (
+    _anthropic_image_tokens,
     count_message_tokens,
     count_tokens,
     count_tool_tokens,
 )
+
+
+def _image_data_url(width: int, height: int) -> str:
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (230, 230, 230)).save(
+        buffer, format="JPEG", quality=85
+    )
+    encoded = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def _image_message(width: int, height: int) -> list[dict]:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": _image_data_url(width, height),
+                        "detail": "high",
+                    },
+                }
+            ],
+        }
+    ]
+
 
 _TOOLS = [
     {
@@ -86,3 +119,29 @@ def test_count_tool_tokens_fallback_when_litellm_fails():
         side_effect=RuntimeError("boom"),
     ):
         assert count_tool_tokens(_TOOLS) > 0
+
+
+def test_anthropic_image_tokens_formula():
+    # No downscale needed (long edge <= 1568): (w*h)/750 rounded up.
+    assert _anthropic_image_tokens(1024, 1024) == math.ceil(1024 * 1024 / 750)
+    assert _anthropic_image_tokens(800, 600) == 640
+    # Long edge > 1568 is scaled down to 1568 before pricing.
+    assert _anthropic_image_tokens(2048, 1024) == 1640  # -> 1568x784
+    assert _anthropic_image_tokens(1536, 2048) == 2459  # -> 1176x1568
+
+
+def test_count_message_tokens_anthropic_prices_images_by_dimensions():
+    # litellm prices any image with OpenAI's tile formula (~1105 for 2048x1024);
+    # Anthropic models must instead use the dimension formula (~1640).
+    blank = [{"role": "user", "content": ""}]
+    message = _image_message(2048, 1024)
+
+    anthropic_delta = count_message_tokens(
+        message, "anthropic/claude-3-5-haiku-20241022"
+    ) - count_message_tokens(blank, "anthropic/claude-3-5-haiku-20241022")
+    openai_delta = count_message_tokens(
+        message, "openai/gpt-4o"
+    ) - count_message_tokens(blank, "openai/gpt-4o")
+
+    assert anthropic_delta == 1640
+    assert openai_delta < anthropic_delta  # litellm's OpenAI formula under-prices
