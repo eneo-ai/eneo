@@ -13,7 +13,7 @@ actually happened. Update this file when a phase lands.
 | 3 API layer (typed client, proxy, Query) | ✅ done | `4763c9c69` |
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
-| 6 Builders + knowledge | ⬜ next | — |
+| 6 Builders + knowledge | 🟡 in progress | `d3b3fc4c4` (jobs), `ab577d5c4` (knowledge: collections + websites) |
 | 7 Admin | ⬜ | — |
 | 8 i18n / polish / parity | ⬜ | — |
 
@@ -111,13 +111,59 @@ actually happened. Update this file when a phase lands.
   (password mode). Generated schemas are excluded from the pre-commit
   large-file hook.
 
-## Phase 6 starting pointers
+## Phase 6 progress (6a partially done; stop point of 2026-06-12 session)
 
-- Plan: `docs/migration/06-builders-and-knowledge.md`. Sources to port:
-  `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/{assistants,apps,services,group-chats,knowledge}`
-  plus `lib/features/{knowledge,integrations,attachments,icons}`.
-- The space sidebar already links to assistants/apps/knowledge/services
-  (currently 404). Chat partner resolution (`space-chat.client.tsx`) already
-  handles `type=assistant|group-chat` for builder-created entities.
-- File uploads through the proxy are proven (chat attachments use
-  `POST /api/v1/files/` with FormData + custom bodySerializer).
+Done:
+- **Jobs** (`d3b3fc4c4`): `src/features/jobs/use-jobs.tsx` — `["jobs"]` query,
+  adaptive refetchInterval (2s for 15s after `trackJob()`, else 30s, stops when
+  idle); upload queue (max 5 concurrent, XHR to
+  `/api/eneo/api/v1/groups/{id}/info-blobs/upload/` for byte progress).
+  Completion (active→complete or job aged out) invalidates
+  `JOB_INVALIDATION_KEYS`: spaces/collections/websites/integration-knowledge/
+  info-blobs/apps. Header bell popover: `job-indicator.tsx`.
+- **Knowledge: collections + websites** (`ab577d5c4`):
+  `src/features/knowledge/` (knowledge.ts query layer, collections, blobs,
+  upload-dialog, websites, website-dialog, crawl-runs, move-dialog,
+  embedding-model-select, knowledge-page) + routes `knowledge/`,
+  `knowledge/collections/[collectionId]/`, `knowledge/websites/[websiteId]/`.
+  Tab state via `?tab=` + history.replaceState. Lists come from the space
+  object (filtered `space_id === space.id`), grouped per embedding model when
+  >1 in use. Detail pages prefetch via fetchQuery + HydrationBoundary; crawl
+  runs poll at 30s. `src/lib/format.ts` (bytes/datetime/relative/duration —
+  no dayjs dep). `ConfirmDialogControlled` added to composites for
+  dropdown-launched deletes.
+
+Remaining for Phase 6 (in plan order):
+1. **Knowledge: integrations tab** — sources studied, not built:
+   `IntegrationsTable.svelte` (SharePoint wrapper grouping: items sharing
+   `wrapper_id` with ≥2 items render as one folder row; wrapper detail page
+   `integrations/wrapper/[wrapperId]`), `ImportKnowledgeDialog` +
+   confluence/sharepoint import dialogs (preview → import single/batch),
+   `SyncHistoryDialog` (paginated 10/page sync logs),
+   `IntegrationAuthService.svelte.ts` (OAuth popup: open about:blank popup
+   FIRST then set location from `GET
+   /api/v1/integrations/auth/{tenant_integration_id}/url/` with
+   state=tenant_integration_id; callback page posts
+   `{type:"intric/integration-callback", code, state, params}` to opener).
+   Available integrations: `GET /api/v1/integrations/spaces/{space_id}/available/`;
+   register code: `POST /api/v1/integrations/auth/callback/token/`. Port
+   `/integrations/callback/token` page popup-flow only — the service-account
+   branch (sessionStorage `sharepoint_service_account_oauth` + admin
+   endpoint) belongs to Phase 7 admin.
+2. **Assistants** (list/editor/publish/transfer/templates), verify via chat.
+3. **Group chats** editor.
+4. **Apps** (editor, run page with dynamic input forms, results, dashboard
+   routes).
+5. **Services** (CRUD + run).
+
+Notes / gotchas hit:
+- eslint react-hooks/purity forbids `Date.now()` in render — keep time math in
+  `src/lib/format.ts` helpers (`daysSince`).
+- react-hooks/immutability forbids self-referencing useCallback — recursive
+  queue pumps need an inner named function.
+- i18n: all knowledge/jobs keys already existed in the converted catalogs
+  (ICU `{param}` style, `t(key, {param: string})`).
+- Blob text create: `POST /api/v1/groups/{id}/info-blobs/` body
+  `{info_blobs:[{text, metadata:{title}}]}`. Website update is POST (RB-5).
+  Duplicate-URL precheck: `GET /api/v1/websites/check-url/?url=` (skip on org
+  space; create anyway on check failure).
