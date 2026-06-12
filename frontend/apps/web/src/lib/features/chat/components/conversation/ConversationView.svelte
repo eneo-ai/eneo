@@ -1,6 +1,8 @@
 <script lang="ts">
   import { getIntric } from "$lib/core/Intric";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import { getAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
+  import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { Markdown } from "@intric/ui";
@@ -22,7 +24,19 @@
 
   const chat = getChatService();
 
-  const attachmentRules = undefined; // getAttachmentRulesStore(toStore(() => chat.partner));
+  // Validate uploads client-side against the backend's per-format size limits
+  // (and the partner model's vision support) so oversized or unsupported files
+  // are rejected instantly with a clear message instead of silently failing the
+  // server-side request. Group-chat partners have no completion_model, so vision
+  // formats are simply omitted from the accepted set.
+  const attachmentRules = getAttachmentRulesStore(
+    toStore(() => {
+      const partner = chat.partner;
+      return {
+        completion_model: partner && "completion_model" in partner ? partner.completion_model : null
+      };
+    })
+  );
   initAttachmentManager({ intric: getIntric(), options: { rules: attachmentRules } });
 
   let scrollContainer = $state() as HTMLDivElement;

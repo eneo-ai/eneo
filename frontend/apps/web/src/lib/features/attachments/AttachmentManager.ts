@@ -5,6 +5,7 @@ import { ATTACHMENTS } from "$lib/core/constants";
 import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 import { toast } from "$lib/components/toast";
+import { m } from "$lib/paraglide/messages";
 
 export type Attachment = {
   id: string;
@@ -171,8 +172,8 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         if (error instanceof Error && error.message.includes("Cancelled")) {
           console.warn(`Cancelled upload for ${file.name}`);
         } else {
-          const message = getUploadErrorMessage(error, file.name);
-          toast.error(`We encountered an error uploading the file ${file.name}: ${message}`);
+          const reason = getUploadErrorMessage(error);
+          toast.error(m.attachment_upload_failed({ fileName: file.name, reason }));
         }
         attachments.update(($attachments) => $attachments.filter((u) => u.id !== currentUpload));
       } finally {
@@ -197,7 +198,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
       if (selectedRules.maxTotalCount && $attachments.length >= selectedRules.maxTotalCount) {
         errors.push({
           kind: "max_total_count",
-          message: `You can only attach a maximum number of ${selectedRules.maxTotalCount} files at a time.`
+          message: m.attachment_error_max_count({ count: selectedRules.maxTotalCount })
         });
         break;
       }
@@ -211,7 +212,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           errors.push({
             kind: "unsupported_type",
             fileName: file.name,
-            message: `${file.name}: File type ${mimetype} is not supported for this operation.`
+            message: m.attachment_error_unsupported_type({
+              fileName: file.name,
+              fileType: mimetype
+            })
           });
           continue;
         }
@@ -222,9 +226,11 @@ function createAttachmentManager(data: AttachmentManagerParams) {
             fileName: file.name,
             fileSizeBytes: file.size,
             maxSizeBytes: format.maxSize,
-            message:
-              `${file.name}: File is ${formatBytes(file.size)}, ` +
-              `maximum allowed is ${formatBytes(format.maxSize)}.`
+            message: m.file_too_large_detail({
+              fileName: file.name,
+              currentSize: formatBytes(file.size),
+              maxSize: formatBytes(format.maxSize)
+            })
           });
           continue;
         }
@@ -242,9 +248,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           fileName: file.name,
           fileSizeBytes: file.size,
           maxSizeBytes: selectedRules.maxTotalSize,
-          message:
-            `${file.name}: Skipping file. Can only upload a total of ` +
-            `${formatBytes(selectedRules.maxTotalSize)} at a time.`
+          message: m.attachment_error_max_total_size({
+            fileName: file.name,
+            maxSize: formatBytes(selectedRules.maxTotalSize)
+          })
         });
         continue;
       }

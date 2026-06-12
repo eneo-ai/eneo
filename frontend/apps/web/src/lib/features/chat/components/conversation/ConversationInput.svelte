@@ -18,6 +18,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { Globe, AlertTriangle } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { toast } from "$lib/components/toast";
 
   type McpServerSummary = {
     id: string;
@@ -98,7 +99,8 @@
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
-    queueValidUploads([...event.clipboardData.files]);
+    const errors = queueValidUploads([...event.clipboardData.files]);
+    if (errors) toast.error(errors.join("\n"));
   }
 
   let inputError = $state<{ message: string; details?: string; isContextError?: boolean } | null>(
