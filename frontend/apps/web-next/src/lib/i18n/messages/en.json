@@ -3580,5 +3580,10 @@
   "template_deleted_at": "Deleted",
   "help_assistant_installed": "Installed",
   "help_assistant_available": "Available",
-  "no_usage_data": "No usage data for this period"
+  "no_usage_data": "No usage data for this period",
+  "storage_used": "Storage used",
+  "shared": "Shared",
+  "governance_prompt_create": "New prompt",
+  "governance_prompt_delete_confirm": "Are you sure you want to delete the prompt \"{name}\"?",
+  "governance_prompts_empty": "No prompts in the library yet"
 }

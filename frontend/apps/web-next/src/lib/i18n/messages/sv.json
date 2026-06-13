@@ -3580,5 +3580,10 @@
   "template_deleted_at": "Borttagen",
   "help_assistant_installed": "Installerad",
   "help_assistant_available": "Tillgänglig",
-  "no_usage_data": "Ingen användningsdata för denna period"
+  "no_usage_data": "Ingen användningsdata för denna period",
+  "storage_used": "Använt lagringsutrymme",
+  "shared": "Delat",
+  "governance_prompt_create": "Ny prompt",
+  "governance_prompt_delete_confirm": "Är du säker på att du vill ta bort prompten \"{name}\"?",
+  "governance_prompts_empty": "Inga prompter i biblioteket ännu"
 }

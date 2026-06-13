@@ -1,6 +1,17 @@
 "use client";
 
-import { Building2, Cloud, Cpu, History, Key, Plug, ShieldCheck, Users } from "lucide-react";
+import {
+  BookText,
+  Building2,
+  ChartPie,
+  Cloud,
+  Cpu,
+  History,
+  Key,
+  Plug,
+  ShieldCheck,
+  Users
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -31,6 +42,7 @@ export function AdminNav() {
     {
       label: t("admin_section_governance"),
       items: [
+        { href: "/admin/prompt-library", icon: BookText, label: t("governance_tab_prompts") },
         {
           href: "/admin/security-classifications",
           icon: ShieldCheck,
@@ -48,7 +60,10 @@ export function AdminNav() {
     },
     {
       label: t("admin_section_analytics_logs"),
-      items: [{ href: "/admin/audit-logs", icon: History, label: t("audit_logs") }]
+      items: [
+        { href: "/admin/usage", icon: ChartPie, label: t("usage") },
+        { href: "/admin/audit-logs", icon: History, label: t("audit_logs") }
+      ]
     },
     {
       label: t("admin_section_access"),
