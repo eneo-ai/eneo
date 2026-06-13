@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2 } from "lucide-react";
+import { Building2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -27,6 +27,10 @@ export function AdminNav() {
     {
       label: t("admin_section_overview"),
       items: [{ href: "/admin", icon: Building2, label: t("organisation") }]
+    },
+    {
+      label: t("admin_section_access"),
+      items: [{ href: "/admin/users", icon: Users, label: t("users") }]
     }
   ];
 

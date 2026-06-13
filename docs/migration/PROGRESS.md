@@ -8,13 +8,15 @@ actually happened. Update this file when a phase lands.
 > services). Phase 7 Admin underway: **foundation + feature toggles** landed —
 > `/admin` layout with server-side admin gate (`hasPermission(user)("admin")`
 > → redirect `/`), a grouped sidebar nav (grows as pages land; legacy
-> roles/user-groups dropped per OQ-2), and the overview feature-toggles page
-> (templates / audit-logging / provisioning via PATCH /settings/* `{enabled}`,
-> optimistic + revert-on-error + `router.refresh()`). QA green (100 tests,
-> build). **Pick up next: Phase 7 step 3 — Users** (list with offset
-> pagination RB-5(a), search + state tabs, create/invite/edit, activate/
-> deactivate), then audit-logs, models, etc. (07-admin.md step order). The
-> `/admin` nav link already exists in main-nav, gated by can("admin").
+> roles/user-groups dropped per OQ-2), the overview feature-toggles page, and
+> **Users** management (list with offset pagination RB-5(a), search + state
+> tabs with counts, create/edit with role assignment, activate/deactivate/
+> delete). QA green (100 tests, build). **Pick up next: Phase 7 step 4 —
+> Audit logs** (filters → table → retention → access-session prompt → the 4
+> async-export BFF route handlers), then models + security-classifications,
+> mcp/api-keys/integrations, templates/help-assistants, insights/usage, and
+> the governance areas. The `/admin` nav link already exists in main-nav,
+> gated by can("admin").
 > Frontend QA runs on the HOST (`bun run check/lint/test/build` in
 > apps/web-next), never `bun install` in the container; backend dev server +
 > `bun run dev` (port 3100) you start yourself in devcontainer terminals.
@@ -29,7 +31,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | 🟡 in progress | foundation + feature toggles |
+| 7 Admin | 🟡 in progress | foundation + feature toggles, users |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -346,8 +348,30 @@ Done (2026-06-13 session, foundation + toggles — steps 1–2):
   openapi-fetch needs literal paths, so a `patchSetting` switch dispatches the
   three (identical body/response shape).
 
-Remaining for Phase 7 (plan order): users, audit-logs (+ the 4 export BFF
-route handlers), models (+ migration wizard) + security-classifications,
+Done (2026-06-13 session, users — step 3):
+- **Users** (`src/features/admin/users/`): users.ts (types + offset-pagination
+  query options `adminUsersQueryOptions({page,stateFilter,search})` against
+  `GET /api/v1/admin/users/` — RB-5(a); `rolesQueryOptions` flattens
+  predefined+custom from `GET /api/v1/roles/`; search committed only at 0 or
+  ≥3 chars per the backend rule). users-page (active/inactive tabs with counts
+  from metadata, debounced search box, offset prev/next pagination with
+  keepPreviousData, URL sync via window.history.replaceState for shareable
+  links, create button). user-table (email / role badges / state badge —
+  active=green, invited=blue, inactive=gray). user-actions (edit, deactivate/
+  reactivate via `POST /admin/users/{username}/{deactivate,reactivate}`, delete
+  via `DELETE /users/admin/{id}/`; deactivate+delete disabled for self).
+  user-editor (create `POST /admin/users/` UserAddAdmin; update
+  `POST /admin/users/{username}/` UserUpdatePublic — username read-only; role
+  checkboxes grouped predefined/custom; form mounted fresh per open so initial
+  state seeds without a reset effect). Route prefetches the first page + roles.
+  Added "Access → Users" to the admin nav.
+- Deviations: **invite is NOT ported** — the Svelte admin UI never wires
+  `users.invite` (create uses a password), so it's deferred (the endpoint
+  exists). **User-groups dropped** from the table + editor (OQ-2). Role
+  assignment kept. All user i18n keys already existed.
+
+Remaining for Phase 7 (plan order): audit-logs (+ the 4 export BFF route
+handlers), models (+ migration wizard) + security-classifications,
 mcp-servers + org api-keys + tenant integrations, templates + help-assistants,
 insights + usage, plus the governance areas (prompt-library, personal-assistant).
 
