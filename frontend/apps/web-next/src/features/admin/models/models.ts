@@ -9,10 +9,47 @@ export type EmbeddingModelAdmin = Schema<"EmbeddingModelSecurityStatus">;
 export type TranscriptionModelAdmin = Schema<"TranscriptionModelSecurityStatus">;
 export type AdminModel = CompletionModelAdmin | EmbeddingModelAdmin | TranscriptionModelAdmin;
 export type TenantCompletionModelUpdate = Schema<"TenantCompletionModelUpdate">;
+export type ModelUsageStatistics = Schema<"ModelUsageStatistics">;
+export type ValidationResult = Schema<"ValidationResult">;
 
 export type ModelKind = "completion" | "embedding" | "transcription";
 
 export const MODELS_KEY = ["admin-models"];
+
+/** Usage impact of a completion model (assistants/apps/etc. that reference it). */
+export function modelUsageQueryOptions(api: EneoClient, modelId: string) {
+  return queryOptions({
+    queryKey: ["model-usage", modelId],
+    queryFn: (): Promise<ModelUsageStatistics> =>
+      unwrap(
+        api.GET("/api/v1/completion-models/{model_id}/usage", {
+          params: { path: { model_id: modelId } }
+        })
+      )
+  });
+}
+
+/** Compatibility check for migrating one completion model's usage to another. */
+export function validateMigrationQueryOptions(api: EneoClient, modelId: string, toModelId: string) {
+  return queryOptions({
+    queryKey: ["model-migration-validate", modelId, toModelId],
+    queryFn: (): Promise<ValidationResult> =>
+      unwrap(
+        api.GET("/api/v1/completion-models/{model_id}/migration-validate", {
+          params: { path: { model_id: modelId }, query: { to_model_id: toModelId } }
+        })
+      )
+  });
+}
+
+export function migrateModelUsage(api: EneoClient, modelId: string, toModelId: string) {
+  return unwrap(
+    api.POST("/api/v1/completion-models/{model_id}/migrate", {
+      params: { path: { model_id: modelId } },
+      body: { to_model_id: toModelId, confirm_migration: true }
+    })
+  );
+}
 
 /** Edit a tenant (custom) completion model's metadata/costs/capabilities. */
 export function updateCompletionModel(

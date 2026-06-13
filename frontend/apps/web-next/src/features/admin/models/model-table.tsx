@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, MoreHorizontal, Pencil, Star } from "lucide-react";
+import { ArrowLeftRight, Check, MoreHorizontal, Pencil, Star } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,7 @@ import {
   type ModelKind
 } from "./models";
 import { EditModelDialog } from "./edit-model-dialog";
+import { MigrateModelDialog } from "./migrate-model-dialog";
 
 type ModelFlags = {
   is_org_enabled?: boolean | null;
@@ -87,6 +88,7 @@ function ModelRow({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
+  const [showMigrate, setShowMigrate] = useState(false);
 
   const flags = useMutation({
     mutationFn: (next: ModelFlags) => updateModelFlags(kind, model.id, next),
@@ -104,7 +106,10 @@ function ModelRow({
   const supportsClassification = securityEnabled && kind !== "embedding";
   // Only tenant (custom) completion models carry an editable metadata contract.
   const canEdit = kind === "completion" && !("readonly" in model && model.readonly);
-  const showActions = supportsDefault || supportsClassification || canEdit;
+  // Migration moves a completion model's usage onto a replacement.
+  const canMigrate =
+    kind === "completion" && !("migrated_to_model_id" in model && model.migrated_to_model_id);
+  const showActions = supportsDefault || supportsClassification || canEdit || canMigrate;
 
   return (
     <TableRow>
@@ -172,7 +177,14 @@ function ModelRow({
                   <Pencil className="size-4" /> {t("edit")}
                 </DropdownMenuItem>
               )}
-              {canEdit && (supportsDefault || supportsClassification) && <DropdownMenuSeparator />}
+              {canMigrate && (
+                <DropdownMenuItem onSelect={() => setShowMigrate(true)}>
+                  <ArrowLeftRight className="size-4" /> {t("migrate")}
+                </DropdownMenuItem>
+              )}
+              {(canEdit || canMigrate) && (supportsDefault || supportsClassification) && (
+                <DropdownMenuSeparator />
+              )}
               {supportsDefault && (
                 <DropdownMenuItem
                   disabled={isDefault || !model.is_org_enabled}
@@ -220,6 +232,13 @@ function ModelRow({
             model={model as CompletionModelAdmin}
             open={showEdit}
             onOpenChange={setShowEdit}
+          />
+        )}
+        {canMigrate && (
+          <MigrateModelDialog
+            model={model as CompletionModelAdmin}
+            open={showMigrate}
+            onOpenChange={setShowMigrate}
           />
         )}
       </TableCell>
