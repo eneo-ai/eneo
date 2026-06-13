@@ -46,7 +46,8 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Group chats: editor, mentions, response labels, publish | PASS | |
 | Apps: list, editor, run (text/upload/recorder), results, dashboard routes | PASS | run status via polling. |
 | Services: list, playground, editor | PASS | |
-| Assistant templates / prompt-history / MCP picker / attachments on editor | DEFERRED | sanctioned editor follow-ups. |
+| Assistant editor: MCP server picker + attachments | PASS | mcp_servers picker (knowledge⇄MCP exclusivity) + file attachments. |
+| Assistant editor: prompt version history / template apply on create | DEFERRED | no assistant-prompt-versions endpoint; create has no `from_template`. Backend-gated. |
 
 ## Admin (phase 7)
 
@@ -64,14 +65,14 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Model add-wizard (provider + credentials + model) | PASS | capability-driven stepped dialog; POST model-providers + tenant-models. |
 | Model migration + usage impact | PASS | validate → migrate dialog with impact counts + compatibility warnings. |
 | Provider edit/delete, per-model usage-details list | DEFERRED | minor: wizard creates providers; usage shows counts (not the per-entity list). |
-| MCP servers: list, enable/disable, CRUD | PASS | tools panel deferred. |
-| Org API keys: list, create, rotate/suspend/reactivate/revoke | PASS | policy/super-key/scope deferred. |
-| Tenant integrations: provider link/unlink | PASS | SharePoint Azure-AD config + webhooks deferred. |
+| MCP servers: list, enable/disable, CRUD, tools panel | PASS | tools dialog (list + remote sync). |
+| Org API keys: list, create, rotate/suspend/reactivate/revoke, notification policy | PASS | expiry-alert thresholds + auto-follow policy. |
+| Tenant integrations: provider link/unlink | PASS | SharePoint Azure-AD app config is backend env (not API-exposed); webhook subscriptions list deferred (niche read-only). |
 | Usage: tokens + storage | PASS | |
 | Insights: counts + usage time-series + activity | PASS | recharts time-series (7/30/90d) + active-assistant/user cards; per-assistant deep-dive deferred. |
 | Prompt library: CRUD | PASS | |
 | Help assistants: roles + templates, install, toggles | PASS | |
-| Templates: list, soft-delete, featured, restore/permanent-delete | PASS | create/edit wizard forms deferred. |
+| Templates: list, create/edit, featured, soft-delete, restore/permanent-delete | PASS | full CRUD (assistant + app). |
 | Personal-assistant governance policy: toggle restrictions + enforced prompt | PASS | allow-list editing deferred. |
 | Legacy roles / user-groups pages | DROPPED | OQ-2. |
 
@@ -87,6 +88,24 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 
 ## Accepted deferrals before cutover
 
-All DEFERRED rows are advanced/low-traffic surfaces or ops tasks; none block a
-member or everyday-admin from operating the platform. The maintainer should
-confirm acceptance (or reclassify any as MISSING) before the proxy flip.
+A post-review buildout closed most former deferrals to PASS: rich model selector,
+governance allow-list editing, audit per-action + user filter, insights
+time-series, full template CRUD, full model management (add-wizard / edit /
+credentials / migration), MCP tools panel, assistant-editor MCP picker +
+attachments, and the API-key notification policy.
+
+The remaining DEFERRED rows are **backend-gated or ops tasks**, not frontend
+work that can be completed in isolation:
+- **Group-chat answer labels** — the v3 conversation stream doesn't carry the
+  answering assistant (needs a backend change).
+- **Assistant prompt-version history / template-apply on create** — no
+  assistant-prompt-versions endpoint; the create endpoint has no `from_template`.
+- **Per-assistant insights deep-dive** — needs an admin assistant-list entry
+  point (no org-wide assistant listing for analysis).
+- **SharePoint Azure-AD app config** — configured via backend env, not the API;
+  **webhook subscriptions list** is a niche read-only view.
+- **CSP nonce middleware** and the **E2E suite** — ops tasks (CUTOVER.md).
+
+None block a member or everyday-admin from operating the platform. The
+maintainer should confirm acceptance (or reclassify any as MISSING) before the
+proxy flip.
