@@ -11,6 +11,7 @@ import { useSpace } from "@/features/spaces/use-space";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
+import { AttachmentsSection } from "./attachments-section";
 import { InstructionsSection } from "./instructions-section";
 import { KnowledgeSection } from "./knowledge-section";
 import { McpSection } from "./mcp-section";
@@ -20,8 +21,8 @@ import { assistantQueryOptions } from "./use-assistant";
 
 /**
  * Assistant settings, saved per section (web-next pattern; the Svelte app's
- * global draft/diff editor is intentionally not ported). Attachments and prompt
- * history are tracked as deferred in the migration ledger.
+ * global draft/diff editor is intentionally not ported). Prompt version history
+ * is tracked as deferred in the migration ledger.
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
@@ -50,6 +51,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       <InstructionsSection assistant={assistant} />
       <KnowledgeSection assistant={assistant} />
       <McpSection assistant={assistant} />
+      <AttachmentsSection assistant={assistant} />
       <AiSection assistant={assistant} />
       <SecuritySection assistant={assistant} />
       <PublishingSection assistant={assistant} />
