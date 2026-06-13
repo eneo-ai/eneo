@@ -1,0 +1,252 @@
+"use client";
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Check, MoreHorizontal, Star } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
+import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
+import { groupByProvider, MODELS_KEY, modelLabel, type AdminModel, type ModelKind } from "./models";
+
+type ModelFlags = {
+  is_org_enabled?: boolean | null;
+  is_org_default?: boolean | null;
+  security_classification?: { id: string } | null;
+};
+
+async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags): Promise<void> {
+  if (kind === "completion") {
+    await unwrap(
+      browserApi.POST("/api/v1/completion-models/{id}/", { params: { path: { id } }, body: flags })
+    );
+  } else if (kind === "transcription") {
+    await unwrap(
+      browserApi.POST("/api/v1/transcription-models/{id}/", {
+        params: { path: { id } },
+        body: flags
+      })
+    );
+  } else {
+    await unwrap(
+      browserApi.POST("/api/v1/embedding-models/{id}/", {
+        params: { path: { id } },
+        body: { is_org_enabled: flags.is_org_enabled ?? undefined }
+      })
+    );
+  }
+}
+
+function hasDefault(model: AdminModel): model is AdminModel & { is_org_default?: boolean } {
+  return "is_org_default" in model;
+}
+function hasClassification(model: AdminModel): boolean {
+  return "security_classification" in model;
+}
+
+function ModelRow({
+  model,
+  kind,
+  classifications,
+  securityEnabled
+}: {
+  model: AdminModel;
+  kind: ModelKind;
+  classifications: SecurityClassification[];
+  securityEnabled: boolean;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+
+  const flags = useMutation({
+    mutationFn: (next: ModelFlags) => updateModelFlags(kind, model.id, next),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: MODELS_KEY }),
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const locked = model.is_locked ?? false;
+  const isDefault = hasDefault(model) && model.is_org_default;
+  const currentClassification = hasClassification(model)
+    ? ((model as { security_classification?: SecurityClassification | null })
+        .security_classification ?? null)
+    : null;
+  const supportsDefault = kind !== "embedding";
+  const supportsClassification = securityEnabled && kind !== "embedding";
+  const showActions = supportsDefault || supportsClassification;
+
+  return (
+    <TableRow>
+      <TableCell>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Switch
+                checked={model.is_org_enabled ?? false}
+                disabled={locked || flags.isPending}
+                aria-label={modelLabel(model)}
+                onCheckedChange={(checked) => flags.mutate({ is_org_enabled: checked })}
+              />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {locked
+              ? t("api_credentials_required_for_provider")
+              : model.is_org_enabled
+                ? t("toggle_to_disable_model")
+                : t("toggle_to_enable_model")}
+          </TooltipContent>
+        </Tooltip>
+      </TableCell>
+      <TableCell className="font-medium">
+        <span className="flex items-center gap-2">
+          {modelLabel(model)}
+          {isDefault && (
+            <Badge variant="secondary" className="gap-1">
+              <Star className="size-3" /> {t("default_model")}
+            </Badge>
+          )}
+        </span>
+        {model.description && (
+          <span className="text-muted-foreground line-clamp-1 text-xs">{model.description}</span>
+        )}
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-wrap gap-1">
+          {"vision" in model && model.vision && (
+            <Badge variant="outline">{t("capability_vision")}</Badge>
+          )}
+          {"reasoning" in model && model.reasoning && (
+            <Badge variant="outline">{t("reasoning")}</Badge>
+          )}
+          {model.hosting && <Badge variant="outline">{model.hosting}</Badge>}
+        </div>
+      </TableCell>
+      {securityEnabled && (
+        <TableCell className="text-muted-foreground text-sm">
+          {currentClassification?.name ?? "—"}
+        </TableCell>
+      )}
+      <TableCell className="w-12">
+        {showActions && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label={t("actions")}>
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {supportsDefault && (
+                <DropdownMenuItem
+                  disabled={isDefault || !model.is_org_enabled}
+                  onSelect={() => flags.mutate({ is_org_default: true })}
+                >
+                  <Star className="size-4" /> {t("set_as_default_model")}
+                </DropdownMenuItem>
+              )}
+              {supportsClassification && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>{t("security_classification")}</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={() => flags.mutate({ security_classification: null })}
+                  >
+                    <Check
+                      className={currentClassification ? "size-4 opacity-0" : "size-4 opacity-100"}
+                    />
+                    {t("none")}
+                  </DropdownMenuItem>
+                  {classifications.map((classification) => (
+                    <DropdownMenuItem
+                      key={classification.id}
+                      onSelect={() =>
+                        flags.mutate({ security_classification: { id: classification.id } })
+                      }
+                    >
+                      <Check
+                        className={
+                          currentClassification?.id === classification.id
+                            ? "size-4 opacity-100"
+                            : "size-4 opacity-0"
+                        }
+                      />
+                      {classification.name}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+export function ModelTable({
+  models,
+  kind,
+  classifications,
+  securityEnabled
+}: {
+  models: AdminModel[];
+  kind: ModelKind;
+  classifications: SecurityClassification[];
+  securityEnabled: boolean;
+}) {
+  const t = useTranslations();
+  const groups = groupByProvider(models);
+
+  return (
+    <div className="flex flex-col gap-6">
+      {groups.map((group) => (
+        <div key={group.provider} className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground text-sm font-semibold capitalize">
+            {group.provider}
+          </h3>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16">{t("status")}</TableHead>
+                <TableHead>{t("name")}</TableHead>
+                <TableHead>{t("capabilities")}</TableHead>
+                {securityEnabled && <TableHead>{t("security_classification")}</TableHead>}
+                <TableHead className="w-12" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {group.models.map((model) => (
+                <ModelRow
+                  key={model.id}
+                  model={model}
+                  kind={kind}
+                  classifications={classifications}
+                  securityEnabled={securityEnabled}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ))}
+    </div>
+  );
+}

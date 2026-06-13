@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, History, ShieldCheck, Users } from "lucide-react";
+import { Building2, Cpu, History, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -37,6 +37,10 @@ export function AdminNav() {
           label: t("security_classifications")
         }
       ]
+    },
+    {
+      label: t("admin_section_configuration"),
+      items: [{ href: "/admin/models", icon: Cpu, label: t("models") }]
     },
     {
       label: t("admin_section_analytics_logs"),

@@ -16,8 +16,12 @@ actually happened. Update this file when a phase lands.
 > QA green (100 tests, build). **Pick up next: Phase 7 step 5 — Models**
 > (+ providers, credentials, migration wizard) and security-classifications,
 > then mcp/api-keys/integrations, templates/help-assistants, insights/usage,
-> and the governance areas. The audit **config (categories) tab is deferred**.
-> The `/admin` nav link already exists in main-nav, gated by can("admin").
+> and the governance areas. **Step 5 done** (security-classifications CRUD +
+> models list with enable/default/classification), minus the deferred
+> add-model wizard / providers / credentials / migration / usage. **Pick up
+> next: step 6 — MCP servers, org API keys, tenant integrations.** The audit
+> **config (categories) tab is deferred**. The `/admin` nav link already
+> exists in main-nav, gated by can("admin").
 > Frontend QA runs on the HOST (`bun run check/lint/test/build` in
 > apps/web-next), never `bun install` in the container; backend dev server +
 > `bun run dev` (port 3100) you start yourself in devcontainer terminals.
@@ -32,7 +36,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | 🟡 in progress | foundation, users, audit-logs, security-classifications |
+| 7 Admin | 🟡 in progress | foundation, users, audit-logs, security-classifications, models |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -415,10 +419,33 @@ Done (2026-06-13 session, security-classifications — part of step 5):
   display order). Added "Governance → Security classifications" to the nav.
   All i18n keys already existed.
 
-Remaining for Phase 7 (plan order): models list/edit (+ providers, credentials,
-migration wizard), mcp-servers + org api-keys + tenant integrations,
-templates + help-assistants, insights + usage, the audit config tab, plus the
-governance areas (prompt-library, personal-assistant).
+Done (2026-06-13 session, models — rest of step 5):
+- **Models** (`src/features/admin/models/`): models.ts (query options →
+  `GET /api/v1/ai-models/` = `ModelsPresentation` with the *SecurityStatus
+  variants; `groupByProvider` by `org`, `modelLabel`). models-page (completion/
+  embedding/transcription tabs). model-table (grouped by provider; per row an
+  enable switch + capability badges (vision/reasoning/hosting) + classification
+  cell when security enabled + an actions dropdown). Everyday flags go through
+  the **simple** `POST /api/v1/{completion|embedding|transcription}-models/{id}/`
+  endpoints — `CompletionModelUpdateFlags` / `TranscriptionModelUpdate` accept
+  `is_org_enabled` + `is_org_default` + `security_classification`;
+  `EmbeddingModelUpdateFlags` only `is_org_enabled`. So: enable/disable (all),
+  set-as-default (completion/transcription), set/clear classification
+  (completion/transcription, when security enabled). Locked models (missing
+  credentials) show a disabled switch with a tooltip. Added "Configuration →
+  Models" to the nav. Reused existing i18n (capability_vision, default_model,
+  set_as_default_model, toggle_to_*_model, api_credentials_required_for_provider).
+- **Deferred** (the heavy tenant-model-management surface): the add-model
+  **AddWizard** (provider → credentials → model drafts w/ cost/token editing),
+  full model-definition edit (name/costs/capabilities via `tenantModels.update*`),
+  provider + tenant-credential management, the **migration wizard**
+  (validate → migrate → history), and usage breakdowns. The `migration_history`
+  tab from Svelte is not ported.
+
+Remaining for Phase 7 (plan order): mcp-servers + org api-keys + tenant
+integrations, templates + help-assistants, insights + usage, the audit config
+tab, the deferred models surfaces above, plus the governance areas
+(prompt-library, personal-assistant).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in
