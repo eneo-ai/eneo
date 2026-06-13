@@ -180,6 +180,22 @@ One row per finding. Add as we review; update disposition when resolved.
 | 1.3 | 1 | S4 note | Two distinct concepts named "proxy": `src/proxy.ts` (Next 16 middleware — auth gating/refresh) vs `app/api/eneo/[...path]/route.ts` (REST proxy). Confusing on onboarding; the middleware filename is mandated by Next 16, so only documentable. | **accept/note** |
 | 1.4 | 1 | S3 maintainability | Query-options were inline in the governance / prompt-library / insights admin pages, not in a `feature.ts` module like the rest. | **FIXED** — extracted to `governance.ts` / `prompt-library.ts` / `insights.ts` |
 
+| 2.1 | 2 | **S1 security** | Open redirect after login: both the OIDC callback (`auth/callback`) and the password action used `next.startsWith("/")`, which accepts `//evil.com` / `/\evil.com` (protocol-relative) — `new URL("//evil.com", origin)` resolves to another origin. A crafted `?next=` could redirect a freshly-logged-in user off-site. | **FIXED** — shared `safeNextPath()` (rejects `//` and `/\`) + unit test; wired into both sinks |
+
+### Phase 2 verdict — reviewed, one security fix
+
+Auth is otherwise well-built and uses the right tools rather than hand-rolling:
+**`openid-client` v6** for OIDC (PKCE S256 + state + nonce, validated in
+`authorizationCodeGrant`; ID-token validation handled by the library; discovery
+cached with TTL; RP-initiated logout). Session is a **JWE** (`jose`, dir +
+A256GCM, SHA-256-derived key, zod-validated on open, tamper/expiry → null); the
+PKCE transaction gets the same encrypted-cookie treatment. Cookie flags correct
+(`httpOnly`, `secure` in prod, `sameSite=lax`, `path=/`, per-mode maxAge).
+Sliding OIDC refresh in `proxy.ts` with the RSC-can't-write-cookies caveat
+documented and handled. Password mode decodes the backend JWT only for exp/sub
+(the backend re-validates every call — correct; the frontend never authorizes).
+The single issue was the open redirect (2.1), now fixed.
+
 ### Phase 1 verdict — reviewed, near-clean
 
 Foundation is in strong shape; **no S0/S1**. Confirmed: strict tsconfig incl.

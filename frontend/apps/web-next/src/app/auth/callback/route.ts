@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { completeAuthorization } from "@/lib/auth/oidc";
+import { safeNextPath } from "@/lib/auth/safe-next";
 import { openTxn, type SessionPayload } from "@/lib/auth/session-codec";
 import { sealedSessionCookie, TXN_COOKIE } from "@/lib/auth/session";
 
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
     user: { email: tokens.claims.email, name: tokens.claims.name }
   };
 
-  const target = txn.next && txn.next.startsWith("/") ? txn.next : "/dashboard";
+  const target = safeNextPath(txn.next);
   const response = NextResponse.redirect(new URL(target, env.APP_ORIGIN));
   const cookie = await sealedSessionCookie(session);
   response.cookies.set(cookie.name, cookie.value, cookie.options);

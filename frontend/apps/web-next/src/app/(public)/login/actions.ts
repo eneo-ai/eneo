@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { passwordLogin } from "@/lib/auth/password";
+import { safeNextPath } from "@/lib/auth/safe-next";
 import { setSessionCookie } from "@/lib/auth/session";
 
 export interface LoginFormState {
@@ -27,5 +28,5 @@ export async function loginAction(
   }
 
   await setSessionCookie(result.session);
-  redirect(typeof next === "string" && next.startsWith("/") ? next : "/dashboard");
+  redirect(safeNextPath(typeof next === "string" ? next : null));
 }
