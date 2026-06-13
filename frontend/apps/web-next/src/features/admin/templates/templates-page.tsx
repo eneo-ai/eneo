@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { MoreHorizontal, RotateCcw, Star, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -34,22 +34,17 @@ import {
   ASSISTANT_KEY,
   DELETED_APP_KEY,
   DELETED_ASSISTANT_KEY,
+  type AppTemplate,
+  type AssistantTemplate,
   appTemplatesQueryOptions,
   assistantTemplatesQueryOptions,
   deletedAppTemplatesQueryOptions,
   deletedAssistantTemplatesQueryOptions
 } from "@/features/admin/templates/templates";
+import { TemplateEditorDialog } from "./template-editor-dialog";
 
 type TemplateKind = "assistants" | "apps";
-
-type TemplateRowData = {
-  id: string;
-  name: string;
-  category: string;
-  completion_model_name?: string | null;
-  is_default?: boolean;
-  usage_count?: number;
-};
+type TemplateRowData = AssistantTemplate | AppTemplate;
 
 function deleteTemplate(kind: TemplateKind, templateId: string) {
   const params = { path: { template_id: templateId } };
@@ -95,7 +90,15 @@ const activeKey = (kind: TemplateKind) => (kind === "assistants" ? ASSISTANT_KEY
 const deletedKey = (kind: TemplateKind) =>
   kind === "assistants" ? DELETED_ASSISTANT_KEY : DELETED_APP_KEY;
 
-function TemplateRow({ template, kind }: { template: TemplateRowData; kind: TemplateKind }) {
+function TemplateRow({
+  template,
+  kind,
+  onEdit
+}: {
+  template: TemplateRowData;
+  kind: TemplateKind;
+  onEdit: (template: TemplateRowData) => void;
+}) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
@@ -147,6 +150,9 @@ function TemplateRow({ template, kind }: { template: TemplateRowData; kind: Temp
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onEdit(template)}>
+              <Pencil className="size-4" /> {t("edit")}
+            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={setDefault.isPending}
               onSelect={() => setDefault.mutate(!template.is_default)}
@@ -173,7 +179,15 @@ function TemplateRow({ template, kind }: { template: TemplateRowData; kind: Temp
   );
 }
 
-function TemplateTable({ templates, kind }: { templates: TemplateRowData[]; kind: TemplateKind }) {
+function TemplateTable({
+  templates,
+  kind,
+  onEdit
+}: {
+  templates: TemplateRowData[];
+  kind: TemplateKind;
+  onEdit: (template: TemplateRowData) => void;
+}) {
   const t = useTranslations();
   if (templates.length === 0) return <EmptyState title={t("no_templates_found")} />;
   return (
@@ -189,7 +203,7 @@ function TemplateTable({ templates, kind }: { templates: TemplateRowData[]; kind
       </TableHeader>
       <TableBody>
         {templates.map((template) => (
-          <TemplateRow key={template.id} template={template} kind={kind} />
+          <TemplateRow key={template.id} template={template} kind={kind} onEdit={onEdit} />
         ))}
       </TableBody>
     </Table>
@@ -293,14 +307,20 @@ function DeletedTab() {
 }
 
 /**
- * Template administration: review assistant/app templates, mark one as the
- * featured default, soft-delete, and restore or permanently remove deleted
- * ones. The per-kind create/edit wizard forms remain a separate follow-up.
+ * Template administration: create / edit assistant & app templates, mark one
+ * as the featured default, soft-delete, and restore or permanently remove
+ * deleted ones.
  */
 export function TemplatesPage() {
   const t = useTranslations();
   const { data: assistantTemplates } = useSuspenseQuery(assistantTemplatesQueryOptions(browserApi));
   const { data: appTemplates } = useSuspenseQuery(appTemplatesQueryOptions(browserApi));
+
+  // null = closed; { kind, template? } = open (template absent → create).
+  const [editor, setEditor] = useState<{
+    kind: TemplateKind;
+    template?: TemplateRowData;
+  } | null>(null);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -311,16 +331,46 @@ export function TemplatesPage() {
           <TabsTrigger value="apps">{t("apps")}</TabsTrigger>
           <TabsTrigger value="deleted">{t("deleted_templates")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="assistants" className="pt-4">
-          <TemplateTable templates={assistantTemplates} kind="assistants" />
+        <TabsContent value="assistants" className="flex flex-col gap-4 pt-4">
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => setEditor({ kind: "assistants" })}>
+              <Plus className="size-4" /> {t("new_template")}
+            </Button>
+          </div>
+          <TemplateTable
+            templates={assistantTemplates}
+            kind="assistants"
+            onEdit={(template) => setEditor({ kind: "assistants", template })}
+          />
         </TabsContent>
-        <TabsContent value="apps" className="pt-4">
-          <TemplateTable templates={appTemplates} kind="apps" />
+        <TabsContent value="apps" className="flex flex-col gap-4 pt-4">
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => setEditor({ kind: "apps" })}>
+              <Plus className="size-4" /> {t("new_template")}
+            </Button>
+          </div>
+          <TemplateTable
+            templates={appTemplates}
+            kind="apps"
+            onEdit={(template) => setEditor({ kind: "apps", template })}
+          />
         </TabsContent>
         <TabsContent value="deleted" className="pt-4">
           <DeletedTab />
         </TabsContent>
       </Tabs>
+
+      {editor && (
+        <TemplateEditorDialog
+          key={editor.template?.id ?? `new-${editor.kind}`}
+          kind={editor.kind}
+          template={editor.template}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditor(null);
+          }}
+        />
+      )}
     </div>
   );
 }

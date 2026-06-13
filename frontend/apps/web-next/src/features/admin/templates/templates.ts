@@ -5,6 +5,10 @@ import type { Schema } from "@/lib/api/models";
 
 export type AssistantTemplate = Schema<"AssistantTemplateAdminPublic">;
 export type AppTemplate = Schema<"AppTemplateAdminPublic">;
+export type AssistantTemplateCreate = Schema<"AssistantTemplateAdminCreate">;
+export type AssistantTemplateUpdate = Schema<"AssistantTemplateAdminUpdate">;
+export type AppTemplateCreate = Schema<"AppTemplateAdminCreate">;
+export type AppTemplateUpdate = Schema<"AppTemplateAdminUpdate">;
 
 export const ASSISTANT_KEY = ["admin-templates", "assistants"];
 export const APP_KEY = ["admin-templates", "apps"];
@@ -43,4 +47,31 @@ export function deletedAppTemplatesQueryOptions(api: EneoClient) {
     queryFn: async (): Promise<AppTemplate[]> =>
       (await unwrap(api.GET("/api/v1/admin/templates/apps/deleted"))).items
   });
+}
+
+export function createAssistantTemplate(api: EneoClient, body: AssistantTemplateCreate) {
+  return unwrap(api.POST("/api/v1/admin/templates/assistants/", { body }));
+}
+export function updateAssistantTemplate(
+  api: EneoClient,
+  templateId: string,
+  body: AssistantTemplateUpdate
+) {
+  return unwrap(
+    api.PATCH("/api/v1/admin/templates/assistants/{template_id}", {
+      params: { path: { template_id: templateId } },
+      body
+    })
+  );
+}
+export function createAppTemplate(api: EneoClient, body: AppTemplateCreate) {
+  return unwrap(api.POST("/api/v1/admin/templates/apps/", { body }));
+}
+export function updateAppTemplate(api: EneoClient, templateId: string, body: AppTemplateUpdate) {
+  return unwrap(
+    api.PATCH("/api/v1/admin/templates/apps/{template_id}", {
+      params: { path: { template_id: templateId } },
+      body
+    })
+  );
 }
