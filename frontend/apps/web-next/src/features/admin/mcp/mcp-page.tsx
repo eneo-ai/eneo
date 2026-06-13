@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Trash2, Wrench } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -27,6 +27,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { McpServerDialog } from "./mcp-dialog";
+import { McpToolsDialog } from "./mcp-tools-dialog";
 import { MCP_KEY, mcpServersQueryOptions, type McpServer } from "./mcp";
 
 function McpRow({ server }: { server: McpServer }) {
@@ -34,6 +35,7 @@ function McpRow({ server }: { server: McpServer }) {
   const queryClient = useQueryClient();
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [showTools, setShowTools] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
@@ -97,6 +99,9 @@ function McpRow({ server }: { server: McpServer }) {
             <DropdownMenuItem onSelect={() => setShowEdit(true)}>
               <Pencil className="size-4" /> {t("edit")}
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setShowTools(true)}>
+              <Wrench className="size-4" /> {t("mcp_server_tools")}
+            </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
               <Trash2 className="size-4" /> {t("delete")}
             </DropdownMenuItem>
@@ -104,6 +109,12 @@ function McpRow({ server }: { server: McpServer }) {
         </DropdownMenu>
       </TableCell>
       <McpServerDialog open={showEdit} onOpenChange={setShowEdit} server={server} />
+      <McpToolsDialog
+        serverId={server.id}
+        serverName={server.name}
+        open={showTools}
+        onOpenChange={setShowTools}
+      />
       <ConfirmDialogControlled
         open={showDelete}
         onOpenChange={setShowDelete}
