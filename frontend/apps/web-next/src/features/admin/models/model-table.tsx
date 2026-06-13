@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, MoreHorizontal, Star } from "lucide-react";
+import { Check, MoreHorizontal, Pencil, Star } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -27,7 +28,15 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
-import { groupByProvider, MODELS_KEY, modelLabel, type AdminModel, type ModelKind } from "./models";
+import {
+  groupByProvider,
+  MODELS_KEY,
+  modelLabel,
+  type AdminModel,
+  type CompletionModelAdmin,
+  type ModelKind
+} from "./models";
+import { EditModelDialog } from "./edit-model-dialog";
 
 type ModelFlags = {
   is_org_enabled?: boolean | null;
@@ -77,6 +86,7 @@ function ModelRow({
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const [showEdit, setShowEdit] = useState(false);
 
   const flags = useMutation({
     mutationFn: (next: ModelFlags) => updateModelFlags(kind, model.id, next),
@@ -92,7 +102,9 @@ function ModelRow({
     : null;
   const supportsDefault = kind !== "embedding";
   const supportsClassification = securityEnabled && kind !== "embedding";
-  const showActions = supportsDefault || supportsClassification;
+  // Only tenant (custom) completion models carry an editable metadata contract.
+  const canEdit = kind === "completion" && !("readonly" in model && model.readonly);
+  const showActions = supportsDefault || supportsClassification || canEdit;
 
   return (
     <TableRow>
@@ -155,6 +167,12 @@ function ModelRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {canEdit && (
+                <DropdownMenuItem onSelect={() => setShowEdit(true)}>
+                  <Pencil className="size-4" /> {t("edit")}
+                </DropdownMenuItem>
+              )}
+              {canEdit && (supportsDefault || supportsClassification) && <DropdownMenuSeparator />}
               {supportsDefault && (
                 <DropdownMenuItem
                   disabled={isDefault || !model.is_org_enabled}
@@ -196,6 +214,13 @@ function ModelRow({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+        )}
+        {canEdit && (
+          <EditModelDialog
+            model={model as CompletionModelAdmin}
+            open={showEdit}
+            onOpenChange={setShowEdit}
+          />
         )}
       </TableCell>
     </TableRow>

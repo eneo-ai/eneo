@@ -8,10 +8,25 @@ export type CompletionModelAdmin = Schema<"CompletionModelSecurityStatus">;
 export type EmbeddingModelAdmin = Schema<"EmbeddingModelSecurityStatus">;
 export type TranscriptionModelAdmin = Schema<"TranscriptionModelSecurityStatus">;
 export type AdminModel = CompletionModelAdmin | EmbeddingModelAdmin | TranscriptionModelAdmin;
+export type TenantCompletionModelUpdate = Schema<"TenantCompletionModelUpdate">;
 
 export type ModelKind = "completion" | "embedding" | "transcription";
 
 export const MODELS_KEY = ["admin-models"];
+
+/** Edit a tenant (custom) completion model's metadata/costs/capabilities. */
+export function updateCompletionModel(
+  api: EneoClient,
+  modelId: string,
+  body: TenantCompletionModelUpdate
+) {
+  return unwrap(
+    api.PUT("/api/v1/admin/tenant-models/completion/{model_id}/", {
+      params: { path: { model_id: modelId } },
+      body
+    })
+  );
+}
 
 export function adminModelsQueryOptions(api: EneoClient) {
   return queryOptions({
