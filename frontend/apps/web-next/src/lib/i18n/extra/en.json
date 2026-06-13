@@ -9,5 +9,14 @@
   "sharepoint_import_hint": "Import a site from SharePoint",
   "confluence_import_hint": "Import a Confluence space into your knowledge",
   "chat_sovereignty_hint": "Data is processed within your infrastructure",
-  "there_are_currently_no_services_configured": "There are currently no services configured"
+  "there_are_currently_no_services_configured": "There are currently no services configured",
+  "from": "From",
+  "action": "Action",
+  "audit_actor_user": "User",
+  "audit_actor_system": "System",
+  "audit_actor_api_key": "API key",
+  "audit_outcome_success": "Success",
+  "audit_outcome_failure": "Failure",
+  "audit_last_purge": "Last purge removed {count} entries",
+  "audit_export_hint": "Start an export to generate a downloadable CSV of the audit trail matching the current filters."
 }

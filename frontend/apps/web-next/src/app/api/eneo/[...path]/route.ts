@@ -14,6 +14,25 @@ import { env } from "@/lib/env";
 /** Request headers forwarded to the backend (cookie et al. stay behind). */
 const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type"];
 
+/**
+ * The only browser cookie forwarded to the backend. Audit-log access is gated
+ * by a short-lived HTTP-only `audit_session_id` cookie the backend sets on
+ * POST /audit/access-session; everything else (incl. the web-next session
+ * cookie) deliberately stays behind so it never leaks to the backend.
+ */
+const AUDIT_SESSION_COOKIE = "audit_session_id";
+
+/**
+ * Re-scope a backend Set-Cookie for the proxy origin: the backend scopes the
+ * audit cookie to `Path=/api/v1`, but the browser reaches it under
+ * `/api/eneo/api/v1`, so rewrite the path and drop the backend Domain.
+ */
+function rescopeSetCookie(setCookie: string): string {
+  return setCookie
+    .replace(/;\s*Path=\/api\/v1\b/i, "; Path=/api/eneo/api/v1")
+    .replace(/;\s*Domain=[^;]+/i, "");
+}
+
 /** Response headers forwarded back to the browser. Deliberately excludes
  * content-encoding/content-length: fetch already decompressed the body. */
 const FORWARDED_RESPONSE_HEADERS = [
@@ -44,6 +63,9 @@ async function proxyRequest(request: NextRequest): Promise<Response> {
   }
   headers.set("authorization", `Bearer ${token}`);
 
+  const auditSession = request.cookies.get(AUDIT_SESSION_COOKIE);
+  if (auditSession) headers.set("cookie", `${AUDIT_SESSION_COOKIE}=${auditSession.value}`);
+
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const backendResponse = await fetch(
     `${env.ENEO_BACKEND_URL.replace(/\/$/, "")}/${path}${request.nextUrl.search}`,
@@ -61,6 +83,14 @@ async function proxyRequest(request: NextRequest): Promise<Response> {
   for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = backendResponse.headers.get(name);
     if (value) responseHeaders.set(name, value);
+  }
+
+  // Forward the audit access-session cookie back to the browser, re-scoped to
+  // the proxy path so it rides along on subsequent /api/eneo audit calls.
+  for (const setCookie of backendResponse.headers.getSetCookie()) {
+    if (setCookie.startsWith(`${AUDIT_SESSION_COOKIE}=`)) {
+      responseHeaders.append("set-cookie", rescopeSetCookie(setCookie));
+    }
   }
 
   return new Response(backendResponse.body, {

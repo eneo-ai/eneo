@@ -3560,5 +3560,14 @@
   "sharepoint_import_hint": "Importera en webbplats från SharePoint",
   "confluence_import_hint": "Importera ett Confluence-space till din kunskap",
   "chat_sovereignty_hint": "Data behandlas inom er infrastruktur",
-  "there_are_currently_no_services_configured": "Det finns inga tjänster konfigurerade ännu"
+  "there_are_currently_no_services_configured": "Det finns inga tjänster konfigurerade ännu",
+  "from": "Från",
+  "action": "Åtgärd",
+  "audit_actor_user": "Användare",
+  "audit_actor_system": "System",
+  "audit_actor_api_key": "API-nyckel",
+  "audit_outcome_success": "Lyckades",
+  "audit_outcome_failure": "Misslyckades",
+  "audit_last_purge": "Senaste rensning tog bort {count} poster",
+  "audit_export_hint": "Starta en export för att generera en nedladdningsbar CSV av spåret som matchar nuvarande filter."
 }

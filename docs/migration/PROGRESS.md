@@ -11,12 +11,13 @@ actually happened. Update this file when a phase lands.
 > roles/user-groups dropped per OQ-2), the overview feature-toggles page, and
 > **Users** management (list with offset pagination RB-5(a), search + state
 > tabs with counts, create/edit with role assignment, activate/deactivate/
-> delete). QA green (100 tests, build). **Pick up next: Phase 7 step 4 —
-> Audit logs** (filters → table → retention → access-session prompt → the 4
-> async-export BFF route handlers), then models + security-classifications,
-> mcp/api-keys/integrations, templates/help-assistants, insights/usage, and
-> the governance areas. The `/admin` nav link already exists in main-nav,
-> gated by can("admin").
+> delete) and **Audit logs** (the RB-5(d) cookie spike is solved in the proxy;
+> justification gate → filtered table → retention panel → async CSV export).
+> QA green (100 tests, build). **Pick up next: Phase 7 step 5 — Models**
+> (+ providers, credentials, migration wizard) and security-classifications,
+> then mcp/api-keys/integrations, templates/help-assistants, insights/usage,
+> and the governance areas. The audit **config (categories) tab is deferred**.
+> The `/admin` nav link already exists in main-nav, gated by can("admin").
 > Frontend QA runs on the HOST (`bun run check/lint/test/build` in
 > apps/web-next), never `bun install` in the container; backend dev server +
 > `bun run dev` (port 3100) you start yourself in devcontainer terminals.
@@ -31,7 +32,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | 🟡 in progress | foundation + feature toggles, users |
+| 7 Admin | 🟡 in progress | foundation + toggles, users, audit-logs |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -370,10 +371,42 @@ Done (2026-06-13 session, users — step 3):
   exists). **User-groups dropped** from the table + editor (OQ-2). Role
   assignment kept. All user i18n keys already existed.
 
-Remaining for Phase 7 (plan order): audit-logs (+ the 4 export BFF route
-handlers), models (+ migration wizard) + security-classifications,
-mcp-servers + org api-keys + tenant integrations, templates + help-assistants,
-insights + usage, plus the governance areas (prompt-library, personal-assistant).
+Done (2026-06-13 session, audit-logs — step 4):
+- **RB-5(d) cookie spike SOLVED** in the proxy (`src/app/api/eneo/[...path]/
+  route.ts`): the backend gates audit access with a 1-hour HTTP-only
+  `audit_session_id` cookie scoped to `Path=/api/v1`. The proxy now (a)
+  forwards ONLY that cookie to the backend (never the web-next session
+  cookie), and (b) re-scopes the backend's Set-Cookie — rewrites
+  `Path=/api/v1` → `/api/eneo/api/v1` and strips `Domain` — so the browser
+  stores it and replays it on subsequent proxied audit calls. Other cookies
+  stay behind. **Needs manual verification against a live backend** (cookie
+  Secure/SameSite over the dev origin).
+- **Audit feature** (`src/features/admin/audit/`): audit.ts (types + query
+  options for logs/retention/action-config; `actionLabel`/`categoryLabel` =
+  `t(\`audit_action_${a}\`)` — no 500-line label map needed since web-next t()
+  is untyped; logs query `retry:false` so a 401 surfaces as the gate).
+  justification-form (category + 10–500 char description → POST
+  /audit/access-session → invalidate logs). audit-filters (action
+  multi-select from /audit/config/actions grouped by category via Popover+
+  Command, from/to date, debounced search). audit-table (timestamp, action,
+  actor, description, success/failure outcome). retention-panel (GET/PUT
+  /audit/retention-policy). export-dialog (async: POST /export/async → poll
+  /status 2s → download via the proxied /download URL → /cancel). audit-page
+  ties it together with the 401 gate + offset pagination. Added "Analytics &
+  logs → Audit logs" to the admin nav.
+- **Export BFF NOT needed**: the 4 SvelteKit BFF endpoints only attached the
+  bearer, which the generic /api/eneo proxy already does — so export goes
+  straight through the proxy (download is a plain proxied link). Deviation
+  from the plan's "4 route handlers", simpler.
+- Deferred: the audit **config tab** (per-category / per-action enable-disable,
+  AuditConfigTab) and the **actor (by-user) filter**. New i18n keys (from,
+  action, audit_actor_*, audit_outcome_*, audit_last_purge, audit_export_hint)
+  added to the extra catalogs (en+sv) + regenerated; the rest reused existing.
+
+Remaining for Phase 7 (plan order): models (+ migration wizard) +
+security-classifications, mcp-servers + org api-keys + tenant integrations,
+templates + help-assistants, insights + usage, the audit config tab, plus the
+governance areas (prompt-library, personal-assistant).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in
