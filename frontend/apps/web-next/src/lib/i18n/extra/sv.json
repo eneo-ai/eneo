@@ -18,5 +18,18 @@
   "audit_outcome_success": "Lyckades",
   "audit_outcome_failure": "Misslyckades",
   "audit_last_purge": "Senaste rensning tog bort {count} poster",
-  "audit_export_hint": "Starta en export för att generera en nedladdningsbar CSV av spåret som matchar nuvarande filter."
+  "audit_export_hint": "Starta en export för att generera en nedladdningsbar CSV av spåret som matchar nuvarande filter.",
+  "mcp_authentication": "Autentisering",
+  "mcp_auth_none": "Ingen autentisering",
+  "mcp_auth_bearer": "Bearer-token",
+  "confirm_delete_mcp_server": "Är du säker på att du vill ta bort MCP-servern \"{name}\"?",
+  "admin_integrations_grid_hint": "Konfigurera organisationsövergripande kunskapskällor. Att ansluta en källa låter redaktörer importera kunskap till delade ytor.",
+  "admin_integrations_advanced_deferred": "Avancerad konfiguration (Azure AD-appuppgifter och SharePoint-webhookprenumerationer) hanteras på staging tills vidare.",
+  "template_featured": "Utvald",
+  "template_deleted_at": "Borttagen",
+  "no_templates_found": "Inga mallar hittades",
+  "help_assistant_installed": "Installerad",
+  "help_assistant_available": "Tillgänglig",
+  "usage_total_tokens": "Totalt antal tokens",
+  "no_usage_data": "Ingen användningsdata för denna period"
 }

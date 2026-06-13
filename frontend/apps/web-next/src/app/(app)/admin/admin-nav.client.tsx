@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Cpu, History, ShieldCheck, Users } from "lucide-react";
+import { Building2, Cloud, Cpu, History, Key, Plug, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -40,7 +40,11 @@ export function AdminNav() {
     },
     {
       label: t("admin_section_configuration"),
-      items: [{ href: "/admin/models", icon: Cpu, label: t("models") }]
+      items: [
+        { href: "/admin/models", icon: Cpu, label: t("models") },
+        { href: "/admin/mcp-servers", icon: Plug, label: t("mcp_servers") },
+        { href: "/admin/integrations", icon: Cloud, label: t("integrations") }
+      ]
     },
     {
       label: t("admin_section_analytics_logs"),
@@ -48,7 +52,10 @@ export function AdminNav() {
     },
     {
       label: t("admin_section_access"),
-      items: [{ href: "/admin/users", icon: Users, label: t("users") }]
+      items: [
+        { href: "/admin/users", icon: Users, label: t("users") },
+        { href: "/admin/api-keys", icon: Key, label: t("api_keys") }
+      ]
     }
   ];
 

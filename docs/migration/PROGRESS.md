@@ -36,7 +36,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | 🟡 in progress | foundation, users, audit-logs, security-classifications, models |
+| 7 Admin | 🟡 in progress | foundation, users, audit-logs, sec-class, models, mcp, api-keys, integrations |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -442,10 +442,30 @@ Done (2026-06-13 session, models — rest of step 5):
   (validate → migrate → history), and usage breakdowns. The `migration_history`
   tab from Svelte is not ported.
 
-Remaining for Phase 7 (plan order): mcp-servers + org api-keys + tenant
-integrations, templates + help-assistants, insights + usage, the audit config
-tab, the deferred models surfaces above, plus the governance areas
-(prompt-library, personal-assistant).
+Done (2026-06-13 session, step 6 — mcp / api-keys / integrations):
+- **MCP servers** (`src/features/admin/mcp/`): list (GET /mcp-servers/settings/
+  → MCPServerSettingsPublic), enable/disable (POST/DELETE /settings/{id}/),
+  create/edit (POST /mcp-servers/ + /{id}/; name/url/description/auth
+  none|bearer with bearer_token → http_auth_config_schema), delete. Tools
+  panel (sync/approve) deferred.
+- **Org API keys** (`src/features/admin/api-keys/org-api-keys.tsx`): cursor-
+  paginated admin list (GET /admin/api-keys with state filter), create org
+  key (POST /api-keys ownership:"service", scope_type:"tenant"),
+  rotate/suspend/reactivate/revoke (POST /admin/api-keys/{id}/{action}, no
+  body), secret reveal. Deferred: policy panel, super-key status, scope
+  resource selectors, notification policy, expiring-soon.
+- **Tenant integrations** (`src/features/admin/integrations/`): provider grid
+  with link/unlink (POST /integrations/tenant/add/{id}/, DELETE
+  /integrations/tenant/remove/{id}/). The SharePoint Azure-AD app credential
+  setup + webhook-subscription management (untyped /admin/sharepoint/* admin
+  endpoints) are **deferred** with an on-screen note.
+- Nav: Configuration += mcp-servers, integrations; Access += api-keys. New
+  i18n in extra catalogs (mcp_auth_*, confirm_delete_mcp_server,
+  admin_integrations_*); reused existing api-keys_* keys.
+
+Remaining for Phase 7 (plan order): templates + help-assistants, insights +
+usage, the audit config tab, the deferred models/api-keys/integrations
+surfaces above, plus the governance areas (prompt-library, personal-assistant).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in

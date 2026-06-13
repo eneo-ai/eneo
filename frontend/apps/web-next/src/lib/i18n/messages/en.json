@@ -3190,7 +3190,7 @@
   "usage_back_to_usage": "← Usage",
   "usage_user_information": "User Information",
   "usage_token_usage_summary": "Token Usage Summary",
-  "usage_total_tokens": "Total Tokens",
+  "usage_total_tokens": "Total tokens",
   "usage_input_tokens": "Input Tokens",
   "usage_of_total": "of total",
   "usage_output_tokens": "Output Tokens",
@@ -3569,5 +3569,16 @@
   "audit_outcome_success": "Success",
   "audit_outcome_failure": "Failure",
   "audit_last_purge": "Last purge removed {count} entries",
-  "audit_export_hint": "Start an export to generate a downloadable CSV of the audit trail matching the current filters."
+  "audit_export_hint": "Start an export to generate a downloadable CSV of the audit trail matching the current filters.",
+  "mcp_authentication": "Authentication",
+  "mcp_auth_none": "No authentication",
+  "mcp_auth_bearer": "Bearer token",
+  "confirm_delete_mcp_server": "Are you sure you want to delete the MCP server \"{name}\"?",
+  "admin_integrations_grid_hint": "Configure organization-wide knowledge providers. Connecting a provider lets editors import knowledge into shared spaces.",
+  "admin_integrations_advanced_deferred": "Advanced provider setup (Azure AD app credentials and SharePoint webhook subscriptions) is managed on staging for now.",
+  "template_featured": "Featured",
+  "template_deleted_at": "Deleted",
+  "help_assistant_installed": "Installed",
+  "help_assistant_available": "Available",
+  "no_usage_data": "No usage data for this period"
 }
