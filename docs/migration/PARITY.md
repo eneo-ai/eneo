@@ -60,7 +60,8 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Audit per-action config; actor-by-user filter | PASS | per-action drill-down + search; per-user GDPR log view. |
 | Security classifications: CRUD, enable, reorder | PASS | |
 | Models: list, enable/disable, set-default, classification | PASS | |
-| Model add-wizard, full edit, providers, credentials, migration wizard, usage | DEFERRED | advanced/staging surface. |
+| Model full edit (custom) + per-provider API credentials | PASS | edit dialog (PUT tenant-models) + credentials tab (set/update keys). |
+| Model add-wizard, provider CRUD, migration wizard, per-model usage | DEFERRED | remaining advanced model surfaces. |
 | MCP servers: list, enable/disable, CRUD | PASS | tools panel deferred. |
 | Org API keys: list, create, rotate/suspend/reactivate/revoke | PASS | policy/super-key/scope deferred. |
 | Tenant integrations: provider link/unlink | PASS | SharePoint Azure-AD config + webhooks deferred. |
