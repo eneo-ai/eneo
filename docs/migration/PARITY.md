@@ -29,6 +29,7 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Conversation streaming (AI SDK v6 UI Message Stream, v3 backend) | PASS | |
 | History panel, attachments, tool approval | PASS | held-stream approval fallback. |
 | Markdown / references / token usage / status | PASS | Streamdown. |
+| Model selector + details (chat + editors) | PASS | rich `ai-elements/model-selector`: vendor groups, logos, prices/context/capabilities, policy filtering. |
 | Mentions (group chat) | REDESIGNED | picker targeting one assistant. |
 | Group-chat answer labels | DEFERRED | v3 doesn't carry the answering assistant (RB candidate). |
 | Reasoning chunks | DROPPED | backend strips `<think>`; never streamed. |
@@ -56,7 +57,7 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Users: list, search, state tabs, create/edit, activate/deactivate, delete | PASS | offset pagination (RB-5a). |
 | Audit logs: justification gate, filters, table, retention, async export | PASS | RB-5(d) cookie spike in the proxy. |
 | Audit category config | PASS | Categories tab. |
-| Audit per-action config; actor-by-user filter | DEFERRED | |
+| Audit per-action config; actor-by-user filter | PASS | per-action drill-down + search; per-user GDPR log view. |
 | Security classifications: CRUD, enable, reorder | PASS | |
 | Models: list, enable/disable, set-default, classification | PASS | |
 | Model add-wizard, full edit, providers, credentials, migration wizard, usage | DEFERRED | advanced/staging surface. |
@@ -64,10 +65,10 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Org API keys: list, create, rotate/suspend/reactivate/revoke | PASS | policy/super-key/scope deferred. |
 | Tenant integrations: provider link/unlink | PASS | SharePoint Azure-AD config + webhooks deferred. |
 | Usage: tokens + storage | PASS | |
-| Insights: headline counts | PASS | time-series charts + per-assistant deferred (OQ-5). |
+| Insights: counts + usage time-series + activity | PASS | recharts time-series (7/30/90d) + active-assistant/user cards; per-assistant deep-dive deferred. |
 | Prompt library: CRUD | PASS | |
 | Help assistants: roles + templates, install, toggles | PASS | |
-| Templates: list + soft-delete | PASS | create/edit wizards + featured/restore deferred. |
+| Templates: list, soft-delete, featured, restore/permanent-delete | PASS | create/edit wizard forms deferred. |
 | Personal-assistant governance policy: toggle restrictions + enforced prompt | PASS | allow-list editing deferred. |
 | Legacy roles / user-groups pages | DROPPED | OQ-2. |
 
