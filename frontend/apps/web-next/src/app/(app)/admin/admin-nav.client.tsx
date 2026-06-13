@@ -8,8 +8,10 @@ import {
   Cpu,
   History,
   Key,
+  Lightbulb,
   Plug,
   ShieldCheck,
+  Sparkles,
   Users
 } from "lucide-react";
 import Link from "next/link";
@@ -54,6 +56,11 @@ export function AdminNav() {
       label: t("admin_section_configuration"),
       items: [
         { href: "/admin/models", icon: Cpu, label: t("models") },
+        {
+          href: "/admin/help-assistants",
+          icon: Sparkles,
+          label: t("admin_help_assistants_nav_label")
+        },
         { href: "/admin/mcp-servers", icon: Plug, label: t("mcp_servers") },
         { href: "/admin/integrations", icon: Cloud, label: t("integrations") }
       ]
@@ -62,6 +69,7 @@ export function AdminNav() {
       label: t("admin_section_analytics_logs"),
       items: [
         { href: "/admin/usage", icon: ChartPie, label: t("usage") },
+        { href: "/admin/insights", icon: Lightbulb, label: t("insights") },
         { href: "/admin/audit-logs", icon: History, label: t("audit_logs") }
       ]
     },

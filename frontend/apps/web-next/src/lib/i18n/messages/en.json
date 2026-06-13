@@ -3585,5 +3585,12 @@
   "shared": "Shared",
   "governance_prompt_create": "New prompt",
   "governance_prompt_delete_confirm": "Are you sure you want to delete the prompt \"{name}\"?",
-  "governance_prompts_empty": "No prompts in the library yet"
+  "governance_prompts_empty": "No prompts in the library yet",
+  "questions": "Questions",
+  "help_assistants": "Help assistants",
+  "help_assistant_visible_to_users": "Visible to users",
+  "help_assistant_install": "Install",
+  "help_assistant_uninstall": "Uninstall",
+  "insights_charts_deferred": "Detailed time-series charts and per-assistant analytics are not yet available in this view.",
+  "insights_period_all_time": "All time"
 }

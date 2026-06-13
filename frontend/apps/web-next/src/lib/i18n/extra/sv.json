@@ -36,5 +36,12 @@
   "shared": "Delat",
   "governance_prompt_create": "Ny prompt",
   "governance_prompt_delete_confirm": "Är du säker på att du vill ta bort prompten \"{name}\"?",
-  "governance_prompts_empty": "Inga prompter i biblioteket ännu"
+  "governance_prompts_empty": "Inga prompter i biblioteket ännu",
+  "questions": "Frågor",
+  "help_assistants": "Hjälpassistenter",
+  "help_assistant_visible_to_users": "Synlig för användare",
+  "help_assistant_install": "Installera",
+  "help_assistant_uninstall": "Avinstallera",
+  "insights_charts_deferred": "Detaljerade tidsseriediagram och analys per assistent är inte tillgängliga i denna vy ännu.",
+  "insights_period_all_time": "All tid"
 }
