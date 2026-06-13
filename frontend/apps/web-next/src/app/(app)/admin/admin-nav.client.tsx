@@ -14,7 +14,7 @@ import {
   Sparkles,
   Users
 } from "lucide-react";
-import { LayoutTemplate } from "lucide-react";
+import { LayoutTemplate, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -57,6 +57,11 @@ export function AdminNav() {
     {
       label: t("admin_section_governance"),
       items: [
+        {
+          href: "/admin/personal-assistant",
+          icon: MessageSquare,
+          label: t("governance_title")
+        },
         { href: "/admin/prompt-library", icon: BookText, label: t("governance_tab_prompts") },
         {
           href: "/admin/security-classifications",

@@ -7,10 +7,12 @@ import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
 import { auditLogsQueryOptions, type AuditFilters } from "./audit";
+import { AuditConfig } from "./audit-config";
 import { AuditFilterBar } from "./audit-filters";
 import { AuditTable } from "./audit-table";
 import { ExportDialog } from "./export-dialog";
@@ -19,13 +21,9 @@ import { RetentionPanel } from "./retention-panel";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function AuditPage() {
+function LogsTab() {
   const t = useTranslations();
-  const [filters, setFilters] = useState<AuditFilters>({
-    page: 1,
-    actions: [],
-    search: ""
-  });
+  const [filters, setFilters] = useState<AuditFilters>({ page: 1, actions: [], search: "" });
   const [searchInput, setSearchInput] = useState("");
   const [showExport, setShowExport] = useState(false);
 
@@ -48,16 +46,10 @@ export function AuditPage() {
 
   // 401 = no active access session; show the justification gate instead.
   if (error instanceof EneoApiError && error.status === 401) {
-    return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <PageHeader title={t("audit_logs")} />
-        <JustificationForm />
-      </div>
-    );
+    return <JustificationForm />;
   }
 
   function patchFilters(next: Partial<AuditFilters>) {
-    // Search is owned by the debounced input; everything else resets to page 1.
     setFilters((current) => ({ ...current, ...next, page: next.page ?? 1 }));
   }
 
@@ -65,12 +57,12 @@ export function AuditPage() {
   const totalPages = data?.total_pages ?? 1;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <PageHeader title={t("audit_logs")}>
+    <div className="flex flex-col gap-6">
+      <div className="flex justify-end">
         <Button variant="outline" onClick={() => setShowExport(true)}>
           <Download className="size-4" /> {t("audit_export_csv")}
         </Button>
-      </PageHeader>
+      </div>
 
       <RetentionPanel />
 
@@ -120,6 +112,27 @@ export function AuditPage() {
       )}
 
       <ExportDialog open={showExport} onOpenChange={setShowExport} filters={filters} />
+    </div>
+  );
+}
+
+export function AuditPage() {
+  const t = useTranslations();
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      <PageHeader title={t("audit_logs")} />
+      <Tabs defaultValue="logs">
+        <TabsList>
+          <TabsTrigger value="logs">{t("audit_logs")}</TabsTrigger>
+          <TabsTrigger value="categories">{t("audit_categories")}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="logs" className="pt-4">
+          <LogsTab />
+        </TabsContent>
+        <TabsContent value="categories" className="pt-4">
+          <AuditConfig />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

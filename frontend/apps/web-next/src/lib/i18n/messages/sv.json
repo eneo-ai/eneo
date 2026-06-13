@@ -2518,7 +2518,7 @@
   "audit_category_integration_events": "Integrationshändelser",
   "audit_category_system_actions": "Systemåtgärder",
   "audit_category_audit_access": "Granskningsåtkomst",
-  "audit_category_action_count": "{count} åtgärder",
+  "audit_category_action_count": "{count} åtgärdstyper",
   "audit_confirm_disable_title": "Bekräfta inaktivering av granskningskategori",
   "audit_disable_warning": "Du håller på att inaktivera loggning för {category}. Följande åtgärder kommer inte längre att loggas:",
   "audit_compliance_warning": "Inaktivering av kritiska granskningskategorier kan påverka efterlevnadskrav och forensiska möjligheter. Överväg konsekvenserna noggrant.",
@@ -3593,5 +3593,16 @@
   "help_assistant_uninstall": "Avinstallera",
   "insights_charts_deferred": "Detaljerade tidsseriediagram och analys per assistent är inte tillgängliga i denna vy ännu.",
   "insights_period_all_time": "All tid",
-  "template_delete_confirm": "Är du säker på att du vill ta bort mallen \"{name}\"?"
+  "template_delete_confirm": "Är du säker på att du vill ta bort mallen \"{name}\"?",
+  "audit_categories": "Kategorier",
+  "audit_categories_hint": "Välj vilka kategorier av händelser som loggas. Ändringar gäller endast nya händelser; befintliga loggar påverkas inte.",
+  "governance_models_restriction": "Modellbegränsning",
+  "governance_models_restriction_hint": "Begränsa vilka completion-modeller den personliga assistenten får använda.",
+  "governance_mcp_restriction": "MCP-begränsning",
+  "governance_mcp_restriction_hint": "Begränsa vilka MCP-servrar den personliga assistenten får använda.",
+  "governance_prompt_enforcement": "Prompt-tvång",
+  "governance_prompt_enforcement_hint": "Kräv att den personliga assistenten använder en prompt från biblioteket.",
+  "governance_restriction_enabled": "Begränsning aktiverad",
+  "governance_enforcement_enabled": "Tvång aktiverat",
+  "governance_policy_saved": "Styrningspolicy sparad"
 }

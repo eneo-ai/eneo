@@ -486,8 +486,9 @@ usage, insights, prompt library, help assistants, templates.
 - Models: add-model AddWizard, full model-definition edit (tenantModels.*),
   provider + tenant-credential management, the migration wizard, usage
   breakdowns, the migration_history tab.
-- Audit: the config (categories/per-action enable-disable) tab; actor-by-user
-  filter.
+- Audit: per-action (not per-category) enable-disable; actor-by-user filter.
+  (The per-category config tab is now SHIPPED — `audit-config.tsx`, a Categories
+  tab on the audit page.)
 - API keys: policy panel, super-key status, scope-resource selectors,
   notification policy, expiring-soon.
 - Integrations: SharePoint Azure-AD app credential setup + webhook
@@ -496,8 +497,12 @@ usage, insights, prompt library, help assistants, templates.
   permanent-delete + rollback + the deleted-templates list.
 - Insights: time-series charts + per-assistant analytics + the analysis
   assistant stream.
-- Governance: the personal-assistant **policy editor** (model/MCP restriction
-  + prompt enforcement multi-section PolicyDraft) — `/admin/personal-assistant`.
+- Governance: the personal-assistant policy page (`/admin/personal-assistant`)
+  is now SHIPPED — it toggles each restriction (models / MCP / prompt
+  enforcement, preserving the allow-lists) and picks the enforced prompt.
+  Editing the model / MCP-server / tool **allow-lists** themselves (the Svelte
+  multi-section PolicyDraft with per-model default + provider/tool selection)
+  remains deferred.
 - Manual gate: the audit access-session cookie re-scoping needs verification
   against a live backend (see step 4).
 

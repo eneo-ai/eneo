@@ -44,5 +44,17 @@
   "help_assistant_uninstall": "Uninstall",
   "insights_charts_deferred": "Detailed time-series charts and per-assistant analytics are not yet available in this view.",
   "insights_period_all_time": "All time",
-  "template_delete_confirm": "Are you sure you want to delete the template \"{name}\"?"
+  "template_delete_confirm": "Are you sure you want to delete the template \"{name}\"?",
+  "audit_categories": "Categories",
+  "audit_category_action_count": "{count} action types",
+  "audit_categories_hint": "Toggle which categories of events are recorded. Changes apply to new events only; existing logs are unaffected.",
+  "governance_models_restriction": "Model restriction",
+  "governance_models_restriction_hint": "Limit which completion models the personal assistant may use.",
+  "governance_mcp_restriction": "MCP restriction",
+  "governance_mcp_restriction_hint": "Limit which MCP servers the personal assistant may use.",
+  "governance_prompt_enforcement": "Prompt enforcement",
+  "governance_prompt_enforcement_hint": "Require the personal assistant to use a prompt from the library.",
+  "governance_restriction_enabled": "Restriction enabled",
+  "governance_enforcement_enabled": "Enforcement enabled",
+  "governance_policy_saved": "Governance policy saved"
 }

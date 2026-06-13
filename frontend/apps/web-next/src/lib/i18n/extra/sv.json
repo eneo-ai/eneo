@@ -44,5 +44,17 @@
   "help_assistant_uninstall": "Avinstallera",
   "insights_charts_deferred": "Detaljerade tidsseriediagram och analys per assistent är inte tillgängliga i denna vy ännu.",
   "insights_period_all_time": "All tid",
-  "template_delete_confirm": "Är du säker på att du vill ta bort mallen \"{name}\"?"
+  "template_delete_confirm": "Är du säker på att du vill ta bort mallen \"{name}\"?",
+  "audit_categories": "Kategorier",
+  "audit_category_action_count": "{count} åtgärdstyper",
+  "audit_categories_hint": "Välj vilka kategorier av händelser som loggas. Ändringar gäller endast nya händelser; befintliga loggar påverkas inte.",
+  "governance_models_restriction": "Modellbegränsning",
+  "governance_models_restriction_hint": "Begränsa vilka completion-modeller den personliga assistenten får använda.",
+  "governance_mcp_restriction": "MCP-begränsning",
+  "governance_mcp_restriction_hint": "Begränsa vilka MCP-servrar den personliga assistenten får använda.",
+  "governance_prompt_enforcement": "Prompt-tvång",
+  "governance_prompt_enforcement_hint": "Kräv att den personliga assistenten använder en prompt från biblioteket.",
+  "governance_restriction_enabled": "Begränsning aktiverad",
+  "governance_enforcement_enabled": "Tvång aktiverat",
+  "governance_policy_saved": "Styrningspolicy sparad"
 }
