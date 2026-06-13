@@ -184,6 +184,35 @@ One row per finding. Add as we review; update disposition when resolved.
 
 | 3.1 | 3 | S1 bug | `browserApi`'s global 401 `onResponse` did `window.location.reload()` on **every** 401. The audit-logs endpoint returns 401 as a domain signal ("open an access session") and the audit page renders its justification gate from that 401 — but the reload fired first, so an admin without an access session hit an **infinite reload loop** on `/admin/audit-logs`. | **FIXED** — skip the reload for `/api/v1/audit/` paths (the only domain-401 in the app); reload still recovers genuine session-death everywhere else |
 
+### Phase 5 verdict — reviewed, clean (no findings)
+
+Chat — the widest surface — is a high-quality, faithful port. Verified: the
+`/api/chat` route forwards to `conversations/?version=3` and passes the SSE
+stream through untouched with abort propagation (no token to the client); the
+transport sends only the latest question (backend owns history); `map-session`
+leniently maps persisted messages to UIMessages with the same renderers; the
+session/assistant/group_chat **exactly-one** rule holds in both `submit()` and
+`usePreflight`; tool approval posts to `approve-tools/?approval_id` and the
+held stream continues server-side; attachments clear `input.value` for
+same-file reselect (#491); web-search is gated to the default assistant;
+mentions are the redesigned single-target picker; Streamdown `@source` globs
+are present so markdown styles. Documented redesigns (polling, held-stream
+approval, mentions picker) are intentional, not gaps.
+
+### Phase 4 verdict — reviewed, clean (no findings)
+
+Shell, spaces, dashboard, account. The highest-risk area — space-level
+permissions (`spaceHasPermission`) — was verified field-by-field against the
+schema: `knowledge.groups/websites/integration_knowledge_list`,
+`members`, `group_members`, `applications.{assistants,group_chats,apps,
+services}` all match, so no permission silently masks to `false`. Space
+aliases resolve via `/spaces/type/{personal,organization}/`. `useSpace`
+hydrates from the layout prefetch with a memoized `can`. No hardcoded JSX text
+in shell/spaces/dashboard/account; pages are server components (client logic in
+`*.client.tsx`) — correct RSC boundaries. Visual side-by-side parity is a
+pending run-the-app spot-check (needs the dev stack), but the code review is
+clean.
+
 ### Phase 3 verdict — reviewed, one interaction bug
 
 API layer is high quality. `browserApi` (proxied, no client token) + `eneoApi`
