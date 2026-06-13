@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isOidcEnabled } from "@/lib/auth/oidc";
 import { getSession } from "@/lib/auth/session";
+import { pageTitle } from "@/lib/page-metadata";
 import { LoginForm } from "./login-form";
+
+export const generateMetadata = pageTitle("login");
 
 export default async function LoginPage({
   searchParams

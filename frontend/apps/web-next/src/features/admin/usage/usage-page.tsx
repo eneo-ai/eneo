@@ -1,6 +1,6 @@
 "use client";
 
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { Card } from "@/components/ui/card";
@@ -13,35 +13,15 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
-import type { Schema } from "@/lib/api/models";
-
-type TokenUsage = Schema<"TokenUsageSummary">;
-type StorageModel = Schema<"StorageModel">;
-type StorageInfo = Schema<"StorageInfoModel">;
+import {
+  storageQueryOptions,
+  storageSpacesQueryOptions,
+  tokenUsageQueryOptions
+} from "@/features/admin/usage/usage";
 
 const NUMBER = new Intl.NumberFormat("sv-SE");
-
-export function tokenUsageQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["admin-token-usage"],
-    queryFn: (): Promise<TokenUsage> => unwrap(api.GET("/api/v1/token-usage/"))
-  });
-}
-export function storageQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["admin-storage"],
-    queryFn: (): Promise<StorageModel> => unwrap(api.GET("/api/v1/storage/"))
-  });
-}
-export function storageSpacesQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["admin-storage-spaces"],
-    queryFn: (): Promise<StorageInfo> => unwrap(api.GET("/api/v1/storage/spaces/"))
-  });
-}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (

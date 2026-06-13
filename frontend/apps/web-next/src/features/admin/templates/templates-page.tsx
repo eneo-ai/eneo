@@ -1,6 +1,6 @@
 "use client";
 
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -24,36 +24,17 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
+import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import {
+  APP_KEY,
+  ASSISTANT_KEY,
+  appTemplatesQueryOptions,
+  assistantTemplatesQueryOptions
+} from "@/features/admin/templates/templates";
 
-type AssistantTemplate = Schema<"AssistantTemplateAdminPublic">;
-type AppTemplate = Schema<"AppTemplateAdminPublic">;
 type TemplateKind = "assistants" | "apps";
-
-const ASSISTANT_KEY = ["admin-templates", "assistants"];
-const APP_KEY = ["admin-templates", "apps"];
-
-export function assistantTemplatesQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ASSISTANT_KEY,
-    queryFn: async (): Promise<AssistantTemplate[]> => {
-      const page = await unwrap(api.GET("/api/v1/admin/templates/assistants/"));
-      return page.items.filter((item) => !item.deleted_at);
-    }
-  });
-}
-export function appTemplatesQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: APP_KEY,
-    queryFn: async (): Promise<AppTemplate[]> => {
-      const page = await unwrap(api.GET("/api/v1/admin/templates/apps/"));
-      return page.items.filter((item) => !item.deleted_at);
-    }
-  });
-}
 
 function deleteTemplate(kind: TemplateKind, templateId: string) {
   if (kind === "assistants") {

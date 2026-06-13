@@ -2,7 +2,11 @@ import { redirect } from "next/navigation";
 import { unwrap } from "@/lib/api/errors";
 import { eneoApi } from "@/lib/api/server";
 import { hasPermission } from "@/lib/auth/permissions";
+import { pageTitle } from "@/lib/page-metadata";
 import { AdminNav } from "./admin-nav.client";
+
+/** Admin pages inherit "Admin · Eneo" unless they set their own title. */
+export const generateMetadata = pageTitle("admin");
 
 /**
  * Admin area gate. The nav is hidden without the admin permission, but this is

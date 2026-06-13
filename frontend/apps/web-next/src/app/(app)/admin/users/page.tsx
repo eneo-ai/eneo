@@ -6,7 +6,10 @@ import {
   rolesQueryOptions,
   type StateFilter
 } from "@/features/admin/users/users";
+import { pageTitle } from "@/lib/page-metadata";
 import { AdminUsersPage } from "@/features/admin/users/users-page";
+
+export const generateMetadata = pageTitle("users");
 
 export default async function AdminUsersRoute({
   searchParams

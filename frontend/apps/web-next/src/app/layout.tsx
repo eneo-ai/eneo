@@ -18,7 +18,11 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Eneo",
+  // Child routes/layouts set a string title → "<Page> · Eneo"; routes without
+  // one fall back to "Eneo" (finding 1.1, ported from the Svelte per-page
+  // <title>). Area layouts (admin / account / space) carry the area title so
+  // their child pages inherit it without per-page boilerplate.
+  title: { template: "%s · Eneo", default: "Eneo" },
   description: "Eneo"
 };
 

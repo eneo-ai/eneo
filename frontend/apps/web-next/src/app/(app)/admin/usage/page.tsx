@@ -4,9 +4,9 @@ import { eneoApi } from "@/lib/api/server";
 import {
   storageQueryOptions,
   storageSpacesQueryOptions,
-  tokenUsageQueryOptions,
-  UsagePage
-} from "@/features/admin/usage/usage-page";
+  tokenUsageQueryOptions
+} from "@/features/admin/usage/usage";
+import { UsagePage } from "@/features/admin/usage/usage-page";
 
 export default async function AdminUsageRoute() {
   const queryClient = getQueryClient();

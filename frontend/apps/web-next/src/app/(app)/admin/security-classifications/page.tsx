@@ -1,8 +1,11 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
+import { pageTitle } from "@/lib/page-metadata";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { SecurityClassificationsPage } from "@/features/admin/security-classifications/classifications-page";
+
+export const generateMetadata = pageTitle("security_classifications");
 
 export default async function AdminSecurityClassificationsRoute() {
   const queryClient = getQueryClient();

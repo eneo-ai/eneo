@@ -1,6 +1,6 @@
 "use client";
 
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -8,36 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
+import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
-
-type RoleAssignment = Schema<"RoleAssignmentPublic">;
-type HelperTemplate = Schema<"HelperTemplatePublic">;
-type HelperKind = Schema<"HelperKind">;
-
-const ROLES_KEY = ["admin-help-roles"];
-const TEMPLATES_KEY = ["admin-help-templates"];
-
-export function helpRolesQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ROLES_KEY,
-    queryFn: async (): Promise<RoleAssignment[]> => {
-      const page = await unwrap(api.GET("/api/v1/admin/help-assistants/roles/"));
-      return page.items;
-    }
-  });
-}
-export function helpTemplatesQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: TEMPLATES_KEY,
-    queryFn: async (): Promise<HelperTemplate[]> => {
-      const page = await unwrap(api.GET("/api/v1/admin/help-assistants/templates/"));
-      return page.items;
-    }
-  });
-}
+import {
+  type HelperKind,
+  type HelperTemplate,
+  type RoleAssignment,
+  ROLES_KEY,
+  helpRolesQueryOptions,
+  helpTemplatesQueryOptions
+} from "@/features/admin/help-assistants/help-assistants";
 
 function HelperCard({ template, role }: { template: HelperTemplate; role?: RoleAssignment }) {
   const t = useTranslations();

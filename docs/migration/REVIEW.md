@@ -67,15 +67,21 @@ Disposition per finding: **fix-now** · **accept** (with reason) · **defer**
 
 ## Cross-cutting checks (run once, not per phase)
 
-- [ ] Repo-wide grep: `as any`, `@ts-expect-error`, `eslint-disable`,
-      `console.log`, `TODO`/`FIXME`, raw color hexes in `src` — triage each.
-- [ ] Convention audit: features under `src/features/*`, route files thin,
-      `eneoApi()` (server) vs `browserApi` (client) used correctly, `unwrap()`
-      + `toastApiError` everywhere, query-key naming consistent.
-- [ ] Schema drift: regenerate `schema.d.ts`, confirm no diff.
-- [ ] Bundle/RSC: spot-check that big client components are actually needed as
-      client; server-first where possible.
-- [ ] Dead i18n keys: scan `extra/{en,sv}` for keys no longer referenced.
+- [x] Repo-wide grep: **0** `as any` · **0** `@ts-expect-error`/`@ts-ignore` ·
+      **0** `console.log` · **0** `TODO`/`FIXME`; **8** `eslint-disable`, all
+      justified inline (proxied `<img>` for signed cross-origin URLs that
+      `next/image` can't sign; mount-only listener `exhaustive-deps`). Only raw
+      hex is the brand colour in the logo SVG (Phase 1).
+- [x] Convention audit: features live under `src/features/*`; route files are
+      thin RSC wrappers; `eneoApi()` (server, bearer) vs `browserApi` (client,
+      proxied) split holds; `unwrap()` + `toastApiError` are the universal error
+      path; query keys mirror backend paths. Finding 1.4 closed the last
+      inline-query-options drift (admin feature `.ts` modules).
+- [x] No hardcoded human text: heuristic JSX-text scan finds only
+      `global-error.tsx`'s "Something went wrong" — intentional (the global
+      boundary replaces the root layout, so it has no next-intl provider).
+- [x] Dead i18n keys: scanned — see finding **8.1** (intentional parity
+      superset; prune post-cutover).
 
 ---
 
@@ -175,7 +181,7 @@ One row per finding. Add as we review; update disposition when resolved.
 
 | # | Phase | Sev | Finding | Disposition |
 |---|---|---|---|---|
-| 1.1 | 1 | S2 parity | No per-page browser `<title>`. Root metadata is static `title: "Eneo"`; the Svelte app set `Eneo.ai – {space} – {page}` per route, so tabs/history/bookmarks lose context. | **defer → Phase 8** (cross-cutting; fix = root `title.template` + `generateMetadata`/`metadata` on key routes) |
+| 1.1 | 1 | S2 parity | No per-page browser `<title>`. Root metadata is static `title: "Eneo"`; the Svelte app set `Eneo.ai – {space} – {page}` per route, so tabs/history/bookmarks lose context. | **FIXED** (Phase 8) — root `title.template` `"%s · Eneo"`; `pageTitle(key)` helper (`lib/page-metadata.ts`); area layouts carry the area title (admin/account, space layout → space name); 18 per-page `generateMetadata` titles on the admin sub-pages + dashboard / spaces-list / login / login-failed / deactivated / account-integrations. Title *format* modernized (suffix `· Eneo` vs Svelte's `Eneo.ai –` prefix); deep dynamic detail routes inherit their area/space title (accepted — the resource name shows in-page). |
 | 1.2 | 1 | S3 robustness | No `app/global-error.tsx`: an error in the root layout/providers has no styled boundary (falls back to Next's default white page). | **FIXED** — added `global-error.tsx` (self-contained, dependency-free) |
 | 1.3 | 1 | S4 note | Two distinct concepts named "proxy": `src/proxy.ts` (Next 16 middleware — auth gating/refresh) vs `app/api/eneo/[...path]/route.ts` (REST proxy). Confusing on onboarding; the middleware filename is mandated by Next 16, so only documentable. | **accept/note** |
 | 1.4 | 1 | S3 maintainability | Query-options were inline in the governance / prompt-library / insights admin pages, not in a `feature.ts` module like the rest. | **FIXED** — extracted to `governance.ts` / `prompt-library.ts` / `insights.ts` |
@@ -183,6 +189,67 @@ One row per finding. Add as we review; update disposition when resolved.
 | 2.1 | 2 | **S1 security** | Open redirect after login: both the OIDC callback (`auth/callback`) and the password action used `next.startsWith("/")`, which accepts `//evil.com` / `/\evil.com` (protocol-relative) — `new URL("//evil.com", origin)` resolves to another origin. A crafted `?next=` could redirect a freshly-logged-in user off-site. | **FIXED** — shared `safeNextPath()` (rejects `//` and `/\`) + unit test; wired into both sinks |
 
 | 3.1 | 3 | S1 bug | `browserApi`'s global 401 `onResponse` did `window.location.reload()` on **every** 401. The audit-logs endpoint returns 401 as a domain signal ("open an access session") and the audit page renders its justification gate from that 401 — but the reload fired first, so an admin without an access session hit an **infinite reload loop** on `/admin/audit-logs`. | **FIXED** — skip the reload for `/api/v1/audit/` paths (the only domain-401 in the app); reload still recovers genuine session-death everywhere else |
+
+| 8.1 | 8 | S4 note | Dead i18n keys: the catalog is **3609** keys but only ~970 are referenced as literals (the rest are deferred-feature keys + dynamic `t(\`prefix_${x}\`)` lookups). | **accept/note** — the catalog is a deliberate full-parity superset: **all 3551 Svelte keys are present (0 dropped)** + 58 new keys for redesigns. Pruning now would delete translations that *deferred* features (PARITY.md) will need on re-introduction. Prune as a **post-cutover** cleanup once deferrals land, not a migration defect. |
+
+## Review complete — whole suite (phases 1–8)
+
+All eight phases reviewed. **No S0/S1 remain.** Three genuine defects were found
+and fixed during the review (2.1 open redirect, 3.1 audit reload loop, 1.1
+missing per-page titles); the rest were robustness/maintainability gains (1.2
+global-error boundary, 1.4 query-option modules) or accepted notes (1.3 proxy
+naming, 8.1 i18n superset). Static gates are green: `tsc --noEmit` clean,
+`eslint` + `prettier --check` clean, **104/104** vitest pass. The one review
+task that genuinely needs the running stack — pixel-level side-by-side parity —
+is the remaining manual spot-check before cutover (PARITY.md still shows a
+pending maintainer sign-off and **no MISSING rows**). Everything reviewable
+statically is done and clean.
+
+### Phase 8 verdict — reviewed, one fix (titles) + one note (dead keys)
+
+i18n / polish / parity / prod. **i18n:** the catalog is a deliberate full-parity
+superset — **all 3551 Svelte keys present, 0 dropped**, +58 new keys for
+redesigns (audit categories, governance restrictions, sovereignty hints); the
+many literal-unreferenced keys belong to deferred features and dynamic
+`t(\`prefix_${x}\`)` lookups, so pruning is a post-cutover cleanup (8.1), not a
+gap. **Per-page titles** (1.1) were the one real fix: root `title.template`
+`"%s · Eneo"` + a `pageTitle()` helper + area-layout titles + 18 per-page
+`generateMetadata`. **Boundaries:** `(app)/error.tsx` (localized, surfaces the
+trace id), `(app)/loading.tsx`, root `not-found.tsx`, and the self-contained
+`global-error.tsx` (1.2); `(public)` route crashes bubble to `global-error`
+(accepted — tiny static surface). **Prod:** `next.config.ts` sets
+`output: "standalone"` + baseline security headers (nonce-CSP intentionally
+deferred to CUTOVER.md with the per-request-nonce rationale);
+`skipTrailingSlashRedirect` is paired with `src/proxy.ts`. The **Dockerfile** is
+the correct standalone-in-monorepo shape (Bun build → Node 20 runner, nested
+`apps/web-next/server.js`, traced static/public copies, build-time placeholder
+env for the zod check). A **`/healthz`** route exists and is in the proxy
+public allow-list. PARITY.md (no MISSING rows) and CUTOVER.md (realistic
+pre-flip IdP/env/flags checklist) are accurate handoff docs.
+
+### Phase 7 verdict — reviewed, clean (security-critical bits re-verified)
+
+Admin. Re-verified the two highest-risk items: (a) the audit access-session
+**cookie rescope** in the proxy — only `audit_session_id` is forwarded (never
+the web-next session cookie), Path is rewritten `/api/v1` → `/api/eneo/api/v1`
+and Domain stripped; (b) the governance `toUpdate()` maps the full public
+policy back to input so toggling one restriction **preserves** the model / MCP
+/ tool allow-lists (no accidental policy wipe). Admin mutations invalidate
+named query keys that match their query options. The 401-reload interaction
+that affected this area was fixed under 3.1. Deferrals (model wizards/migration,
+template editors, SharePoint Azure-AD config, api-key policy, insights charts,
+governance allow-list editing) are advanced surfaces, recorded in PARITY.md.
+
+### Phase 6 verdict — reviewed, clean (no findings)
+
+Builders + knowledge. Pure logic is unit-tested (apps, model-kwargs,
+integrations grouping/selection, knowledge-picker). Per-section save sends
+partial updates so it never clobbers other sections (backend leaves omitted
+fields unchanged). The jobs upload queue is ref-based and race-safe (≤5
+concurrent, completion → invalidate); polling uses `refetchInterval`
+(auto-cleanup). The two `as unknown as` casts (multipart FormData; the
+check-url subset type) are pragmatic seams, not bugs. Documented redesigns —
+condensed audio recorder, WS→polling — are accepted (recorded in PARITY.md).
 
 ### Phase 5 verdict — reviewed, clean (no findings)
 

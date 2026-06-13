@@ -3,8 +3,11 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/composites/page-header";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
+import { pageTitle } from "@/lib/page-metadata";
 import { DashboardList } from "./dashboard-list.client";
 import { dashboardQueryOptions } from "./queries";
+
+export const generateMetadata = pageTitle("dashboard");
 
 export default async function DashboardPage() {
   const t = await getTranslations();

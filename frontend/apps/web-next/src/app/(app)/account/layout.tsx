@@ -1,5 +1,8 @@
 import { getTranslations } from "next-intl/server";
+import { pageTitle } from "@/lib/page-metadata";
 import { AccountNav } from "./account-nav.client";
+
+export const generateMetadata = pageTitle("my_account");
 
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
   const t = await getTranslations();

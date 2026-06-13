@@ -1,5 +1,8 @@
 import { getTranslations } from "next-intl/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { pageTitle } from "@/lib/page-metadata";
+
+export const generateMetadata = pageTitle("organisation_deactivated");
 
 export default async function DeactivatedPage() {
   const t = await getTranslations();

@@ -3,9 +3,12 @@ import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
 import {
   appTemplatesQueryOptions,
-  assistantTemplatesQueryOptions,
-  TemplatesPage
-} from "@/features/admin/templates/templates-page";
+  assistantTemplatesQueryOptions
+} from "@/features/admin/templates/templates";
+import { pageTitle } from "@/lib/page-metadata";
+import { TemplatesPage } from "@/features/admin/templates/templates-page";
+
+export const generateMetadata = pageTitle("templates");
 
 export default async function AdminTemplatesRoute() {
   const queryClient = getQueryClient();

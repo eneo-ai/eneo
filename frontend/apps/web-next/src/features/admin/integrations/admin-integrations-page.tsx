@@ -1,30 +1,19 @@
 "use client";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { queryOptions } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
+import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
-
-type TenantIntegration = Schema<"TenantIntegration">;
-
-const TENANT_INTEGRATIONS_KEY = ["admin-tenant-integrations"];
-
-export function tenantIntegrationsQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: TENANT_INTEGRATIONS_KEY,
-    queryFn: async (): Promise<TenantIntegration[]> => {
-      const page = await unwrap(api.GET("/api/v1/integrations/tenant/"));
-      return page.items;
-    }
-  });
-}
+import {
+  type TenantIntegration,
+  TENANT_INTEGRATIONS_KEY,
+  tenantIntegrationsQueryOptions
+} from "@/features/admin/integrations/integrations";
 
 function IntegrationCard({ integration }: { integration: TenantIntegration }) {
   const t = useTranslations();
