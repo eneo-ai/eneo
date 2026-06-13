@@ -3559,5 +3559,6 @@
   "open_in_confluence": "Open in Confluence",
   "sharepoint_import_hint": "Import a site from SharePoint",
   "confluence_import_hint": "Import a Confluence space into your knowledge",
-  "chat_sovereignty_hint": "Data is processed within your infrastructure"
+  "chat_sovereignty_hint": "Data is processed within your infrastructure",
+  "there_are_currently_no_services_configured": "There are currently no services configured"
 }

@@ -4,17 +4,17 @@ Status ledger for the web-next migration (branch `refactor/web-next`). Read this
 first in a new session; the phase docs (01–08) are the plans, this is what
 actually happened. Update this file when a phase lands.
 
-> **STOP POINT 2026-06-13 (apps)** — Phase 6 in progress. Landed this
-> session: **Apps** — list/create/actions, per-section editor (general, input
-> config, instructions, AI settings incl. transcription model, security,
-> publishing), run page with the dynamic input form (text / file uploads /
-> microphone recorder), results table + result detail (output markdown,
-> transcription tab, downloads; polling replaces the app_run_updates
-> websocket), plus the dashboard app routes (`/dashboard/app/[appId]` + its
-> `results/[resultId]`). QA green (format/lint/check, 100 tests, build).
-> **Pick up next: Services** (06-builders-and-knowledge.md step 6: CRUD +
-> single-input run). Apps follow-ups (deferred) listed below. Frontend QA
-> runs on the HOST (`bun run check/lint/test/build` in apps/web-next), never
+> **STOP POINT 2026-06-13 (Phase 6 complete)** — Apps + Services both landed.
+> Apps: list/create/actions, per-section editor, run page with the dynamic
+> input form (text / file uploads / microphone recorder), results + result
+> detail (polling replaces the app_run_updates websocket), dashboard app
+> routes. Services: list/create/actions (edit/move/delete), playground
+> (input → run → output), single-save editor (name, prompt, completion model
+> + behaviour + kwargs, output_format, json_schema). QA green
+> (format/lint/check, 100 tests, build). **Phase 6 done — pick up next:
+> Phase 7 Admin** (07-admin.md + the develop-merge additions noted below:
+> prompt-library and personal-assistant governance areas). Frontend QA runs
+> on the HOST (`bun run check/lint/test/build` in apps/web-next), never
 > `bun install` in the container; backend dev server + `bun run dev` (port
 > 3100) you start yourself in devcontainer terminals.
 
@@ -27,7 +27,7 @@ actually happened. Update this file when a phase lands.
 | 3 API layer (typed client, proxy, Query) | ✅ done | `4763c9c69` |
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
-| 6 Builders + knowledge | 🟡 in progress | `d3b3fc4c4` (jobs), `ab577d5c4` (knowledge: collections + websites) |
+| 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
 | 7 Admin | ⬜ | — |
 | 8 i18n / polish / parity | ⬜ | — |
 
@@ -298,8 +298,27 @@ Apps follow-ups (deferred):
   result page (copy + download text shipped). The AppSwitcher dropdown in the
   detail header was not ported (plain back-link instead).
 
-Remaining for Phase 6 (in plan order):
-1. **Services** (CRUD + run).
+Done (2026-06-13 session, services):
+- **Services** (`src/features/services/`): services.ts (types — Service =
+  ServicePublicWithUser, ServiceUpdate = PartialServiceUpdatePublic; query
+  options + spaceServices), services-page (tile grid + create), create-service
+  (name + "open editor after creation" switch → navigates to ?tab=settings),
+  tile, actions (edit/move/delete; reuses MoveResourceDialog **without** the
+  knowledge switch — services transfer with move_resources:false; no publish).
+- **Detail** (`service-detail.tsx`): playground / settings tabs, `?tab=`.
+  Playground (input → POST /services/{id}/run/ `{input}` → ServiceOutput
+  `{output}`, string-or-JSON rendered + copy). Editor (`editor/`: use-service
+  = serviceQueryOptions + useUpdateService **POST** /services/{id}/ —
+  POST-as-update RB-5(b)) is a single-save form (name, prompt, completion
+  model + behaviour presets + model-specific kwargs reusing
+  `@/features/assistants/editor/model-kwargs`, output_format json/list/boolean/
+  none, json_schema textarea parsed on save). Settings tab gated by edit perm.
+- New i18n key `there_are_currently_no_services_configured` added to the extra
+  catalogs (en+sv) + regenerated. Services live in org spaces too (no 404
+  guard, matching the Svelte page); the nav already gates on read:service.
+
+**Phase 6 complete.** Next: Phase 7 (Admin) — fold in the develop-merge
+additions (prompt-library + personal-assistant governance areas) per 07-admin.
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in
