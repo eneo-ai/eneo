@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Plus, RefreshCw } from "lucide-react";
+import { MoreHorizontal, Plus, RefreshCw, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -46,6 +46,7 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
+import { NotificationPolicyDialog } from "./notification-policy-dialog";
 
 type ApiKey = Schema<"ApiKeyV2">;
 type ApiKeyState = Schema<"ApiKeyState">;
@@ -283,6 +284,7 @@ export function OrgApiKeysPage() {
   const t = useTranslations();
   const [state, setState] = useState<ApiKeyState>("active");
   const [secret, setSecret] = useState<string | null>(null);
+  const [showPolicy, setShowPolicy] = useState(false);
 
   const { items, hasNextPage, hasPreviousPage, nextPage, previousPage, isPending } =
     usePaginatedQuery<ApiKey>({
@@ -298,8 +300,12 @@ export function OrgApiKeysPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <PageHeader title={t("api_keys")}>
+        <Button variant="outline" onClick={() => setShowPolicy(true)}>
+          <Settings className="size-4" /> {t("notification_policy")}
+        </Button>
         <CreateKeyDialog onCreated={setSecret} />
       </PageHeader>
+      <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
 
       <Tabs value={state} onValueChange={(value) => setState(value as ApiKeyState)}>
         <TabsList>
