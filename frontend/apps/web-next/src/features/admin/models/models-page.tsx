@@ -6,14 +6,15 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
+import { CredentialsPanel } from "./credentials-panel";
 import { ModelTable } from "./model-table";
 import { adminModelsQueryOptions } from "./models";
 
 /**
  * Admin model management: completion / embedding / transcription tabs grouped
- * by provider, with enable/disable, set-default and security-classification
- * assignment. The add-model wizard, provider/credential management, usage
- * breakdowns and the migration flow are deferred (tracked in the ledger).
+ * by provider (enable/disable, set-default, security classification, full edit
+ * of custom models) plus per-provider API credentials. The add-model wizard,
+ * usage breakdowns and the migration flow are deferred (tracked in the ledger).
  */
 export function ModelsPage() {
   const t = useTranslations();
@@ -31,6 +32,7 @@ export function ModelsPage() {
           <TabsTrigger value="completion">{t("completion_models")}</TabsTrigger>
           <TabsTrigger value="embedding">{t("embedding_models")}</TabsTrigger>
           <TabsTrigger value="transcription">{t("transcription_models")}</TabsTrigger>
+          <TabsTrigger value="credentials">{t("api_credentials")}</TabsTrigger>
         </TabsList>
         <TabsContent value="completion" className="pt-4">
           <ModelTable
@@ -55,6 +57,9 @@ export function ModelsPage() {
             classifications={classifications}
             securityEnabled={securityEnabled}
           />
+        </TabsContent>
+        <TabsContent value="credentials" className="pt-4">
+          <CredentialsPanel />
         </TabsContent>
       </Tabs>
     </div>
