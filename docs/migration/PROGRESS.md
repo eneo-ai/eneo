@@ -32,7 +32,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | 🟡 in progress | foundation + toggles, users, audit-logs |
+| 7 Admin | 🟡 in progress | foundation, users, audit-logs, security-classifications |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -403,8 +403,20 @@ Done (2026-06-13 session, audit-logs — step 4):
   action, audit_actor_*, audit_outcome_*, audit_last_purge, audit_export_hint)
   added to the extra catalogs (en+sv) + regenerated; the rest reused existing.
 
-Remaining for Phase 7 (plan order): models (+ migration wizard) +
-security-classifications, mcp-servers + org api-keys + tenant integrations,
+Done (2026-06-13 session, security-classifications — part of step 5):
+- **Security classifications** (`src/features/admin/security-classifications/`):
+  query options (`SecurityClassificationResponse` = `{security_enabled,
+  security_classifications}`; backend orders least→highest by security_level,
+  `highestFirst` reverses for display). Page: enable toggle (POST /enable/
+  `{enabled}`) gated by enable/disable confirm dialogs; ordered list (highest
+  at top, lowest at bottom) with create/edit dialogs (POST / + PATCH /{id}/),
+  delete (DELETE /{id}/), and move up/down via the rank endpoint (PATCH / with
+  `security_classifications: ModelId[]` in least→highest order — reverse of the
+  display order). Added "Governance → Security classifications" to the nav.
+  All i18n keys already existed.
+
+Remaining for Phase 7 (plan order): models list/edit (+ providers, credentials,
+migration wizard), mcp-servers + org api-keys + tenant integrations,
 templates + help-assistants, insights + usage, the audit config tab, plus the
 governance areas (prompt-library, personal-assistant).
 
