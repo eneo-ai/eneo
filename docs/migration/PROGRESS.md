@@ -4,13 +4,16 @@ Status ledger for the web-next migration (branch `refactor/web-next`). Read this
 first in a new session; the phase docs (01–08) are the plans, this is what
 actually happened. Update this file when a phase lands.
 
-> **STOP POINT 2026-06-13 (`4b8cd627e`)** — Phase 6 in progress. Landed this
-> session: develop merged in (conflict-free) + schema regen, integrations
-> (list/wrapper pages, SharePoint import, sync history, OAuth connect),
-> assistants (list + editor incl. knowledge picker), group chat editor.
-> **Pick up next: Apps** (06-builders-and-knowledge.md; editor, run page with
-> dynamic input forms, results, dashboard routes), then Services. The
-> assistant-editor follow-ups list below is the polish backlog. Frontend QA
+> **STOP POINT 2026-06-13 (apps)** — Phase 6 in progress. Landed this
+> session: **Apps** — list/create/actions, per-section editor (general, input
+> config, instructions, AI settings incl. transcription model, security,
+> publishing), run page with the dynamic input form (text / file uploads /
+> microphone recorder), results table + result detail (output markdown,
+> transcription tab, downloads; polling replaces the app_run_updates
+> websocket), plus the dashboard app routes (`/dashboard/app/[appId]` + its
+> `results/[resultId]`). QA green (format/lint/check, 100 tests, build).
+> **Pick up next: Services** (06-builders-and-knowledge.md step 6: CRUD +
+> single-input run). Apps follow-ups (deferred) listed below. Frontend QA
 > runs on the HOST (`bun run check/lint/test/build` in apps/web-next), never
 > `bun install` in the container; backend dev server + `bun run dev` (port
 > 3100) you start yourself in devcontainer terminals.
@@ -252,10 +255,51 @@ Assistants follow-ups (deferred, in rough priority order):
 - Templates: creation is blank-only; TemplateCreateAssistant flow +
   TemplateCreateAssistantHint not ported.
 
+Done (2026-06-13 session, apps):
+- **Apps** (`src/features/apps/`): apps.ts (types, query options
+  app/appRuns/appRun, getResultTitle + inputFieldRules + isRunActive pure +
+  unit-tested, fileSignedUrl helper), apps-page (tile grid, published/drafts
+  for publishers), create-app (blank create → editor; templates deferred),
+  tile, actions (edit/publish/delete; reuses assistants PublishDialog),
+  status-badge (icon/full run status pill, web-next Tailwind palette not the
+  eneo *-dimmer tokens which web-next lacks).
+- **Editor** (`editor/`): per-section save like assistants (use-app.ts =
+  appQueryOptions + useUpdateApp **PATCH** /apps/{id}/ — apps update via PATCH,
+  not the assistant POST-as-update). Sections: general (name/desc/icon via
+  IconField), input (description + grouped type select text/audio/image →
+  input_fields PATCH), instructions (prompt.text; PromptCreate body), AI
+  (completion model + behaviour presets + model-specific kwargs reusing
+  `@/features/assistants/editor/model-kwargs`; transcription model row shown
+  only when an audio input is configured), security (retention), publishing
+  (publish/unpublish — apps have **no** insights toggle, unlike assistants).
+- **Run** (`run/`): use-app-run (text + file upload queue → POST
+  /api/v1/files/ `upload_file`, run create POST /apps/{id}/runs/ with
+  `{files:[{id}], text}` + trackJob + navigate). app-inputs renderer →
+  text-input / upload-input (drag-drop + accept from input field rules) /
+  audio-recorder-input (condensed MediaRecorder port: timesliced capture,
+  size-limit auto-stop, volume meter, preview → "use this recording"). Shared
+  files array across input fields (matches Svelte's single AttachmentManager;
+  apps are normally single-input). run-view = identity + form + submit.
+- **Results** (`results/`): results-table (polls 5s while a run is active,
+  delete via DELETE /app-runs/{id}/), result-detail (polls 3s while active —
+  **app_run_updates websocket intentionally replaced by polling**, per plan;
+  output Streamdown + copy/download, transcription tab with signed-URL audio
+  playback, failed-with-files signed-URL downloads, status sidebar).
+- **Detail + dashboard**: app-detail (run/results tabs, `?tab=`), space routes
+  (apps, [appId], [appId]/edit, [appId]/results/[resultId]) + dashboard routes
+  (`dashboard/app/[appId]` + results/[resultId], reusing RunView/ResultsTable/
+  ResultDetail — none depend on useSpace; the dashboard list already linked
+  there). Org-space exclusion handled by the nav gate (no server 404 guard,
+  matching the sibling assistants page); all app i18n keys already existed.
+
+Apps follow-ups (deferred):
+- Prompt version history dialog, app prompt-attachments section, API-keys
+  section, template create flow (TemplateCreateApp), print-to-PDF on the
+  result page (copy + download text shipped). The AppSwitcher dropdown in the
+  detail header was not ported (plain back-link instead).
+
 Remaining for Phase 6 (in plan order):
-1. **Apps** (editor, run page with dynamic input forms, results, dashboard
-   routes).
-2. **Services** (CRUD + run).
+1. **Services** (CRUD + run).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in
