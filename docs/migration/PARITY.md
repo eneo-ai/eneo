@@ -61,7 +61,9 @@ There are currently **no MISSING rows**. Maintainer sign-off: _pending_.
 | Security classifications: CRUD, enable, reorder | PASS | |
 | Models: list, enable/disable, set-default, classification | PASS | |
 | Model full edit (custom) + per-provider API credentials | PASS | edit dialog (PUT tenant-models) + credentials tab (set/update keys). |
-| Model add-wizard, provider CRUD, migration wizard, per-model usage | DEFERRED | remaining advanced model surfaces. |
+| Model add-wizard (provider + credentials + model) | PASS | capability-driven stepped dialog; POST model-providers + tenant-models. |
+| Model migration + usage impact | PASS | validate → migrate dialog with impact counts + compatibility warnings. |
+| Provider edit/delete, per-model usage-details list | DEFERRED | minor: wizard creates providers; usage shows counts (not the per-entity list). |
 | MCP servers: list, enable/disable, CRUD | PASS | tools panel deferred. |
 | Org API keys: list, create, rotate/suspend/reactivate/revoke | PASS | policy/super-key/scope deferred. |
 | Tenant integrations: provider link/unlink | PASS | SharePoint Azure-AD config + webhooks deferred. |
