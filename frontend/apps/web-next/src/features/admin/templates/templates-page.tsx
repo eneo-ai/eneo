@@ -1,7 +1,7 @@
 "use client";
 
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { MoreHorizontal, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -27,60 +28,116 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { cn } from "@/lib/utils";
 import {
   APP_KEY,
   ASSISTANT_KEY,
+  DELETED_APP_KEY,
+  DELETED_ASSISTANT_KEY,
   appTemplatesQueryOptions,
-  assistantTemplatesQueryOptions
+  assistantTemplatesQueryOptions,
+  deletedAppTemplatesQueryOptions,
+  deletedAssistantTemplatesQueryOptions
 } from "@/features/admin/templates/templates";
 
 type TemplateKind = "assistants" | "apps";
 
+type TemplateRowData = {
+  id: string;
+  name: string;
+  category: string;
+  completion_model_name?: string | null;
+  is_default?: boolean;
+  usage_count?: number;
+};
+
 function deleteTemplate(kind: TemplateKind, templateId: string) {
-  if (kind === "assistants") {
-    return unwrap(
-      browserApi.DELETE("/api/v1/admin/templates/assistants/{template_id}", {
-        params: { path: { template_id: templateId } }
-      })
-    );
-  }
-  return unwrap(
-    browserApi.DELETE("/api/v1/admin/templates/apps/{template_id}", {
-      params: { path: { template_id: templateId } }
-    })
-  );
+  const params = { path: { template_id: templateId } };
+  return kind === "assistants"
+    ? unwrap(browserApi.DELETE("/api/v1/admin/templates/assistants/{template_id}", { params }))
+    : unwrap(browserApi.DELETE("/api/v1/admin/templates/apps/{template_id}", { params }));
 }
 
-function TemplateRow({
-  template,
-  kind,
-  invalidationKey
-}: {
-  template: { id: string; name: string; category: string; completion_model_name?: string | null };
-  kind: TemplateKind;
-  invalidationKey: readonly unknown[];
-}) {
+function toggleDefault(kind: TemplateKind, templateId: string, isDefault: boolean) {
+  const params = { path: { template_id: templateId } };
+  const body = { is_default: isDefault };
+  return kind === "assistants"
+    ? unwrap(
+        browserApi.PATCH("/api/v1/admin/templates/assistants/{template_id}/default", {
+          params,
+          body
+        })
+      )
+    : unwrap(
+        browserApi.PATCH("/api/v1/admin/templates/apps/{template_id}/default", { params, body })
+      );
+}
+
+function restoreTemplate(kind: TemplateKind, templateId: string) {
+  const params = { path: { template_id: templateId } };
+  return kind === "assistants"
+    ? unwrap(
+        browserApi.POST("/api/v1/admin/templates/assistants/{template_id}/restore", { params })
+      )
+    : unwrap(browserApi.POST("/api/v1/admin/templates/apps/{template_id}/restore", { params }));
+}
+
+function permanentDelete(kind: TemplateKind, templateId: string) {
+  const params = { path: { template_id: templateId } };
+  return kind === "assistants"
+    ? unwrap(
+        browserApi.DELETE("/api/v1/admin/templates/assistants/{template_id}/permanent", { params })
+      )
+    : unwrap(browserApi.DELETE("/api/v1/admin/templates/apps/{template_id}/permanent", { params }));
+}
+
+const activeKey = (kind: TemplateKind) => (kind === "assistants" ? ASSISTANT_KEY : APP_KEY);
+const deletedKey = (kind: TemplateKind) =>
+  kind === "assistants" ? DELETED_ASSISTANT_KEY : DELETED_APP_KEY;
+
+function TemplateRow({ template, kind }: { template: TemplateRowData; kind: TemplateKind }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
 
+  const refresh = () => queryClient.invalidateQueries({ queryKey: activeKey(kind) });
+
   const remove = useMutation({
     mutationFn: () => deleteTemplate(kind, template.id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: invalidationKey });
+      void queryClient.invalidateQueries({ queryKey: activeKey(kind) });
+      void queryClient.invalidateQueries({ queryKey: deletedKey(kind) });
       setShowDelete(false);
     },
     onError: (error) => toastApiError(error, t)
   });
 
+  const setDefault = useMutation({
+    mutationFn: (isDefault: boolean) => toggleDefault(kind, template.id, isDefault),
+    onSuccess: refresh,
+    onError: (error) => toastApiError(error, t)
+  });
+
   return (
     <TableRow>
-      <TableCell className="font-medium">{template.name}</TableCell>
+      <TableCell className="font-medium">
+        <span className="flex items-center gap-2">
+          {template.name}
+          {template.is_default && (
+            <Badge variant="secondary" className="gap-1">
+              <Star className="size-3 fill-current" /> {t("featured")}
+            </Badge>
+          )}
+        </span>
+      </TableCell>
       <TableCell>
         <Badge variant="secondary">{template.category}</Badge>
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">
         {template.completion_model_name ?? "—"}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
+        {template.usage_count ?? 0}
       </TableCell>
       <TableCell className="w-12">
         <DropdownMenu>
@@ -90,6 +147,13 @@ function TemplateRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={setDefault.isPending}
+              onSelect={() => setDefault.mutate(!template.is_default)}
+            >
+              <Star className={cn("size-4", template.is_default && "fill-current")} />
+              {template.is_default ? t("remove_default") : t("set_as_default")}
+            </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
               <Trash2 className="size-4" /> {t("delete")}
             </DropdownMenuItem>
@@ -109,20 +173,7 @@ function TemplateRow({
   );
 }
 
-function TemplateTable({
-  templates,
-  kind,
-  invalidationKey
-}: {
-  templates: {
-    id: string;
-    name: string;
-    category: string;
-    completion_model_name?: string | null;
-  }[];
-  kind: TemplateKind;
-  invalidationKey: readonly unknown[];
-}) {
+function TemplateTable({ templates, kind }: { templates: TemplateRowData[]; kind: TemplateKind }) {
   const t = useTranslations();
   if (templates.length === 0) return <EmptyState title={t("no_templates_found")} />;
   return (
@@ -132,17 +183,109 @@ function TemplateTable({
           <TableHead>{t("name")}</TableHead>
           <TableHead>{t("category")}</TableHead>
           <TableHead>{t("completion_model")}</TableHead>
+          <TableHead className="text-right">{t("uses")}</TableHead>
           <TableHead className="w-12" />
         </TableRow>
       </TableHeader>
       <TableBody>
         {templates.map((template) => (
-          <TemplateRow
-            key={template.id}
-            template={template}
-            kind={kind}
-            invalidationKey={invalidationKey}
-          />
+          <TemplateRow key={template.id} template={template} kind={kind} />
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function DeletedRow({ template, kind }: { template: TemplateRowData; kind: TemplateKind }) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const [showPurge, setShowPurge] = useState(false);
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: deletedKey(kind) });
+    void queryClient.invalidateQueries({ queryKey: activeKey(kind) });
+  };
+
+  const restore = useMutation({
+    mutationFn: () => restoreTemplate(kind, template.id),
+    onSuccess: invalidate,
+    onError: (error) => toastApiError(error, t)
+  });
+  const purge = useMutation({
+    mutationFn: () => permanentDelete(kind, template.id),
+    onSuccess: () => {
+      invalidate();
+      setShowPurge(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  return (
+    <TableRow>
+      <TableCell className="font-medium">{template.name}</TableCell>
+      <TableCell>
+        <Badge variant="outline">{kind === "assistants" ? t("assistant") : t("app")}</Badge>
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={restore.isPending}
+            onClick={() => restore.mutate()}
+          >
+            <RotateCcw className="size-4" /> {t("restore")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("delete_permanently")}
+            disabled={purge.isPending}
+            onClick={() => setShowPurge(true)}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+      </TableCell>
+      <ConfirmDialogControlled
+        open={showPurge}
+        onOpenChange={setShowPurge}
+        title={t("delete_permanently")}
+        description={t("template_permanent_delete_confirm", { name: template.name })}
+        confirmLabel={purge.isPending ? t("deleting") : t("delete_permanently")}
+        pending={purge.isPending}
+        onConfirm={() => purge.mutate()}
+      />
+    </TableRow>
+  );
+}
+
+function DeletedTab() {
+  const t = useTranslations();
+  const assistants = useQuery(deletedAssistantTemplatesQueryOptions(browserApi));
+  const apps = useQuery(deletedAppTemplatesQueryOptions(browserApi));
+
+  if (assistants.isPending || apps.isPending) return <Skeleton className="h-40 w-full" />;
+
+  const rows: { template: TemplateRowData; kind: TemplateKind }[] = [
+    ...(assistants.data ?? []).map((template) => ({ template, kind: "assistants" as const })),
+    ...(apps.data ?? []).map((template) => ({ template, kind: "apps" as const }))
+  ];
+
+  if (rows.length === 0) return <EmptyState title={t("no_deleted_templates")} />;
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("name")}</TableHead>
+          <TableHead>{t("type")}</TableHead>
+          <TableHead className="text-right" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map(({ template, kind }) => (
+          <DeletedRow key={`${kind}-${template.id}`} template={template} kind={kind} />
         ))}
       </TableBody>
     </Table>
@@ -150,9 +293,9 @@ function TemplateTable({
 }
 
 /**
- * Template administration: review and remove assistant/app templates. Template
- * creation/editing (the per-kind wizard forms), featured/default toggling,
- * restore and permanent-delete are deferred (tracked in the ledger).
+ * Template administration: review assistant/app templates, mark one as the
+ * featured default, soft-delete, and restore or permanently remove deleted
+ * ones. The per-kind create/edit wizard forms remain a separate follow-up.
  */
 export function TemplatesPage() {
   const t = useTranslations();
@@ -166,16 +309,16 @@ export function TemplatesPage() {
         <TabsList>
           <TabsTrigger value="assistants">{t("assistants")}</TabsTrigger>
           <TabsTrigger value="apps">{t("apps")}</TabsTrigger>
+          <TabsTrigger value="deleted">{t("deleted_templates")}</TabsTrigger>
         </TabsList>
         <TabsContent value="assistants" className="pt-4">
-          <TemplateTable
-            templates={assistantTemplates}
-            kind="assistants"
-            invalidationKey={ASSISTANT_KEY}
-          />
+          <TemplateTable templates={assistantTemplates} kind="assistants" />
         </TabsContent>
         <TabsContent value="apps" className="pt-4">
-          <TemplateTable templates={appTemplates} kind="apps" invalidationKey={APP_KEY} />
+          <TemplateTable templates={appTemplates} kind="apps" />
+        </TabsContent>
+        <TabsContent value="deleted" className="pt-4">
+          <DeletedTab />
         </TabsContent>
       </Tabs>
     </div>

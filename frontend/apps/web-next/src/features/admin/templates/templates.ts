@@ -8,6 +8,8 @@ export type AppTemplate = Schema<"AppTemplateAdminPublic">;
 
 export const ASSISTANT_KEY = ["admin-templates", "assistants"];
 export const APP_KEY = ["admin-templates", "apps"];
+export const DELETED_ASSISTANT_KEY = ["admin-templates", "assistants", "deleted"];
+export const DELETED_APP_KEY = ["admin-templates", "apps", "deleted"];
 
 export function assistantTemplatesQueryOptions(api: EneoClient) {
   return queryOptions({
@@ -25,5 +27,20 @@ export function appTemplatesQueryOptions(api: EneoClient) {
       const page = await unwrap(api.GET("/api/v1/admin/templates/apps/"));
       return page.items.filter((item) => !item.deleted_at);
     }
+  });
+}
+
+export function deletedAssistantTemplatesQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: DELETED_ASSISTANT_KEY,
+    queryFn: async (): Promise<AssistantTemplate[]> =>
+      (await unwrap(api.GET("/api/v1/admin/templates/assistants/deleted"))).items
+  });
+}
+export function deletedAppTemplatesQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: DELETED_APP_KEY,
+    queryFn: async (): Promise<AppTemplate[]> =>
+      (await unwrap(api.GET("/api/v1/admin/templates/apps/deleted"))).items
   });
 }
