@@ -1,22 +1,13 @@
 "use client";
 
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { Card } from "@/components/ui/card";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
+import { browserApi } from "@/lib/api/browser";
+import { insightCountsQueryOptions } from "@/features/admin/insights/insights";
 
-type Counts = Schema<"Counts">;
 const NUMBER = new Intl.NumberFormat("sv-SE");
-
-export function insightCountsQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["admin-insights-counts"],
-    queryFn: (): Promise<Counts> => unwrap(api.GET("/api/v1/analysis/counts/"))
-  });
-}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  queryOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -38,23 +32,14 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
+import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
-
-type Entry = Schema<"PromptLibraryEntrySparse">;
-const KEY = ["admin-prompt-library"];
-
-export function promptLibraryQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: KEY,
-    queryFn: async (): Promise<Entry[]> => {
-      const page = await unwrap(api.GET("/api/v1/admin/prompt-library/"));
-      return page.items;
-    }
-  });
-}
+import {
+  type Entry,
+  PROMPT_LIBRARY_KEY as KEY,
+  promptLibraryQueryOptions
+} from "@/features/admin/prompt-library/prompt-library";
 
 function EntryForm({
   entryId,

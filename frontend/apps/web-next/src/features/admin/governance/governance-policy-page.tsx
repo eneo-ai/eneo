@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  queryOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/composites/page-header";
@@ -20,24 +14,18 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { browserApi, type EneoClient } from "@/lib/api/browser";
+import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
-import { promptLibraryQueryOptions } from "@/features/admin/prompt-library/prompt-library-page";
+import {
+  GOVERNANCE_POLICY_KEY as POLICY_KEY,
+  type GovernancePolicy,
+  type GovernancePolicyUpdate,
+  governancePolicyQueryOptions
+} from "@/features/admin/governance/governance";
+import { promptLibraryQueryOptions } from "@/features/admin/prompt-library/prompt-library";
 
-type GovernancePolicy = Schema<"GovernancePolicyPublic">;
-type GovernancePolicyUpdate = Schema<"GovernancePolicyUpdate">;
-
-const POLICY_KEY = ["admin-governance-policy"];
 const NO_PROMPT = "__none";
-
-export function governancePolicyQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: POLICY_KEY,
-    queryFn: (): Promise<GovernancePolicy> => unwrap(api.GET("/api/v1/admin/governance-policy/"))
-  });
-}
 
 /** Map the current policy back into the update payload so a single-field edit preserves the rest. */
 function toUpdate(policy: GovernancePolicy): GovernancePolicyUpdate {

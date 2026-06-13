@@ -1,10 +1,8 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { getQueryClient } from "@/lib/api/query";
 import { eneoApi } from "@/lib/api/server";
-import {
-  GovernancePolicyPage,
-  governancePolicyQueryOptions
-} from "@/features/admin/governance/governance-policy-page";
+import { governancePolicyQueryOptions } from "@/features/admin/governance/governance";
+import { GovernancePolicyPage } from "@/features/admin/governance/governance-policy-page";
 
 export default async function AdminPersonalAssistantRoute() {
   const queryClient = getQueryClient();

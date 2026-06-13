@@ -176,8 +176,9 @@ One row per finding. Add as we review; update disposition when resolved.
 | # | Phase | Sev | Finding | Disposition |
 |---|---|---|---|---|
 | 1.1 | 1 | S2 parity | No per-page browser `<title>`. Root metadata is static `title: "Eneo"`; the Svelte app set `Eneo.ai – {space} – {page}` per route, so tabs/history/bookmarks lose context. | **defer → Phase 8** (cross-cutting; fix = root `title.template` + `generateMetadata`/`metadata` on key routes) |
-| 1.2 | 1 | S3 robustness | No `app/global-error.tsx`: an error in the root layout/providers has no styled boundary (falls back to Next's default white page). | **collect** (trivial, purely additive) |
+| 1.2 | 1 | S3 robustness | No `app/global-error.tsx`: an error in the root layout/providers has no styled boundary (falls back to Next's default white page). | **FIXED** — added `global-error.tsx` (self-contained, dependency-free) |
 | 1.3 | 1 | S4 note | Two distinct concepts named "proxy": `src/proxy.ts` (Next 16 middleware — auth gating/refresh) vs `app/api/eneo/[...path]/route.ts` (REST proxy). Confusing on onboarding; the middleware filename is mandated by Next 16, so only documentable. | **accept/note** |
+| 1.4 | 1 | S3 maintainability | Query-options were inline in the governance / prompt-library / insights admin pages, not in a `feature.ts` module like the rest. | **FIXED** — extracted to `governance.ts` / `prompt-library.ts` / `insights.ts` |
 
 ### Phase 1 verdict — reviewed, near-clean
 
