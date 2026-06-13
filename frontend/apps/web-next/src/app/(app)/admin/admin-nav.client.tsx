@@ -14,9 +14,11 @@ import {
   Sparkles,
   Users
 } from "lucide-react";
+import { LayoutTemplate } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; icon: React.ComponentType<{ className?: string }>; label: string };
@@ -35,6 +37,17 @@ function isActive(pathname: string, href: string): boolean {
 export function AdminNav() {
   const t = useTranslations();
   const pathname = usePathname();
+  const { settings } = useAppContext();
+
+  const configurationItems: NavItem[] = [
+    { href: "/admin/models", icon: Cpu, label: t("models") },
+    ...(settings.using_templates
+      ? [{ href: "/admin/templates", icon: LayoutTemplate, label: t("templates") }]
+      : []),
+    { href: "/admin/help-assistants", icon: Sparkles, label: t("admin_help_assistants_nav_label") },
+    { href: "/admin/mcp-servers", icon: Plug, label: t("mcp_servers") },
+    { href: "/admin/integrations", icon: Cloud, label: t("integrations") }
+  ];
 
   const groups: NavGroup[] = [
     {
@@ -54,16 +67,7 @@ export function AdminNav() {
     },
     {
       label: t("admin_section_configuration"),
-      items: [
-        { href: "/admin/models", icon: Cpu, label: t("models") },
-        {
-          href: "/admin/help-assistants",
-          icon: Sparkles,
-          label: t("admin_help_assistants_nav_label")
-        },
-        { href: "/admin/mcp-servers", icon: Plug, label: t("mcp_servers") },
-        { href: "/admin/integrations", icon: Cloud, label: t("integrations") }
-      ]
+      items: configurationItems
     },
     {
       label: t("admin_section_analytics_logs"),

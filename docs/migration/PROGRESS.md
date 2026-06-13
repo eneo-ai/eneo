@@ -4,24 +4,18 @@ Status ledger for the web-next migration (branch `refactor/web-next`). Read this
 first in a new session; the phase docs (01–08) are the plans, this is what
 actually happened. Update this file when a phase lands.
 
-> **STOP POINT 2026-06-13 (Phase 7 started)** — Phase 6 complete (apps +
-> services). Phase 7 Admin underway: **foundation + feature toggles** landed —
-> `/admin` layout with server-side admin gate (`hasPermission(user)("admin")`
-> → redirect `/`), a grouped sidebar nav (grows as pages land; legacy
-> roles/user-groups dropped per OQ-2), the overview feature-toggles page, and
-> **Users** management (list with offset pagination RB-5(a), search + state
-> tabs with counts, create/edit with role assignment, activate/deactivate/
-> delete) and **Audit logs** (the RB-5(d) cookie spike is solved in the proxy;
-> justification gate → filtered table → retention panel → async CSV export).
-> QA green (100 tests, build). **Pick up next: Phase 7 step 5 — Models**
-> (+ providers, credentials, migration wizard) and security-classifications,
-> then mcp/api-keys/integrations, templates/help-assistants, insights/usage,
-> and the governance areas. **Step 5 done** (security-classifications CRUD +
-> models list with enable/default/classification), minus the deferred
-> add-model wizard / providers / credentials / migration / usage. **Pick up
-> next: step 6 — MCP servers, org API keys, tenant integrations.** The audit
-> **config (categories) tab is deferred**. The `/admin` nav link already
-> exists in main-nav, gated by can("admin").
+> **STOP POINT 2026-06-13 (Phase 7 functionally complete)** — every admin
+> section from 07-admin.md ships a working web-next page behind the admin gate
+> (`/admin/layout.tsx`): feature toggles, users, audit-logs (incl. the RB-5(d)
+> access-session cookie spike in the proxy), security classifications, models,
+> MCP servers, org API keys, tenant integrations, usage, insights, prompt
+> library, help assistants, templates. Heavy/low-traffic sub-flows are deferred
+> with notes (see "Phase 7 status" below): model add/edit wizards + migration,
+> audit config tab, api-key policy/super-key, SharePoint Azure-AD config +
+> webhooks, template editors, insights charts, and the personal-assistant
+> policy editor. **Pick up next: Phase 8** (i18n / polish / parity,
+> 08-i18n-polish-parity.md). The `/admin` nav link is in main-nav, gated by
+> can("admin").
 > Frontend QA runs on the HOST (`bun run check/lint/test/build` in
 > apps/web-next), never `bun install` in the container; backend dev server +
 > `bun run dev` (port 3100) you start yourself in devcontainer terminals.
@@ -36,7 +30,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | 🟡 in progress | foundation, users, audit-logs, sec-class, models, mcp, api-keys, integrations |
+| 7 Admin | ✅ done (with documented deferrals) | all sections shipped; heavy sub-flows deferred |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -463,9 +457,51 @@ Done (2026-06-13 session, step 6 — mcp / api-keys / integrations):
   i18n in extra catalogs (mcp_auth_*, confirm_delete_mcp_server,
   admin_integrations_*); reused existing api-keys_* keys.
 
-Remaining for Phase 7 (plan order): templates + help-assistants, insights +
-usage, the audit config tab, the deferred models/api-keys/integrations
-surfaces above, plus the governance areas (prompt-library, personal-assistant).
+Done (2026-06-13 session, steps 7–8 + governance — usage/insights/templates/
+help-assistants):
+- **Usage** (`features/admin/usage/`): tokens (total + per-model) + storage
+  (totals + per-space) tabs.
+- **Insights** (`features/admin/insights/`): headline counts (assistants/
+  sessions/questions) from /analysis/counts/. Charts + per-assistant
+  drill-down **deferred** (no chart infra; OQ-5 approximate).
+- **Prompt library** (`features/admin/prompt-library/`): CRUD (governance).
+- **Help assistants** (`features/admin/help-assistants/`): installed roles +
+  available templates, install/uninstall, enable + visible-to-users toggles
+  (POST/DELETE /admin/help-assistants/roles/{kind}/, PATCH .../{enabled,
+  visible} with ToggleRequest {value}).
+- **Templates** (`features/admin/templates/`): assistant/app tabs, list +
+  soft-delete (DELETE /admin/templates/{kind}/{id}). Nav item gated on
+  settings.using_templates. Create/edit wizards, featured/default toggle,
+  restore + permanent-delete **deferred**.
+
+## Phase 7 status: functionally complete
+
+Every admin section from 07-admin.md has a working web-next page, gated by the
+admin permission (`/admin/layout.tsx`). Sections shipped: overview/feature
+toggles, users, audit-logs (+ the RB-5(d) cookie spike), security
+classifications, models, MCP servers, org API keys, tenant integrations,
+usage, insights, prompt library, help assistants, templates.
+
+**Documented deferrals** (heavy/low-traffic sub-flows; pick up if needed):
+- Models: add-model AddWizard, full model-definition edit (tenantModels.*),
+  provider + tenant-credential management, the migration wizard, usage
+  breakdowns, the migration_history tab.
+- Audit: the config (categories/per-action enable-disable) tab; actor-by-user
+  filter.
+- API keys: policy panel, super-key status, scope-resource selectors,
+  notification policy, expiring-soon.
+- Integrations: SharePoint Azure-AD app credential setup + webhook
+  subscription management (untyped /admin/sharepoint/* endpoints).
+- Templates: create/edit wizards, featured/default toggle, restore +
+  permanent-delete + rollback + the deleted-templates list.
+- Insights: time-series charts + per-assistant analytics + the analysis
+  assistant stream.
+- Governance: the personal-assistant **policy editor** (model/MCP restriction
+  + prompt enforcement multi-section PolicyDraft) — `/admin/personal-assistant`.
+- Manual gate: the audit access-session cookie re-scoping needs verification
+  against a live backend (see step 4).
+
+**Next: Phase 8** (i18n / polish / parity) — `08-i18n-polish-parity.md`.
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in

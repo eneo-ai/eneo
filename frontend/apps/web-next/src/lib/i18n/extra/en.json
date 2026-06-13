@@ -43,5 +43,6 @@
   "help_assistant_install": "Install",
   "help_assistant_uninstall": "Uninstall",
   "insights_charts_deferred": "Detailed time-series charts and per-assistant analytics are not yet available in this view.",
-  "insights_period_all_time": "All time"
+  "insights_period_all_time": "All time",
+  "template_delete_confirm": "Are you sure you want to delete the template \"{name}\"?"
 }
