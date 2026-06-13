@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -131,18 +132,12 @@ export function AiSection({ app }: { app: App }) {
       )}
 
       <SettingsRow title={t("completion_model")} description={t("this_model_will_be_used")}>
-        <Select value={modelId} onValueChange={setModelId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("choose_a_completion_model")} />
-          </SelectTrigger>
-          <SelectContent>
-            {space.completion_models.map((candidate) => (
-              <SelectItem key={candidate.id} value={candidate.id}>
-                {candidate.nickname ?? candidate.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ModelSelector
+          models={space.completion_models}
+          selectedId={modelId}
+          onSelect={setModelId}
+          className="w-full justify-between"
+        />
       </SettingsRow>
 
       {presetsSupported && (

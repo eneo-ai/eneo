@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,18 +136,12 @@ export function ServiceEditor({ service }: { service: Service }) {
 
       <div className="flex flex-col gap-2">
         <Label>{t("completion_model")}</Label>
-        <Select value={modelId} onValueChange={setModelId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("choose_a_completion_model")} />
-          </SelectTrigger>
-          <SelectContent>
-            {space.completion_models.map((candidate) => (
-              <SelectItem key={candidate.id} value={candidate.id}>
-                {candidate.nickname ?? candidate.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ModelSelector
+          models={space.completion_models}
+          selectedId={modelId}
+          onSelect={setModelId}
+          className="w-full justify-between"
+        />
       </div>
 
       {presetsSupported && (

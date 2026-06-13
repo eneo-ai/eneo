@@ -3,18 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
+import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import { ChatPage } from "@/features/chat/chat-page";
 import { useSpace } from "@/features/spaces/use-space";
 
@@ -34,12 +29,19 @@ function toModelInfo(
   };
 }
 
-/** Default-assistant completion model switcher (personal chat only). */
+/**
+ * Default-assistant completion model switcher (personal chat only). Switching
+ * persists on the personal space's default assistant — a global change (see the
+ * "personal chat model is global" contract) — and honours the admin governance
+ * policy: a pinned model shows a locked label, an enforced allow-list filters
+ * the list, and the effective pick is resolved when the saved one is disallowed.
+ */
 function ModelSwitcher() {
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
   const assistant = space.default_assistant;
+  const config = assistant?.effective_config ?? null;
 
   const update = useMutation({
     mutationFn: (modelId: string) =>
@@ -56,23 +58,33 @@ function ModelSwitcher() {
 
   if (!assistant) return null;
 
+  const lockedModel =
+    config?.models_enforced && config.locked_model
+      ? (space.completion_models.find((model) => model.id === config.locked_model!.id) ??
+        config.locked_model)
+      : null;
+
+  const allowedIds = config?.models_enforced
+    ? new Set(config.available_models.map((model) => model.id))
+    : null;
+  const visibleModels = allowedIds
+    ? space.completion_models.filter((model) => allowedIds.has(model.id))
+    : space.completion_models;
+
+  const selectedId =
+    selectEffectiveModelId(assistant.completion_model?.id, config) ??
+    assistant.completion_model?.id ??
+    null;
+
   return (
-    <Select
-      value={assistant.completion_model?.id ?? ""}
+    <ModelSelector
+      models={visibleModels}
+      selectedId={selectedId}
+      onSelect={(id) => update.mutate(id)}
+      locked={lockedModel}
       disabled={update.isPending}
-      onValueChange={(modelId) => update.mutate(modelId)}
-    >
-      <SelectTrigger size="sm" className="w-56" aria-label={t("completion_model")}>
-        <SelectValue placeholder={t("choose_a_completion_model")} />
-      </SelectTrigger>
-      <SelectContent>
-        {space.completion_models.map((model) => (
-          <SelectItem key={model.id} value={model.id}>
-            {model.nickname ?? model.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      size="sm"
+    />
   );
 }
 
