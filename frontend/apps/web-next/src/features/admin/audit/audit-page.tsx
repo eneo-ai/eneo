@@ -59,7 +59,11 @@ function LogsTab() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex justify-end">
-        <Button variant="outline" onClick={() => setShowExport(true)}>
+        <Button
+          variant="outline"
+          disabled={Boolean(filters.userId)}
+          onClick={() => setShowExport(true)}
+        >
           <Download className="size-4" /> {t("audit_export_csv")}
         </Button>
       </div>

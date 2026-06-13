@@ -18,6 +18,10 @@ export type AuditFilters = {
   to_date?: string;
   actions: ActionType[];
   search: string;
+  /** Actor-by-user filter: switches to the per-user log endpoint when set. */
+  userId?: string;
+  /** Display label (email) for the selected user, for the active-filter chip. */
+  userLabel?: string;
 };
 
 /** Display label for an action / category — keys come from the converted catalogs. */
@@ -33,8 +37,25 @@ export function auditLogsQueryOptions(api: EneoClient, filters: AuditFilters) {
   return queryOptions({
     queryKey: ["audit-logs", filters],
     retry: false, // a 401 here means "needs an access session", not a transient error
-    queryFn: () =>
-      unwrap(
+    queryFn: () => {
+      // Actor-by-user filter (GDPR Art. 15 view): the per-user endpoint only
+      // takes a date range + paging — action/search filters don't apply.
+      if (filters.userId) {
+        return unwrap(
+          api.GET("/api/v1/audit/logs/user/{user_id}", {
+            params: {
+              path: { user_id: filters.userId },
+              query: {
+                page: filters.page,
+                page_size: AUDIT_PAGE_SIZE,
+                from_date: filters.from_date || undefined,
+                to_date: filters.to_date || undefined
+              }
+            }
+          })
+        );
+      }
+      return unwrap(
         api.GET("/api/v1/audit/logs", {
           params: {
             query: {
@@ -47,7 +68,8 @@ export function auditLogsQueryOptions(api: EneoClient, filters: AuditFilters) {
             }
           }
         })
-      )
+      );
+    }
   });
 }
 
