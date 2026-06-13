@@ -13,11 +13,14 @@ export type EneoClient = Client<paths>;
 export const browserApi: EneoClient = createClient<paths>({ baseUrl: "/api/eneo" });
 
 browserApi.use({
-  onResponse({ response }) {
-    if (response.status === 401 && typeof window !== "undefined") {
-      // Session expired or gone: reload the page so proxy.ts redirects to
-      // /login?next=<current page> and login can return here.
-      window.location.reload();
-    }
+  onResponse({ request, response }) {
+    if (response.status !== 401 || typeof window === "undefined") return;
+    // Audit endpoints return 401 to mean "open an access session", not "your
+    // session died" — the audit page renders the justification gate from that
+    // 401 itself, so reloading here would loop. Everywhere else a 401 means
+    // the session is gone: reload so proxy.ts redirects to
+    // /login?next=<current page>.
+    if (new URL(request.url).pathname.includes("/api/v1/audit/")) return;
+    window.location.reload();
   }
 });

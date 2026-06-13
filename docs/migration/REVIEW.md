@@ -182,6 +182,18 @@ One row per finding. Add as we review; update disposition when resolved.
 
 | 2.1 | 2 | **S1 security** | Open redirect after login: both the OIDC callback (`auth/callback`) and the password action used `next.startsWith("/")`, which accepts `//evil.com` / `/\evil.com` (protocol-relative) — `new URL("//evil.com", origin)` resolves to another origin. A crafted `?next=` could redirect a freshly-logged-in user off-site. | **FIXED** — shared `safeNextPath()` (rejects `//` and `/\`) + unit test; wired into both sinks |
 
+| 3.1 | 3 | S1 bug | `browserApi`'s global 401 `onResponse` did `window.location.reload()` on **every** 401. The audit-logs endpoint returns 401 as a domain signal ("open an access session") and the audit page renders its justification gate from that 401 — but the reload fired first, so an admin without an access session hit an **infinite reload loop** on `/admin/audit-logs`. | **FIXED** — skip the reload for `/api/v1/audit/` paths (the only domain-401 in the app); reload still recovers genuine session-death everywhere else |
+
+### Phase 3 verdict — reviewed, one interaction bug
+
+API layer is high quality. `browserApi` (proxied, no client token) + `eneoApi`
+(server, bearer-injected) split is clean; `unwrap()` + `EneoApiError` normalize
+all three backend error-body shapes with trace-id; error-code → i18n mapping
+mirrors the Svelte `getErrorMessage`; `overrides.ts` is a documented (currently
+empty) seam for spec gaps; Query is the TanStack SSR pattern. The one defect
+was the global 401-reload looping against the audit access-session gate (3.1),
+now scoped out. Proxy itself was deep-reviewed in Phase 7 (audit cookie spike).
+
 ### Phase 2 verdict — reviewed, one security fix
 
 Auth is otherwise well-built and uses the right tools rather than hand-rolling:
