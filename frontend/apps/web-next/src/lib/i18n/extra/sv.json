@@ -56,5 +56,8 @@
   "governance_prompt_enforcement_hint": "Kräv att den personliga assistenten använder en prompt från biblioteket.",
   "governance_restriction_enabled": "Begränsning aktiverad",
   "governance_enforcement_enabled": "Tvång aktiverat",
-  "governance_policy_saved": "Styrningspolicy sparad"
+  "governance_policy_saved": "Styrningspolicy sparad",
+  "trace_id": "Spårnings-ID",
+  "try_again": "Försök igen",
+  "back_to_home": "Tillbaka till start"
 }

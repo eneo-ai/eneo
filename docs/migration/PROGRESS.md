@@ -12,10 +12,13 @@ actually happened. Update this file when a phase lands.
 > library, help assistants, templates. Heavy/low-traffic sub-flows are deferred
 > with notes (see "Phase 7 status" below): model add/edit wizards + migration,
 > audit config tab, api-key policy/super-key, SharePoint Azure-AD config +
-> webhooks, template editors, insights charts, and the personal-assistant
-> policy editor. **Pick up next: Phase 8** (i18n / polish / parity,
-> 08-i18n-polish-parity.md). The `/admin` nav link is in main-nav, gated by
-> can("admin").
+> webhooks, template editors, insights charts. The audit category-config tab
+> and the personal-assistant governance policy page were since added. **Phase
+> 8 in progress**: i18n parity verified, app error/not-found/loading states,
+> standalone build + Dockerfile, ENV/PARITY/CUTOVER docs landed. Remaining
+> Phase 8 is **ops-owned** (E2E stack, strict nonce-CSP, Docker-boot smoke,
+> Lighthouse, maintainer PARITY sign-off) — tracked in CUTOVER.md. The `/admin`
+> nav link is in main-nav, gated by can("admin").
 > Frontend QA runs on the HOST (`bun run check/lint/test/build` in
 > apps/web-next), never `bun install` in the container; backend dev server +
 > `bun run dev` (port 3100) you start yourself in devcontainer terminals.
@@ -31,7 +34,7 @@ actually happened. Update this file when a phase lands.
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
 | 7 Admin | ✅ done (with documented deferrals) | all sections shipped; heavy sub-flows deferred |
-| 8 i18n / polish / parity | ⬜ | — |
+| 8 i18n / polish / parity | 🟡 in progress | i18n parity, states, standalone+Docker, ENV/PARITY/CUTOVER docs; E2E/CSP/Lighthouse are ops |
 
 ## Architecture conventions (established, follow these)
 
@@ -506,7 +509,37 @@ usage, insights, prompt library, help assistants, templates.
 - Manual gate: the audit access-session cookie re-scoping needs verification
   against a live backend (see step 4).
 
-**Next: Phase 8** (i18n / polish / parity) — `08-i18n-polish-parity.md`.
+## Phase 8 progress (i18n / polish / parity — production readiness)
+
+Done (2026-06-13 session):
+- **i18n parity**: en/sv catalogs verified equal (3609 keys each, 0 missing
+  either way; 13 identical strings are proper nouns/technical terms). Swedish
+  default. All web-next-only keys live in `src/lib/i18n/extra/{en,sv}.json` and
+  flow through `convert-paraglide-messages.mjs`.
+- **State polish**: `(app)/error.tsx` (message + trace-id + retry),
+  `(app)/loading.tsx` (spinner), top-level `not-found.tsx`.
+- **Production build**: `next.config.ts` → `output: "standalone"` + safe
+  security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+  Permissions-Policy). `Dockerfile` (Bun build → Node 20 slim runner; verified
+  the standalone entrypoint is `apps/web-next/server.js`). `.env.example`
+  deduped + OIDC vars documented.
+- **Docs**: `ENV.md` (old SvelteKit → new var mapping; JWT_SECRET/ZITADEL_*
+  gone, OIDC_*/SESSION_SECRET new), `PARITY.md` (capability-by-capability audit,
+  zero MISSING rows, sign-off pending), `CUTOVER.md` (proxy-flip checklist +
+  rollback + open hardening).
+
+Remaining for Phase 8 — **ops-owned** (need infra/browser/sign-off I can't run
+here; all listed in CUTOVER.md):
+- Strict nonce-based CSP (`script-src 'self' 'nonce-…'`) via middleware +
+  browser verification. Safe baseline headers already shipped.
+- Playwright E2E suite on `docker-compose.e2e.yml` + mock LLM (v3).
+- `docker build` + container-boot smoke (`curl /healthz`, login+chat round-trip).
+- Lighthouse sanity; no-token-leak Playwright assertion.
+- Maintainer PARITY.md sign-off; OQ-3 (cutover mechanics) / OQ-4 (PWA) decisions.
+
+**Migration feature work is complete.** Phases 1–7 shipped; Phase 8's
+codebase-side deliverables are in. What remains is ops execution (cutover) per
+CUTOVER.md.
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in

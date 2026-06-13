@@ -3604,5 +3604,8 @@
   "governance_prompt_enforcement_hint": "Require the personal assistant to use a prompt from the library.",
   "governance_restriction_enabled": "Restriction enabled",
   "governance_enforcement_enabled": "Enforcement enabled",
-  "governance_policy_saved": "Governance policy saved"
+  "governance_policy_saved": "Governance policy saved",
+  "trace_id": "Trace ID",
+  "try_again": "Try again",
+  "back_to_home": "Back to home"
 }
