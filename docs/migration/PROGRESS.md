@@ -4,19 +4,20 @@ Status ledger for the web-next migration (branch `refactor/web-next`). Read this
 first in a new session; the phase docs (01–08) are the plans, this is what
 actually happened. Update this file when a phase lands.
 
-> **STOP POINT 2026-06-13 (Phase 6 complete)** — Apps + Services both landed.
-> Apps: list/create/actions, per-section editor, run page with the dynamic
-> input form (text / file uploads / microphone recorder), results + result
-> detail (polling replaces the app_run_updates websocket), dashboard app
-> routes. Services: list/create/actions (edit/move/delete), playground
-> (input → run → output), single-save editor (name, prompt, completion model
-> + behaviour + kwargs, output_format, json_schema). QA green
-> (format/lint/check, 100 tests, build). **Phase 6 done — pick up next:
-> Phase 7 Admin** (07-admin.md + the develop-merge additions noted below:
-> prompt-library and personal-assistant governance areas). Frontend QA runs
-> on the HOST (`bun run check/lint/test/build` in apps/web-next), never
-> `bun install` in the container; backend dev server + `bun run dev` (port
-> 3100) you start yourself in devcontainer terminals.
+> **STOP POINT 2026-06-13 (Phase 7 started)** — Phase 6 complete (apps +
+> services). Phase 7 Admin underway: **foundation + feature toggles** landed —
+> `/admin` layout with server-side admin gate (`hasPermission(user)("admin")`
+> → redirect `/`), a grouped sidebar nav (grows as pages land; legacy
+> roles/user-groups dropped per OQ-2), and the overview feature-toggles page
+> (templates / audit-logging / provisioning via PATCH /settings/* `{enabled}`,
+> optimistic + revert-on-error + `router.refresh()`). QA green (100 tests,
+> build). **Pick up next: Phase 7 step 3 — Users** (list with offset
+> pagination RB-5(a), search + state tabs, create/invite/edit, activate/
+> deactivate), then audit-logs, models, etc. (07-admin.md step order). The
+> `/admin` nav link already exists in main-nav, gated by can("admin").
+> Frontend QA runs on the HOST (`bun run check/lint/test/build` in
+> apps/web-next), never `bun install` in the container; backend dev server +
+> `bun run dev` (port 3100) you start yourself in devcontainer terminals.
 
 ## Phase status
 
@@ -28,7 +29,7 @@ actually happened. Update this file when a phase lands.
 | 4 Shell, spaces, dashboard, account | ✅ done | `bd1cf68cb` |
 | 5 Chat (RB-2 + AI SDK v6) | ✅ done | `16a3f2e66` (backend), `f1bc473bd`, `34af2c932`, `03d01aa39` |
 | 6 Builders + knowledge | ✅ done | jobs/knowledge `d3b3fc4c4`/`ab577d5c4`, integrations/assistants/group-chats `4b8cd627e`, apps `6432056c0`, services |
-| 7 Admin | ⬜ | — |
+| 7 Admin | 🟡 in progress | foundation + feature toggles |
 | 8 i18n / polish / parity | ⬜ | — |
 
 ## Architecture conventions (established, follow these)
@@ -317,8 +318,38 @@ Done (2026-06-13 session, services):
   catalogs (en+sv) + regenerated. Services live in org spaces too (no 404
   guard, matching the Svelte page); the nav already gates on read:service.
 
-**Phase 6 complete.** Next: Phase 7 (Admin) — fold in the develop-merge
-additions (prompt-library + personal-assistant governance areas) per 07-admin.
+**Phase 6 complete.**
+
+## Phase 7 progress (Admin — widest phase, multi-session)
+
+Plan: `07-admin.md` step order — (1) layout+gating+nav, (2) feature toggles,
+(3) users, (4) audit-logs (+export BFF), (5) models + security-classifications,
+(6) mcp-servers + org api-keys + integrations, (7) templates + help-assistants,
+(8) insights + usage. Develop-merge additions to fold in: `/admin/prompt-library`
+and `/admin/personal-assistant` (governance). Legacy roles/user-groups DROPPED
+(OQ-2). Charts approximate via recharts/shadcn (OQ-5).
+
+Done (2026-06-13 session, foundation + toggles — steps 1–2):
+- **Admin layout** (`src/app/(app)/admin/layout.tsx`): server component fetches
+  `/users/me/` and `hasPermission(user)("admin")` → `redirect("/")` if not
+  (backend is the real authority; this is the client-visible guard). Sidebar
+  shell mirrors the space `[spaceId]/layout` (aside nav + scrollable content).
+- **Admin nav** (`admin-nav.client.tsx`): grouped sections like the Svelte
+  AdminMenu, but only lists implemented pages — extend the `groups` array as
+  pages land. `/admin` link already in main-nav gated by `can("admin")`.
+- **Feature toggles** (`features/admin/feature-toggles.tsx`): overview page
+  (`admin/page.tsx`). templates / audit-logging / provisioning via
+  PATCH `/api/v1/settings/{templates|audit-logging|provisioning}` body
+  `{enabled}` → SettingsPublic. Optimistic flip + revert-on-error +
+  `router.refresh()` (re-runs the (app) layout so the new settings propagate,
+  e.g. template pickers) — the web-next analogue of the Svelte invalidateAll.
+  openapi-fetch needs literal paths, so a `patchSetting` switch dispatches the
+  three (identical body/response shape).
+
+Remaining for Phase 7 (plan order): users, audit-logs (+ the 4 export BFF
+route handlers), models (+ migration wizard) + security-classifications,
+mcp-servers + org api-keys + tenant integrations, templates + help-assistants,
+insights + usage, plus the governance areas (prompt-library, personal-assistant).
 
 Notes / gotchas hit:
 - eslint react-hooks/purity forbids `Date.now()` in render — keep time math in
