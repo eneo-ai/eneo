@@ -315,7 +315,9 @@ class PreparedModelStream:
     # Intric built-in tools (web search, etc.) kept so iterate_stream can
     # re-merge with refreshed MCP tools after a tools/list_changed without
     # recomputing the built-ins.
-    intric_tools: list[dict[str, Any]] = field(default_factory=list)
+    intric_tools: list[dict[str, Any]] = field(
+        default_factory=lambda: cast("list[dict[str, Any]]", [])
+    )
 
 
 def _get_supported_openai_params(model: str) -> list[str] | None:
