@@ -11,7 +11,7 @@ Each field definition has:
   - in: "credentials" or "config" — where the value is stored in the API payload
 """
 
-from typing import Protocol, Set
+from typing import Protocol
 
 from typing_extensions import TypedDict
 
@@ -73,25 +73,7 @@ def get_field_definitions(provider: str) -> list[FieldDefinition]:
     return PROVIDER_FIELD_DEFINITIONS.get(canonical, DEFAULT_FIELDS)
 
 
-# --- Legacy helpers (kept for backward compatibility) ---
-
-# Provider-specific required fields
-# - All providers require at minimum: api_key
-# - Azure requires: api_key, endpoint, api_version, deployment_name
-# - hosted_vllm requires: api_key, endpoint (for self-hosted vLLM servers)
-PROVIDER_REQUIRED_FIELDS: dict[str, Set[str]] = {
-    "openai": {"api_key"},
-    "anthropic": {"api_key"},
-    "azure": {"api_key", "endpoint", "api_version", "deployment_name"},
-    "hosted_vllm": {"api_key", "endpoint"},
-    "mistral": {"api_key"},
-    "ovhcloud": {"api_key"},
-    "gemini": {"api_key"},
-    "cohere": {"api_key"},
-}
-
-
-def get_required_fields(provider: str) -> Set[str]:
+def get_required_fields(provider: str) -> set[str]:
     """
     Get the set of required fields for a given provider.
 
@@ -101,7 +83,11 @@ def get_required_fields(provider: str) -> Set[str]:
     Returns:
         Set of required field names. Defaults to {"api_key"} for unknown providers.
     """
-    return PROVIDER_REQUIRED_FIELDS.get(provider.lower(), {"api_key"})
+    return {
+        definition["name"]
+        for definition in get_field_definitions(provider)
+        if definition["required"]
+    }
 
 
 def is_field_required(provider: str, field: str) -> bool:

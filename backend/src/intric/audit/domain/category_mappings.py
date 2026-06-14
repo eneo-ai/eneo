@@ -2,18 +2,6 @@
 
 from intric.audit.domain.action_types import ActionType
 
-# Category descriptions for UI display
-CATEGORY_DESCRIPTIONS = {
-    "admin_actions": "User management, role changes, API keys, tenant settings",
-    "user_actions": "Assistant, space, app operations, templates, model configs",
-    "security_events": "Security classification lifecycle events",
-    "file_operations": "File uploads and deletions",
-    "integration_events": "Integration connections, knowledge sources, website crawling, MCP servers",
-    "system_actions": "Retention policies, encryption, maintenance",
-    "audit_access": "Viewing and exporting audit logs",
-}
-
-
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
     # Admin Actions (33 actions)
@@ -37,6 +25,10 @@ CATEGORY_MAPPINGS = {
     ActionType.API_KEY_USED.value: "admin_actions",
     ActionType.API_KEY_AUTH_FAILED.value: "admin_actions",
     ActionType.TENANT_POLICY_UPDATED.value: "admin_actions",
+    ActionType.GOVERNANCE_POLICY_UPDATED.value: "admin_actions",
+    ActionType.PROMPT_LIBRARY_ENTRY_CREATED.value: "admin_actions",
+    ActionType.PROMPT_LIBRARY_ENTRY_UPDATED.value: "admin_actions",
+    ActionType.PROMPT_LIBRARY_ENTRY_DELETED.value: "admin_actions",
     ActionType.TENANT_SETTINGS_UPDATED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
@@ -54,7 +46,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
     ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
     ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
-    # User Actions (29 actions)
+    # User Actions (37 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -91,6 +83,7 @@ CATEGORY_MAPPINGS = {
     ActionType.TRANSCRIPTION_MODEL_CREATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
+    ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
     # Security Events (6 actions)
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
@@ -121,6 +114,13 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
+    # Help Assistant Actions (6 actions)
+    ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_ENABLED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_INSTALLED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
     # System Actions (3 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",

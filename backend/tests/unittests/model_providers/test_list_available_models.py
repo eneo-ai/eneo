@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from intric.main.exceptions import BadRequestException
 from intric.model_providers.domain.model_provider_service import ModelProviderService
 
 
@@ -297,3 +298,16 @@ async def test_mode_none_returns_all_modes() -> None:
         result = await service.list_available_models(uuid4())
 
     assert {r["mode"] for r in result} == {"completion", "embedding", "transcription"}
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_provider_with_attached_models_as_bad_request() -> None:
+    repository = MagicMock()
+    repository.count_models_for_provider = AsyncMock(return_value=2)
+    repository.delete = AsyncMock()
+    service = ModelProviderService(repository=repository, encryption=MagicMock())
+
+    with pytest.raises(BadRequestException, match="2 model\\(s\\)"):
+        await service.delete(uuid4())
+
+    repository.delete.assert_not_awaited()

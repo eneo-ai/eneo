@@ -1,9 +1,8 @@
 <script>
   import { IconNotification } from "@intric/icons/notification";
   import { IconNotificationDot } from "@intric/icons/notification-dot";
-  import { Button } from "@intric/ui";
-  import { createDropdownMenu } from "@melt-ui/svelte";
-  import { fly, fade } from "svelte/transition";
+  import * as Popover from "$lib/components/ui/popover/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import JobManagerDropdownPanel from "./JobManagerDropdownPanel.svelte";
   import { getJobManager } from "../JobManager";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
@@ -15,70 +14,36 @@
   const {
     state: { hasUrgent: hasUrgentKeys, hasWarning: hasWarningKeys }
   } = getExpiringKeysStore();
-
-  const {
-    elements: { menu, trigger, overlay, arrow },
-    states: { open }
-  } = createDropdownMenu({
-    open: showJobManagerPanel,
-    positioning: {
-      fitViewport: true,
-      flip: true,
-      placement: "bottom",
-      overflowPadding: 16
-    },
-    forceVisible: true,
-    loop: true,
-    preventScroll: false,
-    arrowSize: 12
-  });
 </script>
 
-<Button
-  is={[$trigger]}
-  unstyled
-  label={m.notifications()}
-  class="text-secondary hover:bg-accent-dimmer hover:text-brand-intric flex h-[3.25rem] !min-w-[3.5rem] items-center justify-center pt-[0.1rem]"
->
-  {#if $currentlyRunningJobs === 0 && !$hasUrgentKeys && !$hasWarningKeys}
-    <IconNotification />
-  {:else if $hasUrgentKeys}
-    <IconNotificationDot class="min-w-6" style="--dot-color: var(--color-negative-default)" />
-  {:else if $hasWarningKeys}
-    <IconNotificationDot class="min-w-6" style="--dot-color: var(--color-warning-default)" />
-  {:else}
-    <IconNotificationDot class="min-w-6" />
-  {/if}
-</Button>
-{#if $open}
-  <div
-    {...$overlay}
-    use:overlay
-    class="bg-overlay-dimmer fixed inset-0 z-[40]"
-    transition:fade={{ duration: 200 }}
-  ></div>
-  <div
-    {...$menu}
-    use:menu
-    in:fly={{ y: -15, duration: 100 }}
-    out:fly={{ y: -5, duration: 200 }}
-    class="items border-strongest bg-primary absolute z-[50] flex max-h-[70vh] min-w-[22rem] -translate-y-[0.75rem] flex-col overflow-y-auto rounded-sm border-b p-3 shadow-md"
+<Popover.Root bind:open={$showJobManagerPanel}>
+  <Popover.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon-lg" aria-label={m.notifications()}>
+        {#if $currentlyRunningJobs === 0 && !$hasUrgentKeys && !$hasWarningKeys}
+          <IconNotification />
+        {:else if $hasUrgentKeys}
+          <IconNotificationDot class="min-w-6" style="--dot-color: var(--color-negative-default)" />
+        {:else if $hasWarningKeys}
+          <IconNotificationDot class="min-w-6" style="--dot-color: var(--color-warning-default)" />
+        {:else}
+          <IconNotificationDot class="min-w-6" />
+        {/if}
+      </Button>
+    {/snippet}
+  </Popover.Trigger>
+
+  <Popover.Content
+    align="end"
+    class="flex max-h-[70vh] w-[24rem] flex-col gap-0 overflow-y-auto p-0"
   >
     <p
-      class="border-default text-secondary mb-2 border-b px-6 pt-1 pb-2.5 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
+      class="border-default text-secondary border-b px-4 pt-2 pb-2.5 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
       {m.notifications_and_jobs()}
     </p>
-    <JobManagerDropdownPanel></JobManagerDropdownPanel>
-
-    <div {...$arrow} use:arrow class="border-strongest !z-10"></div>
-  </div>
-{/if}
-
-<style>
-  .items {
-    box-shadow:
-      0px 10px 20px -10px rgba(0, 0, 0, 0.5),
-      0px 30px 50px 0px rgba(0, 0, 0, 0.2);
-  }
-</style>
+    <div class="p-2">
+      <JobManagerDropdownPanel />
+    </div>
+  </Popover.Content>
+</Popover.Root>

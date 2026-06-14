@@ -106,6 +106,11 @@ class CompletionModels(BasePublic):
 class TranscriptionModels(BasePublic):
     name: Mapped[str] = mapped_column()
     model_name: Mapped[str] = mapped_column()
+    # Display name. Added in phase 1 of the model-table alignment for parity
+    # with completion/embedding. Currently the display name is still written to
+    # `name` (model_name holds the API id); nickname is backfilled but unused
+    # until a later phase switches the source of truth.
+    nickname: Mapped[Optional[str]] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")
     hf_link: Mapped[Optional[str]] = mapped_column()
@@ -140,6 +145,16 @@ class TranscriptionModels(BasePublic):
     )
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="transcription_models")
+    )
+
+    # Lifecycle parity with completion_models (model-table alignment).
+    migrated_to_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("transcription_models.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     __table_args__ = (
@@ -193,6 +208,12 @@ class EmbeddingModels(BasePublic):
     )
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="embedding_models")
+    )
+
+    # Soft-delete parity with completion_models (added in phase 1 of the
+    # model-table alignment; unused until a later phase wires it up).
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     __table_args__ = (

@@ -427,6 +427,7 @@ async def test_strict_error_handling_no_fallback(
     endpoint is properly implemented with tenant-scoped routing.
     """
     from unittest.mock import AsyncMock, patch
+
     from litellm.exceptions import AuthenticationError
 
     tenant_id = test_tenant.id
@@ -556,8 +557,8 @@ async def test_credential_update_overwrites_existing(
     assert data["set_at"] != initial_set_at, "Timestamp should be updated"
 
     # Verify in database using CredentialResolver to decrypt
-    from intric.tenants.tenant_repo import TenantRepository
     from intric.settings.credential_resolver import CredentialResolver
+    from intric.tenants.tenant_repo import TenantRepository
 
     repo = TenantRepository(async_session, encryption_service=encryption_service)
     tenant = await repo.get(tenant_id)
@@ -618,7 +619,7 @@ async def test_credential_validation_rejects_invalid_format(
         json={"api_key": "azure-key"},  # Missing endpoint, api_version
         headers={"X-API-Key": super_admin_token},
     )
-    assert response.status_code == 422, (
+    assert response.status_code == 400, (
         "Should reject Azure credential without endpoint"
     )
 
@@ -696,10 +697,11 @@ async def test_cross_tenant_credential_isolation(
 
     Expected to FAIL: Tenant isolation not implemented.
     """
+    from uuid import uuid4
+
     from intric.transcription_models.infrastructure import (
         enable_transcription_models_service,
     )
-    from uuid import uuid4
 
     # Mock transcription model lookup to avoid database dependency
 
@@ -761,10 +763,10 @@ async def test_cross_tenant_credential_isolation(
     assert response.status_code == 200
 
     # Verify credential isolation via CredentialResolver
+    from intric.main.config import get_settings
     from intric.settings.credential_resolver import CredentialResolver
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant_repo import TenantRepository
-    from intric.main.config import get_settings
 
     settings = get_settings()
     encryption_service = EncryptionService(settings)

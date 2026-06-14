@@ -16,7 +16,6 @@ from intric.completion_models.infrastructure.context_builder import ContextBuild
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
-from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
 from intric.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
@@ -25,6 +24,7 @@ from intric.mcp_servers.infrastructure.proxy import (
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
 from intric.settings.encryption_service import EncryptionService
+from intric.tokens.token_utils import log_token_count_drift
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -80,14 +80,11 @@ class CompletionService:
         All models must have a provider_id linking to a ModelProvider.
         Uses TenantModelAdapter which routes through LiteLLM.
         """
-        import sqlalchemy as sa
-
         from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
             TenantModelAdapter,
         )
-        from intric.database.tables.model_providers_table import ModelProviders
-        from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
-            TenantModelCredentialResolver,
+        from intric.model_providers.infrastructure.litellm_provider import (
+            load_active_litellm_provider,
         )
 
         # All models must have provider_id
@@ -113,32 +110,18 @@ class CompletionService:
                 "Please ensure the CompletionService is initialized with a database session."
             )
 
-        # Load provider data from database
-        stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-        result = await self.session.execute(stmt)
-        provider_db = result.scalar_one_or_none()
-
-        if provider_db is None:
-            raise ProviderNotFoundException(
-                f"Model provider '{model.provider_id}' not found. "
-                "The provider may have been deleted or is not accessible."
+        if self.tenant is None:
+            raise ValueError(
+                f"Model '{model.name}' requires tenant context to load its provider."
             )
 
-        if not provider_db.is_active:
-            raise ProviderInactiveException(
-                f"The model provider '{provider_db.name}' is currently inactive. "
-                "Please contact your administrator to enable the provider."
-            )
-
-        # Create credential resolver
-        provider_id = provider_db.id
-
-        credential_resolver = TenantModelCredentialResolver(
-            provider_id=provider_id,
-            provider_type=provider_db.provider_type,
-            credentials=provider_db.credentials,
-            config=provider_db.config,
-            encryption_service=self.encryption_service,
+        provider = await load_active_litellm_provider(
+            session=self.session,
+            provider_id=model.provider_id,
+            tenant_id=self.tenant.id,
+        )
+        credential_resolver = provider.create_credential_resolver(
+            self.encryption_service
         )
 
         logger.info(
@@ -147,7 +130,7 @@ class CompletionService:
                 "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
-                "provider_type": provider_db.provider_type,
+                "provider_type": provider.provider_type,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
             },
         )
@@ -155,7 +138,7 @@ class CompletionService:
         return TenantModelAdapter(
             model=model,
             credential_resolver=credential_resolver,
-            provider_type=provider_db.provider_type,
+            provider_type=provider.provider_type,
         )
 
     @staticmethod
@@ -177,6 +160,12 @@ class CompletionService:
         async for chunk in completion:
             # Pass through stop chunk (carries usage data)
             if chunk.stop:
+                yield chunk
+                continue
+
+            # Pass through reasoning/thinking events directly (text=None, so the
+            # branches below would otherwise drop them before they reach SSE).
+            if chunk.response_type == ResponseType.REASONING:
                 yield chunk
                 continue
 
@@ -260,33 +249,12 @@ class CompletionService:
             use_image_generation and stream and get_settings().using_image_generation
         )
 
-        context = self.context_builder.build_context(
-            input_str=text_input,
-            max_tokens=max_tokens,
-            model_name=model_adapter.model.name,
-            files=files,
-            prompt=prompt,
-            session=session,
-            info_blob_chunks=info_blob_chunks,
-            prompt_files=prompt_files,
-            transcription_inputs=transcription_inputs,
-            version=version,
-            use_image_generation=use_image_generation,
-            web_search_results=web_search_results,
-        )
-
-        if extended_logging:
-            logging_details = model_adapter.get_logging_details(
-                context=context, model_kwargs=model_kwargs
-            )
-        else:
-            logging_details = None
-
-        # Create MCP proxy session if servers provided. Pass the chat session
-        # id + active DB session so each MCP server's protocol-assigned
-        # ``mcp-session-id`` resumes across user turns (persisted in
-        # ``chat_session_mcp_state``). Behavior is identical for every MCP
-        # server — no per-server-kind branching.
+        # Create MCP proxy session before building the context, so the tool
+        # definitions it will register can be counted toward the token budget.
+        # Pass the chat session id + active DB session so each MCP server's
+        # protocol-assigned ``mcp-session-id`` resumes across user turns
+        # (persisted in ``chat_session_mcp_state``). Behavior is identical for
+        # every MCP server, with no per-server-kind branching.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
             mcp_proxy = self._mcp_proxy_factory.create(
@@ -297,6 +265,42 @@ class CompletionService:
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )
+
+        try:
+            context = self.context_builder.build_context(
+                input_str=text_input,
+                max_tokens=max_tokens,
+                model_name=model_adapter.get_model_route(),
+                files=files,
+                prompt=prompt,
+                session=session,
+                info_blob_chunks=info_blob_chunks,
+                prompt_files=prompt_files,
+                transcription_inputs=transcription_inputs,
+                version=version,
+                use_image_generation=use_image_generation,
+                web_search_results=web_search_results,
+                vision=model.vision,
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm()
+                    if mcp_proxy and model.supports_tool_calling
+                    else None
+                ),
+            )
+
+            if extended_logging:
+                logging_details = model_adapter.get_logging_details(
+                    context=context, model_kwargs=model_kwargs
+                )
+            else:
+                logging_details = None
+        except BaseException:
+            # Context building can still raise on malformed input or dependencies.
+            # The proxy is closed in the streaming/non-streaming paths below, but
+            # those are never reached on failure here.
+            if mcp_proxy:
+                await mcp_proxy.close()
+            raise
 
         if not stream:
             try:
@@ -392,12 +396,20 @@ class CompletionService:
 
             completion = self._handle_tool_call(streaming_wrapper())
 
+        usage = getattr(completion, "usage", None) if not stream else None
+        if usage is not None:
+            log_token_count_drift(
+                model_name=model_adapter.get_model_route(),
+                predicted=context.token_count,
+                actual=usage.prompt_tokens,
+            )
+
         return CompletionModelResponse(
             completion=completion,
             model=model_adapter.model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
-            usage=getattr(completion, "usage", None) if not stream else None,
+            usage=usage,
         )
 
 

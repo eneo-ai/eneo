@@ -1,7 +1,7 @@
-from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union
 
 from intric.main.config import get_settings
+from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.roles.permissions import Permission, validate_permissions
@@ -76,7 +76,7 @@ class CompletionModelCRUDService:
         # Otherwise get the latest model
         sorted_models = sorted(
             completion_models,
-            key=lambda model: model.created_at or datetime.min,
+            key=lambda model: datetime_or_utc_min(model.created_at),
             reverse=True,
         )
 

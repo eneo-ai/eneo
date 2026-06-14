@@ -1,6 +1,8 @@
-from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Optional, cast
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Optional, TypeVar, cast
 from uuid import UUID
+
+from pydantic import ValidationError
 
 from intric.apps.apps.app_factory import AppFactory
 from intric.collections.domain.collection import Collection
@@ -15,6 +17,7 @@ from intric.group_chat.domain.factories.group_chat_factory import GroupChatFacto
 from intric.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
+from intric.main.logging import get_logger
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -24,6 +27,53 @@ from intric.spaces.space import Space
 from intric.user_groups.user_group import UserGroupState
 from intric.users.user import UserInDBBase, UserSparse
 from intric.websites.domain.website import Website
+
+logger = get_logger(__name__)
+
+RowT = TypeVar("RowT")
+T = TypeVar("T")
+
+
+def _build_or_skip(
+    rows: Iterable[RowT],
+    *,
+    item_kind: str,
+    build_fn: Callable[[RowT], T],
+) -> list[T]:
+    """Build domain objects per DB row, skipping any that fail Pydantic validation.
+
+    A single legacy or corrupt row (e.g. a JSONB column the domain model now
+    rejects) must not crash the entire space load. We log the offending row's
+    identifying fields so it can be triaged downstream, then continue with the
+    rest. Non-validation errors propagate — they signal a real bug, not data drift.
+
+    Log keys are stable across item kinds (`space_item_kind`, `space_item_id`,
+    `space_item_tenant_id`, `space_item_user_id`, `space_item_space_id`,
+    `validation_error_count`) so dashboards and alerts can match on a single
+    schema rather than per-domain field names. Pydantic error payloads are
+    redacted (no `input`, no `url`) to avoid leaking row data into logs.
+    """
+    built: list[T] = []
+    for row in rows:
+        try:
+            built.append(build_fn(row))
+        except ValidationError as exc:
+            errors = exc.errors(include_input=False, include_url=False)
+            logger.exception(
+                "Skipping invalid %s row while loading space",
+                item_kind,
+                extra={
+                    "space_item_kind": item_kind,
+                    "space_item_id": getattr(row, "id", None),
+                    "space_item_tenant_id": getattr(row, "tenant_id", None),
+                    "space_item_user_id": getattr(row, "user_id", None),
+                    "space_item_space_id": getattr(row, "space_id", None),
+                    "validation_error_count": len(errors),
+                    "validation_errors": errors,
+                },
+            )
+    return built
+
 
 if TYPE_CHECKING:
     from intric.assistants.assistant_factory import AssistantFactory
@@ -297,19 +347,26 @@ class SpaceFactory:
                 )
             )
 
-        all_assistants = [
-            self.assistant_factory.create_space_assistant_from_db(
+        all_assistants = _build_or_skip(
+            assistants_in_db,
+            item_kind="assistant",
+            build_fn=lambda assistant: self.assistant_factory.create_space_assistant_from_db(
                 assistant_in_db=assistant,
                 completion_models=completion_models,
                 collections=space_collections,
                 websites=space_websites,
                 integration_knowledge_list=integration_knowledge_list,
                 user=user,
-            )
-            for assistant in assistants_in_db
-        ]
+            ),
+        )
         default_assistant = next(
             (assistant for assistant in all_assistants if assistant.is_default), None
+        )
+        # A default row may exist in the DB yet have been dropped by the
+        # validation belt above. Distinguish that from "no default exists" so
+        # SpaceInitService doesn't auto-create a duplicate default on read.
+        default_assistant_load_failed = default_assistant is None and any(
+            getattr(assistant, "is_default", False) for assistant in assistants_in_db
         )
         space_assistants = [
             assistant
@@ -320,24 +377,26 @@ class SpaceFactory:
         if default_assistant is not None:
             default_assistant.tool_assistants = space_assistants
 
-        space_apps = [
-            self.app_factory.create_space_app_from_db(
+        space_apps = _build_or_skip(
+            apps_in_db,
+            item_kind="app",
+            build_fn=lambda app: self.app_factory.create_space_app_from_db(
                 app_in_db=app,
                 completion_models=completion_models,
                 transcription_models=transcription_models,
-            )
-            for app in apps_in_db
-        ]
-        space_group_chats = [
-            GroupChatFactory.create_group_chat_from_db(
+            ),
+        )
+        space_group_chats = _build_or_skip(
+            group_chats_in_db,
+            item_kind="group_chat",
+            build_fn=lambda group_chat: GroupChatFactory.create_group_chat_from_db(
                 group_chat_db=group_chat,
                 assistants=space_assistants,
-            )
-            for group_chat in group_chats_in_db
-        ]
+            ),
+        )
 
-        space_services = [
-            Service(
+        def _build_service(service: "Services") -> Service:
+            return Service(
                 **service.to_dict(),  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- sqlalchemy_mixins.SerializeMixin lacks type stubs
                 user=UserInDBBase.model_validate(service.user),
                 completion_model=next(
@@ -365,8 +424,12 @@ class SpaceFactory:
                     ],
                 ),
             )
-            for service in services_in_db
-        ]
+
+        space_services = _build_or_skip(
+            services_in_db,
+            item_kind="service",
+            build_fn=_build_service,
+        )
 
         space_security_classification: SecurityClassification | None = (
             SecurityClassification.to_domain(security_classification)
@@ -388,6 +451,7 @@ class SpaceFactory:
             completion_models=space_completion_models,
             mcp_servers=space_mcp_servers,
             default_assistant=default_assistant,
+            default_assistant_load_failed=default_assistant_load_failed,
             assistants=space_assistants,
             group_chats=space_group_chats,
             apps=space_apps,

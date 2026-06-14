@@ -19,6 +19,18 @@ class CompletionModelAdapter(ABC):
     def get_token_limit_of_model(self) -> int:
         raise NotImplementedError()
 
+    def get_model_route(self) -> str:
+        """Provider-qualified model identifier used for calls and token counting.
+
+        Token counting must use the same identifier as the actual request,
+        otherwise the tokenizer may silently resolve a different model.
+        """
+        return self.model.name
+
+    def get_litellm_model_name(self) -> str:
+        """Backward-compatible alias for persisted/API code using the old name."""
+        return self.get_model_route()
+
     def get_logging_details(
         self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
     ) -> "LoggingDetails":
@@ -113,5 +125,10 @@ class CompletionModelAdapter(ABC):
         Yields:
             Completion: Completion objects with text chunks or error events
         """
+        # `if False: yield` keeps this abstract method an async *generator* so its
+        # return type matches the async-generator overrides in subclasses (without
+        # it, the base becomes a coroutine returning AsyncIterator — a pyright
+        # reportIncompatibleMethodOverride). vulture flags the dead branch; the
+        # file is excluded from vulture rather than dropping the typing shim.
         if False:  # pragma: no cover
             yield None  # type: ignore[misc]

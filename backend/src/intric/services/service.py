@@ -8,6 +8,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SkipValidation,
+    field_validator,
     model_validator,
 )
 
@@ -44,6 +45,16 @@ class ServiceBase(OutputValidation):
     name: str
     prompt: str
     completion_model_kwargs: ModelKwargs = Field(default_factory=ModelKwargs)
+
+    @field_validator("completion_model_kwargs", mode="before")
+    @classmethod
+    def set_model_kwargs(cls, model_kwargs: ModelKwargs | None):
+        # `default_factory` does not fire for explicit None; coerce here so
+        # legacy NULL JSONB rows load. `is None` (not truthiness) so a
+        # corrupt non-None value still raises ValidationError.
+        if model_kwargs is None:
+            return ModelKwargs()
+        return model_kwargs
 
 
 class ServiceCreatePublic(ServiceBase):

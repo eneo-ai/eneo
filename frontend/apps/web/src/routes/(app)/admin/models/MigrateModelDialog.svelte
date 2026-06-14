@@ -1,34 +1,25 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Migrate all usage of a soon-to-be-decommissioned completion model to a
-  replacement model. The dialog has three jobs:
+  Migrate all usage of a soon-to-be-decommissioned model to a replacement.
+  Shared by completion and transcription (`modelType` prop) — same layout and
+  flow, only the SDK endpoints differ. The dialog has three jobs:
 
-    1. Show what will be affected (assistants, apps, services, templates,
-       questions) before the user commits.
+    1. Show what will be affected (the entities using the model) before commit.
     2. Validate compatibility against the chosen target server-side and
        surface security blockers / warnings.
-    3. Hand off to `intric.models.migrateCompletion` and refresh the
-       migration history panel.
+    3. Hand off to the migrate endpoint and refresh the migration history panel.
 -->
 
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
   import type { Writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import {
-    Loader2,
-    Bot,
-    AppWindow,
-    LayoutGrid,
-    ChevronDown,
-    AlertTriangle,
-    ShieldAlert
-  } from "lucide-svelte";
+  import { Loader2, AlertTriangle, ShieldAlert, Info } from "lucide-svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -37,16 +28,25 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
 
   import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
-  import { isSecurityBlockerCode, translateMigrationWarning } from "./migrationWarnings";
+  import { classifyMigrationCode, translateMigrationWarning } from "./migrationWarnings";
+  import ModelUsageBreakdown from "./ModelUsageBreakdown.svelte";
+  import type { UsageDetail } from "./usage";
+
+  type MigratableModel = CompletionModel | TranscriptionModel;
 
   let {
     openController,
     sourceModel,
-    models = []
+    models = [],
+    modelType = "completionModel"
   }: {
     openController: Writable<boolean>;
-    sourceModel: CompletionModel;
-    models?: CompletionModel[];
+    sourceModel: MigratableModel;
+    models?: MigratableModel[];
+    // The dialog is identical for both types — same impact preview, same
+    // validation and confirm flow. Only which SDK endpoints get called differs
+    // (gated on modelType in loadImpact / runValidation / handleMigrate).
+    modelType?: "completionModel" | "transcriptionModel";
   } = $props();
 
   const intric = getIntric();
@@ -66,18 +66,9 @@
   let impactLoadError = $state<string | null>(null);
   let submitError = $state<string | null>(null);
 
-  type UsageDetail = {
-    entity_id: string;
-    entity_name: string;
-    entity_type: string;
-    space_name: string | null;
-    owner_name: string | null;
-  };
-
   let impactTotal = $state(0);
   let impactDetails = $state<UsageDetail[]>([]);
   let spacesCount = $state(0);
-  let expandedSections = $state<Record<string, boolean>>({});
 
   // --- Target eligibility -----------------------------------------------
   const availableTargets = $derived(
@@ -89,7 +80,7 @@
       .filter((mod) => !mod.migrated_to_model_id)
   );
 
-  function labelFor(mod: CompletionModel): string {
+  function labelFor(mod: MigratableModel): string {
     return mod.nickname ? mod.nickname : mod.name;
   }
 
@@ -101,30 +92,55 @@
   const sourceAlreadyMigrated = $derived(!!sourceModel.migrated_to_model_id);
 
   // --- Validation -------------------------------------------------------
-  let compatWarnings = $state<string[]>([]);
-  let hasSecurityBlocker = $state(false);
+  // Keep the raw codes from the backend and split them into severity tiers
+  // so each renders in its own section (error / warning / info) instead of
+  // everything landing in one red box.
+  let validationCodes = $state<string[]>([]);
+  // Defensive fallback if the backend ever returns warnings without codes.
+  let fallbackWarnings = $state<string[]>([]);
   let isValidating = $state(false);
   let acknowledged = $state(false);
   let validationError = $state(false);
 
-  const hasWarnings = $derived(compatWarnings.length > 0);
-  // Compatibility warnings (different_family, kwargs_reset, …) are about
-  // resource-level concerns (assistant prompts, kwargs). With zero
-  // resources to re-bind, the warnings are vacuous — even if the model is
-  // still enabled on spaces (those just get repointed). Only security
-  // blockers gate the action regardless of count.
+  const blockerMsgs = $derived(
+    validationCodes
+      .filter((c) => classifyMigrationCode(c) === "blocker")
+      .map(translateMigrationWarning)
+  );
+  const warningMsgs = $derived([
+    ...validationCodes
+      .filter((c) => classifyMigrationCode(c) === "warning")
+      .map(translateMigrationWarning),
+    ...fallbackWarnings
+  ]);
+  const infoMsgs = $derived(
+    validationCodes
+      .filter((c) => classifyMigrationCode(c) === "info")
+      .map(translateMigrationWarning)
+  );
+  const hasSecurityBlocker = $derived(blockerMsgs.length > 0);
+
+  // Compatibility warnings + info (different_family, lower token limit,
+  // kwargs reset, …) concern resource-level state (assistant prompts,
+  // kwargs). With zero resources to re-bind they are vacuous — even if the
+  // model is still enabled on spaces (those just get repointed). Security
+  // blockers gate the action regardless of count (they concern spaces).
   const hasResourceImpact = $derived(impactTotal > 0);
-  const shouldConfirmMigration = $derived(!hasWarnings || acknowledged || !hasResourceImpact);
+  const showWarnings = $derived(warningMsgs.length > 0 && hasResourceImpact);
+  const showInfo = $derived(infoMsgs.length > 0 && hasResourceImpact);
+  const anyValidationSection = $derived(hasSecurityBlocker || showWarnings || showInfo);
+  // A single checkbox gates everything that would otherwise block: security
+  // blockers (via force_override) and compatibility warnings (via confirm).
+  const needsAck = $derived(hasSecurityBlocker || showWarnings);
   const canMigrate = $derived(
     !!targetModelId &&
-      !hasSecurityBlocker &&
       !isLoadingImpact &&
       hasLoadedImpact &&
       !impactLoadError &&
       !isValidating &&
       !validationError &&
       !sourceAlreadyMigrated &&
-      shouldConfirmMigration
+      (!needsAck || acknowledged)
   );
 
   // Track which target the current validation is for to discard stale responses.
@@ -132,8 +148,8 @@
 
   $effect(() => {
     if (!targetModelId || sourceAlreadyMigrated) {
-      compatWarnings = [];
-      hasSecurityBlocker = false;
+      validationCodes = [];
+      fallbackWarnings = [];
       validationError = false;
       return;
     }
@@ -146,14 +162,13 @@
   async function runValidation(toId: string) {
     validatingForTarget = toId;
     isValidating = true;
-    compatWarnings = [];
-    hasSecurityBlocker = false;
+    validationCodes = [];
+    fallbackWarnings = [];
     validationError = false;
     try {
-      const result = (await intric.models.validateMigration({
-        fromId: sourceModel.id,
-        toId
-      })) as {
+      const result = (await (modelType === "transcriptionModel"
+        ? intric.models.validateTranscriptionMigration({ fromId: sourceModel.id, toId })
+        : intric.models.validateMigration({ fromId: sourceModel.id, toId }))) as {
         compatible: boolean;
         warnings: string[];
         warning_codes: string[];
@@ -161,8 +176,8 @@
       };
       if (validatingForTarget !== toId) return;
       const codes = result.warning_codes ?? [];
-      compatWarnings = codes.length > 0 ? codes.map(translateMigrationWarning) : result.warnings;
-      hasSecurityBlocker = codes.some(isSecurityBlockerCode);
+      validationCodes = codes;
+      fallbackWarnings = codes.length === 0 ? (result.warnings ?? []) : [];
     } catch (err: unknown) {
       if (validatingForTarget !== toId) return;
       console.error("[MigrateModelDialog] Validation failed:", err);
@@ -182,7 +197,6 @@
     impactLoadError = null;
     hasLoadedImpact = false;
     acknowledged = false;
-    expandedSections = {};
     impactTotal = 0;
     impactDetails = [];
     spacesCount = 0;
@@ -217,15 +231,23 @@
     impactTotal = 0;
     impactDetails = [];
     spacesCount = 0;
+    // Same impact preview for both model types — only the endpoint differs.
+    // Transcription's details are its apps; spaces come from the aggregate
+    // usage count (a many-to-many, like completion).
+    const isTranscription = modelType === "transcriptionModel";
     try {
-      const details = (await intric.models.getUsageDetails({
-        modelId: sourceModel.id,
-        limit: 100
-      })) as { items?: UsageDetail[]; total?: number };
+      const details = (await (isTranscription
+        ? intric.models.getTranscriptionUsageDetails({ modelId: sourceModel.id, limit: 100 })
+        : intric.models.getUsageDetails({ modelId: sourceModel.id, limit: 100 }))) as {
+        items?: UsageDetail[];
+        total?: number;
+      };
       impactDetails = details?.items ?? [];
       // Use backend total (handles pagination), not just items.length
       impactTotal = details?.total ?? impactDetails.length;
-      const stats = (await intric.models.getUsageStats({ modelId: sourceModel.id })) as {
+      const stats = (await (isTranscription
+        ? intric.models.getTranscriptionUsageStats({ modelId: sourceModel.id })
+        : intric.models.getUsageStats({ modelId: sourceModel.id }))) as {
         spaces_count?: number;
       };
       spacesCount = stats.spaces_count ?? 0;
@@ -243,13 +265,25 @@
     submitError = null;
     isSubmitting = true;
     try {
-      await intric.models.migrateCompletion({
-        fromId: sourceModel.id,
-        toId: targetModelId,
-        // Match the UI gate: spaces-only warning cases are allowed without
-        // a manual acknowledgement because no resources are rebound.
-        confirmMigration: shouldConfirmMigration
-      });
+      // Match the UI gate: spaces-only warning cases are allowed without a
+      // manual acknowledgement because no resources are rebound.
+      // Security blockers only clear when the admin actively acknowledges
+      // (force_override); both model types support the same escape hatch.
+      if (modelType === "transcriptionModel") {
+        await intric.models.migrateTranscription({
+          fromId: sourceModel.id,
+          toId: targetModelId,
+          confirmMigration: !needsAck || acknowledged,
+          forceOverride: hasSecurityBlocker && acknowledged
+        });
+      } else {
+        await intric.models.migrateCompletion({
+          fromId: sourceModel.id,
+          toId: targetModelId,
+          confirmMigration: !needsAck || acknowledged,
+          forceOverride: hasSecurityBlocker && acknowledged
+        });
+      }
       toast.success(m.migration_success());
       bumpModelMigrationHistoryVersion();
       await invalidate("admin:model-providers:load");
@@ -260,29 +294,6 @@
       isSubmitting = false;
     }
   }
-
-  // --- Grouped impact ---------------------------------------------------
-  const groupedDetails = $derived.by(() => {
-    const groups: Record<string, UsageDetail[]> = {};
-    for (const d of impactDetails) {
-      if (!groups[d.entity_type]) groups[d.entity_type] = [];
-      groups[d.entity_type].push(d);
-    }
-    return groups;
-  });
-
-  function toggleSection(type: string) {
-    expandedSections = { ...expandedSections, [type]: !expandedSections[type] };
-  }
-
-  type SectionConfig = { label: () => string; icon: typeof Bot };
-  const sectionConfig: Record<string, SectionConfig> = {
-    assistant: { label: () => m.migration_summary_assistants(), icon: Bot },
-    app: { label: () => m.migration_summary_apps(), icon: AppWindow },
-    service: { label: () => m.migration_summary_services(), icon: LayoutGrid },
-    assistant_template: { label: () => m.migration_summary_assistants(), icon: Bot },
-    app_template: { label: () => m.migration_summary_apps(), icon: AppWindow }
-  };
 </script>
 
 <Dialog.Root bind:open={dialogOpen}>
@@ -325,78 +336,12 @@
             </div>
           </div>
         {:else if !sourceAlreadyMigrated && impactTotal > 0}
-          <div class="border-border overflow-hidden rounded-lg border">
-            <div class="border-border bg-muted/30 flex items-center gap-4 border-b px-4 py-3">
-              <span class="text-sm font-medium">
-                {m.migration_impact_title({ count: impactTotal })}
-              </span>
-            </div>
-            <div class="divide-border divide-y">
-              {#each Object.entries(groupedDetails) as [type, entities] (type)}
-                {@const config = sectionConfig[type] ?? { label: () => type, icon: Bot }}
-                {@const Icon = config.icon}
-                <div>
-                  <button
-                    type="button"
-                    class="hover:bg-muted/40 flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition-colors"
-                    onclick={() => toggleSection(type)}
-                    aria-expanded={Boolean(expandedSections[type])}
-                  >
-                    <div class="flex items-center gap-2">
-                      <Icon size={15} class="text-muted-foreground" aria-hidden="true" />
-                      <span class="font-medium">{config.label()}</span>
-                      <span class="text-muted-foreground">({entities.length})</span>
-                    </div>
-                    <ChevronDown
-                      size={16}
-                      class="text-muted-foreground transition-transform {expandedSections[type]
-                        ? 'rotate-0'
-                        : '-rotate-90'}"
-                      aria-hidden="true"
-                    />
-                  </button>
-                  {#if expandedSections[type]}
-                    <div class="border-border bg-muted/20 border-t">
-                      <table class="w-full text-sm">
-                        <thead>
-                          <tr class="text-muted-foreground text-xs tracking-wider uppercase">
-                            <th class="px-4 py-2 text-left font-medium">{m.name()}</th>
-                            <th class="px-4 py-2 text-left font-medium"
-                              >{m.migration_impact_space()}</th
-                            >
-                            <th class="px-4 py-2 text-left font-medium"
-                              >{m.migration_impact_owner()}</th
-                            >
-                          </tr>
-                        </thead>
-                        <tbody class="divide-border divide-y">
-                          {#each entities as entity (entity.entity_id)}
-                            <tr>
-                              <td class="px-4 py-2">{entity.entity_name}</td>
-                              <td class="text-muted-foreground px-4 py-2"
-                                >{entity.space_name ?? "–"}</td
-                              >
-                              <td class="text-muted-foreground px-4 py-2"
-                                >{entity.owner_name ?? "–"}</td
-                              >
-                            </tr>
-                          {/each}
-                        </tbody>
-                      </table>
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-              {#if spacesCount > 0}
-                <div
-                  class="text-muted-foreground bg-muted/20 flex items-center gap-2 px-4 py-3 text-sm"
-                >
-                  <LayoutGrid size={15} class="flex-shrink-0" aria-hidden="true" />
-                  <span>{m.migration_spaces_info({ count: spacesCount })}</span>
-                </div>
-              {/if}
-            </div>
-          </div>
+          <ModelUsageBreakdown
+            details={impactDetails}
+            {spacesCount}
+            title={m.migration_impact_title({ count: impactTotal })}
+            spacesText={m.migration_spaces_info({ count: spacesCount })}
+          />
         {:else if !sourceAlreadyMigrated}
           <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
             {m.migration_no_impact()}
@@ -431,46 +376,94 @@
           </Field.Field>
         {/if}
 
-        <!-- 3. Validation results -->
+        <!-- 3. Validation results — split by severity -->
         {#if isValidating}
           <div class="text-muted-foreground flex items-center gap-2 py-2 text-sm">
             <Loader2 class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
-        {:else if hasSecurityBlocker}
-          <div
-            class="border-negative-default/30 bg-negative-dimmer/40 text-negative-stronger flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
-            role="alert"
-          >
-            <ShieldAlert size={18} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
-            <div>
-              <p class="font-medium">{m.migration_blocked_title()}</p>
-              {#each compatWarnings as w, i (i)}
-                <p class="text-negative-default mt-1">{w}</p>
-              {/each}
-            </div>
-          </div>
-        {:else if hasWarnings && hasResourceImpact}
-          <div
-            class="border-warning-default/30 bg-warning-dimmer/30 rounded-lg border px-4 py-3 text-sm"
-            role="alert"
-          >
-            <ul class="space-y-1.5">
-              {#each compatWarnings as w, i (i)}
-                <li class="text-warning-stronger flex items-start gap-2">
-                  <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
-                  <span>{w}</span>
-                </li>
-              {/each}
-            </ul>
-            <div class="border-warning-default/20 mt-3 border-t pt-3">
-              <Field.Field orientation="horizontal" class="text-warning-stronger w-fit">
-                <Checkbox id="migrate-acknowledge" bind:checked={acknowledged} />
-                <Field.Label for="migrate-acknowledge" class="text-warning-stronger cursor-pointer">
-                  {m.migrate_model_confirm_label()}
-                </Field.Label>
-              </Field.Field>
-            </div>
+        {:else if anyValidationSection}
+          <div class="flex flex-col gap-3">
+            <!-- Errors: hard blockers (security classification) -->
+            {#if hasSecurityBlocker}
+              <div
+                class="border-negative-default/30 bg-negative-dimmer/40 text-negative-stronger flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+                role="alert"
+              >
+                <ShieldAlert size={18} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <div>
+                  <p class="font-medium">{m.migration_blocked_title()}</p>
+                  {#each blockerMsgs as w, i (i)}
+                    <p class="text-negative-default mt-1">{w}</p>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <!-- Warnings: compatibility issues -->
+            {#if showWarnings}
+              <div
+                class="border-warning-default/30 bg-warning-dimmer/30 rounded-lg border px-4 py-3 text-sm"
+                role="alert"
+              >
+                <p class="text-warning-stronger mb-1.5 font-medium">
+                  {m.migration_warnings_title()}
+                </p>
+                <ul class="space-y-1.5">
+                  {#each warningMsgs as w, i (i)}
+                    <li class="text-warning-stronger flex items-start gap-2">
+                      <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <span>{w}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            <!-- Info: purely informational notices -->
+            {#if showInfo}
+              <div
+                class="border-border bg-muted/30 text-muted-foreground rounded-lg border px-4 py-3 text-sm"
+              >
+                <p class="text-default mb-1.5 font-medium">{m.migration_info_title()}</p>
+                <ul class="space-y-1.5">
+                  {#each infoMsgs as w, i (i)}
+                    <li class="flex items-start gap-2">
+                      <Info size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <span>{w}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            <!-- Single acknowledgement gating both blockers and warnings -->
+            {#if needsAck}
+              <div
+                class="rounded-lg border px-4 py-3 {hasSecurityBlocker
+                  ? 'border-negative-default/30 bg-negative-dimmer/30'
+                  : 'border-warning-default/30 bg-warning-dimmer/20'}"
+              >
+                <Field.Field
+                  orientation="horizontal"
+                  class="{hasSecurityBlocker
+                    ? 'text-negative-stronger'
+                    : 'text-warning-stronger'} w-fit"
+                >
+                  <Checkbox id="migrate-acknowledge" bind:checked={acknowledged} />
+                  <Field.Label
+                    for="migrate-acknowledge"
+                    class="{hasSecurityBlocker
+                      ? 'text-negative-stronger'
+                      : 'text-warning-stronger'} cursor-pointer"
+                  >
+                    {hasSecurityBlocker
+                      ? m.migrate_model_override_security_label()
+                      : m.migrate_model_confirm_label()}
+                  </Field.Label>
+                </Field.Field>
+              </div>
+            {/if}
           </div>
         {/if}
 

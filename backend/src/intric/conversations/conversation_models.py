@@ -70,11 +70,12 @@ class PreflightRequest(_ConversationTarget):
 
 
 class PreflightResponse(BaseModel):
-    """Exact token cost the next request will add to the context window.
+    """Estimated token cost the next request will add to the context window.
 
     Excludes knowledge/RAG chunks and web-search results — those are selected
-    at request time. The frontend pairs this delta with the persisted history
-    tokens to project total context fill.
+    at request time. Provider tokenization is authoritative and can differ from
+    this local estimate, especially for multimodal inputs. The frontend pairs
+    this delta with the persisted history tokens to project total context fill.
 
     `model_name` and `context_window` are echoed so a client can compute the
     percentage fill locally without a separate round-trip to fetch model
@@ -112,6 +113,10 @@ class ConversationRequest(_ConversationTarget):
     tools: Optional[UseTools] = None
     use_web_search: bool = False
     require_tool_approval: bool = False
+    # MCP servers the user turned off in the composer for this message. Narrows
+    # the otherwise-active set (assistant's own servers, or policy-granted ones
+    # for a personal assistant); it can never enable a server that isn't active.
+    disabled_mcp_server_ids: list[UUID] = Field(default=[])
 
 
 class ConversationRenameRequest(BaseModel):

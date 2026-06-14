@@ -28,6 +28,10 @@ class ActionType(str, Enum):
     API_KEY_USED = "api_key_used"
     API_KEY_AUTH_FAILED = "api_key_auth_failed"
     TENANT_POLICY_UPDATED = "tenant_policy_updated"
+    GOVERNANCE_POLICY_UPDATED = "governance_policy_updated"
+    PROMPT_LIBRARY_ENTRY_CREATED = "prompt_library_entry_created"
+    PROMPT_LIBRARY_ENTRY_UPDATED = "prompt_library_entry_updated"
+    PROMPT_LIBRARY_ENTRY_DELETED = "prompt_library_entry_deleted"
     MODULE_ADDED = "module_added"
     MODULE_ADDED_TO_TENANT = "module_added_to_tenant"
 
@@ -79,6 +83,7 @@ class ActionType(str, Enum):
     TRANSCRIPTION_MODEL_CREATED = "transcription_model_created"
     TRANSCRIPTION_MODEL_UPDATED = "transcription_model_updated"
     TRANSCRIPTION_MODEL_DELETED = "transcription_model_deleted"
+    TRANSCRIPTION_MODEL_MIGRATED = "transcription_model_migrated"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"
@@ -99,6 +104,14 @@ class ActionType(str, Enum):
     MCP_SERVER_DISABLED = "mcp_server_disabled"
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
+
+    # Help Assistant Actions
+    HELP_ASSISTANT_ROLE_ASSIGNED = "help_assistant_role_assigned"
+    HELP_ASSISTANT_ROLE_UNASSIGNED = "help_assistant_role_unassigned"
+    HELP_ASSISTANT_ROLE_TOGGLED_ENABLED = "help_assistant_role_toggled_enabled"
+    HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE = "help_assistant_role_toggled_visible"
+    HELP_ASSISTANT_INSTALLED = "help_assistant_installed"
+    HELP_ASSISTANT_UNINSTALLED = "help_assistant_uninstalled"
 
     # SCIM Provisioning Actions
     SCIM_USER_PROVISIONED = "scim_user_provisioned"

@@ -6,12 +6,18 @@ from intric.scim.constants import (
     SCIM_BULK_MAX_PAYLOAD_BYTES,
     SCIM_FILTER_MAX_RESULTS,
 )
+from intric.scim.openapi import scim_responses
 from intric.scim.schemas.common import ListResponse
 
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Discovery"])
 
 
-@router.get("/ServiceProviderConfig")
+@router.get(
+    "/ServiceProviderConfig",
+    description="Get the SCIM service provider capabilities.",
+    responses=scim_responses(401, 500),
+    response_model=dict[str, object],
+)
 async def service_provider_config() -> dict[str, object]:
     return {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
@@ -158,7 +164,12 @@ _GROUP_SCHEMA = {
 }
 
 
-@router.get("/Schemas")
+@router.get(
+    "/Schemas",
+    description="List the SCIM schemas supported by this service.",
+    responses=scim_responses(401, 500),
+    response_model=ListResponse,
+)
 async def schemas() -> ListResponse:
     resources = [_USER_SCHEMA, _GROUP_SCHEMA]
     return ListResponse(
@@ -166,7 +177,12 @@ async def schemas() -> ListResponse:
     )
 
 
-@router.get("/ResourceTypes")
+@router.get(
+    "/ResourceTypes",
+    description="List the SCIM resource types supported by this service.",
+    responses=scim_responses(401, 500),
+    response_model=ListResponse,
+)
 async def resource_types() -> ListResponse:
     resources = [
         {

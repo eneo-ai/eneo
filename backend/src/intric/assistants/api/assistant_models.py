@@ -103,6 +103,30 @@ def _empty_mcp_tool_setting_list() -> list[MCPToolSetting]:
     return []
 
 
+class EffectiveConfigPublic(BaseModel):
+    """Frontend hint surface for personal-assistant governance.
+
+    Only meaningful on default assistants in personal spaces. `prompt_locked`
+    is exposed as a boolean — we never leak the admin-prompt text to the
+    user-facing API.
+    """
+
+    models_enforced: bool
+    available_models: list[CompletionModelSparse]
+    locked_model: CompletionModelSparse | None
+    default_model: CompletionModelSparse | None
+    mcp_enforced: bool
+    available_mcp_servers: list[MCPServerPublicDict] = Field(
+        default_factory=_empty_mcp_server_public_dict_list  # type: ignore[arg-type]
+    )
+    # Allowed servers that start switched OFF in the user's chat (UX seed
+    # only — the user can still enable them per conversation).
+    default_disabled_mcp_server_ids: list[UUID] = Field(
+        default_factory=_empty_uuid_list
+    )
+    prompt_locked: bool
+
+
 class AssistantBase(BaseModel):
     name: str
     completion_model_kwargs: ModelKwargs | None = Field(default_factory=ModelKwargs)
@@ -111,7 +135,12 @@ class AssistantBase(BaseModel):
     @field_validator("completion_model_kwargs", mode="before")
     @classmethod
     def set_model_kwargs(cls, model_kwargs: ModelKwargs | None):
-        return model_kwargs or ModelKwargs()
+        # `default_factory` does not fire for explicit None; coerce here so
+        # legacy NULL JSONB rows load. `is None` (not truthiness) so a
+        # corrupt non-None value still raises ValidationError.
+        if model_kwargs is None:
+            return ModelKwargs()
+        return model_kwargs
 
 
 _DEPRECATED_DESCRIPTION = "This field is deprecated and will be ignored"
@@ -324,6 +353,23 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     metadata_json: Optional[dict[str, object]] = Field(
         default=None,
         description="Metadata for the assistant",
+    )
+    effective_config: Optional[EffectiveConfigPublic] = Field(
+        default=None,
+        description=(
+            "Personal-assistant governance hints. Only populated for personal "
+            "default assistants when a tenant policy applies."
+        ),
+    )
+    is_help_assistant: bool = Field(
+        default=False,
+        description=(
+            "True when this assistant currently fills a Help Assistant role "
+            "(it has an active row in org_space_assistant_roles). Help "
+            "assistants have logging permanently disabled; the edit UI uses "
+            "this flag to surface that explanation. Only the single-assistant "
+            "GET endpoint computes it; other responses default to False."
+        ),
     )
 
 

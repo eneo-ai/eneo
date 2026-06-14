@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -101,7 +102,7 @@ async def test_user_can_not_access_completion_models(service: AIModelsService):
         assert not model.can_access
 
 
-async def test_completion_models_use_effective_deprecation(
+async def test_completion_models_keep_litellm_deprecation_advisory(
     service: AIModelsService,
 ):
     service.user = TEST_ADMIN_USER
@@ -121,11 +122,13 @@ async def test_completion_models_use_effective_deprecation(
     ):
         models = await service.get_completion_models()
 
-    assert models[0].is_deprecated is True
-    assert models[0].can_access is False
+    assert models[0].is_deprecated is False
+    assert models[0].can_access is True
 
 
-async def test_embedding_models_use_effective_deprecation(service: AIModelsService):
+async def test_embedding_models_keep_litellm_deprecation_advisory(
+    service: AIModelsService,
+):
     service.user = TEST_ADMIN_USER
     model = TEST_EMBEDDING_MODEL.model_copy(
         update={
@@ -142,8 +145,8 @@ async def test_embedding_models_use_effective_deprecation(service: AIModelsServi
     ):
         models = await service.get_embedding_models()
 
-    assert models[0].is_deprecated is True
-    assert models[0].can_access is False
+    assert models[0].is_deprecated is False
+    assert models[0].can_access is True
 
 
 async def test_completion_models_flags_settings_not_exists(service: AIModelsService):
@@ -225,3 +228,24 @@ async def test_tenant_azure_models_shown_when_flag_off(service: AIModelsService)
     families = [model.family for model in models]
     assert families.count("azure") == 1
     assert any(model.tenant_id == TEST_TENANT.id for model in models)
+
+
+def test_get_latest_available_model_handles_missing_created_at(
+    service: AIModelsService,
+):
+    latest = service._get_latest_available_model(
+        [
+            TEST_MODEL_CHATGPT.model_copy(
+                update={"created_at": None, "can_access": True}
+            ),
+            TEST_MODEL_GPT4.model_copy(
+                update={
+                    "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    "can_access": True,
+                }
+            ),
+        ]
+    )
+
+    assert latest is not None
+    assert latest.id == TEST_MODEL_GPT4.id

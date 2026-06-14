@@ -18,7 +18,6 @@ from intric.completion_models.infrastructure.static_prompts import (
     SHOW_REFERENCES_PROMPT,
 )
 from intric.files.file_models import File, FileType
-from intric.main.exceptions import QueryException
 from intric.questions.question import ToolCallInfo
 
 QUESTION = "I have a question"
@@ -92,6 +91,7 @@ def test_context_with_files(context_builder: ContextBuilder):
     file = MagicMock(
         text="This is the text from the file",
         file_type=FileType.TEXT,
+        mimetype="application/pdf",
     )
     file.name = "test_file.pdf"
 
@@ -101,7 +101,8 @@ def test_context_with_files(context_builder: ContextBuilder):
 
     expected_input = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and not reveal the specific formatting you see below:
 
-{{"filename": "{file.name}", "text": "{file.text}"}}
+FILE: {file.name} (application/pdf)
+{file.text}
 
 {QUESTION}"""  # noqa
 
@@ -143,7 +144,8 @@ def test_context_with_messages(context_builder: ContextBuilder):
 
     expected_question_2 = f"""Below are files uploaded by the user. You should act like you can see the files themselves, and not reveal the specific formatting you see below:
 
-{{"filename": "{file.name}", "text": "{file.text}"}}
+FILE: {file.name}
+{file.text}
 
 Question 2 with file"""  # noqa
     expected_messages = [
@@ -214,21 +216,37 @@ def test_context_with_messages_and_images(context_builder: ContextBuilder):
     assert context.messages == expected_messages
 
 
-def test_get_error_on_too_long_question(context_builder: ContextBuilder):
+def test_too_long_question_is_forwarded_to_provider(context_builder: ContextBuilder):
     input_str = "This is a loooooong query, longer than 5 tokens"
 
-    with pytest.raises(QueryException):
-        context_builder.build_context(input_str=input_str, max_tokens=5)
+    context = context_builder.build_context(input_str=input_str, max_tokens=5)
+
+    assert context.input == input_str
+    assert context.token_count > 5
 
 
-def test_get_error_on_too_long_question_and_prompt(context_builder: ContextBuilder):
+def test_too_long_required_context_skips_knowledge(
+    context_builder: ContextBuilder,
+):
     input_str = "Short query"
     prompt_str = "This is a super long prompt string"
+    chunk = MagicMock(
+        text="knowledge that must not make an oversized request even larger",
+        chunk_no=1,
+        info_blob_id=uuid4(),
+        info_blob_title="Knowledge",
+    )
 
-    with pytest.raises(QueryException):
-        context_builder.build_context(
-            input_str=input_str, prompt=prompt_str, max_tokens=7
-        )
+    context = context_builder.build_context(
+        input_str=input_str,
+        prompt=prompt_str,
+        info_blob_chunks=[chunk],
+        max_tokens=7,
+    )
+
+    assert context.input == input_str
+    assert context.prompt == prompt_str
+    assert context.token_count > 7
 
 
 def _question_mock(question: str, answer: str, tool_calls=None) -> MagicMock:
@@ -452,6 +470,219 @@ def test_tool_result_tokens_reported_in_history_token_count(
     )
 
     assert tokens_with > tokens_without
+
+
+_PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+    "53de0000000d4944415478da63f8cfc000000301010018dd8db00000000049"
+    "454e44ae426082"
+)
+
+
+def _image_file(blob: bytes = _PNG_1PX) -> File:
+    return File(
+        id=uuid4(),
+        name="photo.png",
+        blob=blob,
+        mimetype="image/png",
+        checksum="",
+        size=len(blob),
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        file_type=FileType.IMAGE,
+    )
+
+
+def test_image_attachment_increases_token_count(context_builder: ContextBuilder):
+    without_image = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
+    with_image = context_builder.build_context(
+        input_str=QUESTION, files=[_image_file()], max_tokens=10000
+    )
+
+    # An image costs at least the provider base cost (85 tokens on OpenAI).
+    assert with_image.token_count >= without_image.token_count + 85
+
+
+def test_large_image_is_counted_at_high_detail(context_builder: ContextBuilder):
+    # Images are sent with detail "high"; a 2048×1024 image is tiled by
+    # OpenAI's formula to ~1105 tokens — make sure we don't count the flat
+    # 85-token "auto" estimate.
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2048, 1024), color=(40, 80, 120)).save(buffer, format="PNG")
+
+    without_image = context_builder.build_context(input_str=QUESTION, max_tokens=100000)
+    with_image = context_builder.build_context(
+        input_str=QUESTION,
+        files=[_image_file(blob=buffer.getvalue())],
+        max_tokens=100000,
+    )
+
+    assert with_image.token_count >= without_image.token_count + 1000
+
+
+def test_attachment_images_ride_on_current_message(context_builder: ContextBuilder):
+    attachment_image = _image_file()
+
+    context = context_builder.build_context(
+        input_str=QUESTION, prompt_files=[attachment_image], max_tokens=10000
+    )
+
+    assert context.images == [attachment_image]
+
+
+def test_attachment_images_dropped_without_vision(context_builder: ContextBuilder):
+    context = context_builder.build_context(
+        input_str=QUESTION,
+        prompt_files=[_image_file()],
+        max_tokens=10000,
+        vision=False,
+    )
+
+    assert context.images == []
+
+
+def test_attachment_images_not_duplicated_with_current(
+    context_builder: ContextBuilder,
+):
+    image = _image_file()
+
+    context = context_builder.build_context(
+        input_str=QUESTION, files=[image], prompt_files=[image], max_tokens=10000
+    )
+
+    assert context.images == [image]
+
+
+def test_history_images_increase_token_count(context_builder: ContextBuilder):
+    def _session(files):
+        return MagicMock(
+            questions=[
+                MagicMock(
+                    question="Q",
+                    answer="A",
+                    files=files,
+                    generated_files=[],
+                    tool_calls=None,
+                )
+            ]
+        )
+
+    _, tokens_without = context_builder._build_messages(
+        session=_session([]), max_tokens=10000
+    )
+    _, tokens_with = context_builder._build_messages(
+        session=_session([_image_file()]), max_tokens=10000
+    )
+
+    assert tokens_with >= tokens_without + 85
+
+
+def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
+    without_tools = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
+    with_function = context_builder.build_context(
+        input_str=QUESTION, max_tokens=10000, use_image_generation=True
+    )
+    with_extra_dicts = context_builder.build_context(
+        input_str=QUESTION,
+        max_tokens=10000,
+        extra_tool_dicts=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp__lookup",
+                    "description": "Look up a record in the registry by id.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"record_id": {"type": "string"}},
+                        "required": ["record_id"],
+                    },
+                },
+            }
+        ],
+    )
+
+    assert with_function.token_count > without_tools.token_count
+    assert with_extra_dicts.token_count > without_tools.token_count
+
+
+def test_oversized_attachment_is_truncated_with_notice(
+    context_builder: ContextBuilder, monkeypatch: pytest.MonkeyPatch
+):
+    from intric.completion_models.infrastructure import context_builder as cb_module
+    from intric.completion_models.infrastructure.context_builder import (
+        ATTACHMENT_TRUNCATION_NOTICE,
+        build_files_string,
+    )
+
+    settings = MagicMock(attachment_max_tokens_per_file=10)
+    monkeypatch.setattr(cb_module, "get_settings", lambda: settings)
+
+    file = MagicMock(
+        text="word " * 1000, file_type=FileType.TEXT, mimetype="text/plain"
+    )
+    file.name = "big.txt"
+
+    result = build_files_string([file])
+
+    assert ATTACHMENT_TRUNCATION_NOTICE in result
+    assert len(result) < len(file.text)
+
+
+def test_truncation_stays_within_budget_including_notice():
+    from intric.completion_models.infrastructure.context_builder import (
+        ATTACHMENT_TRUNCATION_NOTICE,
+        _truncate_to_tokens,
+    )
+
+    max_tokens = 100
+    # Token-dense text (few chars per token) — the proportional cut alone
+    # would overshoot the budget.
+    text = "0123456789abcdef" * 2000
+
+    result = _truncate_to_tokens(text, max_tokens=max_tokens)
+
+    assert ATTACHMENT_TRUNCATION_NOTICE in result
+    assert count_tokens(result) <= max_tokens
+
+
+def test_vision_false_drops_current_images(context_builder: ContextBuilder):
+    context = context_builder.build_context(
+        input_str=QUESTION, files=[_image_file()], max_tokens=10000, vision=False
+    )
+
+    assert context.images == []
+
+
+def test_vision_false_drops_history_images(context_builder: ContextBuilder):
+    session = MagicMock(
+        questions=[
+            MagicMock(
+                question="Q",
+                answer="A",
+                files=[_image_file()],
+                generated_files=[],
+                tool_calls=None,
+            )
+        ]
+    )
+
+    context = context_builder.build_context(
+        input_str=QUESTION, session=session, max_tokens=10000, vision=False
+    )
+
+    assert context.messages[0].images == []
+
+
+def test_message_scaffolding_overhead_is_counted(context_builder: ContextBuilder):
+    # The question is sent as a chat message, not raw text — the count must
+    # include the per-message wrapper, so it exceeds the bare text tokens.
+    context = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
+
+    assert context.token_count > count_tokens(QUESTION)
 
 
 def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):

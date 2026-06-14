@@ -339,21 +339,32 @@ class Assistant(Entity):
         version: int = 1,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         require_tool_approval: bool = False,
+        completion_model_override: Optional[CompletionModel] = None,
+        mcp_servers_override: Optional[list["MCPServer"]] = None,
+        prompt_override: str | None = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
-        if self.completion_model is None:
+        # Overrides come from the orchestrating service (personal assistant
+        # governance). When set, they take precedence over the values stored on
+        # the entity. When None, fall back to the entity's own values.
+        effective_model = (
+            completion_model_override
+            if completion_model_override is not None
+            else self.completion_model
+        )
+        if effective_model is None:
             raise NoModelSelectedException()
 
-        completion_model = cast("AICompletionModel", self.completion_model)
+        completion_model = cast("AICompletionModel", effective_model)
 
         if any(file.file_type == FileType.IMAGE for file in files or []):
-            if not self.completion_model.vision:
+            if not effective_model.vision:
                 raise BadRequestException(
-                    f"Completion model {self.completion_model.name} do not support vision."
+                    f"Completion model {effective_model.name} do not support vision."
                 )
 
         # Fill half the context
         num_chunks = (
-            self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
+            effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
         )
 
         if self.has_knowledge():
@@ -371,11 +382,19 @@ class Assistant(Entity):
                 chunks=[], no_duplicate_chunks=[], info_blobs=[]
             )
 
+        effective_mcp_servers = (
+            mcp_servers_override
+            if mcp_servers_override is not None
+            else self.mcp_servers
+        )
+
         response = await completion_service.get_response(
             model=completion_model,
             text_input=question,
             files=files or [],
-            prompt=self.get_prompt_text(),
+            prompt=prompt_override
+            if prompt_override is not None
+            else self.get_prompt_text(),
             prompt_files=self.attachments,
             info_blob_chunks=datastore_result.chunks,
             session=session,
@@ -385,7 +404,7 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=list(web_search_results or []),
-            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
+            mcp_servers=[] if self.has_knowledge() else effective_mcp_servers,
             require_tool_approval=require_tool_approval,
         )
 

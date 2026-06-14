@@ -30,7 +30,20 @@ export default ts.config(
     }
   },
   {
-    ignores: ["build/", ".svelte-kit/", "dist/", "**/paraglide/"]
+    // `**/dev/**` routes are throwaway UI prototypes / previews (see their
+    // READMEs); their demo copy is intentionally not translated, so exempt them
+    // from the lint rules that would otherwise force paraglide messages.
+    ignores: [
+      "build/",
+      ".svelte-kit/",
+      ".svelte-kit-e2e/",
+      "coverage/",
+      "playwright-report/",
+      "test-results/",
+      "dist/",
+      "**/paraglide/",
+      "**/dev/**"
+    ]
   },
   {
     // Block hardcoded human-facing text — every human-facing string must go
@@ -53,6 +66,19 @@ export default ts.config(
           ]
         }
       ]
+    }
+  },
+  {
+    // Block raw colors in UI source — every color must go through eneo's
+    // semantic design tokens (bg-negative-dimmer, text-warning-stronger, …) so
+    // it adapts to light/dark via `data-theme`. This also covers class strings
+    // assembled in scripts, generated markup, and component <style> blocks.
+    //
+    // Existing violations are tracked in eslint-suppressions.json. ESLint only
+    // suppresses that per-file count, so newly added violations fail CI.
+    files: ["src/**/*.{svelte,js,ts}"],
+    rules: {
+      "intric/no-raw-color": "error"
     }
   },
   {

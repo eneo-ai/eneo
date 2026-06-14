@@ -110,6 +110,10 @@ class QuestionAdd(QuestionBase):
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
+    # Model reasoning/thinking text captured during streaming. Persisted so the
+    # trace can be re-shown when a conversation is reloaded. None for turns
+    # produced before this field existed or by models without reasoning.
+    reasoning: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_session_id_and_service_id(self) -> "QuestionAdd":
@@ -159,6 +163,15 @@ class Message(QuestionBase, InDB):
     web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
+    reasoning: Optional[str] = None
+    # Default 0 keeps deserialization safe for rows persisted before token
+    # measurement was introduced. The DB columns are NOT NULL int, so every
+    # persisted row reads back as an integer. Clients that sum these values
+    # across history should treat 0 as "zero OR unmeasured" — historical
+    # conversations from before measurement was added will underreport actual
+    # context usage. Fix requires a backfill migration, out of scope here.
+    num_tokens_question: int = 0
+    num_tokens_answer: int = 0
 
     @field_validator("tool_calls", mode="before")
     @classmethod

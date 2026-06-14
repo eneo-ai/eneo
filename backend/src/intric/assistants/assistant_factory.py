@@ -117,16 +117,17 @@ class AssistantFactory:
         ]
 
         user = UserSparse.model_validate(assistant_in_db.user)
-        # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
-        # cast to a concrete type so ModelKwargs.model_validate is fully typed.
-        # reportUnknownMemberType is suppressed here because the root cause is the
-        # unparameterised dict column in assistant_table.py (out of scope).
-        completion_model_kwargs_raw: dict[str, object] = (
-            assistant_in_db.completion_model_kwargs or {}
-        )
-        completion_model_kwargs = ModelKwargs.model_validate(
-            completion_model_kwargs_raw
-        )
+        # `is None` (not truthiness) so corrupt non-None JSONB still raises
+        # ValidationError downstream rather than being silently dropped.
+        if assistant_in_db.completion_model_kwargs is None:
+            completion_model_kwargs = ModelKwargs()
+        else:
+            completion_model_kwargs_raw: dict[str, object] = (
+                assistant_in_db.completion_model_kwargs
+            )
+            completion_model_kwargs = ModelKwargs.model_validate(
+                completion_model_kwargs_raw
+            )
         if completion_model is not None:
             completion_model_kwargs = completion_model_kwargs.filter_unsupported(
                 completion_model.get_supported_model_kwargs()
@@ -225,13 +226,17 @@ class AssistantFactory:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
 
-        # JSONB columns are Mapped[Optional[dict]] (unparameterised) in the ORM table;
-        completion_model_kwargs_raw: dict[str, object] = (
-            assistant_in_db.completion_model_kwargs or {}
-        )
-        completion_model_kwargs = ModelKwargs.model_validate(
-            completion_model_kwargs_raw
-        )
+        # `is None` (not truthiness) so corrupt non-None JSONB still raises
+        # ValidationError downstream rather than being silently dropped.
+        if assistant_in_db.completion_model_kwargs is None:
+            completion_model_kwargs = ModelKwargs()
+        else:
+            completion_model_kwargs_raw: dict[str, object] = (
+                assistant_in_db.completion_model_kwargs
+            )
+            completion_model_kwargs = ModelKwargs.model_validate(
+                completion_model_kwargs_raw
+            )
         completion_model = next(
             (
                 cm

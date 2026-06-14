@@ -32,11 +32,17 @@ export interface paths {
     get: operations["get_app_api_v1_apps__id___get"];
     put?: never;
     post?: never;
-    /** Delete App */
+    /**
+     * Delete App
+     * @description Delete an app by id.
+     */
     delete: operations["delete_app_api_v1_apps__id___delete"];
     options?: never;
     head?: never;
-    /** Update App */
+    /**
+     * Update App
+     * @description Update an app by id.
+     */
     patch: operations["update_app_api_v1_apps__id___patch"];
     trace?: never;
   };
@@ -50,7 +56,10 @@ export interface paths {
     /** Get App Runs */
     get: operations["get_app_runs_api_v1_apps__id__runs__get"];
     put?: never;
-    /** Run App */
+    /**
+     * Run App
+     * @description Queue a run for an app by id.
+     */
     post: operations["run_app_api_v1_apps__id__runs__post"];
     delete?: never;
     options?: never;
@@ -84,7 +93,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish App */
+    /**
+     * Publish App
+     * @description Publish or unpublish an app by id.
+     */
     post: operations["publish_app_api_v1_apps__id__publish__post"];
     delete?: never;
     options?: never;
@@ -99,11 +111,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get App Run */
+    /**
+     * Get App Run
+     * @description Get an app run by id.
+     */
     get: operations["get_app_run_api_v1_app_runs__id___get"];
     put?: never;
     post?: never;
-    /** Delete App Run */
+    /**
+     * Delete App Run
+     * @description Delete an app run by id.
+     */
     delete: operations["delete_app_run_api_v1_app_runs__id___delete"];
     options?: never;
     head?: never;
@@ -461,7 +479,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Invite User */
+    /**
+     * Invite User
+     * @description Invite a new user to the tenant (admin).
+     */
     post: operations["invite_user_api_v1_users_admin_invite__post"];
     delete?: never;
     options?: never;
@@ -479,11 +500,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete User */
+    /**
+     * Delete User
+     * @description Delete a user from the tenant (admin).
+     */
     delete: operations["delete_user_api_v1_users_admin__id___delete"];
     options?: never;
     head?: never;
-    /** Update User */
+    /**
+     * Update User
+     * @description Update a user in the tenant (admin).
+     */
     patch: operations["update_user_api_v1_users_admin__id___patch"];
     trace?: never;
   };
@@ -498,7 +525,7 @@ export interface paths {
     put?: never;
     /**
      * Login
-     * @description OAuth2 Login with comprehensive error handling and logging
+     * @description Authenticate with email and password (OAuth2 password flow).
      */
     post: operations["Login_api_v1_users_login_token__post"];
     delete?: never;
@@ -518,7 +545,7 @@ export interface paths {
     put?: never;
     /**
      * Login With Mobilityguard
-     * @description OpenID Connect Login (generic OIDC provider).
+     * @description Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).
      */
     post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
     delete?: never;
@@ -536,17 +563,7 @@ export interface paths {
     };
     /**
      * Get Tenant Users
-     * @description List tenant members for member/group pickers.
-     *
-     *     Returns `UserSparse` (id, email, username, timestamps) — a strict subset
-     *     of the information any authenticated tenant member can retrieve via
-     *     Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
-     *     on /users/admin/* remain gated on Permission.ADMIN.
-     *
-     *     Bearer tokens: any authenticated tenant member may list. API keys: must
-     *     be tenant-scoped with admin permission — the route-level guards above
-     *     stash deferred-enforcement state consumed by `_resolve_api_key`, which
-     *     is a no-op for bearer auth where `request.state.api_key` is unset.
+     * @description List users in the current tenant. Available to authenticated tenant members; API keys require admin scope and permission.
      */
     get: operations["get_tenant_users_api_v1_users__get"];
     put?: never;
@@ -600,7 +617,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Provision User */
+    /**
+     * Provision User
+     * @description Provision a user from a Zitadel access token.
+     */
     post: operations["provision_user_api_v1_users_provision__post"];
     delete?: never;
     options?: never;
@@ -642,12 +662,12 @@ export interface paths {
     put?: never;
     /**
      * Update Info Blob
-     * @description Omitted fields are not updated.
+     * @description Updates an info-blob by id. Omitted fields are not updated.
      */
     post: operations["update_info_blob_api_v1_info_blobs__id___post"];
     /**
      * Delete Info Blob
-     * @description Returns the deleted object.
+     * @description Deletes an info-blob by id. Returns the deleted object.
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
     options?: never;
@@ -662,7 +682,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Space Info Blobs */
+    /**
+     * Get Space Info Blobs
+     * @description Returns the info-blobs of a space (without text).
+     */
     get: operations["get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get"];
     put?: never;
     post?: never;
@@ -708,9 +731,15 @@ export interface paths {
     /** Get Group By Id */
     get: operations["get_group_by_id_api_v1_groups__id___get"];
     put?: never;
-    /** Update Group */
+    /**
+     * Update Group
+     * @description Update a collection (legacy group) by id.
+     */
     post: operations["update_group_api_v1_groups__id___post"];
-    /** Delete Group By Id */
+    /**
+     * Delete Group By Id
+     * @description Delete a collection (legacy group) by id.
+     */
     delete: operations["delete_group_by_id_api_v1_groups__id___delete"];
     options?: never;
     head?: never;
@@ -729,9 +758,7 @@ export interface paths {
     put?: never;
     /**
      * Add Info Blobs
-     * @description Maximum allowed simultaneous upload is 128.
-     *
-     *     Will be embedded using the embedding model of the group.
+     * @description Add info-blobs to a collection (legacy group) and embed them.
      */
     post: operations["add_info_blobs_api_v1_groups__id__info_blobs__post"];
     delete?: never;
@@ -751,7 +778,7 @@ export interface paths {
     put?: never;
     /**
      * Upload File
-     * @description Starts a job, use the job operations to keep track of this job
+     * @description Upload a file to a collection (legacy group); starts a processing job.
      */
     post: operations["upload_file_api_v1_groups__id__info_blobs_upload__post"];
     delete?: never;
@@ -769,7 +796,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Run Semantic Search */
+    /**
+     * Run Semantic Search
+     * @description Run a semantic search within a collection (legacy group).
+     */
     post: operations["run_semantic_search_api_v1_groups__id__searches__post"];
     delete?: never;
     options?: never;
@@ -786,7 +816,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Transfer Group To Space */
+    /**
+     * Transfer Group To Space
+     * @description Transfer a collection (legacy group) to another space.
+     */
     post: operations["transfer_group_to_space_api_v1_groups__id__transfer__post"];
     delete?: never;
     options?: never;
@@ -801,12 +834,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Settings */
+    /**
+     * Get Settings
+     * @description Get the current tenant settings.
+     */
     get: operations["get_settings_api_v1_settings__get"];
     put?: never;
     /**
      * Upsert Settings
-     * @description Omitted fields are not updated.
+     * @description Update tenant settings; omitted fields are not updated.
      */
     post: operations["upsert_settings_api_v1_settings__post"];
     delete?: never;
@@ -824,11 +860,7 @@ export interface paths {
     };
     /**
      * Get Models
-     * @description From the response:
-     *         - use the `id` field as values for `completion_model`
-     *         - use the `id` field as values for `embedding_model`
-     *
-     *     in creating and updating `Assistants` and `Services`.
+     * @description List available completion and embedding models.
      */
     get: operations["get_models_api_v1_settings_models__get"];
     put?: never;
@@ -846,7 +878,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Formats */
+    /**
+     * Get Formats
+     * @description List supported file format mime types.
+     */
     get: operations["get_formats_api_v1_settings_formats__get"];
     put?: never;
     post?: never;
@@ -1026,11 +1061,14 @@ export interface paths {
     };
     /**
      * Get Assistants
-     * @description Requires Admin permission if `for_tenant` is `true`.
+     * @description List assistants. Requires Admin permission if `for_tenant` is `true`.
      */
     get: operations["get_assistants_api_v1_assistants__get"];
     put?: never;
-    /** Create Assistant */
+    /**
+     * Create Assistant
+     * @description Create a new assistant in a space.
+     */
     post: operations["create_assistant_api_v1_assistants__post"];
     delete?: never;
     options?: never;
@@ -1050,10 +1088,13 @@ export interface paths {
     put?: never;
     /**
      * Update Assistant
-     * @description Omitted fields are not updated
+     * @description Update an assistant. Omitted fields are left unchanged.
      */
     post: operations["update_assistant_api_v1_assistants__id___post"];
-    /** Delete Assistant */
+    /**
+     * Delete Assistant
+     * @description Delete an assistant.
+     */
     delete: operations["delete_assistant_api_v1_assistants__id___delete"];
     options?: never;
     head?: never;
@@ -1072,7 +1113,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Assistant
-     * @description Streams the response as Server-Sent Events if stream == true
+     * @description Ask an assistant and start a new session. Streams the response as Server-Sent Events if `stream` is `true`.
      */
     post: operations["ask_assistant_api_v1_assistants__id__sessions__post"];
     delete?: never;
@@ -1093,10 +1134,13 @@ export interface paths {
     put?: never;
     /**
      * Ask Followup
-     * @description Streams the response as Server-Sent Events if stream == true
+     * @description Ask a follow-up question in an existing session. Streams the response as Server-Sent Events if `stream` is `true`.
      */
     post: operations["ask_followup_api_v1_assistants__id__sessions__session_id___post"];
-    /** Delete Assistant Session */
+    /**
+     * Delete Assistant Session
+     * @description Delete a session belonging to an assistant.
+     */
     delete: operations["delete_assistant_session_api_v1_assistants__id__sessions__session_id___delete"];
     options?: never;
     head?: never;
@@ -1112,7 +1156,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Leave Feedback */
+    /**
+     * Leave Feedback
+     * @description Leave feedback on a session.
+     */
     post: operations["leave_feedback_api_v1_assistants__id__sessions__session_id__feedback__post"];
     delete?: never;
     options?: never;
@@ -1150,7 +1197,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Transfer Assistant To Space */
+    /**
+     * Transfer Assistant To Space
+     * @description Transfer an assistant to another space.
+     */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
     delete?: never;
     options?: never;
@@ -1167,7 +1217,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish Assistant */
+    /**
+     * Publish Assistant
+     * @description Publish or unpublish an assistant.
+     */
     post: operations["publish_assistant_api_v1_assistants__id__publish__post"];
     delete?: never;
     options?: never;
@@ -1256,7 +1309,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish Group Chat */
+    /**
+     * Publish Group Chat
+     * @description Publishes or unpublishes an existing group chat by its ID.
+     */
     post: operations["publish_group_chat_api_v1_group_chats__id__publish__post"];
     delete?: never;
     options?: never;
@@ -1282,31 +1338,7 @@ export interface paths {
     put?: never;
     /**
      * Chat
-     * @description Unified endpoint for communicating with an assistant or a group chat.
-     *
-     *     If request.session_id is provided: continues an existing conversation.
-     *     Otherwise: starts a new conversation with the specified assistant or group chat.
-     *
-     *     Either request.session_id, request.assistant_id, or request.group_chat_id must be provided.
-     *
-     *     For group chats:
-     *     - Specify the group_chat_id to chat with a group chat
-     *     - If tools.assistants contains an assistant, that specific assistant will be targeted
-     *       (requires the group chat to have allow_mentions=True).
-     *     - If no assistant is targeted, the most appropriate assistant will be selected.
-     *     - When multiple assistants could answer a question, the system will choose the most relevant one
-     *       or select the first matching assistant if relevance scores are similar.
-     *
-     *     For regular assistants:
-     *     - The tools.assistants field can be used for directing the request to a tool assistant.
-     *
-     *     Streams the response as Server-Sent Events if stream == true.
-     *     The following SSE response models are supported in the stream:
-     *     - SSEText: Text completion chunks
-     *     - SSEIntricEvent: Internal events like generating an image
-     *     - SSEFiles: Generated files/images responses
-     *     - SSEFirstChunk: Initial response with metadata
-     *     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
+     * @description Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.
      */
     post: operations["chat_api_v1_conversations__post"];
     delete?: never;
@@ -1326,15 +1358,7 @@ export interface paths {
     put?: never;
     /**
      * Preflight Tokens
-     * @description Returns the exact token cost the next chat request will add.
-     *
-     *     Excludes knowledge/RAG and web-search content (selected at request time
-     *     and unknowable up-front). Designed to be called debounced from the input
-     *     field — the cost is dominated by tokenization (~5-20ms).
-     *
-     *     Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
-     *     ~150 req/min, so the limit catches scripted abuse while leaving multiple
-     *     tabs and fast input untouched.
+     * @description Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).
      */
     post: operations["preflight_tokens_api_v1_conversations_preflight_post"];
     delete?: never;
@@ -1359,7 +1383,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Conversation
-     * @description Deletes a specific conversation
+     * @description Deletes a specific conversation (session).
      */
     delete: operations["delete_conversation_api_v1_conversations__session_id___delete"];
     options?: never;
@@ -1398,7 +1422,7 @@ export interface paths {
     put?: never;
     /**
      * Leave Feedback
-     * @description Leave feedback for a conversation
+     * @description Leave feedback for a conversation.
      */
     post: operations["leave_feedback_api_v1_conversations__session_id__feedback__post"];
     delete?: never;
@@ -1418,7 +1442,7 @@ export interface paths {
     put?: never;
     /**
      * Set Title Of Conversation
-     * @description Set the title of a conversation
+     * @description Generate and set the title of a conversation.
      */
     post: operations["set_title_of_conversation_api_v1_conversations__session_id__title__post"];
     delete?: never;
@@ -1438,14 +1462,7 @@ export interface paths {
     put?: never;
     /**
      * Approve Tools
-     * @description Submit approval decisions for pending tool calls.
-     *
-     *     When a chat request is made with require_tool_approval=true, the stream will emit
-     *     a tool_approval_required event with an approval_id and list of pending tools.
-     *     Use this endpoint to approve or reject each tool call.
-     *
-     *     The decisions list should contain one entry per tool_call_id from the event.
-     *     If a tool_call_id is omitted, it will be treated as rejected.
+     * @description Submit approval decisions for pending tool calls from a tool_approval_required event.
      */
     post: operations["approve_tools_api_v1_conversations_approve_tools__post"];
     delete?: never;
@@ -1467,7 +1484,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Rename Conversation */
+    /**
+     * Rename Conversation
+     * @description Rename a conversation (session).
+     */
     patch: operations["rename_conversation_api_v1_conversations__session_id__name__patch"];
     trace?: never;
   };
@@ -1478,18 +1498,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Services */
+    /**
+     * Get Services
+     * @description List services, optionally filtered by name.
+     */
     get: operations["get_services_api_v1_services__get"];
     put?: never;
     /**
      * Create Service
      * @description Create a service.
-     *
-     *     `json_schema` is required if `output_validation` is 'json'.
-     *
-     *     Conversely, `json_schema` is not evaluated if `output_format` is not 'json'.
-     *
-     *     if `output_format` is omitted, the output will not be formatted.
      */
     post: operations["create_service_api_v1_services__post"];
     delete?: never;
@@ -1510,10 +1527,13 @@ export interface paths {
     put?: never;
     /**
      * Update Service
-     * @description Omitted fields are not updated
+     * @description Update a service. Omitted fields are not updated.
      */
     post: operations["update_service_api_v1_services__id___post"];
-    /** Delete Service */
+    /**
+     * Delete Service
+     * @description Delete a service.
+     */
     delete: operations["delete_service_api_v1_services__id___delete"];
     options?: never;
     head?: never;
@@ -1532,7 +1552,7 @@ export interface paths {
     put?: never;
     /**
      * Run Service
-     * @description The schema of the output will be depending on the output validation of the service
+     * @description Run a service. The output schema depends on the service's output validation.
      */
     post: operations["run_service_api_v1_services__id__run__post"];
     delete?: never;
@@ -1550,7 +1570,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Transfer Service To Space */
+    /**
+     * Transfer Service To Space
+     * @description Transfer a service to another space.
+     */
     post: operations["transfer_service_to_space_api_v1_services__id__transfer__post"];
     delete?: never;
     options?: never;
@@ -1565,7 +1588,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Logging Details */
+    /**
+     * Get Logging Details
+     * @description Get the logging details for a single message by id.
+     */
     get: operations["get_logging_details_api_v1_logging__message_id___get"];
     put?: never;
     post?: never;
@@ -1584,7 +1610,7 @@ export interface paths {
     };
     /**
      * Get Counts
-     * @description Total counts.
+     * @description Get total tenant counts.
      */
     get: operations["get_counts_api_v1_analysis_counts__get"];
     put?: never;
@@ -1604,10 +1630,7 @@ export interface paths {
     };
     /**
      * Get Metadata
-     * @description Data for analytics.
-     *
-     *     Note on datetime parameters:
-     *     - If no time is provided in the datetime, time components default to 00:00:00
+     * @description Get metadata statistics for analytics.
      */
     get: operations["get_metadata_api_v1_analysis_metadata_statistics__get"];
     put?: never;
@@ -1628,16 +1651,6 @@ export interface paths {
     /**
      * Get Assistant Activity
      * @description Get assistant activity statistics for the tenant.
-     *
-     *     Returns:
-     *     - active_assistant_count: Number of assistants with sessions in the period
-     *     - total_trackable_assistants: Number of published assistants with insights enabled
-     *     - active_assistant_pct: Percentage of trackable assistants that are active
-     *     - active_user_count: Number of unique users with sessions (excluding service sessions
-     *       and deleted users)
-     *
-     *     Note on datetime parameters:
-     *     - If no time is provided in the datetime, time components default to 00:00:00
      */
     get: operations["get_assistant_activity_api_v1_analysis_assistant_activity__get"];
     put?: never;
@@ -1657,7 +1670,7 @@ export interface paths {
     };
     /**
      * Get Metadata Aggregated
-     * @description Aggregated data for analytics (hourly buckets).
+     * @description Get aggregated analytics data in hourly buckets.
      */
     get: operations["get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get"];
     put?: never;
@@ -1677,38 +1690,13 @@ export interface paths {
     };
     /**
      * Get Most Recent Questions
-     * @description Get all the questions asked to an assistant in the last `days_since` days.
-     *
-     *     `days_since`: How long back in time to get the questions.
-     *
-     *     `from_date`: Start date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `to_date`: End date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `include_followups`: If not selected, only the first question of a session is returned.
-     *         Order is by date ascending, but if followups are included they are grouped together
-     *         with their original question.
+     * @description Get the questions asked to an assistant within a time range.
      */
     get: operations["get_most_recent_questions_api_v1_analysis_assistants__assistant_id___get"];
     put?: never;
     /**
      * Ask Question About Questions
-     * @description Ask a question with the questions asked to an assistant in the last
-     *       `days_since` days as the context.
-     *
-     *     `days_since`: How long back in time to get the questions.
-     *
-     *     `from_date`: Start date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `to_date`: End date for filtering questions.
-     *         If no time is provided, time components default to 00:00:00.
-     *
-     *     `include_followups`: If not selected, only the first question of a session is returned.
-     *         Order is by date ascending, but if followups are included they are grouped together
-     *         with their original question.
+     * @description Ask a question using an assistant's recent questions as context.
      */
     post: operations["ask_question_about_questions_api_v1_analysis_assistants__assistant_id___post"];
     delete?: never;
@@ -1727,8 +1715,6 @@ export interface paths {
     /**
      * Get Most Recent Questions Paginated
      * @description Get paginated question history for an assistant.
-     *
-     *     Optimized for admin insights history view and large datasets.
      */
     get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
     put?: never;
@@ -1758,24 +1744,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Unified Questions About Questions
-     * @description Ask a question about the questions asked to an assistant or group chat.
-     *
-     *     This unified endpoint works with both assistants and group chats.
-     *     Either assistant_id or group_chat_id must be provided, but not both.
-     *
-     *     Args:
-     *         ask_analysis: Contains the question and streaming preference
-     *         days_since: How long back in time to get the questions
-     *         from_date: Start date to filter questions (overrides days_since).
-     *             If no time is provided, time components default to 00:00:00.
-     *         to_date: End date to filter questions (overrides days_since).
-     *             If no time is provided, time components default to 00:00:00.
-     *         include_followups: If False, only returns first question of each session
-     *         assistant_id: UUID of assistant to analyze questions for
-     *         group_chat_id: UUID of group chat to analyze questions for
-     *
-     *     Returns:
-     *         AnalysisAnswer containing the AI response
+     * @description Ask a question about an assistant's or group chat's conversations.
      */
     post: operations["ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post"];
     delete?: never;
@@ -1791,7 +1760,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Conversation Insight Job */
+    /**
+     * Get Conversation Insight Job
+     * @description Get the status of a conversation insights analysis job.
+     */
     get: operations["get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get"];
     put?: never;
     post?: never;
@@ -2119,7 +2091,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Privacy Policy */
+    /**
+     * Update Privacy Policy
+     * @description Update the tenant's privacy policy URL (admin only).
+     */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
     delete?: never;
     options?: never;
@@ -2889,7 +2864,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Running Jobs */
+    /**
+     * Get Running Jobs
+     * @description List the current user's running jobs.
+     */
     get: operations["get_running_jobs_api_v1_jobs__get"];
     put?: never;
     post?: never;
@@ -2906,7 +2884,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Job */
+    /**
+     * Get Job
+     * @description Get a single job owned by the current user by id.
+     */
     get: operations["get_job_api_v1_jobs__id___get"];
     put?: never;
     post?: never;
@@ -2923,10 +2904,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get User Groups */
+    /**
+     * Get User Groups
+     * @description List all user groups in the tenant.
+     */
     get: operations["get_user_groups_api_v1_user_groups__get"];
     put?: never;
-    /** Create User Group */
+    /**
+     * Create User Group
+     * @description Create a new user group.
+     */
     post: operations["create_user_group_api_v1_user_groups__post"];
     delete?: never;
     options?: never;
@@ -2941,12 +2928,21 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get User Group By Uuid */
+    /**
+     * Get User Group By Uuid
+     * @description Get a single user group by id.
+     */
     get: operations["get_user_group_by_uuid_api_v1_user_groups__id___get"];
     put?: never;
-    /** Update User Group */
+    /**
+     * Update User Group
+     * @description Update an existing user group by id.
+     */
     post: operations["update_user_group_api_v1_user_groups__id___post"];
-    /** Delete User Group By Uuid */
+    /**
+     * Delete User Group By Uuid
+     * @description Delete a user group by id.
+     */
     delete: operations["delete_user_group_by_uuid_api_v1_user_groups__id___delete"];
     options?: never;
     head?: never;
@@ -2962,9 +2958,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Add User To User Group */
+    /**
+     * Add User To User Group
+     * @description Add a user to a user group.
+     */
     post: operations["add_user_to_user_group_api_v1_user_groups__id__users__user_id___post"];
-    /** Delete User From User Group */
+    /**
+     * Delete User From User Group
+     * @description Remove a user from a user group.
+     */
     delete: operations["delete_user_from_user_group_api_v1_user_groups__id__users__user_id___delete"];
     options?: never;
     head?: never;
@@ -2978,7 +2980,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Origins */
+    /**
+     * Get Origins
+     * @description List the tenant's allowed CORS origins.
+     */
     get: operations["get_origins_api_v1_allowed_origins__get"];
     put?: never;
     post?: never;
@@ -2995,7 +3000,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Completion Models */
+    /**
+     * Get Completion Models
+     * @description List all completion models available to the organization.
+     */
     get: operations["get_completion_models_api_v1_completion_models__get"];
     put?: never;
     post?: never;
@@ -3014,7 +3022,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Completion Model */
+    /**
+     * Update Completion Model
+     * @description Update org-level settings for a completion model.
+     */
     post: operations["update_completion_model_api_v1_completion_models__id___post"];
     delete?: never;
     options?: never;
@@ -3093,12 +3104,7 @@ export interface paths {
     put?: never;
     /**
      * Migrate Model Usage
-     * @description Migrate all usage from one model to another.
-     *
-     *     Source/target validity, same-model rejection, tenant ownership and
-     *     entity-type whitelisting all live in
-     *     `CompletionModelMigrationService.migrate_model_usage` — the router
-     *     only enforces admin permission and persists the audit log on success.
+     * @description Migrate all usage from one completion model to another.
      */
     post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
     delete?: never;
@@ -3116,7 +3122,7 @@ export interface paths {
     };
     /**
      * Get All Models Usage Summary
-     * @description Get usage summary for all models (optimized with pre-aggregation).
+     * @description Get a usage summary for all completion models in the tenant.
      */
     get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
     put?: never;
@@ -3156,7 +3162,7 @@ export interface paths {
     };
     /**
      * Get All Migration History
-     * @description Get all migration history for the tenant
+     * @description Get all completion model migration history for the tenant.
      */
     get: operations["get_all_migration_history_api_v1_completion_models_migration_history_get"];
     put?: never;
@@ -3194,7 +3200,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Embedding Models */
+    /**
+     * Get Embedding Models
+     * @description List all embedding models for the tenant.
+     */
     get: operations["get_embedding_models_api_v1_embedding_models__get"];
     put?: never;
     post?: never;
@@ -3214,7 +3223,10 @@ export interface paths {
     /** Get Embedding Model */
     get: operations["get_embedding_model_api_v1_embedding_models__id___get"];
     put?: never;
-    /** Update Embedding Model */
+    /**
+     * Update Embedding Model
+     * @description Update an embedding model's settings.
+     */
     post: operations["update_embedding_model_api_v1_embedding_models__id___post"];
     delete?: never;
     options?: never;
@@ -3229,7 +3241,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Transcription Models */
+    /**
+     * Get Transcription Models
+     * @description List all transcription models for the tenant.
+     */
     get: operations["get_transcription_models_api_v1_transcription_models__get"];
     put?: never;
     post?: never;
@@ -3248,8 +3263,151 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Transcription Model */
+    /**
+     * Update Transcription Model
+     * @description Update org settings for a transcription model.
+     */
     post: operations["update_transcription_model_api_v1_transcription_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage
+     * @description Count apps and spaces that would be moved by migrating this model.
+     */
+    get: operations["get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/usage/details": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage Details
+     * @description List apps using this transcription model (for the migrate dialog).
+     */
+    get: operations["get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migration-validate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Validate Transcription Migration
+     * @description Validate transcription migration compatibility without executing.
+     */
+    get: operations["validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migrate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Migrate Transcription Model Usage
+     * @description Migrate all usage from one transcription model to another.
+     */
+    post: operations["migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/migration-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get All Transcription Migration History
+     * @description List all transcription migration history for the tenant.
+     */
+    get: operations["get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/migration-history/{migration_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Migration History By Id
+     * @description Get a specific transcription migration history record by ID.
+     */
+    get: operations["get_transcription_migration_history_by_id_api_v1_transcription_models_migration_history__migration_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migration-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Migration History
+     * @description Get migration history for a specific transcription model.
+     */
+    get: operations["get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3290,10 +3448,6 @@ export interface paths {
     /**
      * Get Provider Capabilities
      * @description Get supported model types and top models per provider type from LiteLLM.
-     *
-     *     Returns a structured response with:
-     *     - providers: dict of canonical provider types, each with modes, models, and fields
-     *     - default_fields: fallback field definitions for providers without custom fields
      */
     get: operations["get_provider_capabilities_api_v1_admin_model_providers_capabilities__get"];
     put?: never;
@@ -3369,8 +3523,6 @@ export interface paths {
     /**
      * Delete Provider
      * @description Delete a model provider.
-     *
-     *     Will fail if the provider has models attached to it.
      */
     delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
     options?: never;
@@ -3388,12 +3540,6 @@ export interface paths {
     /**
      * List Provider Models
      * @description List available models from the provider's API using its credentials.
-     *
-     *     Each entry has at least ``name`` and ``mode``. Completion entries also
-     *     include ``max_input_tokens``, ``max_output_tokens`` and ``supports_*``
-     *     flags; embedding entries include ``max_input_tokens`` and
-     *     ``output_vector_size``. When ``mode`` is supplied the server returns
-     *     only matching entries — consumers don't need to filter client-side.
      */
     get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
     put?: never;
@@ -3583,10 +3729,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Files */
+    /**
+     * Get Files
+     * @description List the current user's uploaded files.
+     */
     get: operations["get_files_api_v1_files__get"];
     put?: never;
-    /** Upload File */
+    /**
+     * Upload File
+     * @description Upload a file; rejects unsupported media types and oversized files.
+     */
     post: operations["upload_file_api_v1_files__post"];
     delete?: never;
     options?: never;
@@ -3601,11 +3753,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get File */
+    /**
+     * Get File
+     * @description Fetch a single file's metadata by id.
+     */
     get: operations["get_file_api_v1_files__id___get"];
     put?: never;
     post?: never;
-    /** Delete File */
+    /**
+     * Delete File
+     * @description Delete a file owned by the current user.
+     */
     delete: operations["delete_file_api_v1_files__id___delete"];
     options?: never;
     head?: never;
@@ -3707,7 +3865,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Limits */
+    /**
+     * Get Limits
+     * @description Get the configured size and count limits for uploads and crawls.
+     */
     get: operations["get_limits_api_v1_limits__get"];
     put?: never;
     post?: never;
@@ -3724,10 +3885,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Spaces */
+    /**
+     * Get Spaces
+     * @description List spaces the current user can access.
+     */
     get: operations["get_spaces_api_v1_spaces__get"];
     put?: never;
-    /** Create Space */
+    /**
+     * Create Space
+     * @description Create a new shared space.
+     */
     post: operations["create_space_api_v1_spaces__post"];
     delete?: never;
     options?: never;
@@ -3746,11 +3913,17 @@ export interface paths {
     get: operations["get_space_api_v1_spaces__id___get"];
     put?: never;
     post?: never;
-    /** Delete Space */
+    /**
+     * Delete Space
+     * @description Delete a space. Organization spaces cannot be deleted.
+     */
     delete: operations["delete_space_api_v1_spaces__id___delete"];
     options?: never;
     head?: never;
-    /** Update Space */
+    /**
+     * Update Space
+     * @description Update a space's settings (name, description, models, MCP servers, security classification, data retention).
+     */
     patch: operations["update_space_api_v1_spaces__id___patch"];
     trace?: never;
   };
@@ -3800,7 +3973,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Assistant */
+    /**
+     * Create Space Assistant
+     * @description Create an assistant in a space, optionally from a template.
+     */
     post: operations["create_space_assistant_api_v1_spaces__id__applications_assistants__post"];
     delete?: never;
     options?: never;
@@ -3837,7 +4013,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create App */
+    /**
+     * Create App
+     * @description Create an app in a space, optionally from a template.
+     */
     post: operations["create_app_api_v1_spaces__id__applications_apps__post"];
     delete?: never;
     options?: never;
@@ -3854,7 +4033,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Services */
+    /**
+     * Create Space Services
+     * @description Create a service in a space.
+     */
     post: operations["create_space_services_api_v1_spaces__id__applications_services__post"];
     delete?: never;
     options?: never;
@@ -3888,7 +4070,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Groups */
+    /**
+     * Create Space Groups
+     * @description Create a knowledge collection in a space.
+     */
     post: operations["create_space_groups_api_v1_spaces__id__knowledge_groups__post"];
     delete?: never;
     options?: never;
@@ -3944,7 +4129,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Integration Knowledge */
+    /**
+     * Create Space Integration Knowledge
+     * @description Add integration knowledge to a space. Returns a job to track import progress.
+     */
     post: operations["create_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_add__user_integration_id___post"];
     delete?: never;
     options?: never;
@@ -3961,7 +4149,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Space Integration Knowledge Batch */
+    /**
+     * Create Space Integration Knowledge Batch
+     * @description Add multiple integration knowledge items to a space in a single batch.
+     */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
     delete?: never;
     options?: never;
@@ -3979,7 +4170,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete Space Integration Knowledge */
+    /**
+     * Delete Space Integration Knowledge
+     * @description Remove integration knowledge from a space.
+     */
     delete: operations["delete_space_integration_knowledge_api_v1_spaces__id__knowledge_integrations_remove__integration_knowledge_id___delete"];
     options?: never;
     head?: never;
@@ -3996,11 +4190,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete Integration Knowledge Wrapper */
+    /**
+     * Delete Integration Knowledge Wrapper
+     * @description Remove an integration knowledge wrapper and its items from a space.
+     */
     delete: operations["delete_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___delete"];
     options?: never;
     head?: never;
-    /** Update Integration Knowledge Wrapper */
+    /**
+     * Update Integration Knowledge Wrapper
+     * @description Rename an integration knowledge wrapper in a space.
+     */
     patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
     trace?: never;
   };
@@ -4017,7 +4217,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update Integration Knowledge */
+    /**
+     * Update Integration Knowledge
+     * @description Rename integration knowledge in a space.
+     */
     patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
     trace?: never;
   };
@@ -4030,7 +4233,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Trigger Integration Full Sync */
+    /**
+     * Trigger Integration Full Sync
+     * @description Trigger a full re-sync of integration knowledge. Returns a job to track progress.
+     */
     post: operations["trigger_integration_full_sync_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__sync__post"];
     delete?: never;
     options?: never;
@@ -4047,7 +4253,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Add Space Member */
+    /**
+     * Add Space Member
+     * @description Add a user as a member of a space with a given role.
+     */
     post: operations["add_space_member_api_v1_spaces__id__members__post"];
     delete?: never;
     options?: never;
@@ -4065,11 +4274,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Remove Space Member */
+    /**
+     * Remove Space Member
+     * @description Remove a member from a space.
+     */
     delete: operations["remove_space_member_api_v1_spaces__id__members__user_id___delete"];
     options?: never;
     head?: never;
-    /** Change Role Of Member */
+    /**
+     * Change Role Of Member
+     * @description Change a space member's role.
+     */
     patch: operations["change_role_of_member_api_v1_spaces__id__members__user_id___patch"];
     trace?: never;
   };
@@ -4109,10 +4324,7 @@ export interface paths {
     post?: never;
     /**
      * Remove Space Group Member
-     * @description Remove a user group from a space.
-     *
-     *     All members of the group will lose access through this group membership.
-     *     Note: Users may still have access through direct membership or other groups.
+     * @description Remove a user group from a space. Members lose access granted via this group, but may still have access through direct membership or other groups.
      */
     delete: operations["remove_space_group_member_api_v1_spaces__id__group_members__group_id___delete"];
     options?: never;
@@ -4131,7 +4343,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Personal Space */
+    /**
+     * Get Personal Space
+     * @description Get the current user's personal space.
+     */
     get: operations["get_personal_space_api_v1_spaces_type_personal__get"];
     put?: never;
     post?: never;
@@ -4148,7 +4363,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Organization Space */
+    /**
+     * Get Organization Space
+     * @description Get the organization (tenant) space. Requires admin permission.
+     */
     get: operations["get_organization_space_api_v1_spaces_type_organization__get"];
     put?: never;
     post?: never;
@@ -4165,7 +4383,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Dashboard */
+    /**
+     * Get Dashboard
+     * @description Get the current user's dashboard (spaces and published applications).
+     */
     get: operations["get_dashboard_api_v1_dashboard__get"];
     put?: never;
     post?: never;
@@ -4185,12 +4406,14 @@ export interface paths {
     /**
      * Get Websites
      * @deprecated
+     * @description Deprecated: list websites. Always returns 410 Gone.
      */
     get: operations["get_websites_api_v1_websites__get"];
     put?: never;
     /**
      * Create Website
      * @deprecated
+     * @description Deprecated: create a website. Always returns 410 Gone.
      */
     post: operations["create_website_api_v1_websites__post"];
     delete?: never;
@@ -4295,9 +4518,15 @@ export interface paths {
     /** Get Website */
     get: operations["get_website_api_v1_websites__id___get"];
     put?: never;
-    /** Update Website */
+    /**
+     * Update Website
+     * @description Update a website's configuration by id.
+     */
     post: operations["update_website_api_v1_websites__id___post"];
-    /** Delete Website */
+    /**
+     * Delete Website
+     * @description Delete a website by id.
+     */
     delete: operations["delete_website_api_v1_websites__id___delete"];
     options?: never;
     head?: never;
@@ -4344,7 +4573,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Crawl Runs */
+    /**
+     * Get Crawl Runs
+     * @description List crawl runs for a website by id.
+     */
     get: operations["get_crawl_runs_api_v1_websites__id__runs__get"];
     put?: never;
     post?: never;
@@ -4363,7 +4595,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Transfer Website To Space */
+    /**
+     * Transfer Website To Space
+     * @description Transfer a website to another space by id.
+     */
     post: operations["transfer_website_to_space_api_v1_websites__id__transfer__post"];
     delete?: never;
     options?: never;
@@ -4395,15 +4630,24 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Prompt */
+    /**
+     * Get Prompt
+     * @description Get a prompt by id.
+     */
     get: operations["get_prompt_api_v1_prompts__id___get"];
     put?: never;
     post?: never;
-    /** Delete Prompt */
+    /**
+     * Delete Prompt
+     * @description Delete a prompt by id.
+     */
     delete: operations["delete_prompt_api_v1_prompts__id___delete"];
     options?: never;
     head?: never;
-    /** Update Prompt Description */
+    /**
+     * Update Prompt Description
+     * @description Update a prompt's description by id.
+     */
     patch: operations["update_prompt_description_api_v1_prompts__id___patch"];
     trace?: never;
   };
@@ -4478,7 +4722,7 @@ export interface paths {
     };
     /**
      * Get Templates
-     * @description Get all types of templates
+     * @description List all available templates (assistants and apps).
      */
     get: operations["get_templates_api_v1_templates__get"];
     put?: never;
@@ -4496,7 +4740,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Storage */
+    /**
+     * Get Storage
+     * @description Get aggregated storage usage for the tenant.
+     */
     get: operations["get_storage_api_v1_storage__get"];
     put?: never;
     post?: never;
@@ -4513,7 +4760,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Spaces */
+    /**
+     * Get Spaces
+     * @description Get per-space storage usage breakdown for the tenant.
+     */
     get: operations["get_spaces_api_v1_storage_spaces__get"];
     put?: never;
     post?: never;
@@ -4532,9 +4782,7 @@ export interface paths {
     };
     /**
      * Get Token Usage
-     * @description Get token usage statistics for the specified date range.
-     *     If no dates are provided, returns token usage for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     * @description Get aggregate token usage statistics for the specified date range. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_token_usage_api_v1_token_usage__get"];
     put?: never;
@@ -4554,9 +4802,7 @@ export interface paths {
     };
     /**
      * Get User Token Usage
-     * @description Get token usage statistics aggregated by user for the specified date range.
-     *     If no dates are provided, returns token usage for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     * @description Get token usage statistics aggregated by user for the specified date range. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_user_token_usage_api_v1_token_usage_users_get"];
     put?: never;
@@ -4576,9 +4822,7 @@ export interface paths {
     };
     /**
      * Get User Summary
-     * @description Get summary for a specific user without fetching all users.
-     *     If no dates are provided, returns summary for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     * @description Get token usage summary for a specific user without fetching all users. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_user_summary_api_v1_token_usage_users__user_id__summary_get"];
     put?: never;
@@ -4598,9 +4842,7 @@ export interface paths {
     };
     /**
      * Get User Model Breakdown
-     * @description Get model breakdown for a specific user within the specified date range.
-     *     If no dates are provided, returns model breakdown for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     * @description Get model breakdown for a specific user within the specified date range. If no dates are provided, the last 30 days are used.
      */
     get: operations["get_user_model_breakdown_api_v1_token_usage_users__user_id__get"];
     put?: never;
@@ -4631,12 +4873,6 @@ export interface paths {
     /**
      * Create Security Classification
      * @description Create a new security classification for the current tenant.
-     *     Args:
-     *         request: The security classification creation request.
-     *     Returns:
-     *         The created security classification.
-     *     Raises:
-     *         400: If the request is invalid. Names must be unique.
      */
     post: operations["create_security_classification_api_v1_security_classifications__post"];
     delete?: never;
@@ -4644,15 +4880,7 @@ export interface paths {
     head?: never;
     /**
      * Update Security Classification Levels
-     * @description Update the security levels of security classifications.
-     *     Args:
-     *         request: Security classifications to update.
-     *     Returns:
-     *         The updated security classifications.
-     *     Raises:
-     *         400: If the request is invalid.
-     *         403: If the user doesn't have permission to update the security classification.
-     *         404: If the security classification doesn't exist or belongs to a different tenant.
+     * @description Update the security levels (ordering) of security classifications.
      */
     patch: operations["update_security_classification_levels_api_v1_security_classifications__patch"];
     trace?: never;
@@ -4680,21 +4908,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Security Classification
-     * @description Delete a security classification.
-     *
-     *     Refuses if any model, space or MCP server still references it — the
-     *     FK is `ON DELETE SET NULL`, so dropping a referenced classification
-     *     would silently downgrade every dependent row to "no classification".
-     *     Pass `?force=true` to override after reviewing the usage report.
-     *
-     *     Args:
-     *         id: The ID of the security classification to delete.
-     *         force: When true, delete even if rows still reference this
-     *             classification. Those rows will be downgraded to NULL.
-     *     Raises:
-     *         400: If the classification is referenced and `force` is false.
-     *         403: If the user doesn't have permission to delete the security classification.
-     *         404: If the security classification doesn't exist.
+     * @description Delete a security classification, optionally forcing if still referenced.
      */
     delete: operations["delete_security_classification_api_v1_security_classifications__id___delete"];
     options?: never;
@@ -4702,21 +4916,6 @@ export interface paths {
     /**
      * Update Security Classification
      * @description Update a single security classification's name and/or description.
-     *
-     *     This endpoint allows updating just the name and description of a security classification
-     *     without changing its security level.
-     *
-     *     Args:
-     *         id: The ID of the security classification to update
-     *         request: The update request containing new name and/or description
-     *
-     *     Returns:
-     *         The updated security classification
-     *
-     *     Raises:
-     *         400: If the request is invalid or security is disabled. Names must be unique.
-     *         403: If the user doesn't have permission to update the classification
-     *         404: If the security classification doesn't exist
      */
     patch: operations["update_security_classification_api_v1_security_classifications__id___patch"];
     trace?: never;
@@ -4733,16 +4932,6 @@ export interface paths {
     /**
      * Toggle Security Classifications
      * @description Enable or disable security classifications for the current tenant.
-     *
-     *     Args:
-     *         request: Contains a flag to enable or disable security classifications.
-     *
-     *     Returns:
-     *         The updated tenant information with security_enabled status.
-     *
-     *     Raises:
-     *         400: If the request is invalid.
-     *         403: If the user doesn't have permission to update tenant settings.
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
     delete?: never;
@@ -4811,16 +5000,7 @@ export interface paths {
     post?: never;
     /**
      * Reset Rate Limit
-     * @description Admin utility: Reset audit session rate limit for current user.
-     *
-     *     This endpoint is only available in development/testing environments.
-     *     Use when you get rate limited during testing.
-     *
-     *     Requires: Authentication (JWT token or API key)
-     *     Requires: Development/testing environment
-     *
-     *     Note: Permission check intentionally removed to allow clearing rate limit
-     *     even when locked out. User is still authenticated via JWT.
+     * @description Reset the audit session rate limit for the current user (testing only).
      */
     delete: operations["reset_rate_limit_api_v1_audit_access_session_rate_limit_delete"];
     options?: never;
@@ -4839,22 +5019,7 @@ export interface paths {
     put?: never;
     /**
      * Create Access Session
-     * @description Create an audit access session with justification.
-     *
-     *     Stores the access justification securely in Redis (server-side) instead of
-     *     exposing it in URL parameters. Returns an HTTP-only cookie with session ID.
-     *
-     *     Security Features:
-     *     - Justification never appears in URLs or browser history
-     *     - Session ID stored in HTTP-only cookie (prevents XSS)
-     *     - Automatic expiration after 1 hour
-     *     - Tenant isolation validation
-     *     - Instant revocation capability
-     *
-     *     Requires: Authentication (JWT token or API key)
-     *     Requires: Admin permissions
-     *
-     *     Returns: Session creation confirmation with HTTP-only cookie set
+     * @description Create an audit access session with justification, stored server-side.
      */
     post: operations["create_access_session_api_v1_audit_access_session_post"];
     delete?: never;
@@ -4873,18 +5038,6 @@ export interface paths {
     /**
      * List Audit Logs
      * @description List audit logs for the authenticated user's tenant.
-     *
-     *     Security:
-     *     - Requires active audit access session (via HTTP-only cookie)
-     *     - Session must contain valid justification
-     *     - Justification stored server-side (Redis) - never in URLs
-     *
-     *     Access Control:
-     *     - Admins only: View all actions in their tenant
-     *
-     *     Requires: Authentication (JWT token or API key)
-     *     Requires: Admin permissions
-     *     Requires: Active audit access session with justification
      */
     get: operations["list_audit_logs_api_v1_audit_logs_get"];
     put?: never;
@@ -4904,13 +5057,7 @@ export interface paths {
     };
     /**
      * Get User Logs
-     * @description Get all logs where user is actor OR target (GDPR Article 15 export).
-     *
-     *     Returns audit logs involving the user in any capacity.
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
-     *     Security: Only returns logs for the authenticated user's tenant
+     * @description Get all audit logs where the user is actor or target (GDPR Article 15 export).
      */
     get: operations["get_user_logs_api_v1_audit_logs_user__user_id__get"];
     put?: never;
@@ -4930,22 +5077,7 @@ export interface paths {
     };
     /**
      * Export Audit Logs
-     * @description Export audit logs to CSV or JSON Lines format.
-     *
-     *     Supported formats:
-     *     - csv: Comma-separated values (default, Excel-compatible)
-     *     - json: JSON Lines format (one JSON object per line, for large exports)
-     *
-     *     Use user_id for GDPR Article 15 data subject access requests.
-     *
-     *     Memory Protection:
-     *     - Default limit: 50,000 records (configurable via max_records parameter)
-     *     - Response includes X-Records-Truncated header if limit was hit
-     *     - Response includes X-Total-Records header with total matching count
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
-     *     Security: Only exports logs for the authenticated user's tenant
+     * @description Export audit logs to CSV or JSON Lines format. Default limit is 50,000 records (configurable via max_records, max 100,000); the response includes an X-Records-Truncated header when the limit is hit.
      */
     get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
     put?: never;
@@ -4967,23 +5099,7 @@ export interface paths {
     put?: never;
     /**
      * Request Async Export
-     * @description Request async export of audit logs.
-     *
-     *     Returns immediately with a job_id. Poll /logs/export/{job_id}/status for progress.
-     *     Download via /logs/export/{job_id}/download when complete.
-     *
-     *     Advantages over sync export:
-     *     - Handles 1M-10M+ records without timeout
-     *     - Progress tracking for long exports
-     *     - Cancellation support
-     *     - Constant memory usage (~50MB)
-     *
-     *     Limitations:
-     *     - Max 2 concurrent exports per tenant
-     *     - Files auto-deleted after 24 hours
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
+     * @description Request an async background export of audit logs and receive a job ID. Limited to 2 concurrent exports per tenant; generated files are auto-deleted after 24 hours.
      */
     post: operations["request_async_export_api_v1_audit_logs_export_async_post"];
     delete?: never;
@@ -5001,13 +5117,7 @@ export interface paths {
     };
     /**
      * Get Export Status
-     * @description Get export job status with progress.
-     *
-     *     Poll this endpoint to track export progress.
-     *     When status is 'completed', use the download_url to get the file.
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
+     * @description Get the status and progress of an async export job.
      */
     get: operations["get_export_status_api_v1_audit_logs_export__job_id__status_get"];
     put?: never;
@@ -5027,13 +5137,7 @@ export interface paths {
     };
     /**
      * Download Export
-     * @description Download completed export file.
-     *
-     *     Only available when job status is 'completed'.
-     *     Files are auto-deleted after 24 hours.
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
+     * @description Download the completed export file for an async export job. Files are auto-deleted after 24 hours.
      */
     get: operations["download_export_api_v1_audit_logs_export__job_id__download_get"];
     put?: never;
@@ -5055,13 +5159,7 @@ export interface paths {
     put?: never;
     /**
      * Cancel Export
-     * @description Cancel an in-progress export.
-     *
-     *     Only works for jobs in 'pending' or 'processing' state.
-     *     The worker will stop processing and clean up the partial file.
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
+     * @description Cancel an in-progress async export job.
      */
     post: operations["cancel_export_api_v1_audit_logs_export__job_id__cancel_post"];
     delete?: never;
@@ -5079,33 +5177,12 @@ export interface paths {
     };
     /**
      * Get Retention Policy
-     * @description Get the current retention policy for your tenant.
-     *
-     *     Returns audit log retention policy configuration.
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
+     * @description Get the current audit log retention policy for the tenant.
      */
     get: operations["get_retention_policy_api_v1_audit_retention_policy_get"];
     /**
      * Update Retention Policy
-     * @description Update the audit log retention policy for your tenant.
-     *
-     *     Configure audit log retention for compliance and security tracking.
-     *
-     *     Audit Log Retention:
-     *     - Minimum: 1 day (Recommended: 90+ days for compliance)
-     *     - Maximum: 2555 days (~7 years, Swedish statute of limitations)
-     *     - Default: 365 days (Swedish Arkivlagen)
-     *
-     *     Note: Conversation retention is configured at the Assistant, App, or Space level.
-     *     Tenant-level conversation retention has been removed to prevent accidental data loss.
-     *
-     *     The system automatically runs a daily job to delete audit logs older than
-     *     the retention period.
-     *
-     *     Requires: Authentication (JWT token or API key via X-API-Key header)
-     *     Requires: Admin permissions
+     * @description Update the audit log retention policy for the tenant.
      */
     put: operations["update_retention_policy_api_v1_audit_retention_policy_put"];
     post?: never;
@@ -5122,7 +5199,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Integrations */
+    /**
+     * Get Integrations
+     * @description List all available integrations.
+     */
     get: operations["get_integrations_api_v1_integrations__get"];
     put?: never;
     post?: never;
@@ -5139,7 +5219,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Tenant Integrations */
+    /**
+     * Get Tenant Integrations
+     * @description List the tenant's integrations, optionally filtered.
+     */
     get: operations["get_tenant_integrations_api_v1_integrations_tenant__get"];
     put?: never;
     post?: never;
@@ -5158,7 +5241,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Add Tenant Integration */
+    /**
+     * Add Tenant Integration
+     * @description Add an integration to the tenant.
+     */
     post: operations["add_tenant_integration_api_v1_integrations_tenant_add__integration_id___post"];
     delete?: never;
     options?: never;
@@ -5176,7 +5262,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Remove Tenant Integration */
+    /**
+     * Remove Tenant Integration
+     * @description Remove an integration from the tenant.
+     */
     delete: operations["remove_tenant_integration_api_v1_integrations_tenant_remove__tenant_integration_id___delete"];
     options?: never;
     head?: never;
@@ -5192,10 +5281,7 @@ export interface paths {
     };
     /**
      * Get User Integrations
-     * @description Get user's personal integrations.
-     *
-     *     Only returns user_oauth integrations (personal account connections).
-     *     Tenant app integrations are managed in admin panel and not shown here.
+     * @description List the current user's personal integrations.
      */
     get: operations["get_user_integrations_api_v1_integrations_me__get"];
     put?: never;
@@ -5215,10 +5301,7 @@ export interface paths {
     };
     /**
      * Get Available Integrations For Space
-     * @description Get integrations available for a specific space, filtered by space type and auth type.
-     *
-     *     - Personal spaces: Only user OAuth integrations
-     *     - Shared/Organization spaces: Both tenant app and user OAuth integrations
+     * @description List integrations available for a specific space.
      */
     get: operations["get_available_integrations_for_space_api_v1_integrations_spaces__space_id__available__get"];
     put?: never;
@@ -5239,7 +5322,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Disconnect User Integration */
+    /**
+     * Disconnect User Integration
+     * @description Disconnect the current user's integration.
+     */
     delete: operations["disconnect_user_integration_api_v1_integrations_users__user_integration_id___delete"];
     options?: never;
     head?: never;
@@ -5273,7 +5359,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Integration Preview */
+    /**
+     * Get Integration Preview
+     * @description Get preview data for a user integration.
+     */
     get: operations["get_integration_preview_api_v1_integrations__user_integration_id__preview__get"];
     put?: never;
     post?: never;
@@ -5292,14 +5381,7 @@ export interface paths {
     };
     /**
      * Get Sharepoint Folder Tree
-     * @description Get SharePoint/OneDrive folder tree with hybrid authentication support.
-     *
-     *     Authentication is determined by space type:
-     *     - Personal space: Uses user OAuth
-     *     - Shared/Org space with tenant app: Uses tenant app (no person-dependency)
-     *     - Shared/Org space without tenant app: Falls back to user OAuth
-     *
-     *     Provide site_id for SharePoint sites, or drive_id for OneDrive.
+     * @description Get SharePoint/OneDrive folder tree for a user integration.
      */
     get: operations["get_sharepoint_folder_tree_api_v1_integrations__user_integration_id__sharepoint_tree__get"];
     put?: never;
@@ -5317,7 +5399,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Integration By Id */
+    /**
+     * Get Integration By Id
+     * @description Get a single integration by ID.
+     */
     get: operations["get_integration_by_id_api_v1_integrations__integration_id___get"];
     put?: never;
     post?: never;
@@ -5343,8 +5428,6 @@ export interface paths {
     /**
      * Create Mcp Server
      * @description Create a new MCP server in global catalog (admin only).
-     *
-     *     Validates connection before saving. Returns 400 if connection fails.
      */
     post: operations["create_mcp_server_api_v1_mcp_servers__post"];
     delete?: never;
@@ -5481,12 +5564,6 @@ export interface paths {
     /**
      * Sync Mcp Server Tools
      * @description Sync tools from remote MCP server (admin only).
-     *
-     *     Detects new, changed, and removed tools. Changes are stored as pending
-     *     and require explicit approval before becoming active. This prevents a
-     *     compromised MCP server from injecting malicious tool definitions.
-     *
-     *     Returns 400 if connection to the MCP server fails.
      */
     post: operations["sync_mcp_server_tools_api_v1_mcp_servers__id__tools_sync__post"];
     delete?: never;
@@ -5507,9 +5584,6 @@ export interface paths {
     /**
      * Approve Tool Changes
      * @description Approve pending tool changes (admin only).
-     *
-     *     For new/changed tools: pending values become active.
-     *     For removed tools: tool is deleted from database.
      */
     post: operations["approve_tool_changes_api_v1_mcp_servers__id__tools_review_approve__post"];
     delete?: never;
@@ -5530,10 +5604,6 @@ export interface paths {
     /**
      * Reject Tool Changes
      * @description Reject pending tool changes (admin only).
-     *
-     *     For new tools: tool is deleted (never activated).
-     *     For changed tools: pending values are cleared, active values kept.
-     *     For removed tools: removed flag is cleared, tool stays active.
      */
     post: operations["reject_tool_changes_api_v1_mcp_servers__id__tools_review_reject__post"];
     delete?: never;
@@ -5582,6 +5652,90 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/prompt-library/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Prompt Library Entries */
+    get: operations["list_prompt_library_entries_api_v1_admin_prompt_library__get"];
+    put?: never;
+    /**
+     * Create Prompt Library Entry
+     * @description Create a prompt library entry
+     */
+    post: operations["create_prompt_library_entry_api_v1_admin_prompt_library__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/prompt-library/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Prompt Library Entry */
+    get: operations["get_prompt_library_entry_api_v1_admin_prompt_library__id___get"];
+    /**
+     * Update Prompt Library Entry
+     * @description Update a prompt library entry
+     */
+    put: operations["update_prompt_library_entry_api_v1_admin_prompt_library__id___put"];
+    post?: never;
+    /**
+     * Delete Prompt Library Entry
+     * @description Delete a prompt library entry
+     */
+    delete: operations["delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/prompt-library/{id}/versions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Prompt Library Entry Versions */
+    get: operations["list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/governance-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Governance Policy */
+    get: operations["get_governance_policy_api_v1_admin_governance_policy__get"];
+    /**
+     * Update Governance Policy
+     * @description Update the personal assistant governance policy
+     */
+    put: operations["update_governance_policy_api_v1_admin_governance_policy__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -5589,10 +5743,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Sharepoint Webhook Validation */
+    /**
+     * Sharepoint Webhook Validation
+     * @description Echo the Microsoft Graph validation token (plain text) when present, otherwise report webhook endpoint health.
+     */
     get: operations["sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get"];
     put?: never;
-    /** Sharepoint Webhook */
+    /**
+     * Sharepoint Webhook
+     * @description Handle SharePoint change notifications; echo the Graph validation token (plain text) during the subscription handshake.
+     */
     post: operations["sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post"];
     delete?: never;
     options?: never;
@@ -5757,6 +5917,191 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/help-assistants/roles/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Roles
+     * @description List the Help-Assistant roles installed for the calling tenant.
+     */
+    get: operations["list_roles_api_v1_admin_help_assistants_roles__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Templates
+     * @description Shipped Help Assistant templates not yet installed for the tenant.
+     */
+    get: operations["list_templates_api_v1_admin_help_assistants_templates__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Active Role */
+    get: operations["get_active_role_api_v1_admin_help_assistants_roles__kind___get"];
+    put?: never;
+    /**
+     * Install Helper
+     * @description Install a shipped Help-Assistant template (blank helper + active role).
+     */
+    post: operations["install_helper_api_v1_admin_help_assistants_roles__kind___post"];
+    /**
+     * Uninstall Helper
+     * @description Uninstall the active helper for a kind (deletes its role and assistant).
+     */
+    delete: operations["uninstall_helper_api_v1_admin_help_assistants_roles__kind___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/enabled": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle Enabled
+     * @description Enable or disable a helper role for the tenant.
+     */
+    patch: operations["toggle_enabled_api_v1_admin_help_assistants_roles__kind__enabled_patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/visible": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle Visible
+     * @description Show or hide a helper role from end users.
+     */
+    patch: operations["toggle_visible_api_v1_admin_help_assistants_roles__kind__visible_patch"];
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start Helper Run
+     * @description Start a new helper run for a target assistant (JSON or SSE).
+     */
+    post: operations["start_helper_run_api_v1_help_assistants_runs__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/{run_id}/turns/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Continue Helper Run
+     * @description Follow-up turn on an existing helper run (JSON or SSE).
+     */
+    post: operations["continue_helper_run_api_v1_help_assistants_runs__run_id__turns__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/{run_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Helper Run Status
+     * @description Transition a helper run to a terminal status (completed/abandoned/failed).
+     */
+    patch: operations["update_helper_run_status_api_v1_help_assistants_runs__run_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/help-assistants/availability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Helper Availability
+     * @description Pre-flight signal for whether the prompt-guide button should render.
+     */
+    get: operations["get_helper_availability_api_v1_help_assistants_availability_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/ai-models/": {
     parameters: {
       query?: never;
@@ -5784,7 +6129,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Gen Url */
+    /**
+     * Gen Url
+     * @description Generate the OAuth2 authorization URL for a tenant integration.
+     */
     get: operations["gen_url_api_v1_integrations_auth__tenant_integration_id__url__get"];
     put?: never;
     post?: never;
@@ -5803,7 +6151,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** On Auth Callback */
+    /**
+     * On Auth Callback
+     * @description Complete the OAuth2 callback by exchanging the auth code for a user integration.
+     */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
     delete?: never;
     options?: never;
@@ -5818,10 +6169,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get All Users */
+    /**
+     * Get All Users
+     * @description List all users across all tenants.
+     */
     get: operations["get_all_users_api_v1_sysadmin_users__get"];
     put?: never;
-    /** Register New User */
+    /**
+     * Register New User
+     * @description Register a new user as sysadmin and return the created user with an access token.
+     */
     post: operations["register_new_user_api_v1_sysadmin_users__post"];
     delete?: never;
     options?: never;
@@ -5836,15 +6193,21 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get User */
+    /**
+     * Get User
+     * @description Get a single user by id.
+     */
     get: operations["get_user_api_v1_sysadmin_users__user_id___get"];
     put?: never;
     /**
      * Update User
-     * @description Omitted fields are not updated.
+     * @description Update a user by id; omitted fields are left unchanged.
      */
     post: operations["update_user_api_v1_sysadmin_users__user_id___post"];
-    /** Delete User */
+    /**
+     * Delete User
+     * @description Delete a user by id.
+     */
     delete: operations["delete_user_api_v1_sysadmin_users__user_id___delete"];
     options?: never;
     head?: never;
@@ -5860,21 +6223,14 @@ export interface paths {
     };
     /**
      * Get Tenants
-     * @description Get all tenants with masked API credentials.
-     *
-     *     Returns tenant information with API keys masked to show only last 4 characters.
-     *     This prevents exposing full API keys through the API endpoint.
-     *
-     *     Args:
-     *         domain: Optional domain filter
-     *         container: Dependency injection container
-     *
-     *     Returns:
-     *         Paginated list of tenants with masked credentials
+     * @description List all tenants with API credentials masked, optionally filtered by domain.
      */
     get: operations["get_tenants_api_v1_sysadmin_tenants__get"];
     put?: never;
-    /** Create Tenant */
+    /**
+     * Create Tenant
+     * @description Create a new tenant and return it with masked credentials.
+     */
     post: operations["create_tenant_api_v1_sysadmin_tenants__post"];
     delete?: never;
     options?: never;
@@ -5891,9 +6247,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Tenant */
+    /**
+     * Update Tenant
+     * @description Update a tenant by id and return it with masked credentials.
+     */
     post: operations["update_tenant_api_v1_sysadmin_tenants__id___post"];
-    /** Delete Tenant By Id */
+    /**
+     * Delete Tenant By Id
+     * @description Delete a tenant by id and return it with masked credentials.
+     */
     delete: operations["delete_tenant_by_id_api_v1_sysadmin_tenants__id___delete"];
     options?: never;
     head?: never;
@@ -5907,7 +6269,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Predefined Roles */
+    /**
+     * Get Predefined Roles
+     * @description List the predefined roles loaded from configuration.
+     */
     get: operations["get_predefined_roles_api_v1_sysadmin_predefined_roles__get"];
     put?: never;
     post?: never;
@@ -5926,7 +6291,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Crawl All Weekly Websites */
+    /**
+     * Crawl All Weekly Websites
+     * @description Trigger crawls for all websites scheduled to run weekly.
+     */
     post: operations["crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post"];
     delete?: never;
     options?: never;
@@ -6001,7 +6369,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Enable Completion Model */
+    /**
+     * Enable Completion Model
+     * @description Enable or disable a completion model for a specific tenant.
+     */
     post: operations["enable_completion_model_api_v1_sysadmin_tenants__id__completion_models__completion_model_id___post"];
     delete?: never;
     options?: never;
@@ -6018,7 +6389,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Enable Embedding Model */
+    /**
+     * Enable Embedding Model
+     * @description Enable or disable an embedding model for a specific tenant.
+     */
     post: operations["enable_embedding_model_api_v1_sysadmin_tenants__id__embedding_models__embedding_model_id___post"];
     delete?: never;
     options?: never;
@@ -6033,10 +6407,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Origins */
+    /**
+     * Get Origins
+     * @description List allowed CORS origins, optionally filtered by tenant.
+     */
     get: operations["get_origins_api_v1_sysadmin_allowed_origins__get"];
     put?: never;
-    /** Add Origin */
+    /**
+     * Add Origin
+     * @description Add an allowed CORS origin for a tenant.
+     */
     post: operations["add_origin_api_v1_sysadmin_allowed_origins__post"];
     delete?: never;
     options?: never;
@@ -6054,7 +6434,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete Origin */
+    /**
+     * Delete Origin
+     * @description Delete an allowed CORS origin by id (idempotent).
+     */
     delete: operations["delete_origin_api_v1_sysadmin_allowed_origins__id___delete"];
     options?: never;
     head?: never;
@@ -6073,9 +6456,6 @@ export interface paths {
     /**
      * Recalculate Tenant Usage Statistics
      * @description Recalculate usage statistics for a specific tenant.
-     *
-     *     This endpoint is intended for tenant-specific administrative operations,
-     *     such as fixing usage statistics for a particular tenant.
      */
     post: operations["recalculate_tenant_usage_statistics_api_v1_sysadmin_tenants__tenant_id__usage_stats_recalculate_post"];
     delete?: never;
@@ -6096,9 +6476,6 @@ export interface paths {
     /**
      * Recalculate All Tenants Usage Statistics
      * @description Recalculate usage statistics for all active tenants.
-     *
-     *     This endpoint is intended for system-wide administrative operations,
-     *     such as bulk recalculation of usage statistics across all tenants.
      */
     post: operations["recalculate_all_tenants_usage_statistics_api_v1_sysadmin_system_usage_stats_recalculate_all_post"];
     delete?: never;
@@ -6118,18 +6495,7 @@ export interface paths {
     put?: never;
     /**
      * Migrate Completion Model For Tenant
-     * @description Migrate completion model usage for a specific tenant.
-     *
-     *     This endpoint allows system administrators to migrate all usage from one
-     *     completion model to another for a specific tenant. This is useful for:
-     *     - Migrating tenants away from deprecated models
-     *     - Consolidating model usage
-     *     - Fixing model configurations for specific tenants
-     *
-     *     Args:
-     *         tenant_id: UUID of the tenant to migrate
-     *         model_id: UUID of the source model to migrate from
-     *         migration_request: Details of the migration (target model, entity types, etc.)
+     * @description Migrate completion model usage from one model to another for a specific tenant.
      */
     post: operations["migrate_completion_model_for_tenant_api_v1_sysadmin_tenants__tenant_id__completion_models__model_id__migrate_post"];
     delete?: never;
@@ -6149,17 +6515,7 @@ export interface paths {
     put?: never;
     /**
      * Migrate Completion Model For All Tenants
-     * @description Migrate completion model usage for all active tenants.
-     *
-     *     This endpoint allows system administrators to migrate all usage from one
-     *     completion model to another across all active tenants. This is useful for:
-     *     - Deprecating models system-wide
-     *     - Migrating to newer model versions
-     *     - Consolidating model usage across the entire system
-     *
-     *     Args:
-     *         model_id: UUID of the source model to migrate from
-     *         migration_request: Details of the migration (target model, entity types, etc.)
+     * @description Migrate completion model usage from one model to another across all active tenants.
      */
     post: operations["migrate_completion_model_for_all_tenants_api_v1_sysadmin_system_completion_models__model_id__migrate_all_tenants_post"];
     delete?: never;
@@ -6179,12 +6535,7 @@ export interface paths {
     put?: never;
     /**
      * Create Completion Model
-     * @description Create a new completion model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     This creates the model metadata only. To enable it for a tenant,
-     *     use POST /api/v1/completion-models/{id}/ with tenant credentials.
+     * @description Create global completion model metadata (system-wide operation).
      */
     post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
     delete?: never;
@@ -6203,11 +6554,7 @@ export interface paths {
     get?: never;
     /**
      * Update Completion Model Metadata
-     * @description Update completion model metadata (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     Updates global model metadata. Does not affect tenant-specific settings.
+     * @description Update global completion model metadata (system-wide operation).
      */
     put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
     post?: never;
@@ -6229,12 +6576,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Completion Model
-     * @description Soft-delete a completion model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     WARNING: Affects all tenants. Use with caution.
-     *     Set force=true to hard-delete (may break references).
+     * @description Soft-delete global completion model metadata (system-wide operation).
      */
     delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
     options?: never;
@@ -6253,12 +6595,7 @@ export interface paths {
     put?: never;
     /**
      * Create Embedding Model
-     * @description Create a new embedding model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     This creates the model metadata only. To enable it for a tenant,
-     *     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
+     * @description Create global embedding model metadata (system-wide operation).
      */
     post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
     delete?: never;
@@ -6277,11 +6614,7 @@ export interface paths {
     get?: never;
     /**
      * Update Embedding Model Metadata
-     * @description Update embedding model metadata (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     Updates global model metadata. Does not affect tenant-specific settings.
+     * @description Update global embedding model metadata (system-wide operation).
      */
     put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
     post?: never;
@@ -6303,13 +6636,37 @@ export interface paths {
     post?: never;
     /**
      * Delete Embedding Model
-     * @description Delete an embedding model (system-wide operation).
-     *
-     *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
-     *
-     *     WARNING: Deletion affects all tenants. Use with caution.
+     * @description Soft-delete global embedding model metadata (system-wide operation).
      */
     delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/scim-token": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get SCIM token status for tenant
+     * @description Returns whether SCIM provisioning is active (i.e. a token hash is configured) for the given tenant. Never returns the token itself.
+     */
+    get: operations["get_scim_token_status_api_v1_sysadmin_tenants__tenant_id__scim_token_get"];
+    put?: never;
+    /**
+     * Generate SCIM bearer token for tenant
+     * @description Generates a new SCIM bearer token for the given tenant. The token is returned in plaintext exactly once and is never stored — only its SHA-256 hash is persisted. Calling this endpoint again replaces any existing token.
+     */
+    post: operations["create_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_post"];
+    /**
+     * Revoke SCIM token for tenant
+     * @description Removes the SCIM token hash, disabling SCIM provisioning for the tenant. Any subsequent SCIM requests from the IdP will receive 401.
+     */
+    delete: operations["delete_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -6446,10 +6803,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Modules */
+    /**
+     * Get Modules
+     * @description List all globally registered modules.
+     */
     get: operations["get_modules_api_v1_modules__get"];
     put?: never;
-    /** Add Module */
+    /**
+     * Add Module
+     * @description Register a new global module.
+     */
     post: operations["add_module_api_v1_modules__post"];
     delete?: never;
     options?: never;
@@ -6468,7 +6831,7 @@ export interface paths {
     put?: never;
     /**
      * Add Module To Tenant
-     * @description Value is a list of module `id`'s to add to the `tenant_id`.
+     * @description Assign a list of modules to a tenant.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
     delete?: never;
@@ -6601,7 +6964,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Role Templates */
+    /**
+     * Get Role Templates
+     * @description List the predefined role templates available for creating roles.
+     */
     get: operations["get_role_templates_api_v1_roles_templates__get"];
     put?: never;
     post?: never;
@@ -6618,10 +6984,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Roles */
+    /**
+     * Get Roles
+     * @description List all roles for the current tenant.
+     */
     get: operations["get_roles_api_v1_roles__get"];
     put?: never;
-    /** Create Role */
+    /**
+     * Create Role
+     * @description Create a new role for the current tenant.
+     */
     post: operations["create_role_api_v1_roles__post"];
     delete?: never;
     options?: never;
@@ -6639,9 +7011,15 @@ export interface paths {
     /** Get Role By Id */
     get: operations["get_role_by_id_api_v1_roles__role_id___get"];
     put?: never;
-    /** Update Role */
+    /**
+     * Update Role
+     * @description Update an existing role by id.
+     */
     post: operations["update_role_api_v1_roles__role_id___post"];
-    /** Delete Role By Id */
+    /**
+     * Delete Role By Id
+     * @description Delete a role by id.
+     */
     delete: operations["delete_role_by_id_api_v1_roles__role_id___delete"];
     options?: never;
     head?: never;
@@ -6657,7 +7035,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Reset Role To Default */
+    /**
+     * Reset Role To Default
+     * @description Reset a role's permissions to its default template.
+     */
     post: operations["reset_role_to_default_api_v1_roles__role_id__reset__post"];
     delete?: never;
     options?: never;
@@ -6674,7 +7055,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Set Default Role */
+    /**
+     * Set Default Role
+     * @description Set the given role as the tenant's default role.
+     */
     post: operations["set_default_role_api_v1_roles__role_id__set_default__post"];
     delete?: never;
     options?: never;
@@ -6691,7 +7075,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Clear Default Role */
+    /**
+     * Clear Default Role
+     * @description Clear the tenant's default role.
+     */
     post: operations["clear_default_role_api_v1_roles_clear_default__post"];
     delete?: never;
     options?: never;
@@ -6706,7 +7093,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Healthz */
+    /**
+     * Get Healthz
+     * @description Report backend and worker health for deployment probes.
+     */
     get: operations["get_healthz_api_healthz_get"];
     put?: never;
     post?: never;
@@ -6725,12 +7115,7 @@ export interface paths {
     };
     /**
      * Crawler Health
-     * @description Detailed crawler diagnostics. NOT for K8s probes.
-     *
-     *     Public endpoint - no auth required. Shows only job counts and tenant IDs.
-     *
-     *     Args:
-     *         include_all: If True, return all tenant queue lengths instead of top-10.
+     * @description Get detailed crawler queue and worker diagnostics.
      */
     get: operations["crawler_health_api_healthz_crawler_get"];
     put?: never;
@@ -6748,7 +7133,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Version */
+    /**
+     * Get Version
+     * @description Get the running backend version.
+     */
     get: operations["get_version_version_get"];
     put?: never;
     post?: never;
@@ -6851,41 +7239,26 @@ export interface components {
     };
     /**
      * ActionConfig
-     * @description Configuration for a single action type with metadata for UI display.
+     * @description Configuration for a single action type.
+     *
+     *     Display text is intentionally omitted: the frontend translates ``action``
+     *     by key (``audit_action_{action}`` / ``_description``).
      * @example {
      *       "action": "user_created",
      *       "category": "admin_actions",
-     *       "description_sv": "Loggar när en ny användare skapas",
-     *       "enabled": true,
-     *       "name_sv": "Användare skapad"
+     *       "enabled": true
      *     }
      */
     ActionConfig: {
-      /**
-       * Action
-       * @description Action type value (e.g., 'user_created')
-       */
-      action: string;
+      /** @description Action type key (e.g., 'user_created') */
+      action: components["schemas"]["ActionType"];
       /**
        * Enabled
        * @description Whether this action is currently enabled
        */
       enabled: boolean;
-      /**
-       * Category
-       * @description Category this action belongs to
-       */
-      category: string;
-      /**
-       * Name Sv
-       * @description Swedish display name
-       */
-      name_sv: string;
-      /**
-       * Description Sv
-       * @description Swedish description
-       */
-      description_sv: string;
+      /** @description Category this action belongs to */
+      category: components["schemas"]["CategoryType"];
     };
     /**
      * ActionConfigResponse
@@ -6896,16 +7269,12 @@ export interface components {
      *         {
      *           "action": "user_created",
      *           "category": "admin_actions",
-     *           "description_sv": "Loggar när en ny användare skapas",
-     *           "enabled": true,
-     *           "name_sv": "Användare skapad"
+     *           "enabled": true
      *         },
      *         {
      *           "action": "user_deleted",
      *           "category": "admin_actions",
-     *           "description_sv": "Loggar när en användare tas bort",
-     *           "enabled": false,
-     *           "name_sv": "Användare raderad"
+     *           "enabled": false
      *         }
      *       ]
      *     }
@@ -6970,6 +7339,10 @@ export interface components {
       | "api_key_used"
       | "api_key_auth_failed"
       | "tenant_policy_updated"
+      | "governance_policy_updated"
+      | "prompt_library_entry_created"
+      | "prompt_library_entry_updated"
+      | "prompt_library_entry_deleted"
       | "module_added"
       | "module_added_to_tenant"
       | "assistant_created"
@@ -7019,6 +7392,7 @@ export interface components {
       | "transcription_model_created"
       | "transcription_model_updated"
       | "transcription_model_deleted"
+      | "transcription_model_migrated"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -7035,6 +7409,23 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "help_assistant_role_assigned"
+      | "help_assistant_role_unassigned"
+      | "help_assistant_role_toggled_enabled"
+      | "help_assistant_role_toggled_visible"
+      | "help_assistant_installed"
+      | "help_assistant_uninstalled"
+      | "scim_user_provisioned"
+      | "scim_user_reconciled"
+      | "scim_user_reactivated"
+      | "scim_user_deprovisioned"
+      | "scim_user_updated"
+      | "scim_group_created"
+      | "scim_group_reactivated"
+      | "scim_group_updated"
+      | "scim_group_deleted"
+      | "scim_token_created"
+      | "scim_token_revoked"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -8327,6 +8718,14 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
+      effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
+      /**
+       * Is Help Assistant
+       * @description True when this assistant currently fills a Help Assistant role (it has an active row in org_space_assistant_roles). Help assistants have logging permanently disabled; the edit UI uses this flag to surface that explanation. Only the single-assistant GET endpoint computes it; other responses default to False.
+       * @default false
+       */
+      is_help_assistant?: boolean;
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -8594,23 +8993,21 @@ export interface components {
      *         {
      *           "action_count": 13,
      *           "category": "admin_actions",
-     *           "description": "User management, role changes, API keys, tenant settings",
      *           "enabled": true,
      *           "example_actions": [
-     *             "USER_CREATED",
-     *             "ROLE_DELETED",
-     *             "API_KEY_GENERATED"
+     *             "user_created",
+     *             "role_deleted",
+     *             "api_key_generated"
      *           ]
      *         },
      *         {
      *           "action_count": 28,
      *           "category": "user_actions",
-     *           "description": "Assistant, space, app operations, templates, model configs",
      *           "enabled": true,
      *           "example_actions": [
-     *             "ASSISTANT_CREATED",
-     *             "SPACE_DELETED",
-     *             "APP_EXECUTED"
+     *             "assistant_created",
+     *             "space_deleted",
+     *             "app_executed"
      *           ]
      *         }
      *       ]
@@ -8736,6 +9133,34 @@ export interface components {
       /** Auth Url */
       auth_url: string;
     };
+    /**
+     * AvailabilityResponse
+     * @description Cheap read-only signal for the prompt-guide toolbar button (PRD §5, §10).
+     *
+     *     Returned by ``GET /help-assistants/availability``. The frontend hides
+     *     the toolbar button whenever ``available`` is False; ``disabled_reason``
+     *     lets the admin UX surface the underlying cause without parsing a
+     *     human-readable message.
+     *
+     *     The helper assistant id is intentionally absent — the modal never
+     *     needs it (helper resolution is server-side per :class:`StartRunRequest`)
+     *     and exposing it here would defeat the "helper assistants are hidden
+     *     from every listing" invariant.
+     */
+    AvailabilityResponse: {
+      /** Available */
+      available: boolean;
+      /** Disabled Reason */
+      disabled_reason?:
+        | (
+            | "no_assignment"
+            | "role_disabled"
+            | "role_not_visible"
+            | "no_completion_model"
+            | "no_edit_rights"
+          )
+        | null;
+    };
     /** Body_Login_api_v1_users_login_token__post */
     Body_Login_api_v1_users_login_token__post: {
       /** Grant Type */
@@ -8822,35 +9247,29 @@ export interface components {
     };
     /**
      * CategoryConfig
-     * @description Enriched category configuration with metadata for API responses.
+     * @description Category configuration for API responses.
+     *
+     *     Display text is intentionally omitted: the frontend translates ``category``
+     *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
      *       "action_count": 13,
      *       "category": "admin_actions",
-     *       "description": "User management, role changes, API keys, tenant settings",
      *       "enabled": true,
      *       "example_actions": [
-     *         "USER_CREATED",
-     *         "ROLE_DELETED",
-     *         "API_KEY_GENERATED"
+     *         "user_created",
+     *         "role_deleted",
+     *         "api_key_generated"
      *       ]
      *     }
      */
     CategoryConfig: {
-      /**
-       * Category
-       * @description Category name (e.g., 'admin_actions')
-       */
-      category: string;
+      /** @description Category key (e.g., 'admin_actions') */
+      category: components["schemas"]["CategoryType"];
       /**
        * Enabled
        * @description Whether category is currently enabled
        */
       enabled: boolean;
-      /**
-       * Description
-       * @description Human-readable description of category
-       */
-      description: string;
       /**
        * Action Count
        * @description Number of action types in this category
@@ -8862,6 +9281,24 @@ export interface components {
        */
       example_actions: string[];
     };
+    /**
+     * CategoryType
+     * @description Audit categories that every action type rolls up into.
+     *
+     *     Single source of truth for the category vocabulary: CATEGORY_MAPPINGS,
+     *     the config schemas, and the config service all derive from this enum, and
+     *     it surfaces in the OpenAPI schema so the frontend can translate categories
+     *     by key (no display text crosses the API).
+     * @enum {string}
+     */
+    CategoryType:
+      | "admin_actions"
+      | "user_actions"
+      | "security_events"
+      | "file_operations"
+      | "integration_events"
+      | "system_actions"
+      | "audit_access";
     /**
      * CategoryUpdate
      * @description Represents a category configuration change request.
@@ -9351,12 +9788,30 @@ export interface components {
      * @enum {string}
      */
     ContentDisposition: "attachment" | "inline";
+    /**
+     * ContinueTurnRequest
+     * @description Body for ``POST /runs/{run_id}/turns/`` — follow-up turn.
+     */
+    ContinueTurnRequest: {
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
       total_conversations: number;
       /** Total Questions */
       total_questions: number;
+    };
+    /** ConversationRenameRequest */
+    ConversationRenameRequest: {
+      /** Name */
+      name: string;
     };
     /**
      * ConversationRequest
@@ -9400,10 +9855,11 @@ export interface components {
        * @default false
        */
       require_tool_approval?: boolean;
-    };
-    ConversationRenameRequest: {
-      /** Name */
-      name: string;
+      /**
+       * Disabled Mcp Server Ids
+       * @default []
+       */
+      disabled_mcp_server_ids?: string[];
     };
     /** Counts */
     Counts: {
@@ -10000,6 +10456,14 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
+      effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
+      /**
+       * Is Help Assistant
+       * @description True when this assistant currently fills a Help Assistant role (it has an active row in org_space_assistant_roles). Help assistants have logging permanently disabled; the edit UI uses this flag to surface that explanation. Only the single-assistant GET endpoint computes it; other responses default to False.
+       * @default false
+       */
+      is_help_assistant?: boolean;
     };
     /**
      * DeleteCredentialResponse
@@ -10069,6 +10533,30 @@ export interface components {
        * @description List of setting keys that were removed
        */
       deleted_keys: string[];
+    };
+    /**
+     * EffectiveConfigPublic
+     * @description Frontend hint surface for personal-assistant governance.
+     *
+     *     Only meaningful on default assistants in personal spaces. `prompt_locked`
+     *     is exposed as a boolean — we never leak the admin-prompt text to the
+     *     user-facing API.
+     */
+    EffectiveConfigPublic: {
+      /** Models Enforced */
+      models_enforced: boolean;
+      /** Available Models */
+      available_models: components["schemas"]["CompletionModelSparse"][];
+      locked_model: components["schemas"]["CompletionModelSparse"] | null;
+      default_model: components["schemas"]["CompletionModelSparse"] | null;
+      /** Mcp Enforced */
+      mcp_enforced: boolean;
+      /** Available Mcp Servers */
+      available_mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
+      /** Default Disabled Mcp Server Ids */
+      default_disabled_mcp_server_ids?: string[];
+      /** Prompt Locked */
+      prompt_locked: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -10425,6 +10913,8 @@ export interface components {
       | "file"
       | "website"
       | "tenant_settings"
+      | "governance_policy"
+      | "prompt_library_entry"
       | "credential"
       | "federation_config"
       | "api_key"
@@ -10443,7 +10933,8 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
-      | "mcp_server_tool";
+      | "mcp_server_tool"
+      | "user_group";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -10488,7 +10979,9 @@ export interface components {
       | 9036
       | 9037
       | 9038
-      | 9039;
+      | 9039
+      | 9040
+      | 9041;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -10571,10 +11064,11 @@ export interface components {
       to_date?: string | null;
       /**
        * Format
-       * @description Export format: csv or jsonl
+       * @description Export format: csv, json, or jsonl
        * @default csv
+       * @enum {string}
        */
-      format?: string;
+      format?: "csv" | "json" | "jsonl";
       /**
        * Max Records
        * @description Maximum records to export
@@ -10804,6 +11298,22 @@ export interface components {
       completion_models: components["schemas"]["CompletionModelPublic"][];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublicLegacy"][];
+    };
+    /** GovernancePolicyPublic */
+    GovernancePolicyPublic: {
+      models_restriction: components["schemas"]["ModelsRestrictionPublic"];
+      mcp_restriction: components["schemas"]["McpRestrictionPublic"];
+      prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      /** Updated At */
+      updated_at: string | null;
+      /** Updated By User Id */
+      updated_by_user_id: string | null;
+    };
+    /** GovernancePolicyUpdate */
+    GovernancePolicyUpdate: {
+      models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
+      mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
+      prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
     };
     /** GroupChatAssistantPublic */
     GroupChatAssistantPublic: {
@@ -11067,6 +11577,84 @@ export interface components {
       watchdog_stale_threshold_seconds: number;
       /** Heartbeat Ttl Expected Seconds */
       heartbeat_ttl_expected_seconds: number;
+    };
+    /**
+     * HelperKind
+     * @description Kinds of Help Assistants shipped with Eneo.
+     * @enum {string}
+     */
+    HelperKind: "prompt_guide";
+    /**
+     * HelperRunPublic
+     * @description One row of ``help_assistant_runs`` exposed to the client.
+     */
+    HelperRunPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      kind: components["schemas"]["HelperKind"];
+      /** Assistant Id */
+      assistant_id: string | null;
+      /** Target Type */
+      target_type: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Actor User Id */
+      actor_user_id: string | null;
+      status: components["schemas"]["HelperRunStatus"];
+      /** Completed At */
+      completed_at: string | null;
+      /** Created At */
+      created_at: string | null;
+      /** Updated At */
+      updated_at: string | null;
+    };
+    /**
+     * HelperRunResponsePublic
+     * @description Non-stream response body for the helper-run ask paths.
+     *
+     *     ``answer`` is the final completion text; ``references`` are the
+     *     info-blob chunks pulled into the helper assistant's prompt. ``run``
+     *     carries enough context for the modal to drive its Apply / Abandon
+     *     buttons (id + status).
+     */
+    HelperRunResponsePublic: {
+      run: components["schemas"]["HelperRunPublic"];
+      /** Answer */
+      answer: string;
+      /** References */
+      references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+      /** Error */
+      error?: string | null;
+    };
+    /**
+     * HelperRunStatus
+     * @enum {string}
+     */
+    HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+    /**
+     * HelperTemplatePublic
+     * @description A shipped Help Assistant template available to install.
+     *
+     *     Drives the admin "Add help assistant" picker — one entry per shipped
+     *     ``HelperKind`` that is not already installed for the tenant.
+     */
+    HelperTemplatePublic: {
+      kind: components["schemas"]["HelperKind"];
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
     };
     /** IconPublic */
     IconPublic: {
@@ -11733,6 +12321,30 @@ export interface components {
       /** Is Enabled */
       is_enabled: boolean;
     };
+    /** McpRestrictionInput */
+    McpRestrictionInput: {
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Servers
+       * @default []
+       */
+      servers?: components["schemas"]["PolicyMcpServerInput"][];
+      /**
+       * Disabled Tool Ids
+       * @default []
+       */
+      disabled_tool_ids?: string[];
+    };
+    /** McpRestrictionPublic */
+    McpRestrictionPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Servers */
+      servers: components["schemas"]["PolicyMcpServerPublic"][];
+      /** Disabled Tool Ids */
+      disabled_tool_ids: string[];
+    };
     /**
      * McpToolReferencePublic
      * @description One MCP resource block captured from a tool call.
@@ -11802,6 +12414,18 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -11835,6 +12459,18 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -12030,6 +12666,11 @@ export interface components {
        * @default false
        */
       confirm_migration?: boolean;
+      /**
+       * Force Override
+       * @default false
+       */
+      force_override?: boolean;
     };
     /**
      * ModelProviderCreate
@@ -12279,6 +12920,30 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelSecurityStatus"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
+    };
+    /** ModelsRestrictionInput */
+    ModelsRestrictionInput: {
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Models
+       * @default []
+       */
+      models?: components["schemas"]["PolicyCompletionModelInput"][];
+      /**
+       * Provider Ids
+       * @default []
+       */
+      provider_ids?: string[];
+    };
+    /** ModelsRestrictionPublic */
+    ModelsRestrictionPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Models */
+      models: components["schemas"]["PolicyCompletionModelPublic"][];
+      /** Provider Ids */
+      provider_ids: string[];
     };
     /** ModuleBase */
     ModuleBase: {
@@ -12676,6 +13341,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[HelperTemplatePublic] */
+    PaginatedResponse_HelperTemplatePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["HelperTemplatePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[InfoBlobPublicNoText] */
     PaginatedResponse_InfoBlobPublicNoText_: {
       /**
@@ -12767,6 +13445,32 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[PromptLibraryEntrySparse] */
+    PaginatedResponse_PromptLibraryEntrySparse_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PromptLibraryEntrySparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[PromptLibraryVersionPublic] */
+    PaginatedResponse_PromptLibraryVersionPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PromptLibraryVersionPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -12774,6 +13478,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[RoleAssignmentPublic] */
+    PaginatedResponse_RoleAssignmentPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RoleAssignmentPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -13337,6 +14054,7 @@ export interface components {
      */
     Permission:
       | "assistants"
+      | "personal_chat"
       | "group_chats"
       | "apps"
       | "services"
@@ -13354,6 +14072,52 @@ export interface components {
       name: components["schemas"]["Permission"];
       /** Description */
       description: string;
+    };
+    /** PolicyCompletionModelInput */
+    PolicyCompletionModelInput: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** PolicyCompletionModelPublic */
+    PolicyCompletionModelPublic: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /** Is Default */
+      is_default: boolean;
+    };
+    /** PolicyMcpServerInput */
+    PolicyMcpServerInput: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /**
+       * Is Default Enabled
+       * @default true
+       */
+      is_default_enabled?: boolean;
+    };
+    /** PolicyMcpServerPublic */
+    PolicyMcpServerPublic: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Is Default Enabled */
+      is_default_enabled: boolean;
     };
     /**
      * PreflightRequest
@@ -13385,11 +14149,12 @@ export interface components {
     };
     /**
      * PreflightResponse
-     * @description Exact token cost the next request will add to the context window.
+     * @description Estimated token cost the next request will add to the context window.
      *
      *     Excludes knowledge/RAG chunks and web-search results — those are selected
-     *     at request time. The frontend pairs this delta with the persisted history
-     *     tokens to project total context fill.
+     *     at request time. Provider tokenization is authoritative and can differ from
+     *     this local estimate, especially for multimodal inputs. The frontend pairs
+     *     this delta with the persisted history tokens to project total context fill.
      *
      *     `model_name` and `context_window` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model
@@ -13426,6 +14191,137 @@ export interface components {
       text: string;
       /** Description */
       description?: string | null;
+    };
+    /** PromptEnforcementInput */
+    PromptEnforcementInput: {
+      /** Enabled */
+      enabled: boolean;
+      /** Prompt Library Id */
+      prompt_library_id?: string | null;
+    };
+    /** PromptEnforcementPublic */
+    PromptEnforcementPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Prompt Library Id */
+      prompt_library_id: string | null;
+    };
+    /** PromptLibraryEntryCreate */
+    PromptLibraryEntryCreate: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text: string;
+    };
+    /** PromptLibraryEntryPublic */
+    PromptLibraryEntryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Text */
+      text: string;
+      /** Current Version */
+      current_version: number;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * PromptLibraryEntrySparse
+     * @description List view — text excluded for payload size.
+     */
+    PromptLibraryEntrySparse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Current Version */
+      current_version: number;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** PromptLibraryEntryUpdate */
+    PromptLibraryEntryUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text?: string | null;
+    };
+    /** PromptLibraryVersionPublic */
+    PromptLibraryVersionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Prompt Library Id
+       * Format: uuid
+       */
+      prompt_library_id: string;
+      /** Version */
+      version: number;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Text */
+      text: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** PromptPublic */
     PromptPublic: {
@@ -13611,6 +14507,50 @@ export interface components {
        */
       retention_days: number;
     };
+    /**
+     * RoleAssignmentPublic
+     * @description One row of ``org_space_assistant_roles``.
+     *
+     *     ``assistant_name`` is a display convenience for the admin table: it is
+     *     resolved (via the assistant load) only on the read endpoints
+     *     (``list_roles`` / ``get_active_role``) the UI renders from. Mutation
+     *     responses leave it ``None`` because the admin page re-fetches the list
+     *     after every mutation, so the displayed name always comes from a read.
+     */
+    RoleAssignmentPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Org Space Id
+       * Format: uuid
+       */
+      org_space_id: string;
+      kind: components["schemas"]["HelperKind"];
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Assistant Name */
+      assistant_name?: string | null;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Is Visible To Users */
+      is_visible_to_users: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
     /** RoleCreateRequest */
     RoleCreateRequest: {
       /** Name */
@@ -13690,6 +14630,29 @@ export interface components {
        * @default []
        */
       files?: components["schemas"]["ModelId"][];
+    };
+    /** ScimTokenCreatedResponse */
+    ScimTokenCreatedResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Token
+       * @description Plaintext token — shown once, never stored
+       */
+      token: string;
+    };
+    /** ScimTokenStatusResponse */
+    ScimTokenStatusResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Is Active */
+      is_active: boolean;
     };
     /**
      * SecurityClassificationCreatePublic
@@ -14461,6 +15424,32 @@ export interface components {
       data_retention_days?: number | null;
     };
     /**
+     * StartRunRequest
+     * @description Body for ``POST /runs/`` — start a new helper run.
+     *
+     *     ``target_type`` is currently always ``"assistant"`` (PRD §5). The
+     *     service validates it; the model keeps the field open-ended so a future
+     *     target kind (group chat, app run) can be added without a wire-format
+     *     bump.
+     */
+    StartRunRequest: {
+      kind: components["schemas"]["HelperKind"];
+      /** Target Type */
+      target_type: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
+    };
+    /**
      * StateFilter
      * @description Filter for user state in admin users list
      * @enum {string}
@@ -14694,7 +15683,9 @@ export interface components {
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
       | "update_model_usage_stats"
-      | "analyze_conversation_insights";
+      | "analyze_conversation_insights"
+      | "export_audit_logs"
+      | "log_audit_event";
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -14828,6 +15819,7 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantCompletionModelUpdate */
@@ -14858,6 +15850,7 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Is Default */
       is_default?: boolean | null;
       security_classification?: components["schemas"]["ModelId"] | null;
@@ -15434,6 +16427,11 @@ export interface components {
       /** Favorite Providers */
       favorite_providers?: string[];
     };
+    /** ToggleRequest */
+    ToggleRequest: {
+      /** Value */
+      value: boolean;
+    };
     /** ToggleSettingUpdate */
     ToggleSettingUpdate: {
       /** Enabled */
@@ -15663,6 +16661,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -15728,6 +16728,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -15739,6 +16741,71 @@ export interface components {
       is_org_default?: boolean | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TranscriptionModelUsageDetails */
+    TranscriptionModelUsageDetails: {
+      /**
+       * Items
+       * @default []
+       */
+      items?: components["schemas"]["TranscriptionUsageEntity"][];
+      /**
+       * Total
+       * @default 0
+       */
+      total?: number;
+    };
+    /**
+     * TranscriptionModelUsageStats
+     * @description Live count of what a transcription model migration would move.
+     *
+     *     Transcription has no pre-aggregated usage-stats table (unlike completion);
+     *     these counts come straight from the migration engine's entity counters.
+     */
+    TranscriptionModelUsageStats: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /**
+       * Apps Count
+       * @default 0
+       */
+      apps_count?: number;
+      /**
+       * Spaces Count
+       * @default 0
+       */
+      spaces_count?: number;
+      /**
+       * Total Count
+       * @default 0
+       */
+      total_count?: number;
+    };
+    /**
+     * TranscriptionUsageEntity
+     * @description One entity using a transcription model. Shape matches completion's
+     *     ModelUsageDetail so the migrate dialog can render both with one component.
+     */
+    TranscriptionUsageEntity: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /**
+       * Entity Type
+       * @default app
+       */
+      entity_type?: string;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
     };
     /** TransferApplicationRequest */
     TransferApplicationRequest: {
@@ -15805,6 +16872,17 @@ export interface components {
     /** UpdateSpaceMemberRequest */
     UpdateSpaceMemberRequest: {
       role: components["schemas"]["SpaceRoleValue"];
+    };
+    /**
+     * UpdateStatusRequest
+     * @description Body for ``PATCH /runs/{run_id}/`` — terminal status transition.
+     *
+     *     The service rejects ``IN_PROGRESS`` (only terminal statuses transition)
+     *     and rejects repeat transitions, so the wire model accepts every value
+     *     and lets the service do the policy enforcement.
+     */
+    UpdateStatusRequest: {
+      status: components["schemas"]["HelperRunStatus"];
     };
     /** UseTools */
     UseTools: {
@@ -16059,6 +17137,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** State */
+      state?: string | null;
     };
     /** UserGroupPublic */
     UserGroupPublic: {
@@ -17086,6 +18166,19 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
     };
+    /**
+     * SSEReasoning
+     * @description Event carrying a chunk of the model's reasoning/thinking text.
+     */
+    SSEReasoning: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Reasoning */
+      reasoning: string;
+    };
     /** SSEIntricEvent */
     SSEIntricEvent: {
       /**
@@ -17528,6 +18621,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -17851,6 +18953,15 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -18009,6 +19120,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -19259,6 +20379,15 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
       /** @description No legacy API key found. */
       404: {
         headers: {
@@ -19290,6 +20419,24 @@ export interface operations {
           "application/json": components["schemas"]["UserAdminView"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -19318,6 +20465,33 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -19352,6 +20526,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserAdminView"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -19405,6 +20606,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
@@ -19429,6 +20639,24 @@ export interface operations {
           "application/json": components["schemas"]["AccessToken"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -19436,6 +20664,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -19467,6 +20713,15 @@ export interface operations {
           "application/json": components["schemas"]["CursorPaginatedResponse_UserSparse_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -19494,6 +20749,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -19618,6 +20882,15 @@ export interface operations {
           "application/json": components["schemas"]["InfoBlobPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -19662,8 +20935,35 @@ export interface operations {
           "application/json": components["schemas"]["InfoBlobPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -19700,6 +21000,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["InfoBlobPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -19795,6 +21104,15 @@ export interface operations {
           "application/json": components["schemas"]["GroupPublicWithMetadata"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -19870,6 +21188,15 @@ export interface operations {
           "application/json": components["schemas"]["CollectionPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -19908,6 +21235,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -20074,6 +21410,15 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -20127,6 +21472,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_SemanticSearchResponse_"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -20159,6 +21513,33 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -20211,6 +21592,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -20286,6 +21676,15 @@ export interface operations {
           "application/json": components["schemas"]["SettingsPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -20317,6 +21716,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -20352,6 +21760,15 @@ export interface operations {
           "application/json": components["schemas"]["SettingsPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -20383,6 +21800,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -20417,6 +21843,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AssistantPublic_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -20448,6 +21883,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AssistantPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -20492,6 +21936,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -20545,6 +21998,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -20645,6 +22107,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21000,6 +22471,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21043,6 +22523,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21399,6 +22888,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21442,6 +22940,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21496,6 +23003,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -21615,6 +23131,24 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -21697,6 +23231,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21747,6 +23290,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21786,6 +23338,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -21824,6 +23385,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GroupChatPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -22034,6 +23604,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -22544,6 +24123,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -22613,13 +24201,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
       /** @description Too Many Requests */
@@ -22656,6 +24244,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -22704,6 +24301,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -22817,6 +24423,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -22866,53 +24481,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  rename_conversation_api_v1_conversations__session_id__name__patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description The UUID of the conversation/session */
-        session_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConversationRenameRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["SessionPublic"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -23021,6 +24591,69 @@ export interface operations {
       };
     };
   };
+  rename_conversation_api_v1_conversations__session_id__name__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConversationRenameRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_services_api_v1_services__get: {
     parameters: {
       query?: {
@@ -23083,6 +24716,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23121,6 +24763,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ServicePublicWithUser"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23165,6 +24816,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ServicePublicWithUser"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -23254,6 +24923,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_ServiceRun_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23307,6 +24985,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -23349,6 +25036,33 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23380,6 +25094,24 @@ export interface operations {
           "application/json": components["schemas"]["MessageLogging"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23409,6 +25141,15 @@ export interface operations {
           "application/json": components["schemas"]["Counts"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_metadata_api_v1_analysis_metadata_statistics__get: {
@@ -23430,6 +25171,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatistics"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23464,6 +25214,15 @@ export interface operations {
           "application/json": components["schemas"]["AssistantActivityStats"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23494,6 +25253,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatisticsAggregated"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23530,6 +25298,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_Message_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23572,6 +25367,33 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23611,6 +25433,33 @@ export interface operations {
           "application/json": components["schemas"]["CursorPaginatedResponse_AssistantInsightQuestion_"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23645,12 +25494,32 @@ export interface operations {
           "application/json": components["schemas"]["ConversationInsightResponse"];
         };
       };
-      /** @description Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -23693,6 +25562,33 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -23722,6 +25618,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AnalysisJobStatusResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -23762,12 +25667,32 @@ export interface operations {
           "application/json": components["schemas"]["CursorPaginatedResponse_SessionMetadataPublic_"];
         };
       };
-      /** @description Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -23800,12 +25725,23 @@ export interface operations {
           "application/json": components["schemas"]["SessionPublic"];
         };
       };
-      /** @description Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled */
+      /** @description Forbidden */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -24405,6 +26341,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -25890,6 +27853,24 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -25917,6 +27898,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -27099,6 +29098,15 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -27150,6 +29158,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserGroupPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -27227,6 +29253,33 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27265,6 +29318,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserGroupPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27308,6 +29370,24 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27349,6 +29429,15 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27387,6 +29476,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AllowedOriginPublic_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_completion_models_api_v1_completion_models__get: {
@@ -27405,6 +29503,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CompletionModelPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -27431,6 +29538,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27473,6 +29589,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelUsageStatistics"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27511,6 +29636,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27556,8 +29690,8 @@ export interface operations {
           "application/json": components["schemas"]["ValidationResult"];
         };
       };
-      /** @description Bad Request */
-      400: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -27609,15 +29743,6 @@ export interface operations {
           "application/json": components["schemas"]["MigrationResult"];
         };
       };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -27665,6 +29790,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelUsageSummary"][];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_model_migration_history_api_v1_completion_models__model_id__migration_history_get: {
@@ -27685,6 +29819,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27725,6 +29868,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelMigrationHistory"][];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_migration_history_by_id_api_v1_completion_models_migration_history__migration_id__get: {
@@ -27745,6 +29897,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelMigrationHistory"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27785,6 +29946,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_EmbeddingModelPublic_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_embedding_model_api_v1_embedding_models__id___get: {
@@ -27805,6 +29975,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EmbeddingModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27851,6 +30030,15 @@ export interface operations {
           "application/json": components["schemas"]["EmbeddingModelPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27889,6 +30077,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_TranscriptionModelPublic_"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_transcription_model_api_v1_transcription_models__id___post: {
@@ -27913,6 +30110,371 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageStats"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageDetails"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get: {
+    parameters: {
+      query: {
+        /** @description Target model ID */
+        to_model_id: string;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValidationResult"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_migration_history_by_id_api_v1_transcription_models_migration_history__migration_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        migration_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27953,6 +30515,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelProviderPublic"][];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   create_provider_api_v1_admin_model_providers__post: {
@@ -27975,6 +30546,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Conflict */
@@ -28131,6 +30720,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelProviderPublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -28173,6 +30771,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -28224,6 +30831,24 @@ export interface operations {
           "application/json": {
             [key: string]: string;
           };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -28410,8 +31035,26 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -28465,6 +31108,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -28563,8 +31215,26 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -28625,6 +31295,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -28654,6 +31333,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -28716,8 +31404,26 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -28778,6 +31484,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -28807,6 +31522,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -28880,6 +31604,24 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -28927,6 +31669,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -29009,6 +31769,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -29196,6 +31974,15 @@ export interface operations {
           "application/json": components["schemas"]["IconPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -29299,6 +32086,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SpacePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -29480,6 +32276,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UpdateSpaceDryRunResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -29970,6 +32793,33 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30006,6 +32856,33 @@ export interface operations {
           "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30036,6 +32913,24 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30065,6 +32960,24 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -30100,6 +33013,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["IntegrationKnowledgePublic"][];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30138,6 +33078,33 @@ export interface operations {
           "application/json": components["schemas"]["IntegrationKnowledgePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30168,6 +33135,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["JobPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30203,6 +33197,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SpaceMember"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -30623,6 +33626,15 @@ export interface operations {
           "application/json": components["schemas"]["SpacePublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_dashboard_api_v1_dashboard__get: {
@@ -30677,6 +33689,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_WebsitePublic_"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -30708,6 +33729,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -30825,6 +33855,15 @@ export interface operations {
           "application/json": components["schemas"]["WebsitePublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -30868,6 +33907,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -30979,6 +34027,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_crawl_runs_api_v1_websites__id__runs__get: {
@@ -31000,6 +34057,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31036,6 +34111,24 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31070,6 +34163,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -31172,6 +34274,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {
@@ -31405,6 +34516,15 @@ export interface operations {
           "application/json": components["schemas"]["TokenUsageSummary"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31447,6 +34567,15 @@ export interface operations {
           "application/json": components["schemas"]["UserTokenUsageSummary"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31483,6 +34612,24 @@ export interface operations {
           "application/json": components["schemas"]["UserTokenUsageSummaryDetail"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31517,6 +34664,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TokenUsageSummary"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31583,6 +34748,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -31899,6 +35073,15 @@ export interface operations {
           "application/json": components["schemas"]["AuditConfigResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_audit_config_api_v1_audit_config_patch: {
@@ -31921,6 +35104,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -31952,6 +35153,15 @@ export interface operations {
           "application/json": components["schemas"]["ActionConfigResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_action_config_api_v1_audit_config_actions_patch: {
@@ -31974,6 +35184,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32003,6 +35231,24 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   create_access_session_api_v1_audit_access_session_post: {
@@ -32027,6 +35273,24 @@ export interface operations {
           "application/json": components["schemas"]["AccessJustificationResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32034,6 +35298,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32071,6 +35353,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32112,6 +35412,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuditLogListResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32158,6 +35476,24 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32191,6 +35527,15 @@ export interface operations {
           "application/json": components["schemas"]["ExportJobResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32198,6 +35543,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -32221,6 +35575,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ExportJobStatusResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32255,6 +35627,33 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32287,6 +35686,33 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32316,6 +35742,15 @@ export interface operations {
           "application/json": components["schemas"]["RetentionPolicyResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_retention_policy_api_v1_audit_retention_policy_put: {
@@ -32338,6 +35773,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RetentionPolicyResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32422,6 +35866,24 @@ export interface operations {
           "application/json": components["schemas"]["TenantIntegration"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32450,6 +35912,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -32502,6 +35973,15 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegrationList"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32530,6 +36010,24 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -32598,6 +36096,24 @@ export interface operations {
           "application/json": components["schemas"]["IntegrationPreviewDataList"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32640,6 +36156,24 @@ export interface operations {
           "application/json": components["schemas"]["SharePointTreeResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -32669,6 +36203,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Integration"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32755,6 +36298,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -32890,6 +36442,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -33101,6 +36662,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -33500,11 +37070,9 @@ export interface operations {
       };
     };
   };
-  sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
+  list_prompt_library_entries_api_v1_admin_prompt_library__get: {
     parameters: {
-      query?: {
-        validationToken?: string | null;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
@@ -33517,7 +37085,388 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryEntrySparse_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_prompt_library_entry_api_v1_admin_prompt_library__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PromptLibraryEntryCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_prompt_library_entry_api_v1_admin_prompt_library__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_prompt_library_entry_api_v1_admin_prompt_library__id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PromptLibraryEntryUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryVersionPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_governance_policy_api_v1_admin_governance_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GovernancePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_governance_policy_api_v1_admin_governance_policy__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GovernancePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GovernancePolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
+    parameters: {
+      query?: {
+        validationToken?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Validation token echoed as plain text, or webhook health status. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            status: string;
+          };
+          "text/plain": string;
         };
       };
       /** @description Validation Error */
@@ -33542,13 +37491,24 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Microsoft Graph validation token echoed as plain text. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "text/plain": string;
+        };
+      };
+      /** @description SharePoint notifications accepted for processing. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            status: string;
+          };
         };
       };
       /** @description Validation Error */
@@ -33828,6 +37788,13 @@ export interface operations {
           "application/json": components["schemas"]["SharePointSubscriptionPublic"];
         };
       };
+      /** @description Subscription cannot be recreated */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Authentication required */
       401: {
         headers: {
@@ -33881,6 +37848,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["ServiceAccountAuthStartResponse"];
         };
+      };
+      /** @description OAuth configuration is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Authentication required */
       401: {
@@ -33949,6 +37923,711 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_roles_api_v1_admin_help_assistants_roles__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_RoleAssignmentPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_templates_api_v1_admin_help_assistants_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_HelperTemplatePublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_active_role_api_v1_admin_help_assistants_roles__kind___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"] | null;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  install_helper_api_v1_admin_help_assistants_roles__kind___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  uninstall_helper_api_v1_admin_help_assistants_roles__kind___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  toggle_enabled_api_v1_admin_help_assistants_roles__kind__enabled_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  toggle_visible_api_v1_admin_help_assistants_roles__kind__visible_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  start_helper_run_api_v1_help_assistants_runs__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StartRunRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunResponsePublic"];
+          "text/event-stream": {
+            run: components["schemas"]["HelperRunPublic"];
+            /** Answer */
+            answer: string;
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            /** Error */
+            error?: string | null;
+            $defs: {
+              /**
+               * HelperKind
+               * @description Kinds of Help Assistants shipped with Eneo.
+               * @enum {string}
+               */
+              HelperKind: "prompt_guide";
+              /**
+               * HelperRunPublic
+               * @description One row of ``help_assistant_runs`` exposed to the client.
+               */
+              HelperRunPublic: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                kind: components["schemas"]["HelperKind"];
+                /** Assistant Id */
+                assistant_id: string | null;
+                /** Target Type */
+                target_type: string;
+                /**
+                 * Target Id
+                 * Format: uuid
+                 */
+                target_id: string;
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Actor User Id */
+                actor_user_id: string | null;
+                status: components["schemas"]["HelperRunStatus"];
+                /** Completed At */
+                completed_at: string | null;
+                /** Created At */
+                created_at: string | null;
+                /** Updated At */
+                updated_at: string | null;
+              };
+              /**
+               * HelperRunStatus
+               * @enum {string}
+               */
+              HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  continue_helper_run_api_v1_help_assistants_runs__run_id__turns__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ContinueTurnRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunResponsePublic"];
+          "text/event-stream": {
+            run: components["schemas"]["HelperRunPublic"];
+            /** Answer */
+            answer: string;
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            /** Error */
+            error?: string | null;
+            $defs: {
+              /**
+               * HelperKind
+               * @description Kinds of Help Assistants shipped with Eneo.
+               * @enum {string}
+               */
+              HelperKind: "prompt_guide";
+              /**
+               * HelperRunPublic
+               * @description One row of ``help_assistant_runs`` exposed to the client.
+               */
+              HelperRunPublic: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                kind: components["schemas"]["HelperKind"];
+                /** Assistant Id */
+                assistant_id: string | null;
+                /** Target Type */
+                target_type: string;
+                /**
+                 * Target Id
+                 * Format: uuid
+                 */
+                target_id: string;
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Actor User Id */
+                actor_user_id: string | null;
+                status: components["schemas"]["HelperRunStatus"];
+                /** Completed At */
+                completed_at: string | null;
+                /** Created At */
+                created_at: string | null;
+                /** Updated At */
+                updated_at: string | null;
+              };
+              /**
+               * HelperRunStatus
+               * @enum {string}
+               */
+              HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_helper_run_status_api_v1_help_assistants_runs__run_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateStatusRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_helper_availability_api_v1_help_assistants_availability_get: {
+    parameters: {
+      query: {
+        kind: components["schemas"]["HelperKind"];
+        target_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AvailabilityResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -34033,6 +38712,24 @@ export interface operations {
           "application/json": components["schemas"]["AuthUrlPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34066,6 +38763,24 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegration"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34093,6 +38808,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_UserInDB_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -34168,6 +38892,24 @@ export interface operations {
           "application/json": components["schemas"]["UserInDB"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34203,6 +38945,33 @@ export interface operations {
           "application/json": components["schemas"]["UserInDB"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34234,6 +39003,33 @@ export interface operations {
           "application/json": components["schemas"]["DeleteResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34263,6 +39059,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_TenantWithMaskedCredentials_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -34307,6 +39112,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34340,6 +39154,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantWithMaskedCredentials"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -34382,6 +39214,15 @@ export interface operations {
           "application/json": components["schemas"]["TenantWithMaskedCredentials"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -34420,6 +39261,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   crawl_all_weekly_websites_api_v1_sysadmin_crawl_all_weekly_websites__post: {
@@ -34438,6 +39288,15 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -34527,6 +39386,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_EmbeddingModelLegacy_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -34554,6 +39422,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CompletionModelPublic_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -34590,6 +39467,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CompletionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -34637,6 +39532,24 @@ export interface operations {
           "application/json": components["schemas"]["EmbeddingModelPublicLegacy"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -34677,6 +39590,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_AllowedOriginInDB_"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34710,6 +39632,15 @@ export interface operations {
           "application/json": components["schemas"]["AllowedOriginInDB"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -34738,6 +39669,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -34772,6 +39712,15 @@ export interface operations {
           };
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -34788,6 +39737,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -34810,6 +39768,15 @@ export interface operations {
           "application/json": {
             [key: string]: string | boolean;
           };
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Internal Server Error */
@@ -34850,6 +39817,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -34923,6 +39899,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -35008,6 +39993,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35054,6 +40048,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -35173,6 +40176,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35219,6 +40231,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -35298,6 +40319,145 @@ export interface operations {
       };
     };
   };
+  get_scim_token_status_api_v1_sysadmin_tenants__tenant_id__scim_token_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SCIM token status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScimTokenStatusResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Token created. Copy it now — it will not be shown again. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScimTokenCreatedResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Token revoked — SCIM disabled for this tenant */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   set_tenant_credential_api_v1_sysadmin_tenants__tenant_id__credentials__provider__put: {
     parameters: {
       query?: never;
@@ -35321,6 +40481,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35355,6 +40542,33 @@ export interface operations {
           "application/json": components["schemas"]["DeleteCredentialResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35386,6 +40600,33 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35415,6 +40656,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35452,6 +40711,24 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35483,6 +40760,24 @@ export interface operations {
           "application/json": components["schemas"]["DeleteSettingsResponse"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35512,6 +40807,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35549,6 +40862,33 @@ export interface operations {
           "application/json": components["schemas"]["SetFederationResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35578,6 +40918,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35615,6 +40973,33 @@ export interface operations {
           "application/json": components["schemas"]["SetFederationResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35646,6 +41031,33 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35653,6 +41065,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -35673,6 +41094,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -35697,6 +41127,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModuleInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35732,6 +41171,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantInDB"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35810,6 +41267,13 @@ export interface operations {
           "application/json": components["schemas"]["InitiateAuthResponse"];
         };
       };
+      /** @description Tenant selection or redirect URI is invalid */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Tenant is not active */
       403: {
         headers: {
@@ -35885,6 +41349,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Tenant or user not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35905,7 +41376,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description OpenAPI specification */
       200: {
         headers: {
           [name: string]: unknown;
@@ -35983,6 +41454,15 @@ export interface operations {
           "application/json": components["schemas"]["RolesPaginatedResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   create_role_api_v1_roles__post: {
@@ -36005,6 +41485,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -36036,6 +41534,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36082,6 +41589,24 @@ export interface operations {
           "application/json": components["schemas"]["RolePublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36120,6 +41645,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RolePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -36171,6 +41714,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36211,6 +41763,15 @@ export interface operations {
           "application/json": components["schemas"]["RolePublic"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -36249,6 +41810,15 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   get_healthz_api_healthz_get: {
@@ -36260,7 +41830,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Backend and worker are healthy */
       200: {
         headers: {
           [name: string]: unknown;
@@ -36268,6 +41838,13 @@ export interface operations {
         content: {
           "application/json": unknown;
         };
+      };
+      /** @description Worker health check failed */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -36282,7 +41859,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Crawler diagnostics */
       200: {
         headers: {
           [name: string]: unknown;
@@ -36311,7 +41888,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Backend version */
       200: {
         headers: {
           [name: string]: unknown;

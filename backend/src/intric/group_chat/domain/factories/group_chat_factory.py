@@ -62,8 +62,15 @@ class GroupChatFactory:
                     assistant
                     for assistant in assistants
                     if assistant.id == group_chat_assistant.assistant_id
-                )
+                ),
+                None,
             )
+            # A member assistant may be absent from `assistants` if its row was
+            # skipped during space load (e.g. corrupt JSONB). Degrade to the
+            # reduced membership instead of raising StopIteration and 500-ing
+            # the whole space.
+            if assistant is None:
+                continue
             group_chat_assistants.append(
                 GroupChatAssistant(
                     assistant=assistant,

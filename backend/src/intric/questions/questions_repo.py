@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
+from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.logging_table import logging_table
 from intric.database.tables.mcp_tool_references_table import (
@@ -168,6 +169,7 @@ class QuestionRepository:
         num_tokens_answer: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
+        reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
         web_search_results: list["WebSearchResult"] | None = None,
@@ -202,6 +204,8 @@ class QuestionRepository:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:
             update_values["tool_calls"] = [tc.model_dump() for tc in tool_calls]
+        if reasoning is not None:
+            update_values["reasoning"] = reasoning
         if logging_details_id is not None:
             update_values["logging_details_id"] = logging_details_id
 
@@ -297,6 +301,15 @@ class QuestionRepository:
         stmt = (
             sa.select(Questions)
             .where(Questions.service_id == service_id)
+            # Helper-assistant questions must never surface in exports/analysis
+            # (PRD §4) — same exclusion as sessions_repo / analysis_repo.
+            .where(
+                ~sa.exists(
+                    sa.select(HelpAssistantRuns.id).where(
+                        HelpAssistantRuns.session_id == Questions.session_id
+                    )
+                )
+            )
             .order_by(Questions.created_at)
         )
 
@@ -311,6 +324,14 @@ class QuestionRepository:
             .join(Sessions)
             .join(Users)
             .where(Users.tenant_id == tenant_id)
+            # Exclude helper-assistant questions from tenant-wide exports.
+            .where(
+                ~sa.exists(
+                    sa.select(HelpAssistantRuns.id).where(
+                        HelpAssistantRuns.session_id == Sessions.id
+                    )
+                )
+            )
             .filter(Questions.created_at >= start_date)
             .filter(Questions.created_at <= end_date)
             .order_by(Questions.created_at)

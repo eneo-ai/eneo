@@ -390,6 +390,16 @@ class AppService:
             file_ids=file_ids, include_transcription=True
         )
 
+        # Document-derived images (e.g. rendered PDF pages) enrich the
+        # completion payload only — the run's recorded input files stay the
+        # user's own uploads.
+        if app.completion_model is not None and app.completion_model.vision:
+            files = await self.file_service.with_derived_images(files)
+            if app.attachments:
+                app.attachments = await self.file_service.with_derived_images(
+                    app.attachments
+                )
+
         return await app.run(
             files=files,
             text=text,

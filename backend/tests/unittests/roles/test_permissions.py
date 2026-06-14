@@ -190,6 +190,7 @@ class TestPermissionSemantics:
         """Ensure all expected permissions are defined in the enum."""
         expected = {
             "assistants",
+            "personal_chat",
             "group_chats",
             "apps",
             "services",
@@ -253,6 +254,7 @@ class TestRoleTemplates:
 
     def test_user_has_basic_permissions(self, templates):
         user = templates["User"]
+        assert "personal_chat" in user
         assert "assistants" in user
         assert "shared_spaces" in user
         assert "collections" in user

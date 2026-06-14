@@ -149,6 +149,16 @@ class DataRetentionService:
         3. Tenant-level conversation_retention_days (if enabled)
         4. None (keep forever)
 
+        Help-assistant runs (e.g. Prompt Guide) are intentionally NOT excluded
+        here. Those conversations live in the regular questions table and the
+        helper assistant ships a ``data_retention_days`` policy, so they are
+        purged on the same schedule as any other assistant's data. Retention is
+        a data-lifecycle concern (delete old rows) — distinct from the
+        conversation-visibility invariant that hides helper sessions from
+        listings / insights / analytics (sessions_repo, analysis_repo,
+        token_usage). Preview counts and the delete both include helper rows,
+        so they stay consistent with each other.
+
         Returns:
             Number of questions deleted
         """

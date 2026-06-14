@@ -80,7 +80,7 @@
         user: { username: user.username },
         update
       });
-      invalidate("admin:users:load");
+      await invalidate("admin:users");
       // Invalidate does not update the user and userPassword values in this component, so we need to update
       user = editableUser;
       userPassword = "";
@@ -104,7 +104,7 @@
       await intric.users.create(newUser);
       editableUser.updateWithValue(createEmptyUser());
       userPassword = "";
-      invalidate("admin:users:load");
+      await invalidate("admin:users");
       showDialog?.set(false);
     } catch (e) {
       toastError(e);

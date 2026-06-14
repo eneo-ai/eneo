@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import os
 from pathlib import Path
 from typing import Callable
@@ -9,7 +10,13 @@ from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import FileBaseWithContent, FileType
 from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor, ImageMimeTypes
-from intric.files.text import TextExtractor
+from intric.files.image_processing import (
+    ProcessedImage,
+    downscale_image,
+    extract_images_from_office,
+    extract_images_from_pdf,
+)
+from intric.files.text import TextExtractor, TextMimeTypes
 from intric.main.config import get_settings
 from intric.main.exceptions import FileTooLargeException
 
@@ -49,6 +56,7 @@ class FileProtocol:
         max_size: int,
         extractor: Callable[[Path, str, str | None], str | bytes],
         limit_setting_name: str | None = None,
+        on_disk_hook: Callable[[Path], None] | None = None,
     ):
         file_size = self.file_size_service.get_file_size(upload_file.file)
         if file_size > max_size:
@@ -58,6 +66,8 @@ class FileProtocol:
                 setting_name=limit_setting_name,
             )
 
+        # save_file_to_disk closes the upload stream — this temp file is the
+        # only window where the content is readable from disk.
         filepath = await self.file_size_service.save_file_to_disk(upload_file.file)
         filepath = Path(filepath)
 
@@ -71,6 +81,9 @@ class FileProtocol:
                 size = len(content.encode("utf-8"))
             else:
                 size = len(content)
+
+            if on_disk_hook is not None:
+                on_disk_hook(filepath)
 
             return self._create_file_base(
                 upload_file, file_type, content, checksum, size
@@ -114,6 +127,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
+        on_disk_hook: Callable[[Path], None] | None = None,
     ):
         if max_size is None:
             max_size = get_settings().upload_file_to_session_max_size
@@ -126,6 +140,7 @@ class FileProtocol:
             max_size=max_size,
             extractor=self.text_extractor.extract,
             limit_setting_name=limit_setting_name,
+            on_disk_hook=on_disk_hook,
         )
 
     async def image_to_domain(
@@ -139,13 +154,106 @@ class FileProtocol:
             if limit_setting_name is None:
                 limit_setting_name = "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"
 
-        return await self._get_content(
+        file = await self._get_content(
             upload_file,
             file_type=FileType.IMAGE,
             max_size=max_size,
             extractor=self.image_extractor.extract,
             limit_setting_name=limit_setting_name,
         )
+
+        # Vision images are base64-encoded into every model request (and
+        # replayed for the rest of the session), so store them downscaled.
+        if file.blob is not None:
+            processed = downscale_image(file.blob, file.mimetype)
+            file.blob = processed.blob
+            file.mimetype = processed.mimetype
+            file.size = len(processed.blob)
+            file.checksum = hashlib.sha256(processed.blob).hexdigest()
+
+        return file
+
+    async def to_domain_with_derivatives(
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
+    ) -> tuple[FileBaseWithContent, list[FileBaseWithContent]]:
+        """Like to_domain, but document uploads (PDF/DOCX/PPTX) also yield
+        their visual content as derived image files.
+
+        Image extraction is best-effort: it runs inside the upload's temp-file
+        window (the stream is closed afterwards) and never breaks the upload.
+        """
+        settings = get_settings()
+        content_type = (upload_file.content_type or "").split(";")[0].strip()
+
+        extractor: Callable[[Path], list[ProcessedImage]] | None = None
+        if settings.attachment_image_extraction:
+            if content_type == TextMimeTypes.PDF.value:
+
+                def _extract_pdf(filepath: Path) -> list[ProcessedImage]:
+                    return extract_images_from_pdf(
+                        filepath,
+                        max_images=settings.attachment_max_extracted_images,
+                    )
+
+                extractor = _extract_pdf
+            elif content_type in (
+                TextMimeTypes.DOCX.value,
+                TextMimeTypes.PPTX.value,
+            ):
+
+                def _extract_office(filepath: Path) -> list[ProcessedImage]:
+                    return extract_images_from_office(
+                        filepath,
+                        mimetype=content_type,
+                        max_images=settings.attachment_max_extracted_images,
+                    )
+
+                extractor = _extract_office
+
+        if extractor is None:
+            return (
+                await self.to_domain(
+                    upload_file,
+                    max_size=max_size,
+                    limit_setting_name=limit_setting_name,
+                ),
+                [],
+            )
+
+        extracted: list[ProcessedImage] = []
+        extract = extractor
+
+        def collect_images(filepath: Path) -> None:
+            extracted.extend(extract(filepath))
+
+        file = await self.text_to_domain(
+            upload_file,
+            max_size=max_size,
+            limit_setting_name=limit_setting_name,
+            on_disk_hook=collect_images,
+        )
+
+        derivatives: list[FileBaseWithContent] = []
+        for index, image in enumerate(extracted, start=1):
+            label = (
+                f"page {image.page_number}"
+                if image.page_number is not None
+                else f"image {index}"
+            )
+            derivatives.append(
+                FileBaseWithContent(
+                    name=f"{file.name} ({label})",
+                    checksum=hashlib.sha256(image.blob).hexdigest(),
+                    size=len(image.blob),
+                    file_type=FileType.IMAGE,
+                    mimetype=image.mimetype,
+                    blob=image.blob,
+                )
+            )
+        return file, derivatives
 
     async def audio_to_domain(
         self,
