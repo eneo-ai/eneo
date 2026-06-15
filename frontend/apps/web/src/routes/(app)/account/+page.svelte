@@ -2,14 +2,51 @@
   import { Page } from "$lib/components/layout";
   import SelectLanguage from "$lib/components/SelectLanguage.svelte";
   import { getAppContext } from "$lib/core/AppContext.js";
+  import { getIntric } from "$lib/core/Intric";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
+  import {
+    getPreferredAssistantCopyFormat,
+    setPreferredAssistantCopyFormat
+  } from "$lib/features/chat/copyAssistantAnswer";
   import UpdateUserName from "./UpdateUserName.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { Input } from "@intric/ui";
   const {
     user,
+    settings,
+    updateSettings,
     versions,
     featureFlags,
     state: { userInfo }
   } = getAppContext();
+  const intric = getIntric();
+
+  let savingPreferredTextFormat = false;
+  let preferRichText = $state(getPreferredAssistantCopyFormat(settings) === "richtext");
+
+  async function savePreferredTextFormat(next: boolean) {
+    if (savingPreferredTextFormat) return;
+
+    const nextFormat = next ? "richtext" : "markdown";
+    if (getPreferredAssistantCopyFormat(settings) === nextFormat) return;
+
+    savingPreferredTextFormat = true;
+    try {
+      const updatedSettings = await intric.settings.update({
+        ...settings,
+        chatbot_widget: setPreferredAssistantCopyFormat(settings, nextFormat)
+      });
+      updateSettings(updatedSettings);
+      preferRichText = getPreferredAssistantCopyFormat(updatedSettings) === "richtext";
+      toast.success(m.preferred_copy_format_updated());
+    } catch (error) {
+      preferRichText = getPreferredAssistantCopyFormat(settings) === "richtext";
+      toastError(error, m.preferred_copy_format_update_failed());
+    } finally {
+      savingPreferredTextFormat = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -62,6 +99,23 @@
     >
       <span class="font-medium" aria-hidden="true">{m.language()}</span>
       <SelectLanguage></SelectLanguage>
+    </div>
+    <div
+      class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-3 border-b pt-4 pr-4 pb-4 pl-2"
+    >
+      <div class="flex flex-col gap-1">
+        <h3 class="font-medium">{m.preferred_copy_format()}</h3>
+        <p class="text-secondary text-sm">{m.preferred_copy_format_description()}</p>
+      </div>
+      <Input.RadioSwitch
+        bind:value={preferRichText}
+        disabled={savingPreferredTextFormat}
+        labelTrue={m.copy_format_richtext()}
+        labelFalse={m.copy_format_markdown()}
+        sideEffect={({ next }) => {
+          void savePreferredTextFormat(next);
+        }}
+      />
     </div>
     <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
       <h3 class="font-medium">{m.version()}</h3>
