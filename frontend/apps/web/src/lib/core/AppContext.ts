@@ -59,6 +59,10 @@ function AppContext(data: AppContextParams) {
     throw new Error("Error updating user info");
   }
 
+  function updateSettings(update: Settings) {
+    Object.assign(data.settings, update);
+  }
+
   return Object.freeze({
     user,
     tenant: data.tenant,
@@ -69,6 +73,7 @@ function AppContext(data: AppContextParams) {
     environment: data.environment,
     /** Update the user's name. */
     updateUserInfo,
+    updateSettings,
     state: {
       /** User's name. Eventhough this is a store it's currently not being used as such. Read more in AppContext.ts */
       userInfo,

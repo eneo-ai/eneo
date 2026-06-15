@@ -18,6 +18,20 @@ export function initSettings(client) {
     },
 
     /**
+     * Update user settings
+     * @param {import('../types/resources').Settings} settings
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    update: async (settings) => {
+      const res = await client.fetch("/api/v1/settings/", {
+        method: "post",
+        requestBody: { "application/json": settings }
+      });
+      return res;
+    },
+
+    /**
      * Update template feature setting for the tenant
      * @param {boolean} enabled Whether to enable templates
      * @throws {IntricError}
