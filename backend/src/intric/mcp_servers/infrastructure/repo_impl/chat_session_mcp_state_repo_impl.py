@@ -45,6 +45,17 @@ class ChatSessionMcpStateRepo:
         async with self._tx():
             return await self.session.scalar(stmt)
 
+    async def list_for_chat_session(
+        self, chat_session_id: UUID
+    ) -> list[tuple[UUID, str]]:
+        stmt = sa.select(
+            ChatSessionMcpState.mcp_server_id,
+            ChatSessionMcpState.mcp_session_id,
+        ).where(ChatSessionMcpState.chat_session_id == chat_session_id)
+        async with self._tx():
+            rows = (await self.session.execute(stmt)).all()
+        return [(server_id, session_id) for server_id, session_id in rows]
+
     async def upsert(
         self,
         chat_session_id: UUID,

@@ -4,6 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from intric.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
 
 if TYPE_CHECKING:
@@ -97,3 +98,21 @@ class MCPProxySessionFactory:
             chat_session_id=chat_session_id,
             db_session=db_session,
         )
+
+    async def terminate(
+        self,
+        mcp_server: "MCPServer",
+        mcp_session_id: str,
+    ) -> None:
+        """Terminate one persisted protocol session using server credentials."""
+        credentials: dict[str, str] | None = None
+        if mcp_server.http_auth_config_schema:
+            decrypted = self._decrypt_auth_config(mcp_server.http_auth_config_schema)
+            if decrypted:
+                credentials = {key: str(value) for key, value in decrypted.items()}
+
+        client = MCPClient(
+            mcp_server=mcp_server,
+            auth_credentials=credentials,
+        )
+        await client.terminate_protocol_session(mcp_session_id)

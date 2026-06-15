@@ -104,6 +104,7 @@
         toolName: tc.title || tc.tool_name,
         serverName: tc.server_name,
         args: tc.arguments,
+        toolCallId: tc.tool_call_id,
         status
       };
     })
@@ -194,7 +195,12 @@
 
   {#if tracedSteps.length > 0 || reasoningText.trim().length > 0}
     <div class="mb-4">
-      <ReasoningTrace steps={tracedSteps} reasoning={reasoningText} working={toolsStillExecuting} />
+      <ReasoningTrace
+        steps={tracedSteps}
+        reasoning={reasoningText}
+        working={toolsStillExecuting}
+        loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
+      />
     </div>
   {/if}
 

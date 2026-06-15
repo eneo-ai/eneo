@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getMessageContext } from "../../MessageContext.svelte";
   import AsyncImage from "$lib/components/AsyncImage.svelte";
+  import { sanitizeImageSrc } from "@intric/ui/components/markdown";
 
   const { current } = getMessageContext();
 
@@ -11,8 +12,8 @@
   // de-duplicated server-side, so this strip never doubles an image already
   // shown in the answer text.
   const images = $derived(
-    (current().mcp_tool_references ?? []).filter((ref) =>
-      (ref.mime_type ?? "").startsWith("image/")
+    (current().mcp_tool_references ?? []).filter(
+      (ref) => (ref.mime_type ?? "").startsWith("image/") && sanitizeImageSrc(ref.uri) !== undefined
     )
   );
 </script>

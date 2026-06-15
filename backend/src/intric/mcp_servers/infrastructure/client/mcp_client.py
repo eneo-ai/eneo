@@ -21,6 +21,7 @@ _settings = get_settings()
 MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
 MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
 MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
+MCP_TERMINATE_TIMEOUT_SECONDS = 5.0
 
 # Defensive caps for resource content blocks. An adversarial MCP server can
 # emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
@@ -701,6 +702,26 @@ class MCPClient:
                 )
 
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
+
+    async def terminate_protocol_session(self, mcp_session_id: str) -> None:
+        """Terminate a persisted server-side MCP session.
+
+        Transport teardown keeps protocol sessions alive so later chat turns
+        can resume them. Conversation deletion must therefore explicitly send
+        HTTP DELETE with the persisted ``Mcp-Session-Id``. HTTP 404 is treated
+        as idempotent success because the server has already forgotten it.
+        """
+        headers = await self._build_auth_headers()
+        headers["Mcp-Session-Id"] = mcp_session_id
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(MCP_TERMINATE_TIMEOUT_SECONDS)
+        ) as client:
+            response = await client.delete(self.mcp_server.http_url, headers=headers)
+
+        if response.status_code in {404, 405}:
+            return
+        response.raise_for_status()
 
     async def __aenter__(self):
         """Async context manager entry."""

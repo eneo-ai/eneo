@@ -123,6 +123,27 @@ class _FakeMCPProxy:
         ]
 
 
+class _ResourceMCPProxy(_FakeMCPProxy):
+    async def call_tools_parallel(self, proxy_calls):
+        self.calls.append(proxy_calls)
+        call_number = len(self.calls)
+        return [
+            {
+                "content": [
+                    {
+                        "type": "resource",
+                        "uri": "https://example.test/shared",
+                        "mime_type": "text/plain",
+                        "text": f"resource round {call_number}",
+                        "meta": {},
+                    }
+                ],
+                "is_error": False,
+            }
+            for _ in proxy_calls
+        ]
+
+
 def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
@@ -382,7 +403,7 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
 @pytest.mark.asyncio
 async def test_non_streaming_supports_multiple_tool_rounds():
     adapter = _make_completion_adapter()
-    mcp_proxy = _FakeMCPProxy()
+    mcp_proxy = _ResourceMCPProxy()
     responses = [
         _response(
             tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
@@ -412,6 +433,15 @@ async def test_non_streaming_supports_multiple_tool_rounds():
         [("server__tool", {"q": "first"})],
         [("server__tool", {"q": "second"})],
     ]
+    assert completion.mcp_tool_references is not None
+    assert len(completion.mcp_tool_references) == 2
+    assert {ref.tool_call_id for ref in completion.mcp_tool_references} == {
+        "call_1",
+        "call_2",
+    }
+    assert {ref.uri for ref in completion.mcp_tool_references} == {
+        "https://example.test/shared"
+    }
 
 
 def test_models_without_tool_capability_receive_no_tools():

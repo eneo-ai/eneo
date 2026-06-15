@@ -7,6 +7,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from intric.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelPublic,
+    McpToolReference,
     ResponseType,
 )
 from intric.completion_models.domain.completion_model import CompletionModel
@@ -84,6 +85,7 @@ def to_ask_response(
     info_blobs: Sequence[_SupportsModelDump],
     tools: "UseTools",
     completion_model: CompletionModel | CompletionModelPublic | None = None,
+    mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskResponse:
     public_model = (
         completion_model
@@ -110,6 +112,18 @@ def to_ask_response(
         model=public_model,
         tools=tools,
         web_search_references=[],
+        mcp_tool_references=[
+            McpToolReferencePublic(
+                id=ref.id,
+                uri=ref.uri,
+                mime_type=ref.mime_type,
+                content=ref.content,
+                meta=ref.meta,
+                tool_call_id=ref.tool_call_id,
+                mcp_tool_name=ref.mcp_tool_name,
+            )
+            for ref in mcp_tool_references
+        ],
     )
 
 
@@ -125,6 +139,7 @@ def to_ask_conversation_response(
     created_at: Optional[datetime] = None,
     updated_at: Optional[datetime] = None,
     web_search_results: Sequence[_SupportsWebSearchResult] | None = None,
+    mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskChatResponse:
     public_model = (
         completion_model
@@ -160,6 +175,18 @@ def to_ask_conversation_response(
                 url=web_search_result.url,
             )
             for web_search_result in (web_search_results or [])
+        ],
+        mcp_tool_references=[
+            McpToolReferencePublic(
+                id=ref.id,
+                uri=ref.uri,
+                mime_type=ref.mime_type,
+                content=ref.content,
+                meta=ref.meta,
+                tool_call_id=ref.tool_call_id,
+                mcp_tool_name=ref.mcp_tool_name,
+            )
+            for ref in mcp_tool_references
         ],
     )
 
@@ -204,8 +231,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         # `result` is intentionally omitted from the SSE payload — tool
         # outputs can be large and only a niche view ("Visa svar") needs
         # them. Frontend lazy-fetches via the tool-call-result endpoint
-        # when the user expands the panel; historic sessions get them
-        # preloaded with the Message row.
+        # when the user expands the panel; conversation history likewise
+        # omits the result and uses the same endpoint.
         data = SSEToolCall(
             session_id=session_id,
             tools=[
@@ -350,6 +377,7 @@ async def to_response(
         info_blobs=response.info_blobs,
         completion_model=response.completion_model,
         tools=response.tools,
+        mcp_tool_references=response.mcp_tool_references,
     )
 
 
@@ -397,4 +425,6 @@ async def to_conversation_response(
         question_id=response.question_id,
         created_at=response.created_at,
         updated_at=response.updated_at,
+        web_search_results=response.web_search_results,
+        mcp_tool_references=response.mcp_tool_references,
     )

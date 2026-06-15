@@ -34,6 +34,9 @@ from intric.users.user import UserInDB
 if TYPE_CHECKING:
     from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
+    from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+        McpSessionLifecycleService,
+    )
 
 logger = get_logger(__name__)
 
@@ -125,6 +128,7 @@ class SessionService:
         user: UserInDB,
         assistant_service: AssistantService | None = None,
         group_chat_service: GroupChatService | None = None,
+        mcp_session_lifecycle_service: "McpSessionLifecycleService | None" = None,
     ):
         super().__init__()
         self.session_repo = session_repo
@@ -132,6 +136,7 @@ class SessionService:
         self.user = user
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
+        self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncIterator[None]:
@@ -219,11 +224,10 @@ class SessionService:
 
     async def get_tool_call_result(
         self,
-        session_id: UUID,
+        session: SessionInDB,
         tool_call_id: str,
     ) -> tuple[str | None, str | None]:
         """Return (result, mcp_tool_name) for one visible tool call."""
-        session = await self.get_session_by_uuid(session_id)
         for question in session.questions or []:
             for tc in question.tool_calls or []:
                 if tc.tool_call_id and tc.tool_call_id == tool_call_id:
@@ -263,6 +267,10 @@ class SessionService:
         owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+        if self.mcp_session_lifecycle_service is not None:
+            await self.mcp_session_lifecycle_service.terminate_for_chat_session(
+                owned_session.id
+            )
         return await self.session_repo.delete(owned_session.id)
 
     async def create_session(

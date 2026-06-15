@@ -2,12 +2,15 @@
   Copyright (c) 2026 Sundsvalls Kommun
 
   A single tool call rendered as a self-contained card on the reasoning trace:
-  header (icon + name + server + status badge) over a collapsible "Parameters"
-  section. Presentational only — approval handling stays in MessageAnswer.svelte.
+  header (icon + name + server + status badge), collapsible parameters, and a
+  lazy-loaded result dialog. Approval handling stays in MessageAnswer.svelte.
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
+  import { Button, Dialog } from "@intric/ui";
   import { Check, X, Loader2, ChevronRight, Wrench } from "lucide-svelte";
+  import { writable } from "svelte/store";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -15,16 +18,43 @@
     toolName,
     serverName,
     args,
-    status = "complete"
+    toolCallId,
+    status = "complete",
+    onLoadResult
   }: {
     toolName: string;
     serverName: string;
     args?: Record<string, unknown>;
+    toolCallId?: string;
     status?: Status;
+    onLoadResult?: () => Promise<string | null>;
   } = $props();
 
   let argsOpen = $state(false);
+  let result = $state<string | null>(null);
+  let resultLoaded = $state(false);
+  let resultLoading = $state(false);
+  const resultDialogOpen = writable(false);
   const hasArgs = $derived(args != null && Object.keys(args).length > 0);
+  const canViewResult = $derived(
+    !!toolCallId && !!onLoadResult && (status === "complete" || status === "failed")
+  );
+
+  async function showResult() {
+    resultDialogOpen.set(true);
+    if (resultLoaded || resultLoading || !onLoadResult) return;
+
+    resultLoading = true;
+    try {
+      result = await onLoadResult();
+      resultLoaded = true;
+    } catch (error) {
+      resultDialogOpen.set(false);
+      toastError(error, m.mcp_tool_response_load_error());
+    } finally {
+      resultLoading = false;
+    }
+  }
 
   // Visuals per status: icon colour, badge label, and badge tone. Kept in one
   // map so the header and badge never drift out of sync.
@@ -111,4 +141,34 @@
         )}</pre>
     </div>
   {/if}
+
+  {#if canViewResult}
+    <div class="border-dimmer border-t px-3 py-2">
+      <Button unstyled class="text-accent-default text-xs font-medium" onclick={showResult}>
+        {m.mcp_tool_response_view()}
+      </Button>
+    </div>
+  {/if}
 </div>
+
+<Dialog.Root openController={resultDialogOpen}>
+  <Dialog.Content width="medium">
+    <Dialog.Title>{m.mcp_tool_response_title({ toolName })}</Dialog.Title>
+    <Dialog.Description>{m.mcp_tool_response_description()}</Dialog.Description>
+    <Dialog.Section scrollable>
+      <div class="p-4">
+        {#if resultLoading}
+          <p class="text-muted">{m.loading_ellipsis()}</p>
+        {:else if result}
+          <pre
+            class="bg-primary/60 text-secondary overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">{result}</pre>
+        {:else}
+          <p class="text-muted italic">{m.mcp_tool_response_empty()}</p>
+        {/if}
+      </div>
+    </Dialog.Section>
+    <Dialog.Controls let:close>
+      <Button variant="primary" is={close}>{m.done()}</Button>
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>

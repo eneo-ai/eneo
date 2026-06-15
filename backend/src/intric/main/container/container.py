@@ -259,9 +259,18 @@ from intric.mcp_servers.application.mcp_server_service import MCPServerService
 from intric.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
+from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+    McpSessionLifecycleService,
+)
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
+)
+from intric.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+    MCPProxySessionFactory,
+)
+from intric.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
+    ChatSessionMcpStateRepo,
 )
 from intric.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -1121,11 +1130,26 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
+    chat_session_mcp_state_repo = providers.Factory(
+        ChatSessionMcpStateRepo,
+        session=session,
+    )
+    mcp_proxy_session_factory = providers.Factory(
+        MCPProxySessionFactory,
+        encryption_service=encryption_service,
+    )
+    mcp_session_lifecycle_service = providers.Factory(
+        McpSessionLifecycleService,
+        state_repo=chat_session_mcp_state_repo,
+        mcp_server_repo=mcp_server_repo,
+        proxy_factory=mcp_proxy_session_factory,
+    )
     session_service = providers.Factory(
         SessionService,
         user=user,
         question_repo=question_repo,
         session_repo=session_repo,
+        mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,

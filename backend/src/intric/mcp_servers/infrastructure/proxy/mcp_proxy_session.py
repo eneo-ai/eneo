@@ -220,10 +220,12 @@ class MCPProxySession:
         """Replace a server's registry slice with a freshly-listed tool set.
 
         Used by refresh_tools after a tools/list_changed: drop every prefixed
-        name currently owned by this server, then re-register from the live
-        ``list_tools()`` response. Admin-disabled tools stay hidden — a live
-        tool is registered only if it is genuinely new (not in the DB tool list,
-        i.e. dynamically activated) or its DB row is enabled. Returns True if the
+        name currently owned by this server, then re-register the intersection
+        of the live ``list_tools()`` response and the admin-approved DB catalog.
+        Definitions always come from the DB: a compromised server must not be
+        able to inject a new tool or silently replace an approved tool's schema.
+        Progressive discovery still works for previously approved tools that
+        were absent from the server's earlier live list. Returns True if the
         server's set of prefixed names changed.
         """
         before = {
@@ -241,26 +243,31 @@ class MCPProxySession:
             t for t in self._tools_for_llm if t["function"]["name"] not in before
         ]
 
-        # Names an admin disabled (or that are not yet synced) must stay hidden
-        # even though the live server still advertises them. Tools absent from
-        # the DB entirely are dynamically activated and allowed.
-        db_tools = server.tools or []
-        disabled_names = {
-            tool.name for tool in db_tools if not self._is_db_tool_enabled(tool)
+        approved_tools = {
+            tool.name: tool
+            for tool in (server.tools or [])
+            if self._is_db_tool_enabled(tool)
         }
 
         server_prefix = self._sanitize_name(server.name.lower())
         after: set[str] = set()
-        for tool in live_tools:
-            if tool["name"] in disabled_names:
+        for live_tool in live_tools:
+            db_tool = approved_tools.get(live_tool["name"])
+            if db_tool is None:
+                logger.warning(
+                    "[MCPProxy] Ignoring unapproved live tool '%s/%s'; "
+                    "sync and approve it before exposure",
+                    server.name,
+                    live_tool["name"],
+                )
                 continue
             prefixed = self._register_tool(
                 server=server,
                 server_prefix=server_prefix,
-                name=tool["name"],
-                title=tool.get("title"),
-                description=tool.get("description"),
-                input_schema=tool.get("input_schema"),
+                name=db_tool.name,
+                title=db_tool.title,
+                description=db_tool.description,
+                input_schema=db_tool.input_schema,
             )
             if prefixed is not None:
                 after.add(prefixed)

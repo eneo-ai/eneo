@@ -2,6 +2,7 @@ import { marked, type TokenizerAndRendererExtension } from "marked";
 import type { IntricInrefToken, IntricMentionToken } from "./CustomComponents";
 
 export { default as Markdown } from "./Markdown.svelte";
+export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
 export {
   type CustomRenderers as MarkdownCustomRenderingOptions,
   type IntricInrefCustomComponentProps,

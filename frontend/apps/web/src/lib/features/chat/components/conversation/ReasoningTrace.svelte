@@ -19,17 +19,20 @@
     toolName: string;
     serverName: string;
     args?: Record<string, unknown>;
+    toolCallId?: string;
     status: "preparing" | "running" | "complete" | "failed" | "denied";
   };
 
   let {
     steps = [],
     reasoning = "",
-    working = false
+    working = false,
+    loadToolResult
   }: {
     steps?: Step[];
     reasoning?: string;
     working?: boolean;
+    loadToolResult?: (toolCallId: string) => Promise<string | null>;
   } = $props();
 
   const hasReasoning = $derived(reasoning.trim().length > 0);
@@ -131,7 +134,11 @@
                   toolName={step.toolName}
                   serverName={step.serverName}
                   args={step.args}
+                  toolCallId={step.toolCallId}
                   status={step.status}
+                  onLoadResult={loadToolResult && step.toolCallId
+                    ? () => loadToolResult(step.toolCallId!)
+                    : undefined}
                 />
               {/each}
             </div>

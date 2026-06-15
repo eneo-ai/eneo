@@ -18,6 +18,7 @@ import {
   type ConversationTools,
   type SSE
 } from "@intric/intric-js";
+import { SvelteMap } from "svelte/reactivity";
 
 export type PendingToolApproval = {
   approvalId: string;
@@ -37,6 +38,7 @@ export class ChatService {
     return "tools" in partner && partner.tools?.assistants?.length > 0;
   });
   #intric: Intric;
+  #toolCallResultCache = new SvelteMap<string, Promise<string | null>>();
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
   loadedConversations = $state<ConversationSparse[]>([]);
@@ -209,6 +211,27 @@ export class ChatService {
     this.currentConversation = emptyConversation();
     this.#resetLocked();
     this.#clearPreflight();
+  }
+
+  async getToolCallResult(toolCallId: string): Promise<string | null> {
+    const sessionId = this.currentConversation.id;
+    if (!sessionId) {
+      throw new Error("Cannot load a tool result without an active conversation");
+    }
+
+    const cacheKey = `${sessionId}:${toolCallId}`;
+    const cached = this.#toolCallResultCache.get(cacheKey);
+    if (cached) return cached;
+
+    const request = this.#intric.conversations
+      .getToolCallResult({ sessionId, toolCallId })
+      .then((response) => response.result ?? null)
+      .catch((error) => {
+        this.#toolCallResultCache.delete(cacheKey);
+        throw error;
+      });
+    this.#toolCallResultCache.set(cacheKey, request);
+    return request;
   }
 
   #seedLockedFromHistory() {

@@ -813,6 +813,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
                 tool_round = 0
+                seen_prefixes: set[str] = set()
+                captured_refs: list[McpToolReference] = []
                 while msg.tool_calls and mcp_proxy:
                     if tool_round >= self.MAX_TOOL_ROUNDS:
                         raise OpenAIException(
@@ -858,8 +860,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # later persistence) and woven into the LLM-facing text via
                     # a structured MCP source context so the model can emit
                     # <inref/> markers without relying on server-specific shapes.
-                    seen_prefixes: set[str] = set()
-                    captured_refs: list[McpToolReference] = []
                     for tc, result in zip(msg.tool_calls, results):
                         content_list = cast(
                             list[dict[str, Any]], result.get("content") or []
@@ -886,9 +886,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": llm_text,
                             }
                         )
-                    if captured_refs:
-                        completion.mcp_tool_references = captured_refs
-
                     response = cast(
                         _LiteLLMResponse,
                         await _acompletion_call(
@@ -905,6 +902,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     choice = response.choices[0]
                     msg = choice.message
 
+                if captured_refs:
+                    completion.mcp_tool_references = captured_refs
                 if msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"

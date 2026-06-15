@@ -547,7 +547,7 @@ async def get_conversation(
 @router.get(
     "/{session_id}/tool-calls/{tool_call_id}/result/",
     response_model=ToolCallResultPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 async def get_tool_call_result(
@@ -561,8 +561,10 @@ async def get_tool_call_result(
 ):
     """Lazy-load a single tool call's upstream response text."""
     session_service = container.session_service()
+    session = await session_service.get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
     result, mcp_tool_name = await session_service.get_tool_call_result(
-        session_id=session_id, tool_call_id=tool_call_id
+        session=session, tool_call_id=tool_call_id
     )
     if result is None and mcp_tool_name is None:
         raise NotFoundException("Tool call not found in this session")
