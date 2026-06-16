@@ -1,9 +1,17 @@
 import type { CompletionModel } from "@intric/intric-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
+
+// ChatModelDetails reads the tenant from the app-wide Svelte context to decide
+// whether to show pricing. That context is only set by the app shell, so stub
+// it here with pricing enabled (the default) to keep this a pure render test.
+vi.mock("$lib/core/AppContext", () => ({
+  getAppContext: () => ({ tenant: { show_model_pricing: true } })
+}));
+
 import ChatModelDetails from "./ChatModelDetails.svelte";
 
 const model = {
