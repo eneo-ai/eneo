@@ -13,6 +13,9 @@ MIMETYPE_EXTENSIONS_MAPPER = {
     TextMimeTypes.PPTX.value: [".pptx"],
     TextMimeTypes.XLSX.value: [".xlsx"],
     TextMimeTypes.XLS.value: [".xls"],
+    TextMimeTypes.JSON.value: [".json"],
+    TextMimeTypes.XML.value: [".xml"],
+    TextMimeTypes.XML_APP.value: [".xml"],
     # Legacy formats (for detection/rejection)
     TextMimeTypes.DOC.value: [".doc"],
     TextMimeTypes.PPT.value: [".ppt"],

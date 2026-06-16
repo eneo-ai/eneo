@@ -67,6 +67,9 @@ class TestTextMimeTypes:
             is True
         )
         assert TextMimeTypes.has_value("application/vnd.ms-excel") is True
+        assert TextMimeTypes.has_value("application/json") is True
+        assert TextMimeTypes.has_value("text/xml") is True
+        assert TextMimeTypes.has_value("application/xml") is True
 
     def test_has_value_returns_false_for_invalid_mime(self):
         """has_value should return False for invalid MIME types."""
@@ -494,6 +497,27 @@ class TestTextExtractorExtractMethod:
 
         result = extractor.extract(test_file, "text/plain")
         assert result == "Plain text content"
+
+    def test_extract_routes_json_correctly(self, tmp_path):
+        """Should route JSON files through plain text extraction."""
+        extractor = TextExtractor()
+
+        test_file = tmp_path / "test.json"
+        test_file.write_text('{"key": "value"}')
+
+        result = extractor.extract(test_file, "application/json")
+        assert result == '{"key": "value"}'
+
+    def test_extract_routes_xml_correctly(self, tmp_path):
+        """Should route XML files through plain text extraction for both spellings."""
+        extractor = TextExtractor()
+
+        test_file = tmp_path / "test.xml"
+        content = "<root><a>1</a></root>"
+        test_file.write_text(content)
+
+        assert extractor.extract(test_file, "text/xml") == content
+        assert extractor.extract(test_file, "application/xml") == content
 
     def test_extract_routes_markdown_correctly(self, tmp_path):
         """Should route markdown files correctly."""

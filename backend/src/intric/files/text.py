@@ -75,6 +75,10 @@ class MimeTypesBase(str, Enum):
 
 
 class TextMimeTypes(MimeTypesBase):
+    # Text formats the extractor can handle. Doubles as the upload/attachment
+    # allowlist (see limits.limit_service). The crawler maintains its own
+    # download policy in crawler.parse_html.CRAWLABLE_DOCUMENT_MIMETYPES — keep
+    # the two concerns separate so changing one never silently affects the other.
     # Supported formats
     MD = "text/markdown"
     TXT = "text/plain"
@@ -85,6 +89,10 @@ class TextMimeTypes(MimeTypesBase):
     PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     XLS = "application/vnd.ms-excel"
+    JSON = "application/json"
+    # Browsers and libmagic disagree on the XML mimetype, so accept both spellings
+    XML = "text/xml"
+    XML_APP = "application/xml"
 
     # Legacy formats (for detection/rejection only)
     DOC = "application/msword"
@@ -386,6 +394,9 @@ class TextExtractor:
                 | TextMimeTypes.MD
                 | TextMimeTypes.TEXT_CSV
                 | TextMimeTypes.APP_CSV
+                | TextMimeTypes.JSON
+                | TextMimeTypes.XML
+                | TextMimeTypes.XML_APP
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.PDF:

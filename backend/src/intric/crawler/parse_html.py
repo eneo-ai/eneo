@@ -12,6 +12,31 @@ from intric.files.text import TextMimeTypes
 logger = logging.getLogger(__name__)
 
 
+# MIME types of linked documents worth downloading and ingesting during a crawl.
+# Deliberately kept separate from the upload/attachment allowlist (TextMimeTypes):
+# broadening what users may attach must never silently widen crawl scope. HTML is
+# excluded on purpose — pages are extracted via parse_response, not ingested as
+# standalone files — and legacy .doc/.ppt are excluded since the extractor rejects
+# them anyway. Values are sourced from TextMimeTypes so a removed format breaks at
+# import time rather than drifting silently.
+CRAWLABLE_DOCUMENT_MIMETYPES: frozenset[str] = frozenset(
+    {
+        TextMimeTypes.MD.value,
+        TextMimeTypes.TXT.value,
+        TextMimeTypes.PDF.value,
+        TextMimeTypes.DOCX.value,
+        TextMimeTypes.TEXT_CSV.value,
+        TextMimeTypes.APP_CSV.value,
+        TextMimeTypes.PPTX.value,
+        TextMimeTypes.XLSX.value,
+        TextMimeTypes.XLS.value,
+        TextMimeTypes.JSON.value,
+        TextMimeTypes.XML.value,
+        TextMimeTypes.XML_APP.value,
+    }
+)
+
+
 @dataclass
 class CrawledPage:
     url: str
@@ -62,7 +87,8 @@ def parse_file(response: Response) -> dict[str, list[str]] | None:
             )
             return None
 
-    if TextMimeTypes.has_value(content_type):
+    base_type = content_type.split(";")[0].strip()
+    if base_type in CRAWLABLE_DOCUMENT_MIMETYPES:
         return {"file_urls": [response.url]}
 
     return None
