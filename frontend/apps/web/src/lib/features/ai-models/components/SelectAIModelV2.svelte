@@ -8,6 +8,7 @@
   import { IconCancel } from "@intric/icons/cancel";
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { m } from "$lib/paraglide/messages";
+  import { getAppContext } from "$lib/core/AppContext";
   import ProviderGlyph from "../../../../routes/(app)/admin/models/components/ProviderGlyph.svelte";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
@@ -21,6 +22,10 @@
   /** Hide the inline cost chip on dropdown rows. Useful for surfaces where
    *  cost is irrelevant or the row is too narrow. */
   export let showCost: boolean = true;
+
+  // Org admins can hide model prices from users org-wide; gate the cost chip on it.
+  const { tenant } = getAppContext();
+  $: showCostBadge = showCost && tenant.show_model_pricing !== false;
 
   // Check if models have provider info (provider_name field exists and at least one model has a provider)
   function hasProviderInfo(models: T[]): boolean {
@@ -120,7 +125,7 @@
           <ModelNameAndVendor model={model as T} descriptionMode="non-tabbable"
           ></ModelNameAndVendor>
           <div class="flex items-center gap-3">
-            {#if showCost}
+            {#if showCostBadge}
               <ModelCostBadge model={model as T} dense />
             {/if}
             <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
@@ -139,7 +144,7 @@
       >
         <ModelNameAndVendor {model} descriptionMode="non-tabbable"></ModelNameAndVendor>
         <div class="flex items-center gap-3">
-          {#if showCost}
+          {#if showCostBadge}
             <ModelCostBadge {model} dense />
           {/if}
           <div class="check {$isSelected(model) ? 'block' : 'hidden'}">

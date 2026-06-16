@@ -5,6 +5,7 @@
   import { formatCostPerMillionTokens } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { getAppContext } from "$lib/core/AppContext";
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
 
   type Props = {
@@ -12,6 +13,10 @@
   };
 
   let { model }: Props = $props();
+
+  // Org admins can hide model prices from users; default to showing them.
+  const { tenant } = getAppContext();
+  const showPricing = tenant.show_model_pricing !== false;
 
   const inputPrice = $derived(
     formatCostPerMillionTokens(model.input_cost_per_token) ?? m.model_cost_unknown()
@@ -50,28 +55,30 @@
       <dt class="text-muted-foreground">{m.model_context_label()}</dt>
       <dd class="text-right text-[13px] font-medium tabular-nums">{contextWindow}</dd>
     </div>
-    <div class="flex items-center justify-between gap-4 py-2.5">
-      <dt class="text-muted-foreground">{m.model_selector_input_price()}</dt>
-      <dd class="text-right text-[13px] font-medium tabular-nums">
-        {inputPrice}
-        {#if inputPrice !== m.model_cost_unknown()}
-          <span class="text-muted-foreground font-normal">
-            / {m.model_selector_million_tokens()}
-          </span>
-        {/if}
-      </dd>
-    </div>
-    <div class="flex items-center justify-between gap-4 py-2.5">
-      <dt class="text-muted-foreground">{m.model_selector_output_price()}</dt>
-      <dd class="text-right text-[13px] font-medium tabular-nums">
-        {outputPrice}
-        {#if outputPrice !== m.model_cost_unknown()}
-          <span class="text-muted-foreground font-normal">
-            / {m.model_selector_million_tokens()}
-          </span>
-        {/if}
-      </dd>
-    </div>
+    {#if showPricing}
+      <div class="flex items-center justify-between gap-4 py-2.5">
+        <dt class="text-muted-foreground">{m.model_selector_input_price()}</dt>
+        <dd class="text-right text-[13px] font-medium tabular-nums">
+          {inputPrice}
+          {#if inputPrice !== m.model_cost_unknown()}
+            <span class="text-muted-foreground font-normal">
+              / {m.model_selector_million_tokens()}
+            </span>
+          {/if}
+        </dd>
+      </div>
+      <div class="flex items-center justify-between gap-4 py-2.5">
+        <dt class="text-muted-foreground">{m.model_selector_output_price()}</dt>
+        <dd class="text-right text-[13px] font-medium tabular-nums">
+          {outputPrice}
+          {#if outputPrice !== m.model_cost_unknown()}
+            <span class="text-muted-foreground font-normal">
+              / {m.model_selector_million_tokens()}
+            </span>
+          {/if}
+        </dd>
+      </div>
+    {/if}
   </dl>
 
   {#if model.vision || model.reasoning || model.supports_tool_calling}

@@ -538,7 +538,8 @@ class SpaceAssembler:
         ]
         completion_models = [
             self.completion_model_assembler.from_completion_model_to_model(
-                completion_model=model
+                completion_model=model,
+                show_pricing=self.user.tenant.show_model_pricing,
             )
             for model in space.completion_models
             if (

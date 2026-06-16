@@ -71,6 +71,20 @@ export function initSettings(client) {
         requestBody: { "application/json": { enabled } }
       });
       return res;
+    },
+
+    /**
+     * Set whether model input/output prices are shown to regular users (org-wide).
+     * @param {boolean} enabled Whether to show model pricing to users
+     * @throws {IntricError}
+     * @returns {Promise<{ show_model_pricing: boolean }>}
+     */
+    updateModelPricingVisibility: async (enabled) => {
+      const res = await client.fetch("/api/v1/admin/settings/model-pricing-visibility", {
+        method: "put",
+        requestBody: { "application/json": { show_model_pricing: enabled } }
+      });
+      return res;
     }
   };
 }
