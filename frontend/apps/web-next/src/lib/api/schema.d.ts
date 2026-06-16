@@ -2130,6 +2130,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/settings/model-pricing-visibility": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set model pricing visibility
+     * @description Toggle whether model input/output prices are shown to regular users across the organization.
+     */
+    put: operations["update_model_pricing_visibility_api_v1_admin_settings_model_pricing_visibility_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/super-api-key-status": {
     parameters: {
       query?: never;
@@ -16006,6 +16026,14 @@ export interface components {
       tenants: components["schemas"]["TenantInfo"][];
     };
     /** TenantPublic */
+    /**
+     * ModelPricingVisibility
+     * @description Org-wide toggle for showing model input/output prices to regular users.
+     */
+    ModelPricingVisibility: {
+      /** Show Model Pricing */
+      show_model_pricing: boolean;
+    };
     TenantPublic: {
       /** Name */
       name: string;
@@ -16034,6 +16062,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
       /** Default Role Id */
@@ -26189,6 +26222,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  update_model_pricing_visibility_api_v1_admin_settings_model_pricing_visibility_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelPricingVisibility"];
+      };
+    };
+    responses: {
+      /** @description Updated model pricing visibility. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelPricingVisibility"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

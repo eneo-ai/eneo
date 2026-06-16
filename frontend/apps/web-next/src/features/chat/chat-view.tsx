@@ -2,9 +2,9 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Globe, Paperclip, X } from "lucide-react";
+import { Bot, Copy, Globe, Paperclip } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -12,9 +12,13 @@ import {
   ConversationEmptyState,
   ConversationScrollButton
 } from "@/components/ai-elements/conversation";
-import { MessageAction, MessageActions, MessageResponse } from "@/components/ai-elements/message";
-import { Context } from "@/components/ai-elements/context";
-import { useAppContext } from "@/components/providers/app-context";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  MessageResponse
+} from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputBody,
@@ -25,7 +29,9 @@ import {
   PromptInputTools,
   type PromptInputMessage
 } from "@/components/ai-elements/prompt-input";
-import { Badge } from "@/components/ui/badge";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import { useAppContext } from "@/components/providers/app-context";
 import {
   Select,
   SelectContent,
@@ -38,53 +44,41 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
+import { ComposerAttachments } from "./attachments";
+import { ContextUsageBar } from "./context-usage-bar";
 import { historyQueryKey } from "./history-panel";
-import { GeneratedFile, MessageSources, MessageTool, ToolApprovalCard } from "./message-parts";
+import {
+  GeneratedFile,
+  MessageFiles,
+  MessageSources,
+  MessageTool,
+  ToolApprovalCard
+} from "./message-parts";
 import { useAttachments } from "./use-attachments";
 
 const NO_MENTION = "__none__";
-
-/** Round initials avatar from the design's chat thread (36px circle). */
-function ChatAvatar({ label, className }: { label: string; className?: string }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold select-none",
-        className
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
-/** "anna.lindqvist@…" → "AL"; single-word names fall back to one letter. */
-function initialsOf(name: string) {
-  const parts = name.split(/[\s._-]+/).filter(Boolean);
-  const initials = ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase();
-  return initials || name.slice(0, 1).toUpperCase();
-}
 
 export function ChatView({
   partner,
   initialSessionId = null,
   initialMessages = [],
-  onSessionCreated
+  onSessionCreated,
+  onNewConversation,
+  modelSelector
 }: {
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
   onSessionCreated?: (sessionId: string) => void;
+  /** Start a fresh conversation (offered when the context estimate overflows). */
+  onNewConversation?: () => void;
+  /** Interactive model picker shown in the composer (default-assistant only). */
+  modelSelector?: ReactNode;
 }) {
   const t = useTranslations();
-  const queryClient = useQueryClient();
   const { user } = useAppContext();
+  const queryClient = useQueryClient();
   const attachments = useAttachments(partner);
-
-  const userName = user.username ?? user.email.split("@")[0] ?? user.email;
-  const userInitials = initialsOf(userName);
-  const partnerInitial = partner.name.slice(0, 1).toUpperCase();
 
   const [input, setInput] = useState("");
   const [useWebSearch, setUseWebSearch] = useState(false);
@@ -102,11 +96,31 @@ export function ChatView({
       output: last?.metadata?.tokens?.completion ?? 0
     };
   });
+  // Running conversation total, seeded from history (sum of each turn's
+  // prompt+completion), then incremented per live token-usage event.
+  const [cumulative, setCumulative] = useState(() => {
+    let tokens = 0;
+    let turns = 0;
+    for (const message of initialMessages) {
+      if (message.role !== "assistant") continue;
+      const turnTokens =
+        (message.metadata?.tokens?.prompt ?? 0) + (message.metadata?.tokens?.completion ?? 0);
+      if (turnTokens > 0) {
+        tokens += turnTokens;
+        turns += 1;
+      }
+    }
+    return { tokens, turns };
+  });
 
   const transport = useMemo(() => createChatTransport(), []);
   const { messages, sendMessage, status, stop, error } = useChat<EneoUIMessage>({
     transport,
     messages: initialMessages,
+    // Backend forwards one SSE delta per provider token; coalesce UI updates to
+    // ~20/s so fast streams don't re-parse markdown on every token (the Svelte
+    // app frame-buffered for the same reason). Tune up for snappier, down for calmer.
+    experimental_throttle: 50,
     onData: (part) => {
       if (part.type === "data-session") {
         if (!sessionIdRef.current) {
@@ -120,6 +134,13 @@ export function ChatView({
           input: part.data.prompt_tokens ?? 0,
           output: part.data.completion_tokens ?? 0
         });
+        const turnTokens = part.data.turn_tokens ?? 0;
+        if (turnTokens > 0) {
+          setCumulative((current) => ({
+            tokens: current.tokens + turnTokens,
+            turns: current.turns + 1
+          }));
+        }
       }
     },
     onFinish: async () => {
@@ -155,6 +176,15 @@ export function ChatView({
 
   const busy = status === "submitted" || status === "streaming";
 
+  // Translated reasoning header: shimmering while thinking, elapsed once done.
+  const thinkingMessage = (isStreaming: boolean, duration?: number): ReactNode => {
+    if (isStreaming || duration === 0) {
+      return <Shimmer duration={1}>{t("chat_reasoning_thinking")}</Shimmer>;
+    }
+    if (duration === undefined) return <span>{t("chat_reasoning_thought")}</span>;
+    return <span>{t("chat_reasoning_thought_for", { seconds: duration })}</span>;
+  };
+
   function submit(message: PromptInputMessage) {
     const text = message.text?.trim();
     if (!text || busy || attachments.uploading || usage.willExceedContext) return;
@@ -189,9 +219,18 @@ export function ChatView({
         {/* Same column width as the prompt input: responses span the chat
             column (readable line length), not the full page. */}
         <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-0 py-6">
-          {messages.length === 0 && (
-            <ConversationEmptyState title={partner.name} description={t("ask_a_question")} />
-          )}
+          {messages.length === 0 &&
+            (partner.type === "default-assistant" ? (
+              <ConversationEmptyState
+                icon={<Bot className="size-10" />}
+                title={t("hi_firstname", {
+                  firstName: user.username || user.email.split("@")[0] || user.email
+                })}
+                description={t("personal_assistant_welcome")}
+              />
+            ) : (
+              <ConversationEmptyState title={partner.name} description={t("ask_a_question")} />
+            ))}
           {messages.map((message, messageIndex) => {
             const isAssistant = message.role === "assistant";
             const isStreamingThis = busy && messageIndex === messages.length - 1;
@@ -200,91 +239,81 @@ export function ChatView({
               .map((part) => part.text)
               .join("\n\n");
             return (
-              <div key={message.id} className="flex items-start gap-3">
-                <ChatAvatar
-                  label={isAssistant ? partnerInitial : userInitials}
-                  className={
-                    isAssistant ? "bg-primary text-primary-foreground" : "bg-chart-5 text-white"
-                  }
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold">
-                    {isAssistant ? partner.name : userName}
-                  </div>
-                  <div className="mt-1 flex flex-col gap-2 text-sm leading-relaxed">
-                    {message.parts.map((part, index) => {
-                      if (part.type === "text") {
-                        return isAssistant ? (
-                          <MessageResponse key={index}>{part.text}</MessageResponse>
-                        ) : (
-                          <span key={index} className="whitespace-pre-wrap">
-                            {part.text}
-                          </span>
-                        );
-                      }
-                      if (part.type === "dynamic-tool") {
-                        return <MessageTool key={index} part={part} />;
-                      }
-                      if (part.type === "data-tool-approval") {
-                        return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
-                      }
-                      if (part.type === "file") {
-                        return part.mediaType.startsWith("image/") ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
-                          <img
-                            key={index}
-                            src={part.url}
-                            alt={part.filename ?? "generated"}
-                            className="max-h-96 rounded-lg border"
-                          />
-                        ) : null;
-                      }
-                      return null;
-                    })}
-                    {!isAssistant && (message.metadata?.files?.length ?? 0) > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {message.metadata!.files!.map((file) => (
-                          <Badge key={file.id} variant="secondary">
-                            <Paperclip className="size-3" /> {file.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                    {isAssistant &&
-                      message.metadata?.generatedFiles?.map((file) => (
-                        <GeneratedFile key={file.id} file={file} />
-                      ))}
-                  </div>
-                  {isAssistant && <MessageSources parts={message.parts} />}
-                  {isAssistant && textContent && !isStreamingThis && (
-                    <MessageActions className="mt-2 -ml-1.5">
-                      <MessageAction
-                        tooltip={t("copy")}
-                        onClick={() => {
-                          navigator.clipboard.writeText(textContent);
-                          toast.success(t("copied"));
-                        }}
-                      >
-                        <Copy className="size-3.5" />
-                      </MessageAction>
-                    </MessageActions>
+              <Message key={message.id} from={message.role}>
+                <MessageContent>
+                  {message.parts.map((part, index) => {
+                    if (part.type === "reasoning") {
+                      return (
+                        <Reasoning key={index} isStreaming={part.state === "streaming"}>
+                          <ReasoningTrigger getThinkingMessage={thinkingMessage} />
+                          <ReasoningContent>{part.text}</ReasoningContent>
+                        </Reasoning>
+                      );
+                    }
+                    if (part.type === "text") {
+                      return isAssistant ? (
+                        <MessageResponse key={index}>{part.text}</MessageResponse>
+                      ) : (
+                        <span key={index} className="whitespace-pre-wrap">
+                          {part.text}
+                        </span>
+                      );
+                    }
+                    if (part.type === "dynamic-tool") {
+                      return <MessageTool key={index} part={part} />;
+                    }
+                    if (part.type === "data-tool-approval") {
+                      return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
+                    }
+                    if (part.type === "file") {
+                      return part.mediaType.startsWith("image/") ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- signed cross-origin URL
+                        <img
+                          key={index}
+                          src={part.url}
+                          alt={part.filename ?? "generated"}
+                          className="max-h-96 rounded-lg border"
+                        />
+                      ) : null;
+                    }
+                    return null;
+                  })}
+                  {!isAssistant && (message.metadata?.files?.length ?? 0) > 0 && (
+                    <MessageFiles files={message.metadata!.files!} />
                   )}
-                </div>
-              </div>
+                  {isAssistant &&
+                    message.metadata?.generatedFiles?.map((file) => (
+                      <GeneratedFile key={file.id} file={file} />
+                    ))}
+                </MessageContent>
+                {isAssistant && <MessageSources parts={message.parts} />}
+                {isAssistant && textContent && !isStreamingThis && (
+                  <MessageActions className="-ml-1.5">
+                    <MessageAction
+                      tooltip={t("copy")}
+                      onClick={() => {
+                        navigator.clipboard.writeText(textContent);
+                        toast.success(t("copied"));
+                      }}
+                    >
+                      <Copy className="size-3.5" />
+                    </MessageAction>
+                  </MessageActions>
+                )}
+              </Message>
             );
           })}
           {status === "submitted" && (
-            <div className="flex items-start gap-3">
-              <ChatAvatar label={partnerInitial} className="bg-primary text-primary-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold">{partner.name}</div>
-                <div className="mt-1 flex h-5 items-center gap-1">
+            <Message from="assistant">
+              <MessageContent>
+                <div className="flex h-5 items-center gap-1" aria-live="polite">
                   <span className="bg-muted-foreground size-1.5 animate-pulse rounded-full" />
                   <span className="bg-muted-foreground size-1.5 animate-pulse rounded-full [animation-delay:200ms]" />
                   <span className="bg-muted-foreground size-1.5 animate-pulse rounded-full [animation-delay:400ms]" />
+                  <span className="sr-only">{t("assistant_is_thinking")}</span>
                 </div>
-              </div>
-            </div>
+              </MessageContent>
+            </Message>
           )}
           {error && (
             <p className="text-destructive text-sm">{error.message || t("request_failed")}</p>
@@ -294,22 +323,14 @@ export function ChatView({
       </Conversation>
 
       <div className="mx-auto w-full max-w-3xl pb-4">
-        {attachments.attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1 pb-2">
-            {attachments.attachments.map((attachment) => (
-              <Badge key={attachment.key} variant={attachment.uploading ? "outline" : "secondary"}>
-                <Paperclip className="size-3" /> {attachment.name}
-                <button
-                  type="button"
-                  aria-label={t("remove")}
-                  onClick={() => attachments.removeAttachment(attachment.key)}
-                >
-                  <X className="size-3" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        )}
+        <ComposerAttachments attachments={attachments} />
+        <ContextUsageBar
+          usage={usage}
+          modelName={partner.completionModel?.name}
+          cumulativeTokens={cumulative.tokens}
+          turnCount={cumulative.turns}
+          onNewConversation={onNewConversation}
+        />
         <PromptInput onSubmit={submit}>
           <PromptInputBody>
             <PromptInputTextarea
@@ -320,6 +341,7 @@ export function ChatView({
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
+              {modelSelector}
               <PromptInputButton
                 variant="outline"
                 onClick={() => fileInput.current?.click()}
@@ -353,14 +375,6 @@ export function ChatView({
                     </SelectContent>
                   </Select>
                 )}
-              {usage.contextLimit > 0 && (
-                <Context
-                  usedTokens={usage.usedTokens}
-                  maxTokens={usage.contextLimit}
-                  modelId={partner.completionModel?.name}
-                />
-              )}
-              {usage.willExceedContext && <Badge variant="destructive">{t("context_usage")}</Badge>}
             </PromptInputTools>
             <PromptInputSubmit
               status={status}

@@ -52,13 +52,8 @@ pre-commit install --overwrite --install-hooks \
     --hook-type commit-msg \
     --hook-type pre-push
 
-# Install Node 22 via the nvm that ships in the base image
-# (apps/web-next runs Next.js, whose CLI requires Node >= 20.9; Bun alone is not enough)
-set +u # nvm.sh references unset variables
-source /usr/local/share/nvm/nvm.sh
-nvm install 22
-nvm alias default 22
-set -u
+# Node 22 is installed by the devcontainers/node feature (see devcontainer.json)
+# during container creation, so it's already on PATH here — no nvm step needed.
 
 # Install Bun
 curl -fsSL https://bun.com/install | bash -s "bun-v1.3.0"

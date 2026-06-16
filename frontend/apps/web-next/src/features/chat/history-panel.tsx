@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Plus, ThumbsDown, ThumbsUp } from "lucide-react";
+import { MoreHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
@@ -35,13 +35,11 @@ export function HistoryPanel({
   partner,
   activeSessionId,
   onSelect,
-  onNew,
   onDeleted
 }: {
   partner: ChatPartner;
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
-  onNew: () => void;
   onDeleted: (sessionId: string) => void;
 }) {
   const t = useTranslations();
@@ -111,10 +109,7 @@ export function HistoryPanel({
 
   return (
     <div className="flex h-full flex-col gap-2">
-      <Button onClick={onNew} className="justify-start">
-        <Plus className="size-4" /> {t("new_conversation")}
-      </Button>
-      <div className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wider uppercase">
+      <div className="text-muted-foreground px-2 pb-1 text-[11px] font-semibold tracking-wider uppercase">
         {t("conversations")}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">

@@ -73,11 +73,22 @@ export function deriveContextUsage({
   fallbackContextLimit: number;
 }) {
   const contextLimit = preflight?.context_window || fallbackContextLimit || 0;
-  const pendingTokens = (preflight?.input_tokens ?? 0) + (preflight?.file_tokens ?? 0);
-  const projectedTotal = lockedInputTokens + lockedOutputTokens + pendingTokens;
+  const pendingTextTokens = preflight?.input_tokens ?? 0;
+  const pendingFileTokens = preflight?.file_tokens ?? 0;
+  const projectedTotal =
+    lockedInputTokens + lockedOutputTokens + pendingTextTokens + pendingFileTokens;
   return {
     contextLimit,
+    // Per-segment breakdown for the context-usage bar: the last turn's locked
+    // input/output (provider prompt + reply) plus the pending estimate split
+    // into the user's text and their attached files.
+    lockedInputTokens,
+    lockedOutputTokens,
+    pendingTextTokens,
+    pendingFileTokens,
     usedTokens: projectedTotal,
     willExceedContext: contextLimit > 0 && projectedTotal > contextLimit
   };
 }
+
+export type ContextUsage = ReturnType<typeof deriveContextUsage>;

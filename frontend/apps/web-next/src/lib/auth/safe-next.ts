@@ -4,7 +4,7 @@
  * URLs so a crafted `?next=` can't turn login into an open redirect
  * (`new URL("//evil.com", origin)` resolves to `https://evil.com`).
  */
-export const DEFAULT_LANDING = "/dashboard";
+export const DEFAULT_LANDING = "/spaces/personal/chat";
 
 export function safeNextPath(next: string | null | undefined): string {
   if (typeof next !== "string" || next.length === 0 || next[0] !== "/") return DEFAULT_LANDING;

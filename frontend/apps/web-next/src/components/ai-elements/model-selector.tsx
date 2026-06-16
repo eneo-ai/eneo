@@ -48,7 +48,13 @@ function vendorLabel(model: CompletionModel, fallback: string): string {
 }
 
 /** The rich detail panel: description, context window, prices, capabilities. */
-function ModelDetails({ model }: { model: CompletionModel }) {
+export function ModelDetails({
+  model,
+  showPricing
+}: {
+  model: CompletionModel;
+  showPricing: boolean;
+}) {
   const t = useTranslations();
   const locale = useLocale();
 
@@ -85,30 +91,34 @@ function ModelDetails({ model }: { model: CompletionModel }) {
           <dt className="text-muted-foreground">{t("model_context_label")}</dt>
           <dd className="text-right text-[13px] font-medium tabular-nums">{contextWindow}</dd>
         </div>
-        <div className="flex items-center justify-between gap-4 py-2.5">
-          <dt className="text-muted-foreground">{t("model_selector_input_price")}</dt>
-          <dd className="text-right text-[13px] font-medium tabular-nums">
-            {inputPrice}
-            {inputPrice !== unknown && (
-              <span className="text-muted-foreground font-normal">
-                {" / "}
-                {t("model_selector_million_tokens")}
-              </span>
-            )}
-          </dd>
-        </div>
-        <div className="flex items-center justify-between gap-4 py-2.5">
-          <dt className="text-muted-foreground">{t("model_selector_output_price")}</dt>
-          <dd className="text-right text-[13px] font-medium tabular-nums">
-            {outputPrice}
-            {outputPrice !== unknown && (
-              <span className="text-muted-foreground font-normal">
-                {" / "}
-                {t("model_selector_million_tokens")}
-              </span>
-            )}
-          </dd>
-        </div>
+        {showPricing && (
+          <>
+            <div className="flex items-center justify-between gap-4 py-2.5">
+              <dt className="text-muted-foreground">{t("model_selector_input_price")}</dt>
+              <dd className="text-right text-[13px] font-medium tabular-nums">
+                {inputPrice}
+                {inputPrice !== unknown && (
+                  <span className="text-muted-foreground font-normal">
+                    {" / "}
+                    {t("model_selector_million_tokens")}
+                  </span>
+                )}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-2.5">
+              <dt className="text-muted-foreground">{t("model_selector_output_price")}</dt>
+              <dd className="text-right text-[13px] font-medium tabular-nums">
+                {outputPrice}
+                {outputPrice !== unknown && (
+                  <span className="text-muted-foreground font-normal">
+                    {" / "}
+                    {t("model_selector_million_tokens")}
+                  </span>
+                )}
+              </dd>
+            </div>
+          </>
+        )}
       </dl>
 
       {hasCapabilities && (
@@ -151,6 +161,8 @@ type ModelSelectorProps = {
   disabled?: boolean;
   size?: "sm" | "default";
   className?: string;
+  /** When false, input/output prices are hidden (org-controlled). Defaults to true. */
+  showPricing?: boolean;
 };
 
 /**
@@ -166,7 +178,8 @@ export function ModelSelector({
   locked = null,
   disabled = false,
   size = "default",
-  className
+  className,
+  showPricing = true
 }: ModelSelectorProps) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
@@ -275,7 +288,7 @@ export function ModelSelector({
           </Command>
           {previewModel && (
             <aside className="hidden w-72 overflow-y-auto p-4 sm:block">
-              <ModelDetails model={previewModel} />
+              <ModelDetails model={previewModel} showPricing={showPricing} />
             </aside>
           )}
         </div>

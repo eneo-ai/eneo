@@ -4,6 +4,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isOidcEnabled } from "@/lib/auth/oidc";
+import { DEFAULT_LANDING } from "@/lib/auth/safe-next";
 import { getSession } from "@/lib/auth/session";
 import { pageTitle } from "@/lib/page-metadata";
 import { LoginForm } from "./login-form";
@@ -15,7 +16,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ next?: string; error?: string }>;
 }) {
-  if (await getSession()) redirect("/dashboard");
+  if (await getSession()) redirect(DEFAULT_LANDING);
 
   const { next, error } = await searchParams;
   const t = await getTranslations();

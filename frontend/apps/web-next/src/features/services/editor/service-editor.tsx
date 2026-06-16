@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,6 +57,7 @@ function kwargLabel(name: ModelKwargName, t: (key: string) => string): string {
 export function ServiceEditor({ service }: { service: Service }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const { tenant } = useAppContext();
   const update = useUpdateService(service.id);
 
   const [name, setName] = useState(service.name);
@@ -141,6 +143,7 @@ export function ServiceEditor({ service }: { service: Service }) {
           selectedId={modelId}
           onSelect={setModelId}
           className="w-full justify-between"
+          showPricing={tenant.show_model_pricing}
         />
       </div>
 

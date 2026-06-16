@@ -17,6 +17,8 @@ export type Attachment = {
   size: number;
   mimetype: string;
   uploading: boolean;
+  /** Object URL for previewing the file in the composer (revoked on removal). */
+  previewUrl?: string;
 };
 
 /**
@@ -46,9 +48,10 @@ export function useAttachments(partner: ChatPartner) {
       }
 
       const key = crypto.randomUUID();
+      const previewUrl = URL.createObjectURL(file);
       setAttachments((current) => [
         ...current,
-        { key, name: file.name, size: file.size, mimetype: file.type, uploading: true }
+        { key, name: file.name, size: file.size, mimetype: file.type, uploading: true, previewUrl }
       ]);
 
       try {
@@ -78,6 +81,7 @@ export function useAttachments(partner: ChatPartner) {
 
   async function removeAttachment(key: string) {
     const attachment = attachments.find((candidate) => candidate.key === key);
+    if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
     setAttachments((current) => current.filter((candidate) => candidate.key !== key));
     if (attachment?.fileId) {
       browserApi
@@ -86,12 +90,21 @@ export function useAttachments(partner: ChatPartner) {
     }
   }
 
+  function clear() {
+    setAttachments((current) => {
+      for (const attachment of current) {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      }
+      return [];
+    });
+  }
+
   return {
     attachments,
     acceptString,
     addFiles,
     removeAttachment,
-    clear: () => setAttachments([]),
+    clear,
     uploading: attachments.some((attachment) => attachment.uploading),
     fileIds: attachments.flatMap((attachment) => (attachment.fileId ? [attachment.fileId] : []))
   };

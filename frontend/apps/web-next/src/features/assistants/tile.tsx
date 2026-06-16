@@ -6,14 +6,16 @@ import { useTranslations } from "next-intl";
 import { iconUrl } from "@/components/composites/icon-field";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { entityAccent } from "@/lib/entity-accent";
+import { cn } from "@/lib/utils";
 import { useSpace } from "@/features/spaces/use-space";
 import { ChatAppActions } from "./actions";
 import { chatPartnerHref, type ChatAppItem } from "./assistants";
 
 /**
  * Grid tile for an assistant or group chat; clicking it opens the chat. The
- * Svelte app's dynamic per-id color tiles are deliberately not carried over
- * (web-next uses the plain shadcn palette).
+ * fallback icon is tinted with a deterministic per-id accent (entityAccent) so
+ * the grid has visual identity instead of a wall of identical grey squares.
  */
 export function ChatAppTile({ item, showStatus }: { item: ChatAppItem; showStatus: boolean }) {
   const t = useTranslations();
@@ -21,13 +23,18 @@ export function ChatAppTile({ item, showStatus }: { item: ChatAppItem; showStatu
   const icon = iconUrl(item.icon_id);
 
   return (
-    <Card className="group hover:border-primary/40 relative gap-0 p-4 transition-colors">
+    <Card className="group hover:border-primary/40 focus-within:border-ring focus-within:ring-ring/50 relative gap-0 p-4 transition-colors focus-within:ring-[3px]">
       <Link
         href={chatPartnerHref(routeId, item)}
-        className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0"
+        className="flex flex-col items-center gap-3 pt-2 pb-1 text-center after:absolute after:inset-0 focus-visible:outline-none"
         aria-label={item.name}
       >
-        <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-xl">
+        <span
+          className={cn(
+            "flex size-16 items-center justify-center overflow-hidden rounded-xl",
+            entityAccent(item.id)
+          )}
+        >
           {icon ? (
             // Backend-served upload behind the auth proxy; next/image cannot optimize it.
             // eslint-disable-next-line @next/next/no-img-element

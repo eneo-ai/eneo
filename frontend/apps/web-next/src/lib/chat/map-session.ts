@@ -28,6 +28,12 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
 
     const parts: EneoUIMessage["parts"] = [];
 
+    // Reasoning precedes the answer in a live stream; mirror that ordering so
+    // the history renders the same collapsed trace above the text.
+    if (message.reasoning?.trim()) {
+      parts.push({ type: "reasoning", text: message.reasoning, state: "done" });
+    }
+
     for (const reference of message.references ?? []) {
       if (!reference?.id) continue;
       parts.push({

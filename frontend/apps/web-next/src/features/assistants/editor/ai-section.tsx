@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { useAppContext } from "@/components/providers/app-context";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,6 +75,7 @@ function optionLabel(option: string, t: (key: string) => string): string {
 export function AiSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const { tenant } = useAppContext();
   const update = useUpdateAssistant(assistant.id);
 
   const savedModelId = assistant.completion_model?.id ?? "";
@@ -124,6 +126,7 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
           selectedId={modelId}
           onSelect={setModelId}
           className="w-full justify-between"
+          showPricing={tenant.show_model_pricing}
         />
       </SettingsRow>
 

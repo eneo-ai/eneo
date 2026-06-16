@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -10,8 +10,8 @@ import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -22,17 +22,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { entityAccent } from "@/lib/entity-accent";
+import { cn } from "@/lib/utils";
 import { spaceRouteId, spacesListQueryOptions, type SpaceSparse } from "@/features/spaces/space";
 
 function CreateSpaceDialog() {
@@ -134,37 +128,47 @@ export function SpacesList({ title }: { title: string }) {
     <>
       <PageHeader title={title}>{can("shared_spaces") && <CreateSpaceDialog />}</PageHeader>
       {sharedSpaces.length === 0 ? (
-        <EmptyState title={t("your_spaces")} description={t("create_new_space")} />
+        <EmptyState title={t("your_spaces")} description={t("create_new_space")}>
+          {can("shared_spaces") && (
+            <div className="pt-2">
+              <CreateSpaceDialog />
+            </div>
+          )}
+        </EmptyState>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead>{t("description")}</TableHead>
-              <TableHead className="w-20 text-right">{t("actions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sharedSpaces.map((space) => (
-              <TableRow key={space.id}>
-                <TableCell>
-                  <Link
-                    href={`/spaces/${spaceRouteId(space)}/overview`}
-                    className="font-medium hover:underline"
-                  >
-                    {space.name}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-muted-foreground max-w-md truncate">
-                  {space.description ?? <Badge variant="outline">—</Badge>}
-                </TableCell>
-                <TableCell className="text-right">
-                  {space.permissions?.includes("delete") && <DeleteSpaceButton space={space} />}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {sharedSpaces.map((space) => (
+            <Card
+              key={space.id}
+              className="group hover:border-primary/40 focus-within:border-ring focus-within:ring-ring/50 relative gap-3 p-5 transition-colors focus-within:ring-[3px]"
+            >
+              <div className="flex items-center gap-3">
+                <span
+                  className={cn(
+                    "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                    entityAccent(space.id)
+                  )}
+                >
+                  <Users className="size-5" />
+                </span>
+                <Link
+                  href={`/spaces/${spaceRouteId(space)}/overview`}
+                  className="min-w-0 flex-1 font-medium after:absolute after:inset-0 focus-visible:outline-none"
+                >
+                  <span className="line-clamp-1">{space.name}</span>
+                </Link>
+              </div>
+              <p className="text-muted-foreground line-clamp-2 min-h-10 text-sm">
+                {space.description || "—"}
+              </p>
+              {space.permissions?.includes("delete") && (
+                <div className="absolute top-3 right-3 z-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+                  <DeleteSpaceButton space={space} />
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
       )}
     </>
   );

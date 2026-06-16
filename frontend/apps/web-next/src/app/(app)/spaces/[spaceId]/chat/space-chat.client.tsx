@@ -1,9 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { useAppContext } from "@/components/providers/app-context";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -39,6 +43,7 @@ function toModelInfo(
 function ModelSwitcher() {
   const t = useTranslations();
   const { space, routeId } = useSpace();
+  const { tenant } = useAppContext();
   const queryClient = useQueryClient();
   const assistant = space.default_assistant;
   const config = assistant?.effective_config ?? null;
@@ -84,11 +89,13 @@ function ModelSwitcher() {
       locked={lockedModel}
       disabled={update.isPending}
       size="sm"
+      showPricing={tenant.show_model_pricing}
     />
   );
 }
 
 export function SpaceChat() {
+  const t = useTranslations();
   const { space, routeId } = useSpace();
   const searchParams = useSearchParams();
 
@@ -159,13 +166,32 @@ export function SpaceChat() {
   if (type !== "default-assistant") query.set("type", type);
   if (partnerId) query.set("id", partnerId);
 
+  // Jump straight to the editor from the chat header (the Svelte app's
+  // in-context Edit button); gated on the partner's own edit permission.
+  const editHref =
+    type === "assistant" && assistantQuery.data?.permissions?.includes("edit")
+      ? `/spaces/${routeId}/assistants/${partner.id}/edit`
+      : type === "group-chat" && groupChatQuery.data?.permissions?.includes("edit")
+        ? `/spaces/${routeId}/group-chats/${partner.id}/edit`
+        : null;
+
   return (
     <ChatPage
       // Remount when the partner changes so chat state never leaks across.
       key={`${partner.type}:${partner.id}`}
       partner={partner}
       initialSessionId={sessionId}
-      headerExtra={partner.type === "default-assistant" ? <ModelSwitcher /> : undefined}
+      modelSelector={partner.type === "default-assistant" ? <ModelSwitcher /> : undefined}
+      actions={
+        editHref ? (
+          <Button asChild variant="outline" size="sm">
+            <Link href={editHref}>
+              <Pencil className="size-4" />
+              <span className="hidden sm:inline">{t("edit")}</span>
+            </Link>
+          </Button>
+        ) : undefined
+      }
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);
         if (nextSessionId) params.set("session_id", nextSessionId);

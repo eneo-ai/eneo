@@ -15,6 +15,14 @@
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"version": "latest",
 			"moby": false
+		},
+		// Installs a prebuilt Node 22 (apps/web-next runs Next.js, whose CLI
+		// requires Node >= 20.9). The feature reuses the base image's nvm at
+		// /usr/local/share/nvm and adds node to containerEnv PATH, so the
+		// remoteEnv PATH below picks it up. Avoids the source-compile fallback
+		// that `nvm install 22` in post-create hit when the binary download failed.
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "22"
 		}
 	},
 	"postCreateCommand": "bash .devcontainer/post-create.sh",

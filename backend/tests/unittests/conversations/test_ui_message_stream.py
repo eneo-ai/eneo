@@ -175,6 +175,58 @@ async def test_golden_transcript():
 
 
 @pytest.mark.asyncio
+async def test_reasoning_precedes_text():
+    completions = [
+        Completion(response_type=ResponseType.REASONING, reasoning_content="Let me "),
+        Completion(response_type=ResponseType.REASONING, reasoning_content="think."),
+        Completion(response_type=ResponseType.TEXT, text="Answer"),
+    ]
+
+    chunks = await _collect(_response(completions))
+    types = [chunk["type"] for chunk in chunks]
+
+    assert types == [
+        "start",
+        "data-session",
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+
+    # A single reasoning block id spans all reasoning chunks.
+    reasoning_ids = {c["id"] for c in chunks if c["type"].startswith("reasoning-")}
+    assert len(reasoning_ids) == 1
+    assert [c["delta"] for c in chunks if c["type"] == "reasoning-delta"] == [
+        "Let me ",
+        "think.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_only_closes_without_text():
+    completions = [
+        Completion(response_type=ResponseType.REASONING, reasoning_content="hmm"),
+    ]
+
+    chunks = await _collect(_response(completions))
+    types = [chunk["type"] for chunk in chunks]
+
+    assert types == [
+        "start",
+        "data-session",
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-end",
+        "finish",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_calls_and_approval_pause_resume():
     completions = [
         Completion(

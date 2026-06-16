@@ -13,6 +13,7 @@ import { AddModelWizard } from "./add-model-wizard";
 import { CredentialsPanel } from "./credentials-panel";
 import { ModelTable } from "./model-table";
 import { adminModelsQueryOptions } from "./models";
+import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
 
 /**
  * Admin model management: completion / embedding / transcription tabs grouped
@@ -44,7 +45,8 @@ export function ModelsPage() {
           <TabsTrigger value="transcription">{t("transcription_models")}</TabsTrigger>
           <TabsTrigger value="credentials">{t("api_credentials")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="completion" className="pt-4">
+        <TabsContent value="completion" className="flex flex-col gap-6 pt-4">
+          <PricingVisibilityToggle />
           <ModelTable
             models={models.completion_models}
             kind="completion"

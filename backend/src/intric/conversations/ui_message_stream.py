@@ -189,6 +189,8 @@ async def _ui_message_chunks(
             yield chunk_dict
 
     text_id: Optional[str] = None
+    reasoning_id: Optional[str] = None
+    reasoning_open = False
     tool_fallback_ids: dict[int, str] = {}
     emitted_tool_chunks: set[str] = set()
 
@@ -197,7 +199,23 @@ async def _ui_message_chunks(
     async for completion in completion_stream:
         response_type = completion.response_type
 
-        if response_type == ResponseType.TEXT:
+        if response_type == ResponseType.REASONING:
+            if reasoning_id is None:
+                reasoning_id = "reasoning-0"
+                reasoning_open = True
+                yield {"type": "reasoning-start", "id": reasoning_id}
+            if completion.reasoning_content:
+                yield {
+                    "type": "reasoning-delta",
+                    "id": reasoning_id,
+                    "delta": completion.reasoning_content,
+                }
+
+        elif response_type == ResponseType.TEXT:
+            # Reasoning always precedes the answer; close it before text opens.
+            if reasoning_open and reasoning_id is not None:
+                yield {"type": "reasoning-end", "id": reasoning_id}
+                reasoning_open = False
             if text_id is None:
                 text_id = "text-0"
                 yield {"type": "text-start", "id": text_id}
@@ -275,6 +293,8 @@ async def _ui_message_chunks(
                 extra={"response_type": response_type.value if response_type else None},
             )
 
+    if reasoning_open and reasoning_id is not None:
+        yield {"type": "reasoning-end", "id": reasoning_id}
     if text_id is not None:
         yield {"type": "text-end", "id": text_id}
     yield {"type": "finish"}

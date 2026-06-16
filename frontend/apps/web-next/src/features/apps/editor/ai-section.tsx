@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { useAppContext } from "@/components/providers/app-context";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,6 +78,7 @@ function optionLabel(option: string, t: (key: string) => string): string {
 export function AiSection({ app }: { app: App }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const { tenant } = useAppContext();
   const update = useUpdateApp(app.id);
 
   const usesAudio = app.input_fields.some((field) => AUDIO_INPUT_TYPES.includes(field.type));
@@ -137,6 +139,7 @@ export function AiSection({ app }: { app: App }) {
           selectedId={modelId}
           onSelect={setModelId}
           className="w-full justify-between"
+          showPricing={tenant.show_model_pricing}
         />
       </SettingsRow>
 
