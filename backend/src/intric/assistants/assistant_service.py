@@ -623,9 +623,6 @@ class AssistantService:
             from intric.database.tables.mcp_server_table import (
                 MCPServers as MCPServersTable,
             )
-            from intric.database.tables.mcp_server_table import (
-                SpacesMCPServers as SpacesMCPServersTable,
-            )
 
             mcp_servers_query = (
                 sa.select(MCPServersTable.id)
@@ -649,9 +646,6 @@ class AssistantService:
 
             # For a personal default assistant under an active MCP policy, the
             # governance whitelist (enforced just below) is the source of truth.
-            # Personal spaces are seeded with tenant MCP servers only at creation
-            # time and are not back-filled when a server is enabled later, so the
-            # space-assignment check would wrongly reject a policy-allowed server.
             if isinstance(mcp_effective_config, NotProvided):
                 mcp_effective_config = await self._resolve_effective_config(
                     space=space, assistant=assistant
@@ -660,20 +654,18 @@ class AssistantService:
                 mcp_effective_config is not None and mcp_effective_config.mcp_enforced
             )
             if not mcp_governed:
-                space_servers_query = sa.select(
-                    SpacesMCPServersTable.mcp_server_id
-                ).where(
-                    SpacesMCPServersTable.space_id == space.id,
-                    SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
-                )
-                space_servers_result = await self.repo.session.execute(
-                    space_servers_query
-                )
-                space_server_ids = {row[0] for row in space_servers_result.fetchall()}
+                # Validate space membership against the space read model — the
+                # same source the editor/UI uses to offer servers. For a personal
+                # space that is every tenant-enabled server (space_factory exposes
+                # them all); for a shared space it is the spaces_mcp_servers
+                # mapping. Do NOT query spaces_mcp_servers directly: that table is
+                # seeded once at space creation and never back-filled, so for a
+                # personal space it goes stale and wrongly rejects servers enabled
+                # after the space was created (#500).
                 missing_space_ids = [
                     str(server_id)
                     for server_id in mcp_server_ids
-                    if server_id not in space_server_ids
+                    if not space.is_mcp_server_in_space(server_id)
                 ]
                 if missing_space_ids:
                     raise BadRequestException(
@@ -1811,9 +1803,6 @@ class AssistantService:
         from intric.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
-        from intric.database.tables.mcp_server_table import (
-            SpacesMCPServers as SpacesMCPServersTable,
-        )
 
         # Validate tenant ownership + enablement
         mcp_server_query = sa.select(MCPServersTable).where(
@@ -1829,16 +1818,14 @@ class AssistantService:
             space=space, assistant=assistant
         )
         mcp_governed = effective_config is not None and effective_config.mcp_enforced
-        if not mcp_governed:
-            space_mapping_query = sa.select(SpacesMCPServersTable).where(
-                SpacesMCPServersTable.space_id == space.id,
-                SpacesMCPServersTable.mcp_server_id == mcp_server_id,
+        if not mcp_governed and not space.is_mcp_server_in_space(mcp_server_id):
+            # Validate against the space read model, not the stale
+            # spaces_mcp_servers table (seeded once at space creation, never
+            # back-filled), so a server enabled after a personal space was
+            # created is assignable. See update_assistant (#500).
+            raise BadRequestException(
+                "MCP server is not assigned to this assistant's space"
             )
-            space_mapping = await self.repo.session.scalar(space_mapping_query)
-            if space_mapping is None:
-                raise BadRequestException(
-                    "MCP server is not assigned to this assistant's space"
-                )
 
         await self._ensure_governance_policy_allows_update(
             space=space,
