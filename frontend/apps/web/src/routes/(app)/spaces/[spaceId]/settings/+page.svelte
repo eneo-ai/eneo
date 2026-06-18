@@ -25,6 +25,7 @@
   import { toastError } from "$lib/core/errors";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import ResourceMetadataEditor from "$lib/features/metadata/ResourceMetadataEditor.svelte";
   import { fade } from "svelte/transition";
   import { untrack } from "svelte";
 
@@ -101,6 +102,7 @@
   // Icon state - uses editor for icon_id but handles upload separately
   let iconUploading = $state(false);
   let iconError = $state<string | null>(null);
+  const tenantMetadataFields = $derived(data.settings?.metadata_fields ?? []);
 
   function getIconUrl(id: string | null | undefined): string | null {
     return id ? intric.icons.url({ id }) : null;
@@ -238,6 +240,24 @@
         ></SelectTranscriptionModels>
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
+
+        {#if !isOrgSpace}
+          <Settings.Row
+            title={m.resource_metadata_section_title()}
+            hasChanges={$currentChanges.diff.metadata_json !== undefined}
+            revertFn={() => discardChanges("metadata_json")}
+            fullWidth
+          >
+            <ResourceMetadataEditor
+              metadataJson={$update.metadata_json ?? null}
+              tenantFields={tenantMetadataFields}
+              resourceType="space"
+              onChange={(value) => {
+                $update.metadata_json = value;
+              }}
+            />
+          </Settings.Row>
+        {/if}
       </Settings.Group>
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}

@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from intric.ai_models.ai_models_service import AIModelsService
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
@@ -9,8 +10,14 @@ from intric.audit.domain.entity_types import EntityType
 from intric.main.config import get_settings as get_app_settings
 from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permissions
+from intric.settings.metadata_fields import (
+    TenantMetadataFieldCreate,
+    TenantMetadataFieldPublic,
+    TenantMetadataFieldUpdate,
+)
 from intric.settings.settings import SettingsInDB, SettingsPublic, SettingsUpsert
 from intric.settings.settings_repo import SettingsRepository
+from intric.settings.tenant_metadata_field_service import TenantMetadataFieldService
 from intric.tenants.tenant import TenantUpdate
 from intric.tenants.tenant_repo import TenantRepository
 from intric.users.user import UserInDB
@@ -31,6 +38,7 @@ class SettingService:
         feature_flag_service: "FeatureFlagService",
         tenant_repo: TenantRepository,
         audit_service: AuditService,
+        tenant_metadata_field_service: TenantMetadataFieldService,
     ):
         super().__init__()
         self.repo = repo
@@ -39,6 +47,7 @@ class SettingService:
         self.feature_flag_service = feature_flag_service
         self.tenant_repo = tenant_repo
         self.audit_service = audit_service
+        self.tenant_metadata_field_service = tenant_metadata_field_service
 
     async def _require_feature_flag(self, name: str) -> "FeatureFlag":
         feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(  # type: ignore[reportUnknownMemberType]  # feature_flag_repo.one_or_none uses **filters which lacks type annotations
@@ -114,6 +123,7 @@ class SettingService:
         )
 
         app_settings = get_app_settings()
+        metadata_fields = await self.tenant_metadata_field_service.list_fields()
 
         return SettingsPublic(
             chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {})
@@ -123,11 +133,28 @@ class SettingService:
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
+            metadata_fields=metadata_fields,
         )
 
     async def get_settings(self) -> SettingsPublic:
         settings = await self.repo.get(self.user.id)
         return await self._build_settings_public(settings_in_db=settings)
+
+    async def get_metadata_fields(self) -> list[TenantMetadataFieldPublic]:
+        return await self.tenant_metadata_field_service.list_fields()
+
+    async def create_metadata_field(
+        self, metadata_field: TenantMetadataFieldCreate
+    ) -> TenantMetadataFieldPublic:
+        return await self.tenant_metadata_field_service.create_field(metadata_field)
+
+    async def update_metadata_field(
+        self, metadata_field: TenantMetadataFieldUpdate
+    ) -> TenantMetadataFieldPublic:
+        return await self.tenant_metadata_field_service.update_field(metadata_field)
+
+    async def delete_metadata_field(self, field_id: UUID) -> None:
+        await self.tenant_metadata_field_service.delete_field(field_id)
 
     async def update_settings(self, settings: SettingsPublic) -> SettingsInDB:
         settings_upsert = SettingsUpsert(**settings.model_dump(), user_id=self.user.id)

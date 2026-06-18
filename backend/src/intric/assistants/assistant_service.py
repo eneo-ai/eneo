@@ -58,6 +58,7 @@ from intric.roles.permissions import (
 )
 from intric.services.service import DatastoreResult
 from intric.services.service_repo import ServiceRepository
+from intric.settings.tenant_metadata_field_service import TenantMetadataFieldService
 from intric.spaces.api.space_models import WizardType
 from intric.spaces.space_service import SpaceService
 from intric.templates.assistant_template.assistant_template_service import (
@@ -167,6 +168,7 @@ class AssistantService:
         icon_repo: IconRepository,
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
+        tenant_metadata_field_service: TenantMetadataFieldService,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
@@ -193,6 +195,7 @@ class AssistantService:
         self.help_assistant_assignment_history_repo = (
             help_assistant_assignment_history_repo
         )
+        self.tenant_metadata_field_service = tenant_metadata_field_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
 
@@ -475,6 +478,11 @@ class AssistantService:
         if insight_enabled is not None:
             if not actor.can_toggle_insight():
                 raise UnauthorizedException("Only admins can toggle insights")
+
+        if is_provided(metadata_json):
+            await self.tenant_metadata_field_service.validate_metadata_for_resource(
+                metadata_json, resource_type="assistant"
+            )
 
         assistant = space.get_assistant(assistant_id=assistant_id)
 

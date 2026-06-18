@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
@@ -13,6 +14,11 @@ from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses, to_paginated_response
 from intric.settings import settings_factory
+from intric.settings.metadata_fields import (
+    TenantMetadataFieldCreate,
+    TenantMetadataFieldPublic,
+    TenantMetadataFieldUpdate,
+)
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
     GetModelsResponse,
@@ -41,6 +47,21 @@ async def get_settings(
     return await service.get_settings()
 
 
+@router.get(
+    "/metadata-fields/",
+    response_model=PaginatedResponse[TenantMetadataFieldPublic],
+    description="List tenant metadata field definitions.",
+    responses=responses.get_responses([]),
+)
+async def get_metadata_fields(
+    service: Annotated[
+        SettingService,
+        Depends(settings_factory.get_settings_service_allowing_read_only_key),
+    ],
+):
+    return PaginatedResponse(items=await service.get_metadata_fields())
+
+
 @settings_admin_router.post(
     "/",
     response_model=SettingsPublic,
@@ -55,6 +76,51 @@ async def upsert_settings(
     validate_permission(container.user(), Permission.ADMIN)
     service = container.settings_service()
     return await service.update_settings(settings)
+
+
+@settings_admin_router.post(
+    "/metadata-fields/",
+    response_model=TenantMetadataFieldPublic,
+    description="Create a tenant metadata field definition.",
+    responses=responses.get_responses([403, 409]),
+)
+async def create_metadata_field(
+    metadata_field: TenantMetadataFieldCreate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.settings_service()
+    return await service.create_metadata_field(metadata_field)
+
+
+@settings_admin_router.patch(
+    "/metadata-fields/{field_id}/",
+    response_model=TenantMetadataFieldPublic,
+    description="Update a tenant metadata field definition.",
+    responses=responses.get_responses([403, 404, 409]),
+)
+async def update_metadata_field(
+    field_id: UUID,
+    metadata_field: TenantMetadataFieldCreate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.settings_service()
+    return await service.update_metadata_field(
+        TenantMetadataFieldUpdate(id=field_id, **metadata_field.model_dump())
+    )
+
+
+@settings_admin_router.delete(
+    "/metadata-fields/{field_id}/",
+    status_code=204,
+    description="Delete a tenant metadata field definition.",
+    responses=responses.get_responses([403, 404]),
+)
+async def delete_metadata_field(
+    field_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.settings_service()
+    await service.delete_metadata_field(field_id)
 
 
 @router.get(

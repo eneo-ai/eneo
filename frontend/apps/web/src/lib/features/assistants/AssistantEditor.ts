@@ -20,7 +20,8 @@ function initAssistantEditor(data: {
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
-      mcp_tools: []
+      mcp_tools: [],
+      metadata_json: null
     },
     updateResource: async (resource, changes) => {
       const updated = await data.intric.assistants.update({
@@ -43,7 +44,8 @@ function initAssistantEditor(data: {
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
       attachments: ["id"],
-      data_retention_days: true
+      data_retention_days: true,
+      metadata_json: true
     } as Record<string, unknown>,
     manageAttachements: "attachments"
   });

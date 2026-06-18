@@ -322,6 +322,8 @@ from intric.sessions.sessions_repo import SessionRepository
 from intric.settings.encryption_service import EncryptionService
 from intric.settings.setting_service import SettingService
 from intric.settings.settings_repo import SettingsRepository
+from intric.settings.tenant_metadata_field_repo import TenantMetadataFieldRepository
+from intric.settings.tenant_metadata_field_service import TenantMetadataFieldService
 from intric.spaces.api.space_assembler import SpaceAssembler
 from intric.spaces.domain.resource_mover_service import ResourceMoverService
 from intric.spaces.space_factory import SpaceFactory
@@ -627,6 +629,10 @@ class Container(containers.DeclarativeContainer):
         TenantRepository, session=session, encryption_service=encryption_service
     )
     settings_repo = providers.Factory(SettingsRepository, session=session)
+    tenant_metadata_field_repo = providers.Factory(
+        TenantMetadataFieldRepository,
+        session=session,
+    )
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
@@ -960,6 +966,11 @@ class Container(containers.DeclarativeContainer):
         IconRepository,
         session=session,
     )
+    tenant_metadata_field_service = providers.Factory(
+        TenantMetadataFieldService,
+        user=user,
+        repo=tenant_metadata_field_repo,
+    )
     space_service = providers.Factory(
         SpaceService,
         user=user,
@@ -974,6 +985,7 @@ class Container(containers.DeclarativeContainer):
         transcription_model_service=transcription_model_service,
         actor_manager=actor_manager,
         security_classification_service=security_classification_service,
+        tenant_metadata_field_service=tenant_metadata_field_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
     )
@@ -1062,6 +1074,7 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        tenant_metadata_field_service=tenant_metadata_field_service,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -1206,6 +1219,7 @@ class Container(containers.DeclarativeContainer):
         icon_repo=icon_repo,
         org_space_assistant_role_repo=org_space_assistant_role_repo,
         help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
+        tenant_metadata_field_service=tenant_metadata_field_service,
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
     )
