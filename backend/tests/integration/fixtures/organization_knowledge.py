@@ -7,6 +7,7 @@ These fixtures support testing knowledge distribution across org space and child
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.integration_table import (
@@ -14,6 +15,7 @@ from intric.database.tables.integration_table import (
     TenantIntegration,
     UserIntegration,
 )
+from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 
@@ -199,20 +201,62 @@ def embedding_model_factory(admin_user):
         EmbeddingModels: The created embedding model
     """
 
+    _provider_cache = {}
+
+    async def _get_or_create_provider(session, tenant_id, provider_type: str):
+        cache_key = (tenant_id, provider_type)
+        if cache_key in _provider_cache:
+            return _provider_cache[cache_key]
+
+        result = await session.execute(
+            select(ModelProviders).where(
+                ModelProviders.tenant_id == tenant_id,
+                ModelProviders.provider_type == provider_type,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            _provider_cache[cache_key] = existing.id
+            return existing.id
+
+        provider = ModelProviders(
+            tenant_id=tenant_id,
+            name=provider_type.title(),
+            provider_type=provider_type,
+            credentials={"api_key": "test-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+        _provider_cache[cache_key] = provider.id
+        return provider.id
+
     async def _create_embedding_model(
-        session, name: str = None, **extra
+        session,
+        name: str = None,
+        tenant_id=None,
+        provider: str = "openai",
+        provider_id=None,
+        **extra,
     ) -> EmbeddingModels:
         """Create an embedding model."""
         if name is None:
             name = f"embedding-model-{str(uuid4())[:8]}"
+        if tenant_id is None:
+            tenant_id = admin_user.tenant_id
+        if provider_id is None:
+            provider_id = await _get_or_create_provider(session, tenant_id, provider)
 
         model = EmbeddingModels(
+            tenant_id=tenant_id,
+            provider_id=provider_id,
             name=name,
             open_source=False,
-            family="test-family",
-            stability="stable",
-            hosting="cloud",
-            description=f"{name} embedding model",
+            family=extra.pop("family", "test-family"),
+            stability=extra.pop("stability", "stable"),
+            hosting=extra.pop("hosting", "cloud"),
+            description=extra.pop("description", f"{name} embedding model"),
             **extra,
         )
         session.add(model)
