@@ -13,6 +13,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Tooltip } from "@intric/ui";
   import { IconSparkles } from "@intric/icons/sparkles";
+  import { IconInfo } from "@intric/icons/info";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { fade } from "svelte/transition";
@@ -227,6 +228,12 @@
                 }}
               />
             {/if}
+          </div>
+          <div
+            class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger mb-3 flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm"
+          >
+            <IconInfo class="mt-0.5 !size-5 shrink-0" />
+            <p>{m.admin_help_assistants_edit_prompt_warning()}</p>
           </div>
           <textarea
             rows={4}
