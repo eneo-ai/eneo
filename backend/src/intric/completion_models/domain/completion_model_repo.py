@@ -29,24 +29,14 @@ class CompletionModelRepository:
             sa.select(
                 CompletionModels, ModelProviders.name, ModelProviders.provider_type
             )
-            .outerjoin(
-                ModelProviders, CompletionModels.provider_id == ModelProviders.id
-            )
+            .join(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(CompletionModels.security_classification),
                 selectinload(CompletionModels.security_classification).options(
                     selectinload(SecurityClassificationDBModel.tenant)
                 ),
             )
-            .where(
-                # Return both global and tenant models
-                # This allows existing assistants with global models to continue working
-                # UI filtering happens at the presentation layer
-                sa.or_(
-                    CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == self.user.tenant_id,
-                )
-            )
+            .where(CompletionModels.tenant_id == self.user.tenant_id)
             .order_by(
                 CompletionModels.org,
                 CompletionModels.created_at,
@@ -74,14 +64,11 @@ class CompletionModelRepository:
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["CompletionModel"]:
-        # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
             sa.select(
                 CompletionModels, ModelProviders.name, ModelProviders.provider_type
             )
-            .outerjoin(
-                ModelProviders, CompletionModels.provider_id == ModelProviders.id
-            )
+            .join(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(CompletionModels.security_classification),
                 selectinload(CompletionModels.security_classification).options(
@@ -91,11 +78,7 @@ class CompletionModelRepository:
             .where(
                 CompletionModels.id == model_id,
                 CompletionModels.deleted_at.is_(None),
-                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
-                sa.or_(
-                    CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == self.user.tenant_id,
-                ),
+                CompletionModels.tenant_id == self.user.tenant_id,
             )
         )
 

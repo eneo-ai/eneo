@@ -5,8 +5,6 @@ from sqlalchemy.exc import IntegrityError
 
 from intric.ai_models.completion_models.completion_model import (
     CompletionModel,
-    CompletionModelCreate,
-    CompletionModelUpdate,
 )
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
@@ -37,16 +35,11 @@ class CompletionModelsRepository:
         # Query the model with tenant filtering
         stmt = (
             sa.select(CompletionModels, ModelProviders.provider_type)
-            .outerjoin(
-                ModelProviders, CompletionModels.provider_id == ModelProviders.id
-            )
+            .join(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
             .where(
                 CompletionModels.id == id,
                 CompletionModels.deleted_at.is_(None),
-                sa.or_(
-                    CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == tenant_id,
-                ),
+                CompletionModels.tenant_id == tenant_id,
             )
         )
         result = await self.session.execute(stmt)
@@ -65,9 +58,6 @@ class CompletionModelsRepository:
 
     async def get_model_by_name(self, name: str) -> CompletionModel | None:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
-
-    async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE)
 
     async def enable_completion_model(
         self,
@@ -89,13 +79,6 @@ class CompletionModelsRepository:
             return await self.session.scalar(query)
         except IntegrityError as e:
             raise UniqueException("Default completion model already exists.") from e
-
-    async def update_model(
-        self, model: CompletionModelUpdate
-    ) -> CompletionModel | None:
-        return await self.delegate.update(
-            model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
-        )
 
     async def delete_model(self, id: UUID) -> None:
         # Spaces are containers — a model "enabled" on a space without any
@@ -124,9 +107,7 @@ class CompletionModelsRepository:
     ) -> list[CompletionModel]:
         query = (
             sa.select(CompletionModels, ModelProviders.provider_type)
-            .outerjoin(
-                ModelProviders, CompletionModels.provider_id == ModelProviders.id
-            )
+            .join(ModelProviders, CompletionModels.provider_id == ModelProviders.id)
             .where(CompletionModels.is_deprecated == is_deprecated)
             .where(CompletionModels.deleted_at.is_(None))
             .order_by(CompletionModels.created_at)
@@ -135,14 +116,8 @@ class CompletionModelsRepository:
         if id_list is not None:
             query = query.where(CompletionModels.id.in_(id_list))
 
-        # Filter to tenant's models
         if tenant_id is not None:
-            query = query.where(
-                sa.or_(
-                    CompletionModels.tenant_id.is_(None),
-                    CompletionModels.tenant_id == tenant_id,
-                )
-            )
+            query = query.where(CompletionModels.tenant_id == tenant_id)
 
         result = await self.session.execute(query)
         rows = result.all()

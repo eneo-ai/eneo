@@ -1,812 +1,109 @@
-"""
-Integration tests for sysadmin AI models CRUD endpoints.
+"""Integration tests for deprecated sysadmin global model CRUD endpoints."""
 
-Tests the system-wide AI model management endpoints that require super admin API key:
-- POST /sysadmin/completion-models/create
-- POST /sysadmin/completion-models/{id}/metadata
-- DELETE /sysadmin/completion-models/{id}
-- POST /sysadmin/embedding-models/create
-- POST /sysadmin/embedding-models/{id}/metadata
-- DELETE /sysadmin/embedding-models/{id}
-"""
+from uuid import uuid4
 
 import pytest
-import sqlalchemy as sa
 
-from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_duplicate_display_name_race_returns_409(
-    client, super_admin_token, monkeypatch
-):
-    """The display-name pre-check normally returns a 409 before the DB. If a
-    concurrent request slips past it (the validate-then-insert race), the active
-    nickname unique index fires at flush; that IntegrityError must surface as the
-    same clean 409 NAME_COLLISION, not a 500. Bypass the pre-check to reach it.
-    """
-
-    async def _noop(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(
-        "intric.sysadmin.sysadmin_router.validate_unique_display_name", _noop
-    )
-
-    payload = {
-        "name": "race-collision-model",
-        "nickname": "Race Collision Display Name",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "open_source": False,
-        "description": "Race test model",
-        "org": "OpenAI",
-        "vision": False,
-        "reasoning": False,
-        "base_url": "https://api.openai.com/v1",
-        "litellm_model_name": "gpt-4",
-    }
-
-    first = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=payload,
-    )
-    assert first.status_code == 200
-
-    second = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=payload,
-    )
-    assert second.status_code == 409
-    assert second.json().get("intric_error_code") == 9017
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_completion_model_success(client, super_admin_token, db_container):
-    """Test creating a new completion model with valid data."""
-    model_data = {
-        "name": "gpt-4-test",
-        "nickname": "GPT-4 Test",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "open_source": False,
-        "description": "Test model for integration testing",
-        "org": "OpenAI",
-        "vision": True,
-        "reasoning": False,
-        "base_url": "https://api.openai.com/v1",
-        "litellm_model_name": "gpt-4",
-    }
+COMPLETION_CREATE_PAYLOAD = {
+    "name": "gpt-4-test",
+    "nickname": "GPT-4 Test",
+    "family": "openai",
+    "max_input_tokens": 8000,
+    "max_output_tokens": 4096,
+    "is_deprecated": False,
+    "stability": "stable",
+    "hosting": "usa",
+    "open_source": False,
+    "description": "Test model for integration testing",
+    "org": "OpenAI",
+    "vision": True,
+    "reasoning": False,
+    "base_url": "https://api.openai.com/v1",
+    "litellm_model_name": "gpt-4",
+}
 
+EMBEDDING_CREATE_PAYLOAD = {
+    "name": "text-embedding-3-small-test",
+    "nickname": "Embedding Test",
+    "family": "openai",
+    "dimensions": 1536,
+    "max_input": 8191,
+    "is_deprecated": False,
+    "stability": "stable",
+    "hosting": "usa",
+    "open_source": False,
+    "description": "Test embedding model",
+    "org": "OpenAI",
+    "litellm_model_name": "text-embedding-3-small",
+}
+
+
+async def test_completion_model_create_requires_sysadmin_auth(client):
     response = await client.post(
         "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=model_data,
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Verify response structure (CompletionModelSparse)
-    assert data["name"] == "gpt-4-test"
-    assert data["nickname"] == "GPT-4 Test"
-    assert data["family"] == "openai"
-    assert data["max_input_tokens"] == 8000
-    assert data["vision"] is True
-    assert data["reasoning"] is False
-    assert "id" in data
-    assert "created_at" in data
-    assert "updated_at" in data
-
-    # Verify tenant-specific fields are NOT in response (Sparse model)
-    assert "is_org_enabled" not in data
-    assert "is_org_default" not in data
-    assert "can_access" not in data
-    assert "is_locked" not in data
-    assert "security_classification" not in data
-
-    # Verify model was created in database
-    async with db_container() as container:
-        session = container.session()
-        stmt = sa.select(CompletionModels).where(CompletionModels.name == "gpt-4-test")
-        result = await session.execute(stmt)
-        db_model = result.scalar_one_or_none()
-
-        assert db_model is not None
-        assert db_model.name == "gpt-4-test"
-        assert db_model.nickname == "GPT-4 Test"
-        assert db_model.max_input_tokens == 8000
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_completion_model_without_auth(client):
-    """Test that creating a completion model without authentication fails."""
-    model_data = {
-        "name": "test-model",
-        "nickname": "Test Model",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-
-    response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        json=model_data,
+        json=COMPLETION_CREATE_PAYLOAD,
     )
 
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_completion_model_with_invalid_auth(client):
-    """Test that creating a completion model with invalid API key fails."""
-    model_data = {
-        "name": "test-model",
-        "nickname": "Test Model",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-
-    response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": "invalid-key"},
-        json=model_data,
-    )
-
-    assert response.status_code == 401
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_update_completion_model_metadata(
-    client, super_admin_token, db_container
-):
-    """Test updating an existing completion model's metadata."""
-    # First create a model
-    create_data = {
-        "name": "gpt-3.5-turbo",
-        "nickname": "GPT-3.5 Turbo",
-        "family": "openai",
-        "max_input_tokens": 4000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
+async def test_legacy_completion_model_crud_returns_gone(client, super_admin_token):
+    model_id = uuid4()
+    headers = {"X-API-Key": super_admin_token}
 
     create_response = await client.post(
         "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
+        headers=headers,
+        json=COMPLETION_CREATE_PAYLOAD,
     )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    # Update the model
-    update_data = {
-        "nickname": "GPT-3.5 Turbo Updated",
-        "description": "Updated description",
-        "is_deprecated": True,
-        "max_input_tokens": 16000,
-    }
-
-    response = await client.put(
+    update_response = await client.put(
         f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
-        headers={"X-API-Key": super_admin_token},
-        json=update_data,
+        headers=headers,
+        json={"nickname": "Updated"},
     )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    assert data["id"] == model_id
-    assert data["nickname"] == "GPT-3.5 Turbo Updated"
-    assert data["description"] == "Updated description"
-    assert data["is_deprecated"] is True
-    assert data["max_input_tokens"] == 16000
-
-    # Verify in database
-    async with db_container() as container:
-        session = container.session()
-        stmt = sa.select(CompletionModels).where(CompletionModels.id == model_id)
-        result = await session.execute(stmt)
-        db_model = result.scalar_one()
-
-        assert db_model.nickname == "GPT-3.5 Turbo Updated"
-        assert db_model.description == "Updated description"
-        assert db_model.is_deprecated is True
-        assert db_model.max_input_tokens == 16000
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_update_nonexistent_completion_model(client, super_admin_token):
-    """Test that updating a non-existent model returns 404."""
-    from uuid import uuid4
-
-    fake_id = str(uuid4())
-    update_data = {
-        "nickname": "Should Fail",
-        "description": "This should not work",
-    }
-
-    response = await client.put(
-        f"/api/v1/sysadmin/completion-models/{fake_id}/metadata",
-        headers={"X-API-Key": super_admin_token},
-        json=update_data,
-    )
-
-    assert response.status_code == 404
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_delete_completion_model(client, super_admin_token, db_container):
-    """Test soft-deleting a completion model."""
-    # First create a model
-    create_data = {
-        "name": "model-to-delete",
-        "nickname": "Model to Delete",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-
-    create_response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
-    )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    # Delete the model
-    response = await client.delete(
+    delete_response = await client.delete(
         f"/api/v1/sysadmin/completion-models/{model_id}",
-        headers={"X-API-Key": super_admin_token},
+        headers=headers,
     )
 
-    assert response.status_code == 200
-
-    # Verify model was soft-deleted in database
-    async with db_container() as container:
-        session = container.session()
-        stmt = sa.select(CompletionModels).where(CompletionModels.id == model_id)
-        result = await session.execute(stmt)
-        db_model = result.scalar_one_or_none()
-
-        assert db_model is not None
-        assert db_model.deleted_at is not None
+    assert create_response.status_code == 410
+    assert update_response.status_code == 410
+    assert delete_response.status_code == 410
+    assert "tenant-owned models" in create_response.json()["detail"]
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_delete_nonexistent_completion_model(client, super_admin_token):
-    """Test that deleting a non-existent model succeeds (idempotent delete)."""
-    from uuid import uuid4
-
-    fake_id = str(uuid4())
-
-    response = await client.delete(
-        f"/api/v1/sysadmin/completion-models/{fake_id}",
-        headers={"X-API-Key": super_admin_token},
-    )
-
-    # Note: Current implementation returns 200 even for non-existent models (idempotent)
-    assert response.status_code == 200
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_force_delete_completion_model_without_history(
-    client, super_admin_token, db_container
-):
-    """force=true hard-deletes a model that has no historical attribution."""
-    create_data = {
-        "name": "model-to-force-delete",
-        "nickname": "Model to Force Delete",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-    create_response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
-    )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    response = await client.delete(
-        f"/api/v1/sysadmin/completion-models/{model_id}?force=true",
-        headers={"X-API-Key": super_admin_token},
-    )
-    assert response.status_code == 200
-
-    # Hard-delete, not soft-delete — the row must be physically gone.
-    async with db_container() as container:
-        session = container.session()
-        result = await session.execute(
-            sa.select(CompletionModels).where(CompletionModels.id == model_id)
-        )
-        assert result.scalar_one_or_none() is None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_force_delete_completion_model_with_history_returns_400(
-    client, super_admin_token, db_container
-):
-    """20260402_lifecycle switched questions.completion_model_id to RESTRICT,
-    so hard-deleting a model with question history must fail. The router
-    converts the IntegrityError into MODEL_IN_USE (400) instead of letting
-    it surface as a 500.
-    """
-    from intric.database.tables.questions_table import Questions
-
-    create_data = {
-        "name": "model-with-history",
-        "nickname": "Model With History",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-    create_response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
-    )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    async with db_container() as container:
-        session = container.session()
-        tenant = container.tenant()
-        await session.execute(
-            sa.insert(Questions).values(
-                tenant_id=tenant.id,
-                question="hello",
-                answer="world",
-                num_tokens_question=1,
-                num_tokens_answer=1,
-                completion_model_id=model_id,
-            )
-        )
-
-    response = await client.delete(
-        f"/api/v1/sysadmin/completion-models/{model_id}?force=true",
-        headers={"X-API-Key": super_admin_token},
-    )
-    assert response.status_code == 400
-    body = response.json()
-    from intric.main.exceptions import ErrorCodes
-
-    assert body["intric_error_code"] == ErrorCodes.MODEL_IN_USE
-
-    # The model must still exist after the failed delete.
-    async with db_container() as container:
-        session = container.session()
-        result = await session.execute(
-            sa.select(CompletionModels).where(CompletionModels.id == model_id)
-        )
-        assert result.scalar_one_or_none() is not None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_completion_model_with_duplicate_name(client, super_admin_token):
-    """Test that duplicate model names are allowed (unique constraint removed)."""
-    model_data = {
-        "name": "duplicate-name-test",
-        "nickname": "First Model",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-
-    # Create first model
-    response1 = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=model_data,
-    )
-    assert response1.status_code == 200
-
-    # Create second model with same name (should succeed)
-    model_data["nickname"] = "Second Model"
-    response2 = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=model_data,
-    )
-    assert response2.status_code == 200
-
-    # Verify they have different IDs
-    assert response1.json()["id"] != response2.json()["id"]
-
-
-# Embedding Models Tests
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_embedding_model_success(client, super_admin_token, db_container):
-    """Test creating a new embedding model with valid data."""
-    model_data = {
-        "name": "text-embedding-ada-002",
-        "family": "openai",
-        "is_deprecated": False,
-        "open_source": False,
-        "dimensions": 1536,
-        "max_input": 8191,
-        "max_batch_size": 100,
-        "stability": "stable",
-        "hosting": "usa",
-        "description": "Test embedding model",
-        "org": "OpenAI",
-        "litellm_model_name": "text-embedding-ada-002",
-    }
-
+async def test_embedding_model_create_requires_sysadmin_auth(client):
     response = await client.post(
         "/api/v1/sysadmin/embedding-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=model_data,
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Verify response structure (EmbeddingModelSparse)
-    assert data["name"] == "text-embedding-ada-002"
-    assert data["family"] == "openai"
-    assert data["dimensions"] == 1536
-    assert data["max_input"] == 8191
-    assert data["max_batch_size"] == 100
-    assert "id" in data
-    assert "created_at" in data
-    assert "updated_at" in data
-
-    # Verify tenant-specific fields are NOT in response (Sparse model)
-    assert "is_org_enabled" not in data
-    assert "can_access" not in data
-    assert "is_locked" not in data
-
-    # Verify model was created in database
-    async with db_container() as container:
-        session = container.session()
-        stmt = sa.select(EmbeddingModels).where(
-            EmbeddingModels.name == "text-embedding-ada-002"
-        )
-        result = await session.execute(stmt)
-        db_model = result.scalar_one_or_none()
-
-        assert db_model is not None
-        assert db_model.name == "text-embedding-ada-002"
-        assert db_model.dimensions == 1536
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_embedding_model_without_auth(client):
-    """Test that creating an embedding model without authentication fails."""
-    model_data = {
-        "name": "test-embedding",
-        "family": "openai",
-        "is_deprecated": False,
-        "open_source": False,
-        "stability": "stable",
-        "hosting": "usa",
-    }
-
-    response = await client.post(
-        "/api/v1/sysadmin/embedding-models/create",
-        json=model_data,
+        json=EMBEDDING_CREATE_PAYLOAD,
     )
 
     assert response.status_code == 401
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_update_embedding_model_metadata(client, super_admin_token, db_container):
-    """Test updating an existing embedding model's metadata."""
-    # First create a model
-    create_data = {
-        "name": "text-embedding-3-small",
-        "family": "openai",
-        "is_deprecated": False,
-        "open_source": False,
-        "dimensions": 1536,
-        "stability": "stable",
-        "hosting": "usa",
-    }
+async def test_legacy_embedding_model_crud_returns_gone(client, super_admin_token):
+    model_id = uuid4()
+    headers = {"X-API-Key": super_admin_token}
 
     create_response = await client.post(
         "/api/v1/sysadmin/embedding-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
+        headers=headers,
+        json=EMBEDDING_CREATE_PAYLOAD,
     )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    # Update the model
-    update_data = {
-        "description": "Updated embedding model description",
-        "is_deprecated": True,
-        "dimensions": 512,
-    }
-
-    response = await client.put(
+    update_response = await client.put(
         f"/api/v1/sysadmin/embedding-models/{model_id}/metadata",
-        headers={"X-API-Key": super_admin_token},
-        json=update_data,
+        headers=headers,
+        json={"nickname": "Updated"},
     )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    assert data["id"] == model_id
-    assert data["description"] == "Updated embedding model description"
-    assert data["is_deprecated"] is True
-    assert data["dimensions"] == 512
-
-    # Verify in database
-    async with db_container() as container:
-        session = container.session()
-        stmt = sa.select(EmbeddingModels).where(EmbeddingModels.id == model_id)
-        result = await session.execute(stmt)
-        db_model = result.scalar_one()
-
-        assert db_model.description == "Updated embedding model description"
-        assert db_model.is_deprecated is True
-        assert db_model.dimensions == 512
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_update_nonexistent_embedding_model(client, super_admin_token):
-    """Test that updating a non-existent embedding model returns 404."""
-    from uuid import uuid4
-
-    fake_id = str(uuid4())
-    update_data = {
-        "description": "Should Fail",
-    }
-
-    response = await client.put(
-        f"/api/v1/sysadmin/embedding-models/{fake_id}/metadata",
-        headers={"X-API-Key": super_admin_token},
-        json=update_data,
-    )
-
-    assert response.status_code == 404
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_delete_embedding_model(client, super_admin_token, db_container):
-    """Test deleting an embedding model."""
-    # First create a model
-    create_data = {
-        "name": "embedding-to-delete",
-        "family": "openai",
-        "is_deprecated": False,
-        "open_source": False,
-        "stability": "stable",
-        "hosting": "usa",
-    }
-
-    create_response = await client.post(
-        "/api/v1/sysadmin/embedding-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
-    )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    # Delete the model
-    response = await client.delete(
+    delete_response = await client.delete(
         f"/api/v1/sysadmin/embedding-models/{model_id}",
-        headers={"X-API-Key": super_admin_token},
+        headers=headers,
     )
 
-    assert response.status_code == 200
-
-    # The normal sysadmin delete soft-deletes (parity with completion): the row
-    # is kept as a tombstone with deleted_at set so historical info_blob
-    # attribution survives. Use force=true for a hard delete.
-    async with db_container() as container:
-        session = container.session()
-        stmt = sa.select(EmbeddingModels).where(EmbeddingModels.id == model_id)
-        result = await session.execute(stmt)
-        db_model = result.scalar_one_or_none()
-
-        assert db_model is not None
-        assert db_model.deleted_at is not None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_delete_nonexistent_embedding_model(client, super_admin_token):
-    """Test that deleting a non-existent embedding model succeeds (idempotent delete)."""
-    from uuid import uuid4
-
-    fake_id = str(uuid4())
-
-    response = await client.delete(
-        f"/api/v1/sysadmin/embedding-models/{fake_id}",
-        headers={"X-API-Key": super_admin_token},
-    )
-
-    # Note: Current implementation returns 200 even for non-existent models (idempotent)
-    assert response.status_code == 200
-
-
-# Validation Tests
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_completion_model_missing_required_fields(
-    client, super_admin_token
-):
-    """Test that creating a model with missing required fields fails."""
-    incomplete_data = {
-        "name": "incomplete-model",
-        # Missing many required fields like family, max_input_tokens, etc.
-    }
-
-    response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=incomplete_data,
-    )
-
-    assert response.status_code == 422  # Unprocessable Entity
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_completion_model_accepts_custom_family(client, super_admin_token):
-    """Test that creating a model with custom family string is accepted.
-
-    With per-tenant model architecture, family is Union[CompletionModelFamily, str]
-    to allow tenant-specific models with custom family values.
-    """
-    custom_family_data = {
-        "name": "custom-family-model",
-        "nickname": "Custom Family",
-        "family": "custom_provider",  # Custom family string (now allowed)
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "vision": False,
-        "reasoning": False,
-    }
-
-    response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=custom_family_data,
-    )
-
-    assert response.status_code == 200  # Now accepts custom family strings
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_create_embedding_model_invalid_batch_size(client, super_admin_token):
-    """Test that creating an embedding model with invalid batch size fails."""
-    invalid_data = {
-        "name": "invalid-batch-size",
-        "family": "openai",
-        "is_deprecated": False,
-        "open_source": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "max_batch_size": 500,  # Exceeds max of 256
-    }
-
-    response = await client.post(
-        "/api/v1/sysadmin/embedding-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=invalid_data,
-    )
-
-    assert response.status_code == 422  # Validation error
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_partial_update_completion_model(client, super_admin_token):
-    """Test that partial updates work (only update specified fields)."""
-    # Create a model
-    create_data = {
-        "name": "partial-update-test",
-        "nickname": "Original Nickname",
-        "family": "openai",
-        "max_input_tokens": 8000,
-        "max_output_tokens": 4096,
-        "is_deprecated": False,
-        "stability": "stable",
-        "hosting": "usa",
-        "description": "Original description",
-        "vision": False,
-        "reasoning": False,
-    }
-
-    create_response = await client.post(
-        "/api/v1/sysadmin/completion-models/create",
-        headers={"X-API-Key": super_admin_token},
-        json=create_data,
-    )
-    assert create_response.status_code == 200
-    model_id = create_response.json()["id"]
-
-    # Update only the description
-    update_data = {
-        "description": "Updated description only",
-    }
-
-    response = await client.put(
-        f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
-        headers={"X-API-Key": super_admin_token},
-        json=update_data,
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Verify only description changed, other fields unchanged
-    assert data["description"] == "Updated description only"
-    assert data["nickname"] == "Original Nickname"  # Unchanged
-    assert data["max_input_tokens"] == 8000  # Unchanged
+    assert create_response.status_code == 410
+    assert update_response.status_code == 410
+    assert delete_response.status_code == 410
+    assert "tenant-owned models" in create_response.json()["detail"]

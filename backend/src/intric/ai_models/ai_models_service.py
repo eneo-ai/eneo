@@ -17,7 +17,6 @@ from intric.ai_models.embedding_models.embedding_model import (
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
-from intric.main.config import get_settings
 from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.roles.permissions import Permission, validate_permissions
@@ -145,16 +144,6 @@ class AIModelsService:
 
         models: list[CompletionModelPublic] = []
         for model in completion_models:
-            # See completion_model_crud_service: only the predefined global
-            # Azure models (tenant_id is None) are gated by this flag. Tenant-
-            # configured Azure models are explicit config and always shown.
-            if (
-                model.family == "azure"
-                and model.tenant_id is None
-                and not get_settings().using_azure_models
-            ):
-                continue
-
             models.append(
                 CompletionModelPublic(
                     **model.model_dump(exclude={"is_deprecated"}),

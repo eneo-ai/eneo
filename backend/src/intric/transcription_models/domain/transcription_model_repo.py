@@ -31,9 +31,7 @@ class TranscriptionModelRepository:
             sa.select(
                 TranscriptionModels, ModelProviders.name, ModelProviders.provider_type
             )
-            .outerjoin(
-                ModelProviders, TranscriptionModels.provider_id == ModelProviders.id
-            )
+            .join(ModelProviders, TranscriptionModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(TranscriptionModels.security_classification),
                 selectinload(TranscriptionModels.security_classification).options(
@@ -41,13 +39,7 @@ class TranscriptionModelRepository:
                 ),
             )
             .where(
-                # Return both global and tenant models
-                # This allows existing apps with global models to continue working
-                # UI filtering happens at the presentation layer
-                sa.or_(
-                    TranscriptionModels.tenant_id.is_(None),
-                    TranscriptionModels.tenant_id == self.user.tenant_id,
-                ),
+                TranscriptionModels.tenant_id == self.user.tenant_id,
                 # Soft-deleted models are tombstones kept only so migration
                 # history and lingering app references resolve; never surface
                 # them to readers.
@@ -77,14 +69,11 @@ class TranscriptionModelRepository:
         ]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["TranscriptionModel"]:
-        # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
             sa.select(
                 TranscriptionModels, ModelProviders.name, ModelProviders.provider_type
             )
-            .outerjoin(
-                ModelProviders, TranscriptionModels.provider_id == ModelProviders.id
-            )
+            .join(ModelProviders, TranscriptionModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(TranscriptionModels.security_classification),
                 selectinload(TranscriptionModels.security_classification).options(
@@ -93,11 +82,7 @@ class TranscriptionModelRepository:
             )
             .where(
                 TranscriptionModels.id == model_id,
-                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
-                sa.or_(
-                    TranscriptionModels.tenant_id.is_(None),
-                    TranscriptionModels.tenant_id == self.user.tenant_id,
-                ),
+                TranscriptionModels.tenant_id == self.user.tenant_id,
                 # Soft-deleted models are invisible to all callers (including the
                 # migration engine, which must not migrate from/to a tombstone).
                 TranscriptionModels.deleted_at.is_(None),
