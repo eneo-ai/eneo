@@ -29,6 +29,7 @@
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
   import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import ResourceMetadataEditor from "$lib/features/metadata/ResourceMetadataEditor.svelte";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -84,6 +85,7 @@
   const availableMCPServers = $derived(
     mcpEnforced ? (effectiveConfig?.available_mcp_servers ?? []) : undefined
   );
+  const tenantMetadataFields = $derived(data.settings?.metadata_fields ?? []);
 
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id ?? null);
@@ -617,6 +619,26 @@
             inheritedFrom="space"
             {labelId}
             {descriptionId}
+          />
+        </Settings.Row>
+      </Settings.Group>
+
+      <Settings.Group title={m.advanced_settings()}>
+        <Settings.Row
+          title={m.resource_metadata_section_title()}
+          hasChanges={$currentChanges.diff.metadata_json !== undefined}
+          revertFn={() => {
+            discardChanges("metadata_json");
+          }}
+          fullWidth
+        >
+          <ResourceMetadataEditor
+            metadataJson={$update.metadata_json ?? null}
+            tenantFields={tenantMetadataFields}
+            resourceType="assistant"
+            onChange={(value) => {
+              $update.metadata_json = value;
+            }}
           />
         </Settings.Row>
       </Settings.Group>

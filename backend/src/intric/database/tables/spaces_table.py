@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.ai_models_table import (
@@ -30,6 +31,7 @@ class Spaces(BasePublic):
     name: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     data_retention_days: Mapped[Optional[int]] = mapped_column()
+    metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))

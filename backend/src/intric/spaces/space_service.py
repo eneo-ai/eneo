@@ -27,6 +27,7 @@ from intric.main.exceptions import (
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+from intric.settings.tenant_metadata_field_service import TenantMetadataFieldService
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
@@ -92,6 +93,7 @@ class SpaceService:
         transcription_model_service: TranscriptionModelService,
         actor_manager: "ActorManager",
         security_classification_service: "SecurityClassificationService",
+        tenant_metadata_field_service: TenantMetadataFieldService,
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
@@ -108,6 +110,7 @@ class SpaceService:
         self.transcription_model_service = transcription_model_service
         self.actor_manager = actor_manager
         self.security_classification_service = security_classification_service
+        self.tenant_metadata_field_service = tenant_metadata_field_service
         self.icon_repo = icon_repo
         self.api_key_scope_revoker = api_key_scope_revoker
         self._logger = get_logger(__name__)
@@ -257,6 +260,7 @@ class SpaceService:
         mcp_tools: list["MCPToolSetting"] | None = None,
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
         space = await self.get_space(id)
@@ -264,6 +268,11 @@ class SpaceService:
 
         if not actor.can_edit_space():
             raise UnauthorizedException("User does not have permission to edit space")
+
+        if is_provided(metadata_json):
+            await self.tenant_metadata_field_service.validate_metadata_for_resource(
+                metadata_json, resource_type="space"
+            )
 
         space_security_classification = None
         if is_provided(security_classification):
@@ -382,6 +391,7 @@ class SpaceService:
                 else NOT_PROVIDED
             ),
             data_retention_days=data_retention_days,
+            metadata_json=metadata_json,
             icon_id=icon_id,
         )
 

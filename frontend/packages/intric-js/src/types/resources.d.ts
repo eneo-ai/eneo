@@ -60,10 +60,48 @@ export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
-export type Settings = components["schemas"]["SettingsPublic"];
+export type MetadataFieldType = "int" | "string" | "boolean";
+export type ResourceMetadataEntry = {
+  key: string;
+  value: string | number | boolean;
+  type: MetadataFieldType;
+};
+export type ResourceMetadataJson = {
+  eneo?: Array<ResourceMetadataEntry | Record<string, unknown>>;
+} & Record<string, unknown>;
+export type TenantMetadataField = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  field_type: MetadataFieldType;
+  visible_on_assistants: boolean;
+  visible_on_spaces: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+export type Settings = components["schemas"]["SettingsPublic"] & {
+  metadata_fields?: TenantMetadataField[];
+};
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
-export type Space = components["schemas"]["SpacePublic"];
-export type SpaceSparse = components["schemas"]["SpaceSparse"];
+export type Space = components["schemas"]["SpacePublic"] & {
+  metadata_json?: ResourceMetadataJson | null;
+};
+export type SpaceSparse = components["schemas"]["SpaceSparse"] & {
+  metadata_json?: ResourceMetadataJson | null;
+};
+export type SpaceUpdate = {
+  name?: string;
+  description?: string;
+  embedding_models?: { id: string }[];
+  completion_models?: { id: string }[];
+  transcription_models?: { id: string }[];
+  mcp_servers?: { id: string }[];
+  mcp_tools?: { tool_id: string; is_enabled: boolean }[];
+  security_classification?: { id: string } | null;
+  data_retention_days?: number | null;
+  metadata_json?: ResourceMetadataJson | null;
+  icon_id?: string | null;
+};
 export type Dashboard = components["schemas"]["Dashboard"];
 export type Prompt = components["schemas"]["PromptPublic"];
 export type PromptSparse = components["schemas"]["PromptSparse"];

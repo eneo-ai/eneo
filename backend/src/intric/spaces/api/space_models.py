@@ -139,6 +139,10 @@ class UpdateSpaceRequest(BaseModel):
             "Valid range: 1-2555 days (1 day to 7 years)."
         ),
     )
+    metadata_json: Union[dict[str, object], None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description="Metadata for the space. Set to null to clear.",
+    )
 
 
 class UpdateSpaceDryRunResponse(BaseModel):
@@ -174,6 +178,7 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     description: Optional[str]
     personal: bool
     organization: bool
+    metadata_json: Optional[dict[str, object]] = None
     icon_id: Optional[UUID] = Field(
         default=None,
         description="Icon ID referencing an uploaded icon",
@@ -211,6 +216,7 @@ class SpacePublic(SpaceDashboard):
 
     available_roles: list[SpaceRole]
     security_classification: Optional[SecurityClassificationPublic]
+    metadata_json: Optional[dict[str, object]] = None
 
 
 # Assistants

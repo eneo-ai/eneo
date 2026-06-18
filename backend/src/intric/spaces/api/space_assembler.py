@@ -606,6 +606,7 @@ class SpaceAssembler:
             available_roles=available_roles,
             security_classification=security_classification,
             data_retention_days=space.data_retention_days,
+            metadata_json=space.metadata_json,
             icon_id=space.icon_id,
         )
 
@@ -623,6 +624,7 @@ class SpaceAssembler:
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             data_retention_days=space.data_retention_days,
+            metadata_json=space.metadata_json,
             icon_id=space.icon_id,
         )
 
@@ -674,6 +676,7 @@ class SpaceAssembler:
             applications=applications,
             default_assistant=default_assistant,
             data_retention_days=space.data_retention_days,
+            metadata_json=space.metadata_json,
             icon_id=space.icon_id,
         )
 
