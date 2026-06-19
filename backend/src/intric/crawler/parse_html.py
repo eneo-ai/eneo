@@ -39,15 +39,10 @@ def parse_response(response: Response) -> CrawledPage | None:
         href_attribute = link.get("href")
         if isinstance(href_attribute, str):
             href = href_attribute
-        elif (
-            isinstance(href_attribute, list)
-            and href_attribute
-            and isinstance(href_attribute[0], str)
-        ):
+        elif isinstance(href_attribute, list) and href_attribute:
             href = href_attribute[0]
         else:
             continue
-
         link["href"] = urljoin(response.url, href)
 
     content = html2text(str(soup))
