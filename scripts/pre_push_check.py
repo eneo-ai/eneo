@@ -15,6 +15,33 @@ PREFERRED_BRANCH_RE = re.compile(
 )
 PROTECTED_BRANCHES = {"main", "master", "develop"}
 SCHEMA_PATH = Path("frontend/packages/intric-js/src/types/schema.d.ts")
+# Mirror CI's schema-drift env so local OpenAPI dumps use the same placeholder settings.
+SCHEMA_DRIFT_ENV = {
+    "POSTGRES_USER": "placeholder",
+    "POSTGRES_HOST": "placeholder",
+    "POSTGRES_PASSWORD": "placeholder",
+    "POSTGRES_PORT": "5432",
+    "POSTGRES_DB": "placeholder",
+    "REDIS_HOST": "localhost",
+    "REDIS_PORT": "6379",
+    "UPLOAD_FILE_TO_SESSION_MAX_SIZE": "10485760",
+    "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE": "10485760",
+    "UPLOAD_MAX_FILE_SIZE": "10485760",
+    "TRANSCRIPTION_MAX_FILE_SIZE": "10485760",
+    "MAX_IN_QUESTION": "1",
+    "API_PREFIX": "/api/v1",
+    "API_KEY_LENGTH": "64",
+    "API_KEY_HEADER_NAME": "X-API-Key",
+    "JWT_AUDIENCE": "test",
+    "JWT_ISSUER": "test",
+    "JWT_EXPIRY_TIME": "3600",
+    "JWT_ALGORITHM": "HS256",
+    "JWT_SECRET": "ci-test-jwt-secret-not-for-production-0123456789",
+    "JWT_TOKEN_PREFIX": "Bearer",
+    "URL_SIGNING_KEY": "test_key",
+    "ENCRYPTION_KEY": "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
+    "OPENAI_API_KEY": "test-api-key",
+}
 
 
 def run_git(repo_root: Path, *args: str) -> str:
@@ -97,6 +124,7 @@ def run_schema_drift_check(repo: Path) -> None:
         tmp_dir = Path(tmp)
         openapi_path = tmp_dir / "openapi.gen.json"
         generated_schema = tmp_dir / "schema.d.ts"
+        schema_env = {**os.environ, **SCHEMA_DRIFT_ENV}
 
         dump_result = subprocess.run(
             [
@@ -111,6 +139,7 @@ def run_schema_drift_check(repo: Path) -> None:
                 ),
             ],
             cwd=repo / "backend",
+            env=schema_env,
             text=True,
             check=False,
         )

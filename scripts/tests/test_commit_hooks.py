@@ -1,18 +1,44 @@
 from __future__ import annotations
 
+import ast
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMIT_MSG_CHECK = REPO_ROOT / "scripts" / "commit_msg_check.py"
 COMMIT_PREFLIGHT = REPO_ROOT / "scripts" / "commit_preflight.py"
 PRE_PUSH_CHECK = REPO_ROOT / "scripts" / "pre_push_check.py"
 ROUTE_METADATA_CHECK = REPO_ROOT / "scripts" / "check_route_metadata.py"
+
+
+def load_pre_push_check_module():
+    sys.path.insert(0, str(PRE_PUSH_CHECK.parent))
+    spec = importlib.util.spec_from_file_location("pre_push_check", PRE_PUSH_CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def required_settings_env_keys() -> set[str]:
+    tree = ast.parse((REPO_ROOT / "backend" / "src" / "intric" / "main" / "config.py").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "Settings":
+            return {
+                item.target.id.upper()
+                for item in node.body
+                if isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and item.value is None
+            }
+    raise AssertionError("Settings class not found")
 
 
 def run_script(
@@ -180,12 +206,31 @@ class CommitHookTests(unittest.TestCase):
         root = self.make_repo()
         bin_dir = root / "bin"
         schema = root / "frontend" / "packages" / "intric-js" / "src" / "types" / "schema.d.ts"
+        schema_env = root / "schema-env.json"
         bin_dir.mkdir()
         schema.parent.mkdir(parents=True, exist_ok=True)
         schema.write_text("export type Schema = 'current';\n", encoding="utf-8")
 
         uv = bin_dir / "uv"
-        uv.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        uv.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            f"marker = pathlib.Path({str(schema_env)!r})\n"
+            "keys = [\n"
+            "    'POSTGRES_USER',\n"
+            "    'POSTGRES_PORT',\n"
+            "    'UPLOAD_FILE_TO_SESSION_MAX_SIZE',\n"
+            "    'UPLOAD_IMAGE_TO_SESSION_MAX_SIZE',\n"
+            "    'UPLOAD_MAX_FILE_SIZE',\n"
+            "    'TRANSCRIPTION_MAX_FILE_SIZE',\n"
+            "    'JWT_EXPIRY_TIME',\n"
+            "    'JWT_SECRET',\n"
+            "    'ENCRYPTION_KEY',\n"
+            "]\n"
+            "marker.write_text(json.dumps({key: os.environ.get(key) for key in keys}), encoding='utf-8')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
         uv.chmod(0o755)
 
         bun = bin_dir / "bun"
@@ -221,6 +266,27 @@ class CommitHookTests(unittest.TestCase):
         result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("running schema drift", result.stderr)
+
+        dump_env = json.loads(schema_env.read_text(encoding="utf-8"))
+        self.assertEqual(dump_env["POSTGRES_USER"], "placeholder")
+        self.assertEqual(dump_env["JWT_SECRET"], "ci-test-jwt-secret-not-for-production-0123456789")
+        self.assertEqual(dump_env["ENCRYPTION_KEY"], "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=")
+        for key in (
+            "POSTGRES_PORT",
+            "UPLOAD_FILE_TO_SESSION_MAX_SIZE",
+            "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE",
+            "UPLOAD_MAX_FILE_SIZE",
+            "TRANSCRIPTION_MAX_FILE_SIZE",
+            "JWT_EXPIRY_TIME",
+        ):
+            self.assertRegex(dump_env[key], r"^\d+$", key)
+
+    def test_pre_push_schema_drift_env_covers_required_settings(self) -> None:
+        pre_push_check = load_pre_push_check_module()
+
+        missing = required_settings_env_keys() - set(pre_push_check.SCHEMA_DRIFT_ENV)
+
+        self.assertEqual(missing, set())
 
     def test_pre_push_check_blocks_schema_drift(self) -> None:
         root = self.make_repo()
