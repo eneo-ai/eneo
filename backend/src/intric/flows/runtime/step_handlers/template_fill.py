@@ -24,7 +24,7 @@ class TemplateFillStepHandler:
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> StepExecutionResult:
         output = await execute_template_fill_step(
             step=step,

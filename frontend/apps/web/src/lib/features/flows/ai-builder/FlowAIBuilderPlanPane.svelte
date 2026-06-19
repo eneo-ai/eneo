@@ -27,6 +27,10 @@
     getRemovedStepChanges,
     getStepChangeKind
   } from "./flowAIBuilderPlanDiff";
+  import {
+    getAIBuilderApplyPrerequisites,
+    hasAIBuilderApplyBlocker
+  } from "./flowAIBuilderApplyPrerequisites";
 
   interface Props {
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
@@ -65,6 +69,30 @@
   const isUnpublishedApplyFailure = $derived(
     service.applyError?.code === "flow_unpublished_apply_failed"
   );
+  const isGeneralApplyError = $derived(
+    service.applyError !== null &&
+      !service.isConflict &&
+      !isPublishedError &&
+      !isUnpublishedApplyFailure
+  );
+  const applyPrerequisites = $derived(
+    getAIBuilderApplyPrerequisites({
+      plan: service.currentPlan,
+      targetKind: service.session?.target_kind,
+      transcriptionModels: $currentSpace.transcription_models
+    })
+  );
+  const isMissingSpaceTranscriptionModel = $derived(
+    hasAIBuilderApplyBlocker(applyPrerequisites, "transcription_model_required")
+  );
+  const applyBlockedByPrerequisites = $derived(!applyPrerequisites.canApply);
+  const generalApplyErrorMessage = $derived.by(() => {
+    if (!service.applyError) return "";
+    if (service.applyError.code === "transcription_model_required") {
+      return m.ai_builder_missing_transcription_model_description();
+    }
+    return service.applyError.message;
+  });
   const diagnosticSession = $derived.by(() =>
     buildAIBuilderDiagnosticReportSession(service.session)
   );
@@ -166,7 +194,14 @@
   }
 
   async function handleApply() {
-    if (isApplying || isUnpublishingAndApplying || isPublishedError) return;
+    if (
+      isApplying ||
+      isUnpublishingAndApplying ||
+      isPublishedError ||
+      applyBlockedByPrerequisites
+    ) {
+      return;
+    }
     isApplying = true;
     try {
       const result = await service.applyPlan();
@@ -225,6 +260,21 @@
             </Alert.Title>
             <Alert.Description class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
               {attachmentWarnings[0]}
+            </Alert.Description>
+          </Alert.Root>
+        {/if}
+
+        {#if isMissingSpaceTranscriptionModel}
+          <Alert.Root
+            class="border-warning-default/40 bg-warning-dimmer rounded-lg"
+            role="status"
+            aria-live="polite"
+          >
+            <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
+              {m.ai_builder_missing_transcription_model_title()}
+            </Alert.Title>
+            <Alert.Description class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
+              {m.ai_builder_missing_transcription_model_description()}
             </Alert.Description>
           </Alert.Root>
         {/if}
@@ -735,6 +785,31 @@
       </Alert.Root>
     {/if}
 
+    {#if isGeneralApplyError}
+      <Alert.Root
+        class="border-warning-default/40 bg-warning-dimmer shrink-0 rounded-none border-x-0 border-b-0"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="mx-auto max-w-3xl px-4 py-3 md:px-6">
+          <Alert.Title class="text-warning-stronger text-[0.8125rem] font-semibold">
+            {m.ai_builder_apply_failed_title()}
+          </Alert.Title>
+          <Alert.Description class="text-warning-stronger/80 mt-0.5 text-xs leading-relaxed">
+            {m.ai_builder_apply_failed_description({
+              message: generalApplyErrorMessage
+            })}
+          </Alert.Description>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
+              {m.ai_builder_dismiss()}
+            </Button>
+            <FlowAIBuilderDiagnosticCopyButton report={applyErrorDiagnosticReport} size="sm" />
+          </div>
+        </div>
+      </Alert.Root>
+    {/if}
+
     <!-- Sticky action bar ----------------------------------------------------->
     <div
       class="plan-actions border-default bg-primary/85 supports-[not(backdrop-filter:blur(0))]:bg-primary relative shrink-0 border-t backdrop-blur-sm"
@@ -791,7 +866,11 @@
             size="sm"
             class="max-sm:min-h-11 max-sm:w-full"
             onclick={handleApply}
-            disabled={isApproving || isApplying || isUnpublishingAndApplying || isPublishedError}
+            disabled={isApproving ||
+              isApplying ||
+              isUnpublishingAndApplying ||
+              isPublishedError ||
+              applyBlockedByPrerequisites}
           >
             {isApplying ? m.ai_builder_applying() : m.ai_builder_apply()}
           </Button>

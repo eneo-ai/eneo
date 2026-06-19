@@ -70,6 +70,20 @@ describe("createClient path parameters", () => {
     });
   });
 
+  it("exposes backend trace headers on client errors", () => {
+    const error = new IntricError(
+      "Backend failed",
+      "RESPONSE",
+      500,
+      0,
+      {},
+      { endpoint: "GET@https://api.example.test/api/v1/info/" },
+      new Headers({ "X-Trace-Id": "trace-1" })
+    );
+
+    expect(error.getTraceId()).toBe("trace-1");
+  });
+
   it("fails xhr requests before opening a pre-aborted upload", async () => {
     const client = createClient({ baseUrl: "https://api.example.test", fetch: vi.fn() });
     const abortController = new AbortController();

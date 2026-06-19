@@ -65,7 +65,6 @@ class StepExecutionOutput:
     source_text: str
     input_source: str
     used_question_binding: bool
-    legacy_prompt_binding_used: bool
     full_text: str
     persisted_text: str
     generated_file_ids: list[UUID]
@@ -100,19 +99,9 @@ class StepInputValue:
     raw_extracted_text: str = ""
     input_source: str = "flow_input"
     used_question_binding: bool = False
-    legacy_prompt_binding_used: bool = False
     diagnostics: list[StepDiagnostic] = field(default_factory=_empty_step_diagnostics)
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class StepInputResolution:
-    input_text: str
-    source_text: str
-    input_source: str
-    used_question_binding: bool
-    legacy_prompt_binding_used: bool
 
 
 @dataclass

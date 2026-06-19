@@ -31,7 +31,7 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FormFieldSpec,

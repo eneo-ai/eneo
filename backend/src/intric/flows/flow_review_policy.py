@@ -7,6 +7,7 @@ from typing import TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from intric.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
     FLOW_REVIEW_EXPIRY_MAX_SECONDS,
@@ -14,7 +15,7 @@ from intric.flows.flow_review_expiry_policy import (
 )
 from intric.main.exceptions import BadRequestException
 
-FLOW_REVIEW_POLICY_INVALID = "flow_review_policy_invalid"
+FLOW_REVIEW_POLICY_INVALID = FlowApiErrorCode.REVIEW_POLICY_INVALID.value
 FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED = (
     "flow_review_policy_outbound_output_unsupported"
 )

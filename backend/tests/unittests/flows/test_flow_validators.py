@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowOutputMode, FlowOutputType
-from intric.flows.flow import FlowStep
 from intric.flows.flow_metadata import normalize_flow_metadata_for_write
 from intric.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
@@ -65,16 +65,20 @@ def test_validate_steps_rejects_output_contract_for_text_output():
         )
 
 
-def test_validate_steps_rejects_http_get_body_fields():
+def test_validate_steps_rejects_authored_http_get_body_fields():
     with pytest.raises(
         BadRequestException,
-        match="body fields are only allowed for input_source 'http_post'",
+        match="HTTP_BODY_NOT_ALLOWED_FOR_GET",
     ):
         validate_steps(
             [
                 _step(
                     input_source="http_get",
-                    input_config={"url": "https://example.com", "body_json": {"x": 1}},
+                    input_config={
+                        "url": "https://example.com",
+                        "auth": {"mode": "none"},
+                        "body": {"mode": "json_template", "template": '{"x": 1}'},
+                    },
                 )
             ]
         )
@@ -111,34 +115,27 @@ def test_validate_form_schema_options_error_mentions_select_and_multiselect():
         )
 
 
-def test_validate_steps_rejects_http_body_template_and_body_json_together():
-    with pytest.raises(
-        BadRequestException, match="cannot define both body_template and body_json"
-    ):
+def test_validate_steps_rejects_flat_http_config_without_authored_shape():
+    with pytest.raises(BadRequestException, match="authored HTTP config"):
         validate_steps(
             [
                 _step(
                     input_source="http_post",
-                    input_config={
-                        "url": "https://example.com",
-                        "body_template": "{{flow_input.text}}",
-                        "body_json": {"x": 1},
-                    },
+                    input_config={"url": "https://example.com"},
                 )
             ]
         )
 
 
 def test_validate_steps_rejects_invalid_http_response_format():
-    with pytest.raises(
-        BadRequestException, match="response_format must be 'text' or 'json'"
-    ):
+    with pytest.raises(BadRequestException, match="response_format"):
         validate_steps(
             [
                 _step(
                     input_source="http_post",
                     input_config={
                         "url": "https://example.com",
+                        "auth": {"mode": "none"},
                         "response_format": "xml",
                     },
                 )
@@ -152,7 +149,7 @@ def test_validate_steps_rejects_forward_binding_reference_directly():
     ):
         validate_steps(
             [
-                _step(1, input_bindings={"value": "{{step_2.output.text}}"}),
+                _step(1, input_bindings={"question": "{{step_2.output.text}}"}),
                 _step(2),
             ]
         )
@@ -166,10 +163,25 @@ def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
                 input_config={
                     "runtime_input": {"enabled": True, "input_format": "document"}
                 },
-                input_bindings={"value": "{{step_input.text}}"},
+                input_bindings={"question": "{{step_input.text}}"},
             )
         ]
     )
+
+
+def test_validate_steps_rejects_unsupported_binding_keys_only_when_publish_strict():
+    step = _step(input_bindings={"text": "{{ flow_input.text }}"})
+
+    validate_steps([step], require_complete_template_fill_config=False)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_steps([step], require_complete_template_fill_config=True)
+
+    assert exc_info.value.code == "flow_input_binding_unsupported_key"
+    assert exc_info.value.context == {
+        "field": "input_bindings",
+        "key": "text",
+    }
 
 
 def test_validate_steps_rejects_question_binding_with_input_contract():
@@ -361,6 +373,8 @@ def test_validate_form_schema_allows_scalar_runtime_reserved_field_names():
         ("transcript", "flow_form_field_name_primary_input_key"),
         ("transcribed_text", "flow_form_field_name_primary_input_key"),
         ("transkribering", "flow_form_field_name_primary_input_key"),
+        ("expected_flow_version", "flow_form_field_name_primary_input_key"),
+        ("step_inputs", "flow_form_field_name_primary_input_key"),
     ],
 )
 def test_validate_form_schema_rejects_runtime_payload_field_names(field_name, code):
@@ -538,7 +552,10 @@ def test_validate_steps_rejects_http_post_output_before_last_step() -> None:
                 _step(
                     1,
                     output_mode=FlowOutputMode.HTTP_POST,
-                    output_config={"url": "https://example.test/hook"},
+                    output_config={
+                        "url": "https://example.test/hook",
+                        "auth": {"mode": "none"},
+                    },
                 ),
                 _step(2),
             ]
@@ -552,7 +569,10 @@ def test_validate_steps_allows_http_post_output_on_last_step() -> None:
             _step(
                 2,
                 output_mode=FlowOutputMode.HTTP_POST,
-                output_config={"url": "https://example.test/hook"},
+                output_config={
+                    "url": "https://example.test/hook",
+                    "auth": {"mode": "none"},
+                },
             ),
         ]
     )
@@ -563,7 +583,10 @@ def test_validate_steps_allows_single_step_http_post_output() -> None:
         [
             _step(
                 output_mode=FlowOutputMode.HTTP_POST,
-                output_config={"url": "https://example.test/hook"},
+                output_config={
+                    "url": "https://example.test/hook",
+                    "auth": {"mode": "none"},
+                },
             )
         ]
     )

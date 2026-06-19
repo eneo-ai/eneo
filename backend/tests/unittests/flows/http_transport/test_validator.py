@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
 
+from intric.flows.flow_validators_http import validate_authored_http_config
 from intric.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
@@ -11,8 +15,8 @@ from intric.flows.http_transport.authored_config import (
     HttpBodyMode,
 )
 from intric.flows.http_transport.errors import HttpTransportError
-from intric.flows.http_transport.secret_codec import SECRET_SENTINEL
 from intric.flows.http_transport.validator import validate_authored_config
+from intric.main.exceptions import BadRequestException
 
 
 def _config(
@@ -30,8 +34,70 @@ def _config(
     )
 
 
-def _validate(cfg: HttpAuthoredConfig, *, method: str = "POST") -> list[HttpTransportError]:
+def _validate(
+    cfg: HttpAuthoredConfig, *, method: str = "POST"
+) -> list[HttpTransportError]:
     return validate_authored_config(cfg, direction="output", method=method)
+
+
+def test_authored_config_model_validate_accepts_json_contract_values() -> None:
+    config = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 30,
+            "custom_headers": [
+                {"name": "X-Trace", "value": "trace-id", "secret": False}
+            ],
+        }
+    )
+
+    assert config.timeout_seconds == 30
+    assert config.custom_headers[0].secret is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "url": "https://example.org/api",
+            "auth": {"mode": "none"},
+            "timeout_seconds": "30",
+        },
+        {
+            "url": "https://example.org/api",
+            "auth": {"mode": "none"},
+            "timeout_seconds": True,
+        },
+        {
+            "url": "https://example.org/api",
+            "auth": {"mode": "none"},
+            "custom_headers": [
+                {"name": "X-Trace", "value": "trace-id", "secret": "true"}
+            ],
+        },
+    ],
+)
+def test_authored_config_model_validate_rejects_coerced_json_contract_values(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        HttpAuthoredConfig.model_validate(payload)
+
+
+def test_validate_authored_http_config_rejects_coerced_json_contract_values() -> None:
+    with pytest.raises(BadRequestException, match="not a valid HTTP config"):
+        validate_authored_http_config(
+            step_order=1,
+            label="output_config",
+            config={
+                "url": "https://example.org/api",
+                "auth": {"mode": "none"},
+                "timeout_seconds": "30",
+            },
+            method="POST",
+            direction="output",
+        )
 
 
 # --- URL validation ---
@@ -59,6 +125,13 @@ def test_url_without_scheme_returns_invalid_url() -> None:
     errors = _validate(_config(url="example.org/api"))
 
     assert HttpTransportError.INVALID_URL in errors
+
+
+def test_template_expression_url_is_validated_after_interpolation() -> None:
+    errors = _validate(_config(url="{{base_url}}/api"))
+
+    assert HttpTransportError.MISSING_URL not in errors
+    assert HttpTransportError.INVALID_URL not in errors
 
 
 def test_valid_https_url_no_url_errors() -> None:
@@ -91,9 +164,7 @@ def test_bearer_with_token_no_auth_errors() -> None:
 
 
 def test_bearer_with_sentinel_no_auth_errors() -> None:
-    # Sentinel is a dict injected via model_copy, same as redact_authored_config does
-    auth = HttpAuthBearer(token="placeholder").model_copy(update={"token": SECRET_SENTINEL})
-    cfg = _config(auth=auth)
+    cfg = _config(auth=HttpAuthBearer(token=SECRET_SENTINEL))
     errors = _validate(cfg)
 
     assert HttpTransportError.MISSING_AUTH_CREDENTIALS not in errors
@@ -106,9 +177,7 @@ def test_api_key_empty_returns_missing_auth() -> None:
 
 
 def test_basic_auth_empty_returns_missing_auth() -> None:
-    errors = _validate(
-        _config(auth=HttpAuthBasicAuth(username="", password=""))
-    )
+    errors = _validate(_config(auth=HttpAuthBasicAuth(username="", password="")))
 
     assert HttpTransportError.MISSING_AUTH_CREDENTIALS in errors
 
@@ -165,7 +234,9 @@ def test_invalid_json_template_returns_invalid_body_json() -> None:
 
 
 def test_valid_json_template_no_body_json_errors() -> None:
-    cfg = _config(body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template='{"key": "val"}'))
+    cfg = _config(
+        body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template='{"key": "val"}')
+    )
     errors = _validate(cfg, method="POST")
 
     assert HttpTransportError.INVALID_BODY_JSON not in errors

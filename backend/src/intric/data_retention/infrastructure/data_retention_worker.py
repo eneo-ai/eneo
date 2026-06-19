@@ -1,15 +1,25 @@
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from typing import TypeVar
 
 from dependency_injector import providers
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
+from intric.data_retention.infrastructure.data_retention_service import (
+    RETENTION_BATCH_SIZE,
+    FlowDebugRedactionCounts,
+    FlowRunHistoryPurgeBlockedCounts,
+    FlowRunHistoryPurgeCounts,
+)
 from intric.database.database import sessionmanager
 from intric.main.container.container import Container
 from intric.worker.worker import Worker
 
 logger = logging.getLogger(__name__)
 worker = Worker()
+T = TypeVar("T")
 
 
 class DeletedCounts(TypedDict):
@@ -18,9 +28,13 @@ class DeletedCounts(TypedDict):
     sessions: int
     flow_debug_rows: int
     flow_attempt_provenance: int
-    flow_artifact_rows: int
-    flow_artifact_files: int
-    flow_artifact_reconciliations: int
+    flow_runs_purged: int
+    flow_generated_files_deleted: int
+    flow_webhook_deliveries_deleted: int
+    flow_audit_outbox_rows_deleted: int
+    flow_review_checkpoints_deleted: int
+    flow_runs_skipped_undelivered_audit: int
+    flow_runs_skipped_active_rerun: int
     flow_audit_outbox_delivered_rows: int
     total: int
 
@@ -32,6 +46,48 @@ class CleanupResults(TypedDict):
     deleted: DeletedCounts
     errors: list[str]
     success: bool
+
+
+async def _run_cleanup_step(
+    *,
+    session: AsyncSession,
+    results: CleanupResults,
+    error_prefix: str,
+    action: Callable[[], Awaitable[T]],
+) -> T | None:
+    try:
+        async with session.begin():
+            return await action()
+    except Exception as e:
+        error_msg = f"{error_prefix}: {e}"
+        logger.error(error_msg, exc_info=True)
+        results["errors"].append(error_msg)
+        results["success"] = False
+        return None
+
+
+def _record_flow_run_history_purge_counts(
+    deleted: DeletedCounts, counts: FlowRunHistoryPurgeCounts
+) -> None:
+    deleted["flow_runs_purged"] += counts.flow_runs_purged
+    deleted["flow_generated_files_deleted"] += counts.flow_generated_files_deleted
+    deleted["flow_webhook_deliveries_deleted"] += counts.flow_webhook_deliveries_deleted
+    deleted["flow_audit_outbox_rows_deleted"] += counts.flow_audit_outbox_rows_deleted
+    deleted["flow_review_checkpoints_deleted"] += counts.flow_review_checkpoints_deleted
+
+
+def _record_flow_run_history_blocked_counts(
+    deleted: DeletedCounts, counts: FlowRunHistoryPurgeBlockedCounts
+) -> None:
+    deleted["flow_runs_skipped_undelivered_audit"] = counts.skipped_undelivered_audit
+    deleted["flow_runs_skipped_active_rerun"] = counts.skipped_active_rerun
+
+
+def _record_flow_debug_redaction_counts(
+    deleted: DeletedCounts, counts: FlowDebugRedactionCounts
+) -> None:
+    deleted["flow_debug_rows"] += counts.debug_step_results
+    deleted["flow_attempt_provenance"] += counts.debug_step_attempts
 
 
 @worker.cron_job(hour=3, minute=0)
@@ -58,9 +114,13 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "sessions": 0,
             "flow_debug_rows": 0,
             "flow_attempt_provenance": 0,
-            "flow_artifact_rows": 0,
-            "flow_artifact_files": 0,
-            "flow_artifact_reconciliations": 0,
+            "flow_runs_purged": 0,
+            "flow_generated_files_deleted": 0,
+            "flow_webhook_deliveries_deleted": 0,
+            "flow_audit_outbox_rows_deleted": 0,
+            "flow_review_checkpoints_deleted": 0,
+            "flow_runs_skipped_undelivered_audit": 0,
+            "flow_runs_skipped_active_rerun": 0,
             "flow_audit_outbox_delivered_rows": 0,
             "total": 0,
         },
@@ -78,83 +138,103 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         try:
             retention_service = container.data_retention_service()
 
-            try:
-                async with session.begin():
-                    questions_count = await retention_service.delete_old_questions()
-                    results["deleted"]["questions"] = questions_count
-                    if questions_count > 0:
-                        logger.info(
-                            f"Deleted {questions_count} old questions based on retention policies"
-                        )
-            except Exception as e:
-                error_msg = f"Failed to delete old questions: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
-
-            try:
-                async with session.begin():
-                    app_runs_count = await retention_service.delete_old_app_runs()
-                    results["deleted"]["app_runs"] = app_runs_count
-                    if app_runs_count > 0:
-                        logger.info(
-                            f"Deleted {app_runs_count} old app runs based on retention policies"
-                        )
-            except Exception as e:
-                error_msg = f"Failed to delete old app runs: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
-
-            try:
-                async with session.begin():
-                    sessions_count = await retention_service.delete_old_sessions()
-                    results["deleted"]["sessions"] = sessions_count
-                    if sessions_count > 0:
-                        logger.info(f"Deleted {sessions_count} orphaned sessions")
-            except Exception as e:
-                error_msg = f"Failed to delete old sessions: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
-
-            try:
-                async with session.begin():
-                    flow_runtime_counts = (
-                        await retention_service.cleanup_old_flow_runtime_data()
+            questions_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete old questions",
+                action=retention_service.delete_old_questions,
+            )
+            if questions_count is not None:
+                results["deleted"]["questions"] = questions_count
+                if questions_count > 0:
+                    logger.info(
+                        f"Deleted {questions_count} old questions based on retention policies"
                     )
-                    results["deleted"]["flow_debug_rows"] = flow_runtime_counts[
-                        "debug_step_results"
-                    ]
-                    results["deleted"]["flow_attempt_provenance"] = flow_runtime_counts[
-                        "debug_step_attempts"
-                    ]
-                    results["deleted"]["flow_artifact_rows"] = flow_runtime_counts[
-                        "generated_artifact_rows"
-                    ]
-                    results["deleted"]["flow_artifact_files"] = flow_runtime_counts[
-                        "generated_artifact_files"
-                    ]
-                    results["deleted"]["flow_artifact_reconciliations"] = (
-                        flow_runtime_counts["reconciled_artifact_references"]
-                    )
-            except Exception as e:
-                error_msg = f"Failed to clean old flow runtime data: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
 
-            try:
-                async with session.begin():
-                    outbox_count = await retention_service.delete_old_delivered_flow_audit_outbox_rows()
-                    results["deleted"]["flow_audit_outbox_delivered_rows"] = (
-                        outbox_count
+            app_runs_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete old app runs",
+                action=retention_service.delete_old_app_runs,
+            )
+            if app_runs_count is not None:
+                results["deleted"]["app_runs"] = app_runs_count
+                if app_runs_count > 0:
+                    logger.info(
+                        f"Deleted {app_runs_count} old app runs based on retention policies"
                     )
-            except Exception as e:
-                error_msg = f"Failed to delete delivered Flow audit outbox rows: {e}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
+
+            sessions_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete old sessions",
+                action=retention_service.delete_old_sessions,
+            )
+            if sessions_count is not None:
+                results["deleted"]["sessions"] = sessions_count
+                if sessions_count > 0:
+                    logger.info(f"Deleted {sessions_count} orphaned sessions")
+
+            flow_runtime_now = start_time
+            flow_purge_drained = True
+            while True:
+                purge_counts = await _run_cleanup_step(
+                    session=session,
+                    results=results,
+                    error_prefix="Failed to purge old Flow run history batch",
+                    action=lambda: retention_service.purge_old_flow_run_history_batch(
+                        now=flow_runtime_now,
+                        limit=RETENTION_BATCH_SIZE,
+                    ),
+                )
+                if purge_counts is None:
+                    flow_purge_drained = False
+                    break
+
+                _record_flow_run_history_purge_counts(
+                    results["deleted"],
+                    purge_counts,
+                )
+                if purge_counts.flow_runs_purged == 0:
+                    break
+
+            if flow_purge_drained:
+                blocked_counts = await _run_cleanup_step(
+                    session=session,
+                    results=results,
+                    error_prefix="Failed to count blocked Flow run-history purge candidates",
+                    action=lambda: retention_service.count_blocked_flow_run_history_purge_candidates(
+                        now=flow_runtime_now,
+                    ),
+                )
+                if blocked_counts is not None:
+                    _record_flow_run_history_blocked_counts(
+                        results["deleted"],
+                        blocked_counts,
+                    )
+
+            redaction_counts = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to redact old Flow debug evidence",
+                action=lambda: retention_service.redact_old_flow_debug_evidence(
+                    now=flow_runtime_now,
+                ),
+            )
+            if redaction_counts is not None:
+                _record_flow_debug_redaction_counts(
+                    results["deleted"],
+                    redaction_counts,
+                )
+
+            outbox_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete delivered Flow audit outbox rows",
+                action=retention_service.delete_old_delivered_flow_audit_outbox_rows,
+            )
+            if outbox_count is not None:
+                results["deleted"]["flow_audit_outbox_delivered_rows"] = outbox_count
         finally:
             # Later worker calls must not inherit this job's scoped session.
             container.session.reset_override()
@@ -170,9 +250,11 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["sessions"]
         + results["deleted"]["flow_debug_rows"]
         + results["deleted"]["flow_attempt_provenance"]
-        + results["deleted"]["flow_artifact_rows"]
-        + results["deleted"]["flow_artifact_files"]
-        + results["deleted"]["flow_artifact_reconciliations"]
+        + results["deleted"]["flow_runs_purged"]
+        + results["deleted"]["flow_generated_files_deleted"]
+        + results["deleted"]["flow_webhook_deliveries_deleted"]
+        + results["deleted"]["flow_audit_outbox_rows_deleted"]
+        + results["deleted"]["flow_review_checkpoints_deleted"]
         + results["deleted"]["flow_audit_outbox_delivered_rows"]
     )
 
@@ -185,10 +267,19 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"sessions: {results['deleted']['sessions']}, "
             f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
             f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
-            f"flow_artifact_rows: {results['deleted']['flow_artifact_rows']}, "
-            f"flow_artifact_files: {results['deleted']['flow_artifact_files']}, "
-            f"flow_artifact_reconciliations: "
-            f"{results['deleted']['flow_artifact_reconciliations']}, "
+            f"flow_runs_purged: {results['deleted']['flow_runs_purged']}, "
+            f"flow_generated_files_deleted: "
+            f"{results['deleted']['flow_generated_files_deleted']}, "
+            f"flow_webhook_deliveries_deleted: "
+            f"{results['deleted']['flow_webhook_deliveries_deleted']}, "
+            f"flow_audit_outbox_rows_deleted: "
+            f"{results['deleted']['flow_audit_outbox_rows_deleted']}, "
+            f"flow_review_checkpoints_deleted: "
+            f"{results['deleted']['flow_review_checkpoints_deleted']}, "
+            f"flow_runs_skipped_undelivered_audit: "
+            f"{results['deleted']['flow_runs_skipped_undelivered_audit']}, "
+            f"flow_runs_skipped_active_rerun: "
+            f"{results['deleted']['flow_runs_skipped_active_rerun']}, "
             f"flow_audit_outbox_delivered_rows: "
             f"{results['deleted']['flow_audit_outbox_delivered_rows']})"
         )

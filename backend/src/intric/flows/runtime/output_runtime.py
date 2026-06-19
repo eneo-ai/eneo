@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol
 from uuid import UUID
 
 from intric.files.file_models import FileCreate, FileType
-from intric.flows.domain.flow import JsonObject
-from intric.flows.output_processing import JsonStructuredValue
+from intric.flows.domain.flow import FlowPersistedJsonObject
+from intric.flows.output_processing import StructuredOutputValue
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
@@ -37,7 +37,7 @@ class RuntimeOutputStep(Protocol):
     def output_type(self) -> str: ...
 
     @property
-    def output_contract(self) -> JsonObject | None: ...
+    def output_contract(self) -> FlowPersistedJsonObject | None: ...
 
 
 class RuntimeOutputRun(Protocol):
@@ -51,7 +51,7 @@ class RuntimeOutputFileRepository(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class TypedOutputProcessingResult:
-    structured_output: JsonStructuredValue | None
+    structured_output: StructuredOutputValue | None
     artifacts: list[dict[str, str | int]] | None
     diagnostics: list[StepDiagnostic]
 

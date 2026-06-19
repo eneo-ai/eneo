@@ -6,6 +6,9 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.assistant_execution_snapshot import stable_hash
+from intric.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
 from intric.flows.flow_metadata import FlowFormFieldType, serialize_flow_metadata
 from intric.flows.flow_review_policy import (
     FLOW_REVIEW_POLICY_INVALID,
@@ -78,8 +81,8 @@ def test_parser_round_trips_definition_and_runtime_steps() -> None:
         ],
     )
 
-    parsed = parse_published_definition(definition)
-    runtime_steps = parse_published_runtime_steps(definition)
+    parsed = parse_published_definition(definition, flow_version=7)
+    runtime_steps = parse_published_runtime_steps(definition, flow_version=7)
 
     assert parsed.schema_version == FLOW_DEFINITION_SCHEMA_VERSION
     assert parsed.flow_id == flow_id
@@ -162,10 +165,44 @@ def test_published_definition_validates_step_identity_at_construction(
     )
 
     with pytest.raises(BadRequestException) as exc_info:
-        parse_published_definition(definition)
+        parse_published_definition(definition, flow_version=7)
 
     assert exc_info.value.code == error_code
     assert exc_info.value.context == error_context
+
+
+def test_parser_rejects_definition_without_executable_steps() -> None:
+    flow_id = uuid4()
+    definition = build_published_definition_json(
+        flow_id=flow_id,
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[],
+    )
+
+    with pytest.raises(FlowPublishedDefinitionWithoutExecutableStepsError) as exc_info:
+        parse_published_definition(definition, flow_version=7)
+
+    assert exc_info.value.flow_id == flow_id
+    assert exc_info.value.flow_version == 7
+
+
+def test_runtime_steps_rejects_definition_without_executable_steps() -> None:
+    flow_id = uuid4()
+    definition = build_published_definition_json(
+        flow_id=flow_id,
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[],
+    )
+
+    with pytest.raises(FlowPublishedDefinitionWithoutExecutableStepsError) as exc_info:
+        parse_published_runtime_steps(definition, flow_version=9)
+
+    assert exc_info.value.flow_id == flow_id
+    assert exc_info.value.flow_version == 9
 
 
 def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
@@ -191,7 +228,7 @@ def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:
         steps=[_step(order=1)],
     )
 
-    parsed = parse_published_definition(definition)
+    parsed = parse_published_definition(definition, flow_version=7)
     metadata = parsed.metadata()
 
     assert "metadata_json" not in {field.name for field in fields(parsed)}
@@ -226,7 +263,7 @@ def test_metadata_maps_corrupt_published_form_schema_to_named_error(
     )
 
     with pytest.raises(BadRequestException) as exc_info:
-        parse_published_definition(definition).metadata()
+        parse_published_definition(definition, flow_version=7).metadata()
 
     assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
     assert exc_info.value.context == expected_context
@@ -241,7 +278,7 @@ def test_parser_round_trips_step_review_policy() -> None:
         steps=[{**_step(order=1), "review_policy": {"mode": "edit"}}],
     )
 
-    runtime_steps = parse_published_runtime_steps(definition)
+    runtime_steps = parse_published_runtime_steps(definition, flow_version=7)
 
     assert runtime_steps[0].review_policy is not None
     assert runtime_steps[0].review_policy.mode == FlowStepReviewMode.EDIT
@@ -261,7 +298,7 @@ def test_parser_accepts_published_review_policy_with_explicit_null_expiry() -> N
         ],
     )
 
-    runtime_steps = parse_published_runtime_steps(definition)
+    runtime_steps = parse_published_runtime_steps(definition, flow_version=7)
 
     assert runtime_steps[0].review_policy is not None
     assert runtime_steps[0].review_policy.expires_after_seconds is None
@@ -283,7 +320,7 @@ def test_parser_reports_invalid_review_policy_with_step_context() -> None:
     )
 
     with pytest.raises(BadRequestException) as exc_info:
-        parse_published_runtime_steps(definition)
+        parse_published_runtime_steps(definition, flow_version=7)
 
     assert exc_info.value.code == FLOW_REVIEW_POLICY_INVALID
     assert str(exc_info.value).startswith("Step 1 (Draft review):")
@@ -309,7 +346,7 @@ def test_parser_reports_other_step_errors_with_step_context() -> None:
     )
 
     with pytest.raises(BadRequestException) as exc_info:
-        parse_published_runtime_steps(definition)
+        parse_published_runtime_steps(definition, flow_version=7)
 
     assert (
         str(exc_info.value)
@@ -343,7 +380,7 @@ def test_published_definition_detects_required_runtime_input(
         steps=[{**_step(order=1), "input_config": input_config}],
     )
 
-    published_definition = parse_published_definition(definition)
+    published_definition = parse_published_definition(definition, flow_version=7)
 
     assert published_definition.has_required_runtime_input() is expected
 
@@ -356,7 +393,7 @@ def test_published_definition_rejects_non_object_input_config() -> None:
         metadata_json=None,
         steps=[{**_step(order=1), "input_config": "not-an-object"}],
     )
-    published_definition = parse_published_definition(definition)
+    published_definition = parse_published_definition(definition, flow_version=7)
 
     with pytest.raises(
         BadRequestException, match="Step input_config must be an object"
@@ -384,7 +421,7 @@ def test_published_definition_detects_required_runtime_input_after_optional_step
             },
         ],
     )
-    published_definition = parse_published_definition(definition)
+    published_definition = parse_published_definition(definition, flow_version=7)
 
     assert published_definition.has_required_runtime_input()
 
@@ -406,7 +443,7 @@ def test_parser_rejects_review_policy_for_outbound_delivery() -> None:
     )
 
     with pytest.raises(BadRequestException) as exc_info:
-        parse_published_runtime_steps(definition)
+        parse_published_runtime_steps(definition, flow_version=7)
 
     assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
 
@@ -448,7 +485,7 @@ def test_parser_rejects_corrupt_definition_with_named_error(
     definition, error_code: str
 ) -> None:
     with pytest.raises(BadRequestException) as exc_info:
-        parse_published_runtime_steps(definition)
+        parse_published_runtime_steps(definition, flow_version=7)
 
     assert exc_info.value.code == error_code
 

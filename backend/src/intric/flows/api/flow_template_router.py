@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Annotated
 from uuid import UUID
 
@@ -9,12 +8,11 @@ from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile, 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.signed_urls import generate_signed_token
 from intric.files.file_models import SignedURLRequest, SignedURLResponse
-from intric.flows.api import flow_router_common as common
+from intric.files.signed_urls import build_signed_download_response
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_definition_access import require_flow_edit_access
-from intric.flows.api.flow_models import (
+from intric.flows.api.flow_template_asset_models import (
     FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
 )
@@ -183,12 +181,7 @@ async def upload_flow_template_file(
     ),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await require_flow_edit_access(
-        request,
-        container,
-        flow_id=id,
-        require_flow_lookup_without_scope=True,
-    )
+    await require_flow_edit_access(request, container, flow_id=id)
 
     asset = await container.flow_template_asset_service().upload_asset(
         flow_id=id,
@@ -200,9 +193,7 @@ async def upload_flow_template_file(
         actor_id=user.id,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
-        entity_id=common.required_uuid(
-            asset.file_id, field="flow_template_asset.file_id"
-        ),
+        entity_id=asset.file_id,
         description=f"Uploaded DOCX template '{asset.name}' for flow authoring",
         metadata=AuditMetadata.standard(
             actor=user,
@@ -264,22 +255,12 @@ async def generate_flow_template_signed_url(
         flow_id=id,
         asset_id=file_id,
     )
-    expires_at = int(time.time()) + signed_url_req.expires_in
-    token = generate_signed_token(
+    return build_signed_download_response(
+        base_url=str(request.base_url),
         file_id=asset.file_id,
-        expires_at=expires_at,
-        content_disposition=signed_url_req.content_disposition,
         tenant_id=file.tenant_id,
+        signed_url_request=signed_url_req,
     )
-    base_url = str(request.base_url).rstrip("/")
-    url = f"{base_url}/api/v1/files/{asset.file_id}/download/?token={token}"
-    return SignedURLResponse(url=url, expires_at=expires_at)
 
 
-__all__ = [
-    "generate_flow_template_signed_url",
-    "inspect_flow_template",
-    "list_flow_template_files",
-    "router",
-    "upload_flow_template_file",
-]
+__all__ = ["router"]

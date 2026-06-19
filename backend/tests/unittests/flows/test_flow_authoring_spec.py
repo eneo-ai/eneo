@@ -5,13 +5,13 @@ import inspect
 import pytest
 from pydantic import Field, ValidationError
 
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     AssistantSpecLocalRefNotPortableError,
     FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
-    JsonObject,
     OutputMode,
     StepSpec,
 )
@@ -109,9 +109,7 @@ def test_flow_draft_spec_preserves_document_body_writer_refs() -> None:
     )
 
     assert spec.document_body_writer_step_refs == ("step_b",)
-    assert spec.model_dump(mode="json")["document_body_writer_step_refs"] == [
-        "step_b"
-    ]
+    assert spec.model_dump(mode="json")["document_body_writer_step_refs"] == ["step_b"]
 
 
 def test_document_body_writer_refs_do_not_change_spec_hash() -> None:
@@ -182,7 +180,7 @@ def test_step_spec_keeps_completion_model_ref_when_runtime_uses_completion_model
 
 
 def _step(
-    input_bindings: JsonObject | None = None,
+    input_bindings: FlowPersistedJsonObject | None = None,
     *,
     plan_step_ref: str = "collect_input",
     output_mode: OutputMode = OutputMode.PASS_THROUGH,

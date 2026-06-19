@@ -1,5 +1,6 @@
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
+import type { IntricFetchFunction, IntricStreamFunction } from "@intric/intric-js";
 import type {
   PersistedStructuredQuestionAnswerMetadata,
   StructuredQuestion,
@@ -33,20 +34,24 @@ import type {
   TargetKind
 } from "./protocol";
 
-interface AIBuilderStreamHandlers {
-  onMessage: (event: AIBuilderStreamEvent) => void;
-  onClose: () => void;
+export interface AIBuilderClientTransport {
+  fetch: IntricFetchFunction;
+  stream: IntricStreamFunction;
 }
 
-export interface AIBuilderClientTransport {
-  fetch: (path: string, init: unknown) => Promise<unknown>;
-  stream: (
-    path: string,
-    init: unknown,
-    handlers: AIBuilderStreamHandlers,
-    abortController?: AbortController
-  ) => Promise<void>;
-}
+const FLOW_AI_BUILDER_ROUTES = {
+  sessions: "/api/v1/flows/ai-builder/sessions",
+  session: "/api/v1/flows/ai-builder/sessions/{session_id}",
+  sessionAttachments: "/api/v1/flows/ai-builder/sessions/{session_id}/attachments/{file_id}",
+  sessionCancel: "/api/v1/flows/ai-builder/sessions/{session_id}/cancel",
+  sessionMessages: "/api/v1/flows/ai-builder/sessions/{session_id}/messages",
+  sessionModels: "/api/v1/flows/ai-builder/sessions/{session_id}/models",
+  plan: "/api/v1/flows/ai-builder/plans/{plan_id}",
+  planApply: "/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+  planApprove: "/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+  planRevise: "/api/v1/flows/ai-builder/plans/{plan_id}/revise",
+  flowUnpublish: "/api/v1/flows/{id}/unpublish/"
+} as const;
 
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
@@ -217,9 +222,8 @@ export class FlowAIBuilderDriver {
     this.#notify();
 
     try {
-      const result = (await this.#transport.fetch("/api/v1/flows/ai-builder/sessions", {
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
         method: "post",
-        params: {},
         requestBody: {
           "application/json": {
             target_kind: targetKind,
@@ -253,9 +257,8 @@ export class FlowAIBuilderDriver {
 
   async loadDraftSessions(): Promise<void> {
     try {
-      const result = (await this.#transport.fetch("/api/v1/flows/ai-builder/sessions", {
-        method: "get",
-        params: {}
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
+        method: "get"
       })) as { sessions: AIBuilderDraftSession[] };
       this.#state.draftSessions = result.sessions;
       this.#notify();
@@ -286,9 +289,9 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#notify();
 
-    const result = (await this.#transport.fetch(`/api/v1/flows/ai-builder/sessions/${sessionId}`, {
+    const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
       method: "get",
-      params: {}
+      params: { path: { session_id: sessionId } }
     })) as AIBuilderSession;
     this.#state.session = result;
     this.#hydrateMessagesFromConversation(result.conversation ?? []);
@@ -299,9 +302,9 @@ export class FlowAIBuilderDriver {
   }
 
   async discardSession(sessionId: string): Promise<void> {
-    await this.#transport.fetch(`/api/v1/flows/ai-builder/sessions/${sessionId}/cancel`, {
+    await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionCancel, {
       method: "post",
-      params: {}
+      params: { path: { session_id: sessionId } }
     });
 
     this.#state.draftSessions = this.#state.draftSessions.filter(
@@ -324,10 +327,10 @@ export class FlowAIBuilderDriver {
 
     try {
       const result = (await this.#transport.fetch(
-        `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}`,
+        FLOW_AI_BUILDER_ROUTES.session,
         {
           method: "get",
-          params: {}
+          params: { path: { session_id: this.#state.session.session_id } }
         }
       )) as AIBuilderSession;
       this.#state.session = result;
@@ -412,9 +415,9 @@ export class FlowAIBuilderDriver {
       requestBody.ui_language = getLocale();
 
       await this.#transport.stream(
-        `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}/messages`,
+        FLOW_AI_BUILDER_ROUTES.sessionMessages,
         {
-          params: {},
+          params: { path: { session_id: this.#state.session.session_id } },
           requestBody: {
             "application/json": requestBody
           }
@@ -519,10 +522,10 @@ export class FlowAIBuilderDriver {
 
     try {
       await this.#transport.fetch(
-        `/api/v1/flows/ai-builder/plans/${this.#state.currentPlan.plan_id}/approve`,
+        FLOW_AI_BUILDER_ROUTES.planApprove,
         {
           method: "post",
-          params: {}
+          params: { path: { plan_id: this.#state.currentPlan.plan_id } }
         }
       );
       this.#state.currentPlan = { ...this.#state.currentPlan, status: "approved" };
@@ -551,10 +554,10 @@ export class FlowAIBuilderDriver {
 
     try {
       const result = (await this.#transport.fetch(
-        `/api/v1/flows/ai-builder/plans/${this.#state.currentPlan.plan_id}/apply`,
+        FLOW_AI_BUILDER_ROUTES.planApply,
         {
           method: "post",
-          params: {},
+          params: { path: { plan_id: this.#state.currentPlan.plan_id } },
           requestBody: {
             "application/json": {
               expected_revision: expectedRevision ?? null
@@ -599,9 +602,9 @@ export class FlowAIBuilderDriver {
     this.#notify();
 
     try {
-      await this.#transport.fetch(`/api/v1/flows/${flowId}/unpublish/`, {
+      await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowUnpublish, {
         method: "post",
-        params: {}
+        params: { path: { id: flowId } }
       });
       this.#state.applyError = null;
       this.#state.isConflict = false;
@@ -639,10 +642,10 @@ export class FlowAIBuilderDriver {
     if (!this.#state.session) return;
 
     await this.#transport.fetch(
-      `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}/attachments/${fileId}`,
+      FLOW_AI_BUILDER_ROUTES.sessionAttachments,
       {
         method: "delete",
-        params: {}
+        params: { path: { session_id: this.#state.session.session_id, file_id: fileId } }
       }
     );
 
@@ -678,11 +681,13 @@ export class FlowAIBuilderDriver {
 
     try {
       const result = (await this.#transport.fetch(
-        `/api/v1/flows/ai-builder/plans/${this.#state.currentPlan.plan_id}/revise`,
+        FLOW_AI_BUILDER_ROUTES.planRevise,
         {
           method: "post",
-          body: JSON.stringify({ type }),
-          headers: { "Content-Type": "application/json" }
+          params: { path: { plan_id: this.#state.currentPlan.plan_id } },
+          requestBody: {
+            "application/json": { type }
+          }
         }
       )) as IncomingProposedPlan;
 
@@ -824,10 +829,10 @@ export class FlowAIBuilderDriver {
 
     try {
       const result = (await this.#transport.fetch(
-        `/api/v1/flows/ai-builder/sessions/${this.#state.session.session_id}/models`,
+        FLOW_AI_BUILDER_ROUTES.sessionModels,
         {
           method: "get",
-          params: {}
+          params: { path: { session_id: this.#state.session.session_id } }
         }
       )) as { models: AIBuilderModel[]; default_model_id: string | null };
       this.#state.availableModels = result.models;
@@ -1072,13 +1077,10 @@ export class FlowAIBuilderDriver {
     }
 
     try {
-      const result = (await this.#transport.fetch(
-        `/api/v1/flows/ai-builder/plans/${latestPlanId}`,
-        {
-          method: "get",
-          params: {}
-        }
-      )) as ProposedPlan;
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.plan, {
+        method: "get",
+        params: { path: { plan_id: latestPlanId } }
+      })) as ProposedPlan;
       this.#state.currentPlan = this.#normalizePlan(result);
       this.#notify();
     } catch {

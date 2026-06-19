@@ -15,7 +15,7 @@ from intric.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
 )
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
@@ -174,6 +174,7 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
         state=state,
         version_metadata=None,
         deps=deps,
+        requested_file_ids=(),
     )
 
     assert prepared.effective_prompt.startswith('Review {"title":"A"}')
@@ -235,6 +236,7 @@ async def test_prepare_step_execution_keeps_json_binding_underlag_without_contra
         state=state,
         version_metadata=None,
         deps=deps,
+        requested_file_ids=(),
     )
 
     assert prepared.step_input.text == (
@@ -292,6 +294,7 @@ async def test_prepare_step_execution_validates_json_binding_when_binding_is_jso
         state=state,
         version_metadata=None,
         deps=deps,
+        requested_file_ids=(),
     )
 
     assert prepared.contract_validation == {
@@ -433,7 +436,10 @@ def test_detect_native_json_output_support_logs_lookup_failures(
         )
     )
 
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(
+        logging.WARNING,
+        logger="intric.flows.runtime.step_execution_runtime",
+    )
     supported = detect_native_json_output_support(assistant)
 
     assert supported is None
@@ -1028,7 +1034,10 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         count_tokens=lambda text: len(text),
     )
 
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(
+        logging.WARNING,
+        logger="intric.flows.runtime.step_execution_runtime",
+    )
     output = await complete_step_execution(
         step=step,
         run=run,
@@ -1824,7 +1833,6 @@ def test_attach_typed_failure_context_backfills_payload_and_prompt():
         "text": "",
         "source_text": "",
         "used_question_binding": False,
-        "legacy_prompt_binding_used": False,
     }
     assert updated.effective_prompt == "Prompt"
 
@@ -1851,7 +1859,6 @@ def test_build_output_payload_excludes_artifact_display_keys():
             source_text="hello",
             input_source="flow_input",
             used_question_binding=False,
-            legacy_prompt_binding_used=False,
             full_text="done",
             persisted_text="done",
             generated_file_ids=[],
@@ -1879,7 +1886,6 @@ def test_build_output_payload_preserves_raw_text_for_pruned_structured_output():
             source_text="hello",
             input_source="flow_input",
             used_question_binding=False,
-            legacy_prompt_binding_used=False,
             full_text='{"beslutslista":[{"rubrik_kommentar":"extra"}]}',
             persisted_text='{"beslutslista":[{"rubrik_kommentar":"extra"}]}',
             generated_file_ids=[],
@@ -1925,7 +1931,6 @@ def test_build_output_payload_merges_output_payload_extensions():
             source_text="hello",
             input_source="flow_input",
             used_question_binding=False,
-            legacy_prompt_binding_used=False,
             full_text="raw docx text",
             persisted_text="## summary\n\nclean text",
             generated_file_ids=[],

@@ -18,18 +18,27 @@ from intric.database.tables.flow_tables import (
     FlowStepResults,
 )
 from intric.database.tables.service_principals_table import ServicePrincipals
-from intric.flows import (
-    Flow,
-    FlowFactory,
-    FlowRepository,
-    FlowStep,
-    FlowVersionRepository,
-)
+from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from intric.flows.domain.flow import (
+    Flow,
+    FlowRunStatus,
+    FlowStep,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+)
 from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow import FlowRunStatus, FlowStepAttemptStatus, FlowStepResultStatus
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import FlowRunError
+from intric.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    FlowRunInputEnvelopePatch,
+)
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.principal import FlowPrincipal
 
 
@@ -209,7 +218,6 @@ async def test_create_run_preseeds_pending_step_results(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-run-repo",
             definition_json={
                 "steps": [
                     {
@@ -317,7 +325,6 @@ async def test_list_runs_filters_by_flow_id(
         await version_repo.create(
             flow_id=first_flow.id,
             version=1,
-            definition_checksum="checksum-list-1",
             definition_json={
                 "steps": [
                     {
@@ -332,7 +339,6 @@ async def test_list_runs_filters_by_flow_id(
         await version_repo.create(
             flow_id=second_flow.id,
             version=1,
-            definition_checksum="checksum-list-2",
             definition_json={
                 "steps": [
                     {
@@ -419,7 +425,6 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-token-usage",
             definition_json={
                 "steps": [
                     {
@@ -562,7 +567,6 @@ async def test_list_token_usage_for_runs_returns_sparse_map_when_usage_is_empty(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-empty-token-usage",
             definition_json={
                 "steps": [
                     {
@@ -650,7 +654,6 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-idempotent-run",
             definition_json={"steps": []},
             tenant_id=admin_user.tenant_id,
         )
@@ -721,7 +724,6 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-idempotent-principal-isolation",
             definition_json={"steps": []},
             tenant_id=admin_user.tenant_id,
         )
@@ -824,7 +826,6 @@ async def test_service_principal_idempotency_replays_after_api_key_rotation(
         await FlowVersionRepository(session=session, factory=FlowFactory()).create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-rotated-service-idempotency",
             definition_json={"steps": []},
             tenant_id=admin_user.tenant_id,
         )
@@ -911,7 +912,6 @@ async def test_idempotency_key_isolated_between_service_principals(
         await FlowVersionRepository(session=session, factory=FlowFactory()).create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-service-principal-isolation",
             definition_json={"steps": []},
             tenant_id=admin_user.tenant_id,
         )
@@ -1024,7 +1024,6 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-active-count",
             definition_json={
                 "steps": [
                     {
@@ -1095,14 +1094,26 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         active_count = await run_repo.count_active_runs(tenant_id=admin_user.tenant_id)
         assert active_count == 2
 
-        await FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo).terminalize_run(
+        await FlowRunTerminalizer(
+            run_repo,
+            FlowRunRerunRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+            ),
+            run_repo.audit_outbox_repo,
+            FlowRunReviewCheckpointRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+                audit_outbox_repo=run_repo.audit_outbox_repo,
+            ),
+        ).terminalize_run(
             run_id=queued_run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.USER_CANCEL,
             error=FlowRunError.from_source(
                 FlowRunLifecycleSource.USER_CANCEL,
-                code="user_cancelled",
+                code=FlowApiErrorCode.RUN_USER_CANCELLED,
                 message="Run cancelled by user.",
             ),
         )
@@ -1148,7 +1159,6 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-tenant-active-count",
             definition_json={
                 "steps": [
                     {
@@ -1228,7 +1238,6 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-terminal",
             definition_json={
                 "steps": [
                     {
@@ -1256,10 +1265,22 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
                 }
             ],
         )
-        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        terminalizer = FlowRunTerminalizer(
+            run_repo,
+            FlowRunRerunRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+            ),
+            run_repo.audit_outbox_repo,
+            FlowRunReviewCheckpointRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+                audit_outbox_repo=run_repo.audit_outbox_repo,
+            ),
+        )
         expected_error = FlowRunError.from_source(
             FlowRunLifecycleSource.USER_CANCEL,
-            code="user_cancelled",
+            code=FlowApiErrorCode.RUN_USER_CANCELLED,
             message="Run cancelled by user.",
         )
         cancelled = await terminalizer.terminalize_run(
@@ -1286,6 +1307,108 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
             tenant_id=admin_user.tenant_id,
         )
         assert refetched.error == expected_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_failed_terminalization_stamps_active_step_result_error_code(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Flows failed-step-error-code space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Flow failed-step-error-code assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(flow.steps[0].id),
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_order": 1,
+                    }
+                ]
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"case": "failed-step-error-code"},
+            preseed_steps=[
+                {
+                    "step_id": flow.steps[0].id,
+                    "assistant_id": flow.steps[0].assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        await run_repo.claim_step_result(
+            run_id=run.id,
+            step_id=flow.steps[0].id,
+            tenant_id=admin_user.tenant_id,
+        )
+
+        await FlowRunTerminalizer(
+            run_repo,
+            FlowRunRerunRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+            ),
+            run_repo.audit_outbox_repo,
+            FlowRunReviewCheckpointRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+                audit_outbox_repo=run_repo.audit_outbox_repo,
+            ),
+        ).terminalize_run(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                message="Flow step 1 execution failed.",
+            ),
+        )
+
+        row = await session.scalar(
+            sa.select(FlowStepResults).where(FlowStepResults.flow_run_id == run.id)
+        )
+        assert row is not None
+        assert row.status == FlowStepResultStatus.FAILED.value
+        assert row.error_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
+        assert row.error_message == "Flow step 1 execution failed."
 
 
 @pytest.mark.asyncio
@@ -1322,7 +1445,6 @@ async def test_claim_step_result_is_single_winner(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-claim",
             definition_json={
                 "steps": [
                     {
@@ -1349,6 +1471,17 @@ async def test_claim_step_result_is_single_winner(
                 }
             ],
         )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run.id)
+            .where(FlowStepResults.step_id == flow.steps[0].id)
+            .values(
+                status=FlowStepResultStatus.FAILED.value,
+                error_code=FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+                error_message="stale failure",
+            )
+        )
+        await session.flush()
 
         first_claim = await run_repo.claim_step_result(
             run_id=run.id,
@@ -1362,6 +1495,8 @@ async def test_claim_step_result_is_single_winner(
         )
 
         assert first_claim is not None
+        assert first_claim.error_code is None
+        assert first_claim.error_message is None
         assert second_claim is None
 
 
@@ -1398,7 +1533,6 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-claim-concurrency",
             definition_json={
                 "steps": [
                     {
@@ -1488,7 +1622,6 @@ async def test_mark_running_if_claimable_is_single_winner(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-run-claim",
             definition_json={
                 "steps": [
                     {
@@ -1564,7 +1697,6 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-run-claim-concurrency",
             definition_json={
                 "steps": [
                     {
@@ -1614,7 +1746,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_update_input_payload_merges_audio_patch_without_clobbering_claimed_run_state(
+async def test_update_input_payload_applies_transcription_patch_without_clobbering_claimed_run_state(
     db_container,
     completion_model_factory,
     space_factory,
@@ -1646,7 +1778,6 @@ async def test_update_input_payload_merges_audio_patch_without_clobbering_claime
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-payload-merge",
             definition_json={
                 "steps": [
                     {
@@ -1681,24 +1812,30 @@ async def test_update_input_payload_merges_audio_patch_without_clobbering_claime
         )
         assert claimed is True
 
-        await run_repo.update_input_payload(
+        updated = await run_repo.update_input_payload(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
-            input_payload_json={"transkribering": "transcribed text"},
+            input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                transcript="draft transcript",
+            ),
         )
-        await run_repo.update_input_payload(
+        assert updated[FLOW_INPUT_TRANSCRIPTION_KEY] == "draft transcript"
+
+        updated = await run_repo.update_input_payload(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
-            input_payload_json={"transcription_meta": {"files_count": 1}},
+            input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                transcript="transcribed text",
+            ),
         )
+        assert updated[FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
 
         refreshed = await run_repo.get(run_id=run.id, tenant_id=admin_user.tenant_id)
         assert refreshed.status.value == FlowRunStatus.RUNNING.value
         assert refreshed.input_payload_json == {
             "file_ids": ["f-1"],
             "case": "audio-case",
-            "transkribering": "transcribed text",
-            "transcription_meta": {"files_count": 1},
+            FLOW_INPUT_TRANSCRIPTION_KEY: "transcribed text",
         }
 
 
@@ -1736,7 +1873,6 @@ async def test_list_runs_supports_limit_and_offset(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-run-pagination",
             definition_json={
                 "steps": [
                     {
@@ -1819,7 +1955,6 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-wrong-tenant-claim",
             definition_json={
                 "steps": [
                     {
@@ -1891,7 +2026,6 @@ async def test_create_or_get_attempt_started_is_idempotent(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-attempt-idempotency",
             definition_json={
                 "steps": [
                     {
@@ -1985,7 +2119,6 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-concurrent-attempt",
             definition_json={
                 "steps": [
                     {
@@ -2084,7 +2217,6 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-mark-cancelled",
             definition_json={
                 "steps": [
                     {
@@ -2135,14 +2267,26 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
         )
         await session.flush()
 
-        await FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo).terminalize_run(
+        await FlowRunTerminalizer(
+            run_repo,
+            FlowRunRerunRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+            ),
+            run_repo.audit_outbox_repo,
+            FlowRunReviewCheckpointRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+                audit_outbox_repo=run_repo.audit_outbox_repo,
+            ),
+        ).terminalize_run(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
             target_status=FlowRunStatus.CANCELLED,
             source=FlowRunLifecycleSource.USER_CANCEL,
             error=FlowRunError.from_source(
                 FlowRunLifecycleSource.USER_CANCEL,
-                code="user_cancelled",
+                code=FlowApiErrorCode.RUN_USER_CANCELLED,
                 message="cancelled in test",
             ),
         )
@@ -2159,7 +2303,9 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
             .all()
         )
         assert rows[0].status == FlowStepResultStatus.CANCELLED.value
+        assert rows[0].error_code == FlowApiErrorCode.RUN_USER_CANCELLED.value
         assert rows[1].status == FlowStepResultStatus.COMPLETED.value
+        assert rows[1].error_code is None
 
 
 @pytest.mark.asyncio
@@ -2196,7 +2342,6 @@ async def test_finish_attempt_is_idempotent(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-finish-attempt",
             definition_json={
                 "steps": [
                     {
@@ -2299,7 +2444,6 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
         await version_repo.create(
             flow_id=first_flow.id,
             version=1,
-            definition_checksum="checksum-stale-1",
             definition_json={
                 "steps": [
                     {
@@ -2314,7 +2458,6 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
         await version_repo.create(
             flow_id=second_flow.id,
             version=1,
-            definition_checksum="checksum-stale-2",
             definition_json={
                 "steps": [
                     {

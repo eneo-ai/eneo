@@ -1,7 +1,7 @@
 """constrain builder latest_plan_id to the same session
 
 Revision ID: 20260426_latest_plan_fk
-Revises: 20260424_builder_attachment_obs
+Revises: 20260423_builder_planning_state
 Create Date: 2026-04-26 00:00:00.000000
 
 `builder_sessions.latest_plan_id` points at the plan shown as the latest
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260426_latest_plan_fk"
-down_revision = "20260424_builder_attachment_obs"
+down_revision = "20260423_builder_planning_state"
 branch_labels = None
 depends_on = None
 

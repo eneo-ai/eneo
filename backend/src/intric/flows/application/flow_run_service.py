@@ -16,19 +16,24 @@ from intric.flows.application.flow_run_access_policy import (
 )
 from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
-    flow_stale_running_reconcile_after_seconds,
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.domain.flow import (
     Flow,
+    FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
     FlowRunTokenUsage,
     FlowStepResult,
-    JsonObject,
+)
+from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from intric.flows.domain.run_step_input_exceptions import (
+    FlowRunRuntimeUploadBindingRaceError,
 )
 from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from intric.flows.execution_backend import FlowExecutionBackend
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_api_exceptions import FlowBadRequestException
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
@@ -38,24 +43,29 @@ from intric.flows.flow_run_dispatch_request import (
     build_flow_run_dispatch_request,
 )
 from intric.flows.flow_run_error import FlowRunError
+from intric.flows.flow_run_input_envelope import build_initial_run_input_envelope
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_run_payload_validation import (
     ensure_inline_payload_size_allowed,
     reject_reserved_input_payload_keys,
 )
 from intric.flows.flow_run_step_inputs import (
+    FlowRunStepInputFileProjection,
     FlowRunStepInputs,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
-    serialize_step_inputs_payload,
+    runtime_file_not_bound_to_flow_error,
     validate_submitted_step_inputs,
 )
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
+from intric.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
     PreseedStep,
-    StepInputFileProjection,
+)
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
 )
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
@@ -64,7 +74,7 @@ from intric.flows.published_definition import (
     parse_published_definition,
 )
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
 from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
@@ -72,10 +82,42 @@ from intric.users.user import UserInDB
 logger = get_logger(__name__)
 
 
-@dataclass(frozen=True)
-class FlowRunStepResultsWithFiles:
-    step_results: Sequence[FlowStepResult]
+@dataclass(frozen=True, slots=True)
+class FlowRunStepResultWithFiles:
+    step_result: FlowStepResult
+    runtime_input_file_ids: Sequence[UUID]
     result_files: Sequence[FlowRunStepResultFile]
+
+
+@dataclass(frozen=True)
+class CreateRunResult:
+    run: FlowRun
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunRedispatchResult:
+    run: FlowRun
+    redispatched_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunVersionedView:
+    published_definition: PublishedFlowDefinition
+    step_results: Sequence[FlowStepResult]
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunWithResultFilesAndTokenUsage:
+    run: FlowRun
+    result_files: Sequence[FlowRunStepResultFile]
+    token_usage: FlowRunTokenUsage | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunPageWithResultFilesAndTokenUsage:
+    items: Sequence[FlowRunWithResultFilesAndTokenUsage]
+    has_more: bool
 
 
 @dataclass(frozen=True)
@@ -87,23 +129,39 @@ class _PublishedRunDefinition:
 
 @dataclass(frozen=True)
 class _PreparedRunCreation:
-    input_payload_json: JsonObject | None
+    input_payload_json: FlowPersistedJsonObject | None
     preseed_steps: list[PreseedStep]
-    step_input_files: list[StepInputFileProjection]
+    step_input_files: list[FlowRunStepInputFileProjection]
     request_fingerprint: str
 
 
-def build_persisted_run_payload(
-    *,
-    normalized_inline_payload: JsonObject | None,
-    flow_version: int,
-    normalized_step_inputs: dict[UUID, list[UUID]],
-) -> JsonObject:
-    payload = dict(normalized_inline_payload or {})
-    payload["expected_flow_version"] = flow_version
-    if normalized_step_inputs:
-        payload["step_inputs"] = serialize_step_inputs_payload(normalized_step_inputs)
-    return payload
+def _normalize_step_input_files_for_fingerprint(
+    step_input_files: Sequence[FlowRunStepInputFileProjection] | None,
+) -> dict[str, dict[str, list[str]]]:
+    return {
+        str(projection["step_id"]): {
+            "file_ids": [str(file_id) for file_id in projection["file_ids"]]
+        }
+        for projection in step_input_files or ()
+    }
+
+
+def _result_files_by_run_id(
+    result_files: Sequence[FlowRunStepResultFile],
+) -> dict[UUID, list[FlowRunStepResultFile]]:
+    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
+    for result_file in result_files:
+        grouped.setdefault(result_file.flow_run_id, []).append(result_file)
+    return grouped
+
+
+def _result_files_by_step_result_id(
+    result_files: Sequence[FlowRunStepResultFile],
+) -> dict[UUID, list[FlowRunStepResultFile]]:
+    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
+    for result_file in result_files:
+        grouped.setdefault(result_file.step_result_id, []).append(result_file)
+    return grouped
 
 
 class FlowRunService:
@@ -114,31 +172,27 @@ class FlowRunService:
         user: UserInDB,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
+        flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
-        flow_run_terminalizer: FlowRunTerminalizer | None = None,
-        file_repo: FileRepository | None = None,
+        runtime_upload_repo: FlowRuntimeUploadRepository,
+        file_repo: FileRepository,
+        flow_run_terminalizer: FlowRunTerminalizer,
+        access_policy: FlowRunAccessPolicy,
         settings_service: SettingService | None = None,
         execution_backend: FlowExecutionBackend | None = None,
-        access_policy: FlowRunAccessPolicy | None = None,
         max_concurrent_runs: int | None = None,
         queued_redispatch_after_seconds: int | None = None,
     ):
         self.user = user
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
-        self.flow_run_terminalizer = flow_run_terminalizer or FlowRunTerminalizer(
-            flow_run_repo,
-            flow_run_repo.audit_outbox_repo,
-        )
+        self.flow_run_terminalizer = flow_run_terminalizer
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
+        self.runtime_upload_repo = runtime_upload_repo
         self.settings_service = settings_service
         self.execution_backend = execution_backend
-        self.access_policy = access_policy or FlowRunAccessPolicy(
-            user=user,
-            flow_repo=flow_repo,
-            flow_run_repo=flow_run_repo,
-        )
+        self.access_policy = access_policy
         self.max_concurrent_runs = (
             max_concurrent_runs
             if max_concurrent_runs is not None
@@ -148,11 +202,6 @@ class FlowRunService:
             queued_redispatch_after_seconds
             if queued_redispatch_after_seconds is not None
             else FLOW_QUEUED_REDISPATCH_AFTER_SECONDS
-        )
-        self.running_reconcile_after_seconds = (
-            flow_stale_running_reconcile_after_seconds(
-                task_timeout_seconds=get_settings().flow_task_timeout_seconds
-            )
         )
 
     def _principal(self) -> FlowPrincipal:
@@ -165,11 +214,7 @@ class FlowRunService:
         if not principal.is_service_key:
             return None
         key = getattr(self.user, "active_api_key", None)
-        if key is None:
-            raise BadRequestException(
-                "Service-key Flow run creation requires an active API key.",
-                code="flow_service_key_missing",
-            )
+        assert key is not None, "service-key Flow principal requires active_api_key"
         return resolve_effective_resource_permission(key, "flows")
 
     def build_dispatch_request(self, run: FlowRun) -> FlowRunDispatchRequest:
@@ -180,9 +225,9 @@ class FlowRunService:
             return None
         normalized = idempotency_key.strip()
         if not normalized or len(normalized) > 255:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Idempotency key must be between 1 and 255 characters.",
-                code="flow_run_invalid_idempotency_key",
+                code=FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY,
             )
         return normalized
 
@@ -190,11 +235,11 @@ class FlowRunService:
         self,
         *,
         flow_id: UUID,
-        input_payload_json: JsonObject | None,
+        input_payload_json: FlowPersistedJsonObject | None,
         expected_flow_version: int | None = None,
         step_inputs: FlowRunStepInputs | None = None,
         idempotency_key: str | None = None,
-    ) -> FlowRun:
+    ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         principal = self._principal()
         published = await self._load_published_run_definition(
@@ -217,14 +262,15 @@ class FlowRunService:
             request_fingerprint=prepared.request_fingerprint,
         )
         if existing_run is not None:
-            return existing_run
-        return await self._create_persisted_run(
+            return CreateRunResult(run=existing_run, created=False)
+        created_run = await self._create_persisted_run(
             flow=published.flow,
             flow_version=published.flow_version,
             principal=principal,
             prepared=prepared,
             idempotency_key=idempotency_key,
         )
+        return CreateRunResult(run=created_run, created=True)
 
     async def _load_published_run_definition(
         self,
@@ -234,9 +280,9 @@ class FlowRunService:
     ) -> _PublishedRunDefinition:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.published_version is None:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Flow must be published before a run can be created.",
-                code="flow_not_published",
+                code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
                 context={"flow_id": str(flow_id)},
             )
 
@@ -244,9 +290,9 @@ class FlowRunService:
             expected_flow_version is not None
             and expected_flow_version != flow.published_version
         ):
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "The published flow version changed before this run request was submitted.",
-                code="flow_run_stale_version",
+                code=FlowApiErrorCode.RUN_STALE_VERSION,
                 context={
                     "expected_flow_version": expected_flow_version,
                     "published_flow_version": flow.published_version,
@@ -260,7 +306,8 @@ class FlowRunService:
             tenant_id=self.user.tenant_id,
         )
         published_definition = parse_published_definition(
-            runtime_version.definition_json
+            runtime_version.definition_json,
+            flow_version=runtime_version.version,
         )
         return _PublishedRunDefinition(
             flow=flow,
@@ -276,7 +323,7 @@ class FlowRunService:
         flow_version: int,
         definition: PublishedFlowDefinition,
         principal: FlowPrincipal,
-        input_payload_json: JsonObject | None,
+        input_payload_json: FlowPersistedJsonObject | None,
         step_inputs: FlowRunStepInputs | None,
     ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
@@ -285,11 +332,6 @@ class FlowRunService:
         )
         reject_reserved_input_payload_keys(normalized_inline_payload)
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
-        if not definition.step_identities:
-            raise BadRequestException(
-                "Published flow version does not contain executable steps.",
-                code="flow_version_no_executable_steps",
-            )
         preseed_steps: list[PreseedStep] = [
             {
                 "step_id": identity.step_id,
@@ -298,7 +340,7 @@ class FlowRunService:
             }
             for identity in definition.step_identities
         ]
-        step_input_file_projections: list[StepInputFileProjection] = []
+        step_input_file_projections: list[FlowRunStepInputFileProjection] = []
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
             limits = await self._resolve_flow_input_limits()
@@ -306,10 +348,12 @@ class FlowRunService:
                 steps=runtime_steps, limits=limits
             )
             await validate_submitted_step_inputs(
+                flow_id=flow_id,
                 steps=runtime_steps,
                 specs=runtime_specs,
                 normalized_step_inputs=normalized_step_inputs,
                 file_repo=self.file_repo,
+                runtime_upload_repo=self.runtime_upload_repo,
                 principal=principal,
                 tenant_id=self.user.tenant_id,
             )
@@ -326,10 +370,9 @@ class FlowRunService:
                 for step_id, file_ids in normalized_step_inputs.items()
                 if file_ids
             ]
-        prepared_payload = build_persisted_run_payload(
+        prepared_payload = build_initial_run_input_envelope(
             normalized_inline_payload=normalized_inline_payload,
             flow_version=flow_version,
-            normalized_step_inputs=normalized_step_inputs,
         )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
@@ -337,6 +380,7 @@ class FlowRunService:
             flow_id=flow_id,
             flow_version=flow_version,
             input_payload_json=prepared_payload,
+            step_input_files=step_input_file_projections,
         )
 
         ensure_inline_payload_size_allowed(
@@ -372,18 +416,18 @@ class FlowRunService:
             if existing is not None:
                 existing_run, existing_fingerprint = existing
                 if existing_fingerprint != request_fingerprint:
-                    raise BadRequestException(
+                    raise FlowBadRequestException(
                         "Idempotency key was already used with a different run request payload.",
-                        code="flow_run_idempotency_conflict",
+                        code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
                     )
                 return existing_run
         active_runs = await self.flow_run_repo.count_active_runs(
             tenant_id=self.user.tenant_id
         )
         if active_runs >= self.max_concurrent_runs:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Concurrent flow run limit reached for this tenant.",
-                code="flow_run_concurrency_limit_reached",
+                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
                 context={"max_concurrent_runs": self.max_concurrent_runs},
             )
         return None
@@ -397,26 +441,28 @@ class FlowRunService:
         prepared: _PreparedRunCreation,
         idempotency_key: str | None,
     ) -> FlowRun:
-        if flow.id is None:
-            raise BadRequestException(
-                "Flow id missing for run creation.",
-                code="flow_id_missing",
+        flow_id = flow.require_persisted_id()
+        try:
+            return await self.flow_run_repo.create(
+                flow_id=flow_id,
+                flow_version=flow_version,
+                principal_type=principal.principal_type.value,
+                principal_user_id=principal.principal_user_id,
+                principal_service_id=principal.principal_service_id,
+                created_by_api_key_id=principal.actor_api_key_id,
+                runtime_service_permission=self._runtime_service_permission(principal),
+                tenant_id=self.user.tenant_id,
+                input_payload_json=prepared.input_payload_json,
+                preseed_steps=prepared.preseed_steps,
+                step_input_files=prepared.step_input_files,
+                idempotency_key=idempotency_key,
+                request_fingerprint=prepared.request_fingerprint,
             )
-        return await self.flow_run_repo.create(
-            flow_id=flow.id,
-            flow_version=flow_version,
-            principal_type=principal.principal_type.value,
-            principal_user_id=principal.principal_user_id,
-            principal_service_id=principal.principal_service_id,
-            created_by_api_key_id=principal.actor_api_key_id,
-            runtime_service_permission=self._runtime_service_permission(principal),
-            tenant_id=self.user.tenant_id,
-            input_payload_json=prepared.input_payload_json,
-            preseed_steps=prepared.preseed_steps,
-            step_input_files=prepared.step_input_files,
-            idempotency_key=idempotency_key,
-            request_fingerprint=prepared.request_fingerprint,
-        )
+        except FlowRunRuntimeUploadBindingRaceError as exc:
+            raise runtime_file_not_bound_to_flow_error(
+                step_id=exc.step_id,
+                file_ids=exc.file_ids,
+            ) from exc
 
     async def _resolve_flow_input_limits(self) -> FlowInputLimits:
         return await resolve_flow_input_limits_from_source(self.settings_service)
@@ -428,10 +474,11 @@ class FlowRunService:
         principal: FlowPrincipal,
         flow_id: UUID,
         flow_version: int,
-        input_payload_json: JsonObject | None,
+        input_payload_json: FlowPersistedJsonObject | None,
+        step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
     ) -> str:
         normalized = {
-            "request_fingerprint_algo_version": 2,
+            "request_fingerprint_algo_version": 3,
             "tenant_id": str(tenant_id),
             "principal_type": principal.principal_type.value,
             "principal_user_id": (
@@ -447,6 +494,9 @@ class FlowRunService:
             "flow_id": str(flow_id),
             "flow_version": flow_version,
             "input_payload_json": input_payload_json,
+            "step_input_files": _normalize_step_input_files_for_fingerprint(
+                step_input_files
+            ),
         }
         payload = json.dumps(
             normalized,
@@ -517,34 +567,89 @@ class FlowRunService:
             tenant_id=self.user.tenant_id,
         )
 
-    async def list_result_files_for_runs(
+    async def get_run_versioned_view(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+    ) -> FlowRunVersionedView:
+        run = await self.get_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
+        )
+        flow_version = await self.flow_version_repo.get(
+            flow_id=run.flow_id,
+            version=run.flow_version,
+            tenant_id=run.tenant_id,
+        )
+        published_definition = parse_published_definition(
+            flow_version.definition_json,
+            flow_version=flow_version.version,
+        )
+        step_results = await self.flow_run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        return FlowRunVersionedView(
+            published_definition=published_definition,
+            step_results=tuple(step_results),
+        )
+
+    async def get_run_with_result_files_and_token_usage(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+    ) -> FlowRunWithResultFilesAndTokenUsage:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        views = await self._runs_with_result_files_and_token_usage(runs=(run,))
+        return views[0]
+
+    async def list_runs_with_result_files_and_token_usage(
+        self,
+        *,
+        flow_id: UUID,
+        limit: int,
+        offset: int,
+    ) -> FlowRunPageWithResultFilesAndTokenUsage:
+        runs = await self.list_runs(
+            flow_id=flow_id,
+            limit=limit + 1,
+            offset=offset,
+        )
+        page_runs = tuple(runs[:limit])
+        return FlowRunPageWithResultFilesAndTokenUsage(
+            items=await self._runs_with_result_files_and_token_usage(runs=page_runs),
+            has_more=len(runs) > limit,
+        )
+
+    async def _runs_with_result_files_and_token_usage(
         self, *, runs: Sequence[FlowRun]
-    ) -> list[FlowRunStepResultFile]:
+    ) -> tuple[FlowRunWithResultFilesAndTokenUsage, ...]:
         if not runs:
-            return []
+            return ()
         run_ids: list[UUID] = []
         for run in runs:
             if run.tenant_id != self.user.tenant_id:
                 self.access_policy.deny_run_access(auth_layer="flow_run_argument")
             run_ids.append(run.id)
-        return await self.flow_run_repo.list_result_files_for_runs(
+        result_files = await self.flow_run_repo.list_result_files_for_runs(
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )
-
-    async def list_token_usage_for_runs(
-        self, *, runs: Sequence[FlowRun]
-    ) -> dict[UUID, FlowRunTokenUsage]:
-        if not runs:
-            return {}
-        run_ids: list[UUID] = []
-        for run in runs:
-            if run.tenant_id != self.user.tenant_id:
-                self.access_policy.deny_run_access(auth_layer="flow_run_argument")
-            run_ids.append(run.id)
-        return await self.flow_run_repo.list_token_usage_for_runs(
+        token_usage_by_run_id = await self.flow_run_repo.list_token_usage_for_runs(
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
+        )
+        result_files_by_run_id = _result_files_by_run_id(result_files)
+        return tuple(
+            FlowRunWithResultFilesAndTokenUsage(
+                run=run,
+                result_files=tuple(result_files_by_run_id.get(run.id, ())),
+                token_usage=token_usage_by_run_id.get(run.id),
+            )
+            for run in runs
         )
 
     async def list_step_results_with_files(
@@ -552,7 +657,7 @@ class FlowRunService:
         *,
         run_id: UUID,
         flow_id: UUID | None = None,
-    ) -> FlowRunStepResultsWithFiles:
+    ) -> tuple[FlowRunStepResultWithFiles, ...]:
         run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
         step_results = await self.flow_run_repo.list_step_results(
             run_id=run.id,
@@ -562,35 +667,55 @@ class FlowRunService:
             run_id=run.id,
             tenant_id=self.user.tenant_id,
         )
-        return FlowRunStepResultsWithFiles(
-            step_results=tuple(step_results),
-            result_files=tuple(result_files),
+        runtime_input_file_ids_by_step_result_id = (
+            await self.flow_run_repo.list_current_step_input_file_ids_by_step_result_id(
+                run_id=run.id,
+                tenant_id=self.user.tenant_id,
+                step_results=step_results,
+            )
         )
+        result_files_by_step_result_id = _result_files_by_step_result_id(result_files)
+        views: list[FlowRunStepResultWithFiles] = []
+        for result in step_results:
+            result_id = result.id
+            if result_id is None:
+                # Domain ids are optional; persisted reads normally set this.
+                views.append(
+                    FlowRunStepResultWithFiles(
+                        step_result=result,
+                        runtime_input_file_ids=(),
+                        result_files=(),
+                    )
+                )
+                continue
+            views.append(
+                FlowRunStepResultWithFiles(
+                    step_result=result,
+                    runtime_input_file_ids=runtime_input_file_ids_by_step_result_id.get(
+                        result_id, ()
+                    ),
+                    result_files=tuple(
+                        result_files_by_step_result_id.get(result_id, ())
+                    ),
+                )
+            )
+        return tuple(views)
 
-    async def redispatch_stale_queued_runs(
+    async def redispatch_run(
         self,
         *,
-        flow_id: UUID | None = None,
-        run_id: UUID | None = None,
-        limit: int = 25,
+        flow_id: UUID,
+        run_id: UUID,
         execution_backend: FlowExecutionBackend | None = None,
-    ) -> int:
+    ) -> FlowRunRedispatchResult:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id)
         backend = execution_backend or self.execution_backend
-        if backend is None:
-            return 0
-
-        stale_before = datetime.now(timezone.utc) - timedelta(
-            seconds=max(1, self.queued_redispatch_after_seconds)
-        )
-        stale_runs = await self.flow_run_repo.list_stale_queued_runs(
-            tenant_id=self.user.tenant_id,
-            flow_id=flow_id,
-            run_id=run_id,
-            stale_before=stale_before,
-            limit=limit,
-        )
         redispatched = 0
-        for run in stale_runs:
+
+        if backend is not None:
+            stale_before = datetime.now(timezone.utc) - timedelta(
+                seconds=max(1, self.queued_redispatch_after_seconds)
+            )
             claimed_run = (
                 await self.flow_run_repo.claim_stale_queued_run_for_redispatch(
                     run_id=run.id,
@@ -599,69 +724,50 @@ class FlowRunService:
                     flow_id=flow_id,
                 )
             )
-            if claimed_run is None:
-                continue
-            try:
-                dispatch_request = self.build_dispatch_request(claimed_run)
-            except ValueError:
-                continue
-            try:
-                await backend.dispatch(request=dispatch_request)
-                redispatched += 1
-            except Exception:
-                logger.exception(
-                    "Failed to redispatch stale queued flow run",
-                    extra={
-                        "run_id": str(claimed_run.id),
-                        "flow_id": str(claimed_run.flow_id),
-                        "tenant_id": str(claimed_run.tenant_id),
-                    },
-                )
-                if run_id is not None:
-                    raise
-        return redispatched
+            if claimed_run is not None:
+                try:
+                    dispatch_request = self.build_dispatch_request(claimed_run)
+                except ValueError:
+                    pass
+                else:
+                    try:
+                        await backend.dispatch(request=dispatch_request)
+                        redispatched = 1
+                    except Exception:
+                        logger.exception(
+                            "Failed to redispatch stale queued flow run",
+                            extra={
+                                "run_id": str(claimed_run.id),
+                                "flow_id": str(claimed_run.flow_id),
+                                "tenant_id": str(claimed_run.tenant_id),
+                            },
+                        )
+                        raise
 
-    async def reconcile_stale_running_runs(self, *, limit: int = 25) -> int:
-        stale_before = datetime.now(timezone.utc) - timedelta(
-            seconds=max(1, self.running_reconcile_after_seconds)
+        refreshed = await self.get_run(run_id=run_id, flow_id=flow_id)
+        return FlowRunRedispatchResult(
+            run=refreshed,
+            redispatched_count=redispatched,
         )
-        stale_runs = await self.flow_run_repo.list_stale_running_runs(
-            tenant_id=self.user.tenant_id,
-            stale_before=stale_before,
-            limit=limit,
-        )
-        reconciled = 0
-        error_message = "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
-        for run in stale_runs:
-            result = await self.flow_run_terminalizer.terminalize_stale_running_run(
-                run_id=run.id,
-                tenant_id=self.user.tenant_id,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                    code="flow_worker_stalled",
-                    message=error_message,
-                ),
-                stale_before=stale_before,
-            )
-            if result.did_transition:
-                reconciled += 1
-        return reconciled
 
-    async def cancel_run(self, *, run_id: UUID) -> FlowRun:
-        run = await self.get_run(run_id=run_id, access_kind="cancel")
+    async def cancel_run(self, *, run_id: UUID, flow_id: UUID) -> FlowRun:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="cancel")
         if is_terminal_flow_run_status(run.status):
             return run
-        result = await self.flow_run_terminalizer.terminalize_run(
-            run_id=run_id,
-            tenant_id=self.user.tenant_id,
-            target_status=FlowRunStatus.CANCELLED,
-            source=FlowRunLifecycleSource.USER_CANCEL,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.USER_CANCEL,
-                code="user_cancelled",
-                message="Run cancelled by user.",
-            ),
-            cancelled_at=datetime.now(timezone.utc),
-            principal=self._principal(),
-        )
+        try:
+            result = await self.flow_run_terminalizer.terminalize_run(
+                run_id=run_id,
+                tenant_id=self.user.tenant_id,
+                target_status=FlowRunStatus.CANCELLED,
+                source=FlowRunLifecycleSource.USER_CANCEL,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.USER_CANCEL,
+                    code=FlowApiErrorCode.RUN_USER_CANCELLED,
+                    message="Run cancelled by user.",
+                ),
+                cancelled_at=datetime.now(timezone.utc),
+                principal=self._principal(),
+            )
+        except FlowRunNotFoundError as exc:
+            raise NotFoundException("Flow run not found.") from exc
         return result.run

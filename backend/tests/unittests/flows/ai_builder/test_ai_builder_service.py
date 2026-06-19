@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -784,56 +783,30 @@ class TestSessionRecovery:
         session = _make_session(
             tenant_id=user.tenant_id, actor_user_id=user.id, latest_plan_id=uuid4()
         )
-        repo.list_sessions_for_user.return_value = [session]
-        repo.get_plan.return_value = _make_plan(
-            plan_id=session.latest_plan_id,
-            session_id=session.id,
-            tenant_id=user.tenant_id,
-            spec=FlowDraftSpecCore(
-                flow_name="Recovered Draft",
-                steps=[
-                    StepSpec(
-                        plan_step_ref="step_a",
-                        name="Step A",
-                        assistant_spec=AssistantSpec(instructions="Do something."),
-                        input_source=InputSource.FLOW_INPUT,
-                    )
-                ],
-            ),
-        )
+        repo.list_sessions_with_draft_titles.return_value = [
+            (session, "Recovered Draft")
+        ]
         service = _make_service(user=user, repo=repo)
 
         result = await service.list_sessions()
 
         assert result[0].draft_title == "Recovered Draft"
         assert result[0].space_id == session.space_id
+        repo.get_plan.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_list_sessions_logs_plan_lookup_failures_and_keeps_summary(
-        self, caplog
-    ):
+    async def test_list_sessions_keeps_sessions_without_latest_plan_title(self):
         user = _make_user()
         repo = AsyncMock()
-        session = _make_session(
-            tenant_id=user.tenant_id, actor_user_id=user.id, latest_plan_id=uuid4()
-        )
-        repo.list_sessions_for_user.return_value = [session]
-        repo.get_plan.side_effect = RuntimeError("boom")
+        session = _make_session(tenant_id=user.tenant_id, actor_user_id=user.id)
+        repo.list_sessions_with_draft_titles.return_value = [(session, None)]
         service = _make_service(user=user, repo=repo)
 
-        with patch(
-            "intric.flows.ai_builder.ai_builder_service.logger.warning"
-        ) as mock_warning:
-            caplog.set_level(logging.WARNING)
-            result = await service.list_sessions()
+        result = await service.list_sessions()
 
         assert result[0].draft_title is None
         assert result[0].session_id == session.id
-        mock_warning.assert_called_once()
-        assert (
-            mock_warning.call_args.args[0]
-            == "Failed to resolve AI builder draft title for session list item."
-        )
+        repo.get_plan.assert_not_called()
 
     @pytest.mark.anyio
     async def test_cancel_session_updates_status_and_returns_session(self):

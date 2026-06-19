@@ -10,15 +10,16 @@ import httpx
 from pydantic import ValidationError
 
 from intric.audit.domain.outcome import Outcome
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.http_transport import (
     EffectiveHttpRequest,
     HttpAuthoredConfig,
+    HttpMethod,
     compile_http_config,
     decrypt_authored_config,
     is_authored_config,
 )
-from intric.flows.step_config_secrets import decrypt_step_headers_for_runtime
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 
@@ -66,29 +67,6 @@ class ResolveTimeoutFn(Protocol):
     ) -> float: ...
 
 
-class BuildHeadersFn(Protocol):
-    def __call__(
-        self,
-        headers_raw: Any,
-        *,
-        context: dict[str, Any],
-        step_order: int,
-        config_label: str,
-    ) -> dict[str, str]: ...
-
-
-class ResolveRequestBodyFn(Protocol):
-    def __call__(
-        self,
-        *,
-        method: str,
-        config: dict[str, Any],
-        context: dict[str, Any],
-        step_order: int,
-        config_label: str,
-    ) -> tuple[bytes | None, dict[str, Any] | list[Any] | None]: ...
-
-
 class ReadResponseTextFn(Protocol):
     def __call__(
         self,
@@ -108,8 +86,6 @@ class FlowHttpOrchestrationDeps:
     encryption_service: Any
     variable_resolver: Any
     resolve_timeout_seconds: ResolveTimeoutFn
-    build_headers: BuildHeadersFn
-    resolve_request_body: ResolveRequestBodyFn
     read_response_text: ReadResponseTextFn
     send_http_request: SendHttpRequestFn
     audit_http_outbound: AuditHttpOutboundFn
@@ -117,20 +93,28 @@ class FlowHttpOrchestrationDeps:
 
 def _compile_authored_http_request(
     *,
-    raw_config: JsonObject,
+    raw_config: FlowPersistedJsonObject,
     direction: str,
-    method: str,
-    context: JsonObject,
+    method: HttpMethod,
+    context: FlowPersistedJsonObject,
     step_order: int,
     config_label: str,
     deps: FlowHttpOrchestrationDeps,
 ) -> tuple[EffectiveHttpRequest, str | None]:
+    if not is_authored_config(raw_config):
+        raise TypedIOValidationException(
+            _authored_http_config_required_message(
+                step_order=step_order,
+                config_label=config_label,
+            ),
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
     try:
         authored = HttpAuthoredConfig.model_validate(raw_config)
     except ValidationError as exc:
         raise TypedIOValidationException(
             f"Step {step_order}: {config_label} is not a valid authored HTTP config.",
-            code="typed_io_http_invalid_config",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
         ) from exc
 
     decrypted = decrypt_authored_config(authored, deps.encryption_service)
@@ -156,6 +140,17 @@ def _compile_authored_http_request(
     )
 
 
+def _authored_http_config_required_message(
+    *,
+    step_order: int,
+    config_label: str,
+) -> str:
+    return (
+        f"Step {step_order}: {config_label} must use authored HTTP config with an auth field; "
+        "legacy flat HTTP config is no longer supported."
+    )
+
+
 async def resolve_http_input_source_text(
     *,
     step: RuntimeHttpStep,
@@ -166,66 +161,29 @@ async def resolve_http_input_source_text(
     if not isinstance(step.input_config, dict):
         raise TypedIOValidationException(
             f"Step {step.step_order}: HTTP input source requires input_config object.",
-            code="typed_io_http_invalid_config",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
         )
 
-    method = "GET" if step.input_source == "http_get" else "POST"
-    response_format: object = None
-    if is_authored_config(step.input_config):
-        # Dispatch before decryption: authored and legacy configs use different secret codecs.
-        effective_request, response_format = _compile_authored_http_request(
-            raw_config=step.input_config,
-            direction="input",
-            method=method,
-            context=context,
-            step_order=step.step_order,
-            config_label="input_config",
-            deps=deps,
+    method: HttpMethod = "GET" if step.input_source == "http_get" else "POST"
+    effective_request, response_format = _compile_authored_http_request(
+        raw_config=step.input_config,
+        direction="input",
+        method=method,
+        context=context,
+        step_order=step.step_order,
+        config_label="input_config",
+        deps=deps,
+    )
+    url = effective_request.url
+    if not url:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: input_config.url is required for HTTP input.",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
         )
-        url = effective_request.url
-        if not url:
-            raise TypedIOValidationException(
-                f"Step {step.step_order}: input_config.url is required for HTTP input.",
-                code="typed_io_http_invalid_config",
-            )
-        timeout_seconds = effective_request.timeout
-        headers = dict(effective_request.headers)
-        body_bytes = effective_request.body
-        json_body = effective_request.json_body
-    else:
-        resolved_config = (
-            decrypt_step_headers_for_runtime(
-                config=step.input_config,
-                encryption_service=deps.encryption_service,
-            )
-            or {}
-        )
-        url_raw = resolved_config.get("url")
-        if not isinstance(url_raw, str) or not url_raw.strip():
-            raise TypedIOValidationException(
-                f"Step {step.step_order}: input_config.url is required for HTTP input.",
-                code="typed_io_http_invalid_config",
-            )
-        url = deps.variable_resolver.interpolate(url_raw, context).strip()
-        timeout_seconds = deps.resolve_timeout_seconds(
-            resolved_config.get("timeout_seconds"),
-            step_order=step.step_order,
-            config_label="input_config",
-        )
-        headers = deps.build_headers(
-            resolved_config.get("headers"),
-            context=context,
-            step_order=step.step_order,
-            config_label="input_config",
-        )
-        body_bytes, json_body = deps.resolve_request_body(
-            method=method,
-            config=resolved_config,
-            context=context,
-            step_order=step.step_order,
-            config_label="input_config",
-        )
-        response_format = resolved_config.get("response_format")
+    timeout_seconds = effective_request.timeout
+    headers = dict(effective_request.headers)
+    body_bytes = effective_request.body
+    json_body = effective_request.json_body
 
     start_time = time.monotonic()
     try:
@@ -265,7 +223,7 @@ async def resolve_http_input_source_text(
         )
         raise TypedIOValidationException(
             err_msg,
-            code="typed_io_http_timeout",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT.value,
         ) from exc
     except httpx.HTTPError as exc:
         duration_ms = (time.monotonic() - start_time) * 1000
@@ -282,7 +240,7 @@ async def resolve_http_input_source_text(
         )
         raise TypedIOValidationException(
             err_msg,
-            code="typed_io_http_connection_error",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
         ) from exc
 
     duration_ms = (time.monotonic() - start_time) * 1000
@@ -301,13 +259,13 @@ async def resolve_http_input_source_text(
         )
         raise TypedIOValidationException(
             err_msg,
-            code="typed_io_http_non_success",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS.value,
         )
 
     response_text = deps.read_response_text(
         response=response,
         step_order=step.step_order,
-        code="typed_io_http_response_too_large",
+        code=FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value,
     )
 
     expects_json = step.input_type == "json" or str(response_format or "text") == "json"
@@ -329,7 +287,7 @@ async def resolve_http_input_source_text(
             )
             raise TypedIOValidationException(
                 err_msg,
-                code="typed_io_http_malformed_response",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_MALFORMED_RESPONSE.value,
             ) from exc
         await deps.audit_http_outbound(
             run=run,
@@ -367,7 +325,14 @@ async def deliver_webhook(
 ) -> None:
     if step.output_config is None:
         return
-    if is_authored_config(step.output_config):
+    if not is_authored_config(step.output_config):
+        raise BadRequestException(
+            _authored_http_config_required_message(
+                step_order=step.step_order,
+                config_label="output_config",
+            )
+        )
+    try:
         effective_request, _ = _compile_authored_http_request(
             raw_config=step.output_config,
             direction="output",
@@ -377,44 +342,15 @@ async def deliver_webhook(
             config_label="output_config",
             deps=deps,
         )
-        url = effective_request.url
-        if not url:
-            raise BadRequestException("Webhook output mode requires output_config.url.")
-        timeout_seconds = effective_request.timeout
-        headers = dict(effective_request.headers)
-        body_bytes = effective_request.body
-        json_body = effective_request.json_body
-    else:
-        resolved_config = (
-            decrypt_step_headers_for_runtime(
-                config=step.output_config,
-                encryption_service=deps.encryption_service,
-            )
-            or {}
-        )
-        url_raw = resolved_config.get("url")
-        if not isinstance(url_raw, str) or not url_raw.strip():
-            raise BadRequestException("Webhook output mode requires output_config.url.")
-
-        url = deps.variable_resolver.interpolate(url_raw, context).strip()
-        timeout_seconds = deps.resolve_timeout_seconds(
-            resolved_config.get("timeout_seconds"),
-            step_order=step.step_order,
-            config_label="output_config",
-        )
-        headers = deps.build_headers(
-            resolved_config.get("headers"),
-            context=context,
-            step_order=step.step_order,
-            config_label="output_config",
-        )
-        body_bytes, json_body = deps.resolve_request_body(
-            method="POST",
-            config=resolved_config,
-            context=context,
-            step_order=step.step_order,
-            config_label="output_config",
-        )
+    except TypedIOValidationException as exc:
+        raise BadRequestException(str(exc)) from exc
+    url = effective_request.url
+    if not url:
+        raise BadRequestException("Webhook output mode requires output_config.url.")
+    timeout_seconds = effective_request.timeout
+    headers = dict(effective_request.headers)
+    body_bytes = effective_request.body
+    json_body = effective_request.json_body
     if body_bytes is None and json_body is None:
         body_bytes = text_payload.encode("utf-8")
     headers["Idempotency-Key"] = hashlib.sha256(

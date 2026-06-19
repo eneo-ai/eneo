@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from intric.flows.domain.flow import FlowPersistedJsonObject
+from intric.flows.flow_authoring_runtime_input import (
+    resolve_runtime_input_config,
+)
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,
     StepSpec,
-)
-from intric.flows.flow_authoring_runtime_input import (
-    resolve_runtime_input_config,
 )
 
 
@@ -17,7 +18,7 @@ def _step(
     *,
     input_source: InputSource = InputSource.FLOW_INPUT,
     input_type: InputType = InputType.DOCUMENT,
-    input_config: dict | None = None,
+    input_config: FlowPersistedJsonObject | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref="step_a",
@@ -44,7 +45,9 @@ class TestInputFormatSyncsWithInputType:
         }
 
         result = resolve_runtime_input_config(
-            step_spec=_step(input_type=InputType.DOCUMENT, input_config=existing_config),
+            step_spec=_step(
+                input_type=InputType.DOCUMENT, input_config=existing_config
+            ),
         )
 
         assert result is not None
@@ -88,7 +91,10 @@ class TestInputFormatSyncsWithInputType:
         assert result is not None
         ri = result["runtime_input"]
         assert ri["input_format"] == "audio"
-        assert ri["description"] == "Ladda upp ljudfiler som detta steg ska transkribera eller analysera."
+        assert (
+            ri["description"]
+            == "Ladda upp ljudfiler som detta steg ska transkribera eller analysera."
+        )
 
     def test_preserves_custom_description_when_type_changes(self) -> None:
         """If user wrote a custom description, keep it even when type changes."""
@@ -101,7 +107,9 @@ class TestInputFormatSyncsWithInputType:
         }
 
         result = resolve_runtime_input_config(
-            step_spec=_step(input_type=InputType.DOCUMENT, input_config=existing_config),
+            step_spec=_step(
+                input_type=InputType.DOCUMENT, input_config=existing_config
+            ),
         )
 
         assert result is not None
@@ -123,7 +131,9 @@ class TestInputFormatSyncsWithInputType:
         }
 
         result = resolve_runtime_input_config(
-            step_spec=_step(input_type=InputType.DOCUMENT, input_config=existing_config),
+            step_spec=_step(
+                input_type=InputType.DOCUMENT, input_config=existing_config
+            ),
         )
 
         assert result is not None
@@ -143,7 +153,10 @@ class TestInputFormatSyncsWithInputType:
         ri = result["runtime_input"]
         assert ri["enabled"] is True
         assert ri["input_format"] == "audio"
-        assert ri["description"] == "Ladda upp ljudfiler som detta steg ska transkribera eller analysera."
+        assert (
+            ri["description"]
+            == "Ladda upp ljudfiler som detta steg ska transkribera eller analysera."
+        )
 
     def test_existing_config_from_parameter_used_when_spec_has_none(self) -> None:
         """When step_spec.input_config is None, existing_input_config is used as base."""
@@ -167,6 +180,27 @@ class TestInputFormatSyncsWithInputType:
         assert ri["description"] == "Ladda upp dokument som detta steg ska analysera."
         assert ri["max_files"] == 3
 
+    def test_non_runtime_upload_step_removes_stale_runtime_input(self) -> None:
+        existing = {
+            "other": "keep",
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+            },
+        }
+
+        result = resolve_runtime_input_config(
+            step_spec=_step(
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.DOCUMENT,
+                input_config=None,
+            ),
+            existing_input_config=existing,
+        )
+
+        assert result == {"other": "keep"}
+        assert "runtime_input" in existing
+
 
 class TestAcceptedMimetypesOverrideCleared:
     """Format change must clear accepted_mimetypes_override to prevent stale constraints."""
@@ -182,7 +216,9 @@ class TestAcceptedMimetypesOverrideCleared:
         }
 
         result = resolve_runtime_input_config(
-            step_spec=_step(input_type=InputType.DOCUMENT, input_config=existing_config),
+            step_spec=_step(
+                input_type=InputType.DOCUMENT, input_config=existing_config
+            ),
         )
 
         assert result is not None
@@ -201,7 +237,9 @@ class TestAcceptedMimetypesOverrideCleared:
         }
 
         result = resolve_runtime_input_config(
-            step_spec=_step(input_type=InputType.DOCUMENT, input_config=existing_config),
+            step_spec=_step(
+                input_type=InputType.DOCUMENT, input_config=existing_config
+            ),
         )
 
         assert result is not None

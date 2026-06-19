@@ -17,7 +17,7 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
             description: "Forecast tools",
             tools: [
               { id: "tool-forecast", name: "forecast_tool", is_enabled: true },
-              { id: "tool-history", name: "history_tool", is_enabled: false }
+              { id: "tool-history", name: "history_tool", is_enabled: true }
             ]
           }
         ]
@@ -34,7 +34,7 @@ describe("Flow step MCP persistence wiring", () => {
   it("saves MCP server selection as one batched payload with tool settings", async () => {
     render(FlowStepMcpPersistenceHarness);
 
-    await fireEvent.click(screen.getByRole("button", { name: "Weather Server" }));
+    await fireEvent.click(screen.getByRole("switch", { name: /Weather Server/ }));
 
     expect(screen.getByTestId("save-call-count").textContent).toBe("1");
     expect(screen.getByTestId("last-save").textContent).toContain('"mcp_servers"');
@@ -55,7 +55,7 @@ describe("Flow step MCP persistence wiring", () => {
       initialTools: [{ tool_id: "tool-stale", is_enabled: false }]
     });
 
-    await fireEvent.click(screen.getByRole("button", { name: "Weather Server" }));
+    await fireEvent.click(screen.getByRole("switch", { name: /Weather Server/ }));
 
     expect(screen.getByTestId("save-call-count").textContent).toBe("1");
     expect(screen.getByTestId("last-save").textContent).not.toContain("server-stale");
@@ -67,13 +67,26 @@ describe("Flow step MCP persistence wiring", () => {
   it("saves MCP tool toggles as one batched payload", async () => {
     render(FlowStepMcpPersistenceHarness);
 
-    await fireEvent.click(screen.getByRole("button", { name: "Weather Server" }));
+    await fireEvent.click(screen.getByRole("switch", { name: /Weather Server/ }));
     await fireEvent.click(screen.getByRole("button", { name: "Visa verktyg" }));
-    await fireEvent.click(screen.getByRole("button", { name: "history_tool" }));
+    await fireEvent.click(screen.getByRole("switch", { name: "forecast_tool" }));
 
     expect(screen.getByTestId("save-call-count").textContent).toBe("2");
+    expect(screen.getByTestId("last-save").textContent).toContain('"tool_id":"tool-forecast"');
+    expect(screen.getByTestId("last-save").textContent).toContain('"is_enabled":false');
+  });
+
+  it("saves MCP bulk tool toggles as one batched payload", async () => {
+    render(FlowStepMcpPersistenceHarness);
+
+    await fireEvent.click(screen.getByRole("switch", { name: /Weather Server/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "Visa verktyg" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Alla av" }));
+
+    expect(screen.getByTestId("save-call-count").textContent).toBe("2");
+    expect(screen.getByTestId("last-save").textContent).toContain('"tool_id":"tool-forecast"');
     expect(screen.getByTestId("last-save").textContent).toContain('"tool_id":"tool-history"');
-    expect(screen.getByTestId("last-save").textContent).toContain('"is_enabled":true');
+    expect(screen.getByTestId("last-save").textContent).toContain('"is_enabled":false');
   });
 
   it("does not auto-save on load or when switching between preconfigured assistants", async () => {

@@ -1,6 +1,5 @@
 import io
 import re
-import time
 from typing import Annotated
 from uuid import UUID
 
@@ -12,7 +11,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import require_user_for_creation
-from intric.authentication.signed_urls import generate_signed_token, verify_signed_token
+from intric.authentication.signed_urls import verify_signed_token
 from intric.files.file_models import (
     ContentDisposition,
     FilePublic,
@@ -20,6 +19,7 @@ from intric.files.file_models import (
     SignedURLRequest,
     SignedURLResponse,
 )
+from intric.files.signed_urls import build_signed_download_response
 from intric.main.container.container import Container
 from intric.main.exceptions import (
     AuthenticationException,
@@ -175,27 +175,15 @@ async def generate_signed_url(
     signed_url_req: SignedURLRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    # Verify the file exists and the user has access to it
     service = container.file_service()
     [file_info] = await service.get_file_infos(file_ids=[id])
 
-    # Calculate expiration time
-    expires_at = int(time.time()) + signed_url_req.expires_in
-
-    # Generate the signed token
-    token = generate_signed_token(
+    return build_signed_download_response(
+        base_url=str(request.base_url),
         file_id=id,
-        expires_at=expires_at,
-        content_disposition=signed_url_req.content_disposition,
         tenant_id=file_info.tenant_id,
+        signed_url_request=signed_url_req,
     )
-
-    # Build the full URL
-    # Get the base URL from the request
-    base_url = str(request.base_url).rstrip("/")
-    url = f"{base_url}/api/v1/files/{id}/download/?token={token}"
-
-    return SignedURLResponse(url=url, expires_at=expires_at)
 
 
 @router.get(

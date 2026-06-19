@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import time
-from typing import Annotated, Any, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -9,19 +8,24 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.signed_urls import generate_signed_token
 from intric.files.file_models import SignedURLRequest, SignedURLResponse
-from intric.flows.api import flow_router_common as common
+from intric.files.signed_urls import build_signed_download_response
+from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_graph import (
-    build_graph_from_steps,
-    enrich_nodes_with_run_results,
+    GraphResponse,
+    build_graph_response,
 )
-from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
-from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
+from intric.flows.api.flow_models import FlowRunStepPublic
+from intric.flows.api.flow_runtime_paths import (
+    FLOW_GRAPH_PATH,
+    FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+    FLOW_RUN_STEPS_PATH,
+)
+from intric.flows.flow_access_policy import FlowApiAction
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.principal import FlowPrincipal
-from intric.flows.published_definition import parse_published_definition
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException
 from intric.server.dependencies.container import get_container
@@ -29,11 +33,8 @@ from intric.server.dependencies.container import get_container
 router = APIRouter()
 
 _FLOW_RUNTIME_FORBIDDEN_DESCRIPTION = (
-    "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
-    "space scope does not match the flow, `insufficient_tenant_permission` or "
-    "`insufficient_space_permission` for callers without the required access, "
-    "`flow_run_access_denied` when a caller tries to inspect another user's run, "
-    "and `flow_service_key_principal_not_supported` on flow surfaces that still require a user principal."
+    "Forbidden. Caller scope, tenant or space permission, and run visibility are "
+    "evaluated before returning Flow runtime data."
 )
 
 _FLOW_RUN_STEPS_DESCRIPTION = """
@@ -62,21 +63,12 @@ Service-key principals are supported for their own runtime artifacts in v1.
     """
 
 
-def _result_files_by_step_result_id(
-    result_files: list[FlowRunStepResultFile],
-) -> dict[UUID, list[FlowRunStepResultFile]]:
-    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
-    for result_file in result_files:
-        grouped.setdefault(result_file.step_result_id, []).append(result_file)
-    return grouped
-
-
 @router.get(
-    "/{id}/runs/{run_id}/steps/",
+    FLOW_RUN_STEPS_PATH,
     response_model=list[FlowRunStepPublic],
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_run_steps",
-    summary="List flow run step outputs (flow-first)",
+    summary="List flow run step outputs",
     description=_FLOW_RUN_STEPS_DESCRIPTION,
     responses={
         403: error_response(
@@ -105,52 +97,30 @@ async def list_flow_run_steps(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    step_results_with_files = (
-        await container.flow_run_service().list_step_results_with_files(
-            run_id=run_id,
-            flow_id=id,
-        )
-    )
-    result_files_by_step_result_id = _result_files_by_step_result_id(
-        list(step_results_with_files.result_files)
+    step_result_views = await container.flow_run_service().list_step_results_with_files(
+        run_id=run_id,
+        flow_id=id,
     )
     assembler = FlowAssembler()
-    items: list[FlowRunStepPublic] = []
-    for result in step_results_with_files.step_results:
-        diagnostics: list[dict[str, Any]] = []
-        input_payload = result.input_payload_json
-        if isinstance(input_payload, dict):
-            raw_diagnostics = input_payload.get("diagnostics")
-            if isinstance(raw_diagnostics, list):
-                diagnostics = [
-                    item
-                    for item in cast(list[object], raw_diagnostics)
-                    if isinstance(item, dict)
-                ]
-        result_id = result.id
-        items.append(
-            assembler.to_step_public(
-                result,
-                diagnostics=diagnostics,
-                result_files=(
-                    result_files_by_step_result_id.get(result_id, [])
-                    if result_id is not None
-                    else []
-                ),
-            )
+    return [
+        assembler.to_step_public(
+            view.step_result,
+            runtime_input_file_ids=view.runtime_input_file_ids,
+            result_files=view.result_files,
         )
-    return items
+        for view in step_result_views
+    ]
 
 
 @router.get(
-    "/{id}/graph/",
+    FLOW_GRAPH_PATH,
     response_model=GraphResponse,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_graph",
@@ -194,40 +164,26 @@ async def get_flow_graph(
     ),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    flow_service = container.flow_service()
     flow_run_service = container.flow_run_service()
-    flow_version_repo = container.flow_version_repo()
 
     if run_id is not None:
-        run = await flow_run_service.get_run(
+        versioned_view = await flow_run_service.get_run_versioned_view(
+            flow_id=id,
             run_id=run_id,
-            flow_id=id,
-            access_kind="content",
         )
-        version = await flow_version_repo.get(
-            flow_id=run.flow_id,
-            version=run.flow_version,
-            tenant_id=run.tenant_id,
+        return build_graph_response(
+            versioned_view.published_definition.steps,
+            versioned_view.step_results,
         )
-        definition_steps = parse_published_definition(version.definition_json).steps
-        nodes, edges = build_graph_from_steps(definition_steps)
-        step_results = await flow_run_service.list_step_results(
-            run_id=run.id,
-            flow_id=id,
-        )
-        nodes = enrich_nodes_with_run_results(
-            nodes,
-            [item.model_dump(mode="json") for item in step_results],
-        )
-        return GraphResponse.model_validate({"nodes": nodes, "edges": edges})
 
+    flow_service = container.flow_service()
     flow = await flow_service.get_flow(id)
     if (
         FlowPrincipal.from_user(container.user()).is_service_key
@@ -235,12 +191,11 @@ async def get_flow_graph(
     ):
         raise NotFoundException("Flow not found.")
     live_steps = [step.model_dump(mode="json") for step in flow.steps]
-    nodes, edges = build_graph_from_steps(live_steps)
-    return GraphResponse.model_validate({"nodes": nodes, "edges": edges})
+    return build_graph_response(live_steps)
 
 
 @router.post(
-    "/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+    FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
     response_model=SignedURLResponse,
     status_code=status.HTTP_200_OK,
     operation_id="generate_flow_run_artifact_signed_url",
@@ -258,13 +213,13 @@ async def get_flow_graph(
             description="Flow, run, or artifact not found.",
             message="Artifact not found for this run.",
             intric_error_code=ErrorCodes.NOT_FOUND,
-            code="flow_run_artifact_not_found",
+            code=FlowApiErrorCode.RUN_ARTIFACT_NOT_FOUND,
         ),
         410: error_response(
             description="Artifact content was purged by retention policy.",
             message="Artifact content has been purged by retention policy.",
             intric_error_code=ErrorCodes.RESOURCE_GONE,
-            code="flow_run_artifact_content_unavailable",
+            code=FlowApiErrorCode.RUN_ARTIFACT_CONTENT_UNAVAILABLE,
         ),
     },
 )
@@ -285,11 +240,11 @@ async def generate_flow_run_artifact_signed_url(
     signed_url_req: SignedURLRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     evidence_service = container.flow_run_evidence_service()
@@ -302,15 +257,12 @@ async def generate_flow_run_artifact_signed_url(
         file_id=file_id,
     )
 
-    expires_at = int(time.time()) + signed_url_req.expires_in
-    token = generate_signed_token(
+    signed_url = build_signed_download_response(
+        base_url=str(request.base_url),
         file_id=file_id,
-        expires_at=expires_at,
-        content_disposition=signed_url_req.content_disposition,
         tenant_id=file.tenant_id,
+        signed_url_request=signed_url_req,
     )
-    base_url = str(request.base_url).rstrip("/")
-    url = f"{base_url}/api/v1/files/{file_id}/download/?token={token}"
 
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -334,4 +286,7 @@ async def generate_flow_run_artifact_signed_url(
         ),
     )
 
-    return SignedURLResponse(url=url, expires_at=expires_at)
+    return signed_url
+
+
+__all__ = ["router"]

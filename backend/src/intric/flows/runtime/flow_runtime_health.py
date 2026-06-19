@@ -25,11 +25,11 @@ from intric.flows.application.flow_run_recovery_policy import (
     flow_stale_running_unhealthy_after_seconds,
 )
 from intric.flows.enums import (
+    ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
+    OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
-    TERMINAL_FLOW_RUN_STATUSES,
+    TERMINAL_FLOW_RUN_STATUS_VALUES,
     FlowRunStatus,
-    FlowStepAttemptStatus,
-    FlowStepResultStatus,
 )
 from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_UNHEALTHY_AFTER_SECONDS,
@@ -432,7 +432,6 @@ async def _load_terminal_runs_with_open_attempts_summary(
     session: AsyncSession,
     updated_after: datetime,
 ) -> _RunSummary:
-    terminal_statuses = tuple(status.value for status in TERMINAL_FLOW_RUN_STATUSES)
     count, oldest_updated_at = (
         await session.execute(
             sa.select(
@@ -441,16 +440,9 @@ async def _load_terminal_runs_with_open_attempts_summary(
             )
             .select_from(FlowRuns)
             .join(FlowStepAttempts, FlowStepAttempts.flow_run_id == FlowRuns.id)
-            .where(FlowRuns.status.in_(terminal_statuses))
+            .where(FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES))
             .where(FlowRuns.updated_at >= updated_after)
-            .where(
-                FlowStepAttempts.status.in_(
-                    (
-                        FlowStepAttemptStatus.STARTED.value,
-                        FlowStepAttemptStatus.RETRIED.value,
-                    )
-                )
-            )
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
         )
     ).one()
     return _RunSummary(
@@ -497,7 +489,6 @@ async def _load_terminal_runs_with_active_step_results_summary(
     session: AsyncSession,
     updated_after: datetime,
 ) -> _RunSummary:
-    terminal_statuses = tuple(status.value for status in TERMINAL_FLOW_RUN_STATUSES)
     count, oldest_updated_at = (
         await session.execute(
             sa.select(
@@ -506,16 +497,9 @@ async def _load_terminal_runs_with_active_step_results_summary(
             )
             .select_from(FlowRuns)
             .join(FlowStepResults, FlowStepResults.flow_run_id == FlowRuns.id)
-            .where(FlowRuns.status.in_(terminal_statuses))
+            .where(FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES))
             .where(FlowRuns.updated_at >= updated_after)
-            .where(
-                FlowStepResults.status.in_(
-                    (
-                        FlowStepResultStatus.PENDING.value,
-                        FlowStepResultStatus.RUNNING.value,
-                    )
-                )
-            )
+            .where(FlowStepResults.status.in_(ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES))
         )
     ).one()
     return _RunSummary(

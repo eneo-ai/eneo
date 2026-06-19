@@ -10,12 +10,14 @@ from intric.authentication.principal_types import PrincipalType
 from intric.flows.application.flow_run_lifecycle_events import (
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
     FLOW_RUN_LIFECYCLE_EVENT_SCHEMA_VERSION,
+    FLOW_RUN_LIFECYCLE_LOG_MESSAGE,
     FLOW_RUN_TERMINALIZATION_OPERATION,
     FlowRunTerminalizationOutcome,
     emit_flow_run_terminalization_event,
 )
 from intric.flows.domain.flow import FlowRun, FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import FlowRunError
 
 LIFECYCLE_LOGGER = "intric.flows.application.flow_run_lifecycle_events"
@@ -38,7 +40,7 @@ def _run() -> FlowRun:
         output_payload_json=None,
         error=FlowRunError.from_source(
             FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-            code="flow_worker_stalled",
+            code=FlowApiErrorCode.RUN_WORKER_STALLED,
             message="flow_worker_stalled: stale run reconciled.",
         ),
         job_id=None,
@@ -75,7 +77,7 @@ def test_emit_flow_run_terminalization_event_uses_stable_schema(
     records = _lifecycle_records(caplog)
     assert len(records) == 1
     record = records[0]
-    assert record.message == "flow_run_lifecycle_event"
+    assert record.message == FLOW_RUN_LIFECYCLE_LOG_MESSAGE
     assert getattr(record, "schema_version") == FLOW_RUN_LIFECYCLE_EVENT_SCHEMA_VERSION
     assert getattr(record, "operation") == FLOW_RUN_TERMINALIZATION_OPERATION
     assert getattr(record, "outcome") == "transitioned"

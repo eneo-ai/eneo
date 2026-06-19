@@ -25,6 +25,9 @@ class FlowInputLimits:
     audio_max_files_per_run: int | None = DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
+FLOW_INPUT_LIMIT_KEYS = frozenset(FlowInputLimits.__dataclass_fields__)
+
+
 @dataclass(frozen=True)
 class FlowRuntimeUploadPolicy:
     min_timeout_seconds: int = 120
@@ -69,7 +72,6 @@ def _parse_limit(value: Any, field_name: str) -> int:
 
 
 def _parse_optional_file_count(value: Any, field_name: str, max_bound: int) -> int:
-    """Parse an optional file count value. Returns validated int or raises BadRequestException."""
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(f"{field_name} must be an integer.")
     if value < 1 or value > max_bound:
@@ -95,6 +97,13 @@ def validate_flow_input_limits_object(input_limits: Any) -> dict[str, Any]:
         raise BadRequestException("flow_settings.input_limits must be an object")
 
     input_limits_dict = cast(dict[str, Any], input_limits)
+    unknown_fields = set(input_limits_dict) - FLOW_INPUT_LIMIT_KEYS
+    if unknown_fields:
+        unknown = ", ".join(sorted(unknown_fields))
+        raise BadRequestException(
+            f"flow_settings.input_limits contains unknown fields: {unknown}"
+        )
+
     for key in ("file_max_size_bytes", "audio_max_size_bytes"):
         if key not in input_limits_dict:
             continue

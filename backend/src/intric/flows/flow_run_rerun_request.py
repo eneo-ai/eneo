@@ -4,15 +4,13 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypeAlias, cast
+from typing import TypeGuard, cast
 from uuid import UUID
 
 from intric.authentication.principal_types import PrincipalType
+from intric.json_types import JsonObject, JsonValue
 
-JsonPrimitive: TypeAlias = str | int | float | bool | None
-JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
-
-RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION = 2
+RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +31,7 @@ class FlowRunRerunRequestFingerprintInput:
 def build_rerun_request_fingerprint(
     request: FlowRunRerunRequestFingerprintInput,
 ) -> str:
-    payload: dict[str, JsonValue] = {
+    payload: JsonObject = {
         "request_fingerprint_algorithm_version": (
             RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION
         ),
@@ -72,27 +70,37 @@ def build_rerun_request_fingerprint(
 
 def _normalize_step_inputs(
     step_inputs: Mapping[UUID, Sequence[UUID]] | None,
-) -> dict[str, JsonValue]:
+) -> JsonObject:
     if step_inputs is None:
         return {}
-    normalized: dict[str, JsonValue] = {}
+    normalized: JsonObject = {}
     for step_id, file_ids in sorted(
         step_inputs.items(),
         key=lambda item: str(item[0]),
     ):
         normalized_file_ids: list[JsonValue] = []
-        for file_id in sorted(str(file_id) for file_id in file_ids):
-            normalized_file_ids.append(file_id)
+        # Step maps are unordered; each step's file sequence preserves runtime ordinal.
+        for file_id in file_ids:
+            normalized_file_ids.append(str(file_id))
         normalized[str(step_id)] = {
             "file_ids": normalized_file_ids,
         }
     return normalized
 
 
-def _normalize_json_object(value: Mapping[str, object] | None) -> JsonValue:
+def _normalize_json_object(value: Mapping[str, object] | None) -> JsonObject | None:
     if value is None:
         return None
-    return _normalize_json_value(value)
+    return _normalize_json_mapping(value)
+
+
+def _normalize_json_mapping(
+    value: Mapping[str, object] | Mapping[object, object],
+) -> JsonObject:
+    normalized: JsonObject = {}
+    for item_key, item_value in sorted(value.items(), key=lambda item: str(item[0])):
+        normalized[str(item_key)] = _normalize_json_value(item_value)
+    return normalized
 
 
 def _normalize_json_value(value: object) -> JsonValue:
@@ -100,16 +108,14 @@ def _normalize_json_value(value: object) -> JsonValue:
         return value
     if isinstance(value, UUID):
         return str(value)
-    if isinstance(value, Mapping):
-        normalized: dict[str, JsonValue] = {}
-        for item_key, item_value in sorted(
-            cast(Mapping[object, object], value).items(),
-            key=lambda item: str(item[0]),
-        ):
-            normalized[str(item_key)] = _normalize_json_value(item_value)
-        return normalized
+    if _is_json_mapping(value):
+        return _normalize_json_mapping(value)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_normalize_json_value(item) for item in cast(Sequence[object], value)]
     raise TypeError(
         f"Unsupported rerun request fingerprint value: {type(value).__name__}"
     )
+
+
+def _is_json_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)

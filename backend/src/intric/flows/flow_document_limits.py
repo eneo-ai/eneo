@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any, cast
+from typing import cast
 
 from intric.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
@@ -13,6 +14,8 @@ from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+_DOCUMENT_RENDER_LIMITS_KEY = "document_render_limits"
 
 
 # Tenant admins may tune effective limits at runtime, but these hard ceilings
@@ -35,20 +38,27 @@ FLOW_DOCUMENT_RENDER_HARD_LIMITS = DocumentRenderLimits(
 _FIELD_NAMES = tuple(asdict(DEFAULT_DOCUMENT_RENDER_LIMITS))
 
 
-def _extract_document_render_limits(
-    tenant_flow_settings: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if not isinstance(tenant_flow_settings, dict):
+def _object_mapping(value: object | None) -> Mapping[object, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[object, object], value)
+
+
+def _extract_document_render_limit_values(
+    tenant_flow_settings: object | None,
+) -> dict[str, object]:
+    settings = _object_mapping(tenant_flow_settings)
+    if settings is None:
         return {}
 
-    limits = tenant_flow_settings.get("document_render_limits")
-    if not isinstance(limits, dict):
+    limits = _object_mapping(settings.get(_DOCUMENT_RENDER_LIMITS_KEY))
+    if limits is None:
         return {}
 
-    return dict(cast(dict[str, Any], limits))
+    return {key: value for key, value in limits.items() if isinstance(key, str)}
 
 
-def _parse_limit(value: Any, field_name: str) -> int:
+def _parse_limit(value: object, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(f"{field_name} must be an integer.")
 
@@ -64,25 +74,30 @@ def _parse_limit(value: Any, field_name: str) -> int:
     return value
 
 
-def validate_flow_document_render_limits_object(limits: Any) -> dict[str, Any]:
-    if not isinstance(limits, dict):
+def validate_flow_document_render_limits_object(
+    limits: object,
+) -> dict[str, int]:
+    limits_mapping = _object_mapping(limits)
+    if limits_mapping is None:
         raise BadRequestException(
             "flow_settings.document_render_limits must be an object"
         )
 
-    limits_dict = cast(dict[str, Any], limits)
-    for key, value in limits_dict.items():
+    parsed: dict[str, int] = {}
+    for key, value in limits_mapping.items():
+        if not isinstance(key, str):
+            raise BadRequestException("Document render limit names must be strings.")
         if key not in _FIELD_NAMES:
             raise BadRequestException(f"Unsupported document render limit: {key}.")
-        _parse_limit(value, key)
+        parsed[key] = _parse_limit(value, key)
 
-    return limits_dict
+    return parsed
 
 
 def resolve_flow_document_render_limits(
-    tenant_flow_settings: dict[str, Any] | None,
+    tenant_flow_settings: object | None,
 ) -> DocumentRenderLimits:
-    overrides = _extract_document_render_limits(tenant_flow_settings)
+    overrides = _extract_document_render_limit_values(tenant_flow_settings)
     values = asdict(DEFAULT_DOCUMENT_RENDER_LIMITS)
 
     for key in _FIELD_NAMES:
@@ -101,15 +116,18 @@ def resolve_flow_document_render_limits(
 
 
 def apply_flow_document_render_limits_patch(
-    current_flow_settings: dict[str, Any] | None,
+    current_flow_settings: Mapping[str, object] | None,
     *,
     remove_keys: set[str] | None = None,
     **updates: int,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     result = (
-        dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
+        dict(current_flow_settings)
+        if isinstance(current_flow_settings, Mapping)
+        else {}
     )
-    next_limits = _extract_document_render_limits(result)
+    next_limit_values = _extract_document_render_limit_values(result)
+    next_limits: dict[str, object] = dict(next_limit_values)
 
     for key, value in updates.items():
         if key not in _FIELD_NAMES:
@@ -122,7 +140,7 @@ def apply_flow_document_render_limits_patch(
         next_limits.pop(key, None)
 
     if next_limits:
-        result["document_render_limits"] = next_limits
+        result[_DOCUMENT_RENDER_LIMITS_KEY] = next_limits
     else:
-        result.pop("document_render_limits", None)
+        result.pop(_DOCUMENT_RENDER_LIMITS_KEY, None)
     return result

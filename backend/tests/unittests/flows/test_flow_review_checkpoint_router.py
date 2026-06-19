@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 
 from intric.authentication.auth_dependencies import ScopeFilter
-from intric.flows.api import flow_router_common as router_common_module
+from intric.flows.api import flow_access_context as flow_access_context_module
 from intric.flows.api import flow_run_execution_router as router_module
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
@@ -19,16 +19,16 @@ from intric.flows.api.flow_models import (
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
 )
-from intric.flows.api.flow_router_common import (
-    dispatch_flow_run_recoverably_after_commit,
-)
 from intric.flows.api.flow_run_execution_router import (
     approve_flow_run_review_checkpoint,
     edit_flow_run_review_checkpoint,
     reject_flow_run_review_checkpoint,
     resume_flow_run_review_checkpoint,
 )
-from intric.flows.flow import FlowRunStatus
+from intric.flows.application.flow_dispatch import (
+    dispatch_flow_run_recoverably_after_commit,
+)
+from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
 from tests.unittests.flows.test_flow_router import (
     _disable_flow_scope_filter,
@@ -43,8 +43,8 @@ from tests.unittests.flows.test_flow_router import (
 
 
 def _record_review_checkpoint_public(monkeypatch, events: list[str]):
-    async def _to_review_checkpoint_public(*, container, checkpoint):
-        events.append("to_review_checkpoint_public")
+    async def _present_review_checkpoint(*, container, checkpoint):
+        events.append("present_review_checkpoint")
         checkpoint_for_public = checkpoint.model_copy(
             update={
                 "requester_user_id": uuid4(),
@@ -55,8 +55,8 @@ def _record_review_checkpoint_public(monkeypatch, events: list[str]):
 
     monkeypatch.setattr(
         router_module,
-        "_to_review_checkpoint_public",
-        _to_review_checkpoint_public,
+        "_present_review_checkpoint",
+        _present_review_checkpoint,
     )
 
 
@@ -104,7 +104,7 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     _enable_explicit_transaction(container, events)
     _record_review_checkpoint_public(monkeypatch, events)
     monkeypatch.setattr(
-        router_common_module,
+        flow_access_context_module,
         "get_scope_filter",
         lambda _request: ScopeFilter(space_id=None),
     )
@@ -128,7 +128,7 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     assert events == [
         "transaction_enter",
         "build_dispatch_request",
-        "to_review_checkpoint_public",
+        "present_review_checkpoint",
         "transaction_exit",
         "add_task",
     ]
@@ -174,7 +174,7 @@ async def test_edit_review_checkpoint_builds_response_inside_transaction(monkeyp
     assert ctx.events == [
         "transaction_enter",
         "edit_review_checkpoint",
-        "to_review_checkpoint_public",
+        "present_review_checkpoint",
         "transaction_exit",
     ]
     ctx.review_service.edit_review_checkpoint.assert_awaited_once_with(
@@ -187,7 +187,9 @@ async def test_edit_review_checkpoint_builds_response_inside_transaction(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_approve_review_checkpoint_builds_response_inside_transaction(monkeypatch):
+async def test_approve_review_checkpoint_builds_response_inside_transaction(
+    monkeypatch,
+):
     container = MagicMock()
     ctx = _enable_review_checkpoint_route_context(container)
     _record_review_checkpoint_public(monkeypatch, ctx.events)
@@ -216,7 +218,7 @@ async def test_approve_review_checkpoint_builds_response_inside_transaction(monk
     assert ctx.events == [
         "transaction_enter",
         "approve_review_checkpoint",
-        "to_review_checkpoint_public",
+        "present_review_checkpoint",
         "transaction_exit",
     ]
     ctx.review_service.approve_review_checkpoint.assert_awaited_once_with(
@@ -256,7 +258,7 @@ async def test_reject_review_checkpoint_builds_response_inside_transaction(monke
     assert ctx.events == [
         "transaction_enter",
         "reject_review_checkpoint",
-        "to_review_checkpoint_public",
+        "present_review_checkpoint",
         "transaction_exit",
     ]
     ctx.review_service.reject_review_checkpoint.assert_awaited_once_with(

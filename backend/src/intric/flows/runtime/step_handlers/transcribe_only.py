@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from intric.flows.domain.flow import FlowRun
 from intric.flows.enums import FlowOutputMode
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.runtime.models import (
     RunExecutionState,
@@ -29,7 +30,7 @@ class TranscribeOnlyStepHandler:
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> StepExecutionResult:
         prepared_step = await self.prepare_assistant_step(
             step=step,
@@ -50,7 +51,7 @@ class TranscribeOnlyStepHandler:
             raise deps.attach_typed_failure_context(
                 TypedIOValidationException(
                     mode_error,
-                    code="typed_io_invalid_output_mode_combination",
+                    code=FlowApiErrorCode.TYPED_IO_INVALID_OUTPUT_MODE_COMBINATION.value,
                 ),
                 input_payload_for_result=prepared.input_payload_for_result,
                 effective_prompt=prepared.effective_prompt,
@@ -81,7 +82,6 @@ class TranscribeOnlyStepHandler:
                 source_text=prepared.step_input.source_text,
                 input_source=prepared.step_input.input_source,
                 used_question_binding=prepared.step_input.used_question_binding,
-                legacy_prompt_binding_used=prepared.step_input.legacy_prompt_binding_used,
                 full_text=prepared.step_input.text,
                 persisted_text=persisted_text,
                 generated_file_ids=generated_file_ids,

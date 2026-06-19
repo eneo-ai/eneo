@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import pytest
+
+from intric.flows.runtime_input import parse_runtime_input_config
+from intric.main.exceptions import BadRequestException
+
+
+def test_parse_runtime_input_config_accepts_valid_json_contract_values() -> None:
+    config = parse_runtime_input_config(
+        {
+            "runtime_input": {
+                "enabled": True,
+                "required": True,
+                "max_files": 2,
+                "input_format": "document",
+            }
+        }
+    )
+
+    assert config.enabled is True
+    assert config.required is True
+    assert config.max_files == 2
+    assert config.input_format == "document"
+
+
+@pytest.mark.parametrize(
+    ("runtime_input", "expected_enabled"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+def test_parse_runtime_input_config_supports_literal_bool_shortcuts(
+    runtime_input: bool,
+    expected_enabled: bool,
+) -> None:
+    config = parse_runtime_input_config({"runtime_input": runtime_input})
+
+    assert config.enabled is expected_enabled
+
+
+@pytest.mark.parametrize(
+    "runtime_input",
+    [
+        {"enabled": "true"},
+        {"required": "false"},
+        {"max_files": "2"},
+        {"max_files": True},
+        0,
+    ],
+)
+def test_parse_runtime_input_config_rejects_coerced_json_contract_values(
+    runtime_input: object,
+) -> None:
+    with pytest.raises(BadRequestException, match="runtime_input"):
+        parse_runtime_input_config({"runtime_input": runtime_input})

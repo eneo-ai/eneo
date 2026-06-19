@@ -395,6 +395,11 @@ export class IntricError extends Error {
     return message;
   }
 
+  /** @returns {string | undefined} */
+  getTraceId() {
+    return this.headers?.get("X-Trace-Id") ?? this.headers?.get("X-Correlation-ID") ?? undefined;
+  }
+
   /**
    * Rethrow an error as an IntricError
    * @param {unknown} error

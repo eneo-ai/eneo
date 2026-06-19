@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import Protocol
 
 from intric.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
     CustomHeader,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
     HttpAuthNone,
     HttpAuthoredConfig,
+    SecretValue,
+    is_secret_sentinel,
 )
-
-SECRET_SENTINEL: dict[str, str] = {"$secret": "stored"}
 
 
 class SupportsEncryption(Protocol):
@@ -19,12 +20,6 @@ class SupportsEncryption(Protocol):
     def is_encrypted(self, value: str) -> bool: ...
     def encrypt(self, plaintext: str) -> str: ...
     def decrypt(self, ciphertext: str) -> str: ...
-
-
-def _is_sentinel(value: Any) -> bool:
-    if not isinstance(value, dict):
-        return False
-    return cast(dict[str, Any], value).get("$secret") == "stored"
 
 
 def encrypt_authored_config(
@@ -35,9 +30,9 @@ def encrypt_authored_config(
     if encryption_service is None or not encryption_service.is_active():
         return config
 
-    def _encrypt(value: str | dict[str, Any]) -> str:
+    def _encrypt(value: SecretValue) -> SecretValue:
         if not isinstance(value, str) or not value:
-            return value  # type: ignore[return-value]
+            return value
         if encryption_service.is_encrypted(value):
             return value
         return encryption_service.encrypt(value)
@@ -69,9 +64,9 @@ def decrypt_authored_config(
     if encryption_service is None:
         return config
 
-    def _decrypt(value: str | dict[str, Any]) -> str:
+    def _decrypt(value: SecretValue) -> SecretValue:
         if not isinstance(value, str):
-            return value  # type: ignore[return-value]
+            return value
         if not value:
             return value
         if encryption_service.is_encrypted(value):
@@ -102,11 +97,11 @@ def redact_authored_config(config: HttpAuthoredConfig) -> HttpAuthoredConfig:
     auth = config.auth
     match auth:
         case HttpAuthBearer():
-            auth = auth.model_copy(update={"token": SECRET_SENTINEL})  # type: ignore[arg-type]
+            auth = auth.model_copy(update={"token": SECRET_SENTINEL})
         case HttpAuthApiKey():
-            auth = auth.model_copy(update={"key": SECRET_SENTINEL})  # type: ignore[arg-type]
+            auth = auth.model_copy(update={"key": SECRET_SENTINEL})
         case HttpAuthBasicAuth():
-            auth = auth.model_copy(update={"password": SECRET_SENTINEL})  # type: ignore[arg-type]
+            auth = auth.model_copy(update={"password": SECRET_SENTINEL})
         case HttpAuthNone():
             pass
 
@@ -129,22 +124,22 @@ def merge_secrets_on_update(
     """
 
     def _merge_field(
-        incoming_value: str | dict[str, Any],
-        stored_value: str | dict[str, Any],
-    ) -> str | dict[str, Any]:
-        if _is_sentinel(incoming_value):
+        incoming_value: SecretValue,
+        stored_value: SecretValue,
+    ) -> SecretValue:
+        if is_secret_sentinel(incoming_value):
             return stored_value
         return incoming_value
 
     auth = incoming.auth
     match incoming.auth, stored.auth:
         case HttpAuthBearer() as inc, HttpAuthBearer() as sto:
-            auth = inc.model_copy(update={"token": _merge_field(inc.token, sto.token)})  # type: ignore[arg-type]
+            auth = inc.model_copy(update={"token": _merge_field(inc.token, sto.token)})
         case HttpAuthApiKey() as inc, HttpAuthApiKey() as sto:
-            auth = inc.model_copy(update={"key": _merge_field(inc.key, sto.key)})  # type: ignore[arg-type]
+            auth = inc.model_copy(update={"key": _merge_field(inc.key, sto.key)})
         case HttpAuthBasicAuth() as inc, HttpAuthBasicAuth() as sto:
             auth = inc.model_copy(
-                update={"password": _merge_field(inc.password, sto.password)}  # type: ignore[arg-type]
+                update={"password": _merge_field(inc.password, sto.password)}
             )
         case _:
             pass
@@ -152,7 +147,7 @@ def merge_secrets_on_update(
     stored_headers_by_name = {h.name: h for h in stored.custom_headers}
     merged_headers: list[CustomHeader] = []
     for h in incoming.custom_headers:
-        if h.secret and _is_sentinel(h.value):
+        if h.secret and is_secret_sentinel(h.value):
             stored_h = stored_headers_by_name.get(h.name)
             if stored_h is not None:
                 merged_headers.append(h.model_copy(update={"value": stored_h.value}))

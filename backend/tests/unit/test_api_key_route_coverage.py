@@ -17,6 +17,7 @@ from intric.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    FLOW_METHOD_PERMISSION_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
 )
 from intric.main.config import get_settings
@@ -406,6 +407,42 @@ class TestReadOverrideWiring:
         overrides = self._get_read_overrides_from_route(route)
         assert overrides is not None, "/files missing read overrides"
         assert "generate_signed_url" in overrides
+
+
+class TestMethodPermissionOverrideWiring:
+    """Method-permission overrides must stay explicit and narrowly scoped."""
+
+    def test_only_runtime_file_delete_has_flow_write_delete_override(self):
+        override_routes = [
+            info
+            for info in walk_routes()
+            if info.resource_perm_config is not None
+            and info.resource_perm_config.method_permission_overrides is not None
+        ]
+
+        assert override_routes, "No method permission override routes were found."
+        assert all(
+            info.resource_perm_config is not None
+            and info.resource_perm_config.method_permission_overrides
+            == FLOW_METHOD_PERMISSION_OVERRIDES
+            for info in override_routes
+        )
+        assert all(info.path.startswith("/flows") for info in override_routes)
+
+        overridden_names = set(FLOW_METHOD_PERMISSION_OVERRIDES)
+        matched_paths = {
+            (info.method, info.path, info.endpoint_name)
+            for info in override_routes
+            if info.endpoint_name in overridden_names
+        }
+
+        assert matched_paths == {
+            (
+                "DELETE",
+                "/flows/{id}/runtime-files/{file_id}/",
+                "delete_flow_runtime_file",
+            )
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -916,6 +953,7 @@ RESOURCE_PERM_VOCABULARY: frozenset[str] = frozenset(
         "knowledge",
         "conversations",
         "files",
+        "flows",
         "jobs",
         "prompts",
     }
@@ -933,6 +971,7 @@ SCOPE_CHECK_VOCABULARY: frozenset[str] = frozenset(
         "conversation",
         "crawl_run",
         "file",
+        "flow",
         "group_chat",
         "info_blob",
         "prompt",

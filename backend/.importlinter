@@ -19,50 +19,55 @@ source_modules =
     intric.flows.domain
     intric.flows.enums
     intric.flows.execution_backend
-    intric.flows.flow
     intric.flows.flow_access_policy
+    intric.flows.flow_ai_builder_budget_settings
+    intric.flows.flow_api_error_code
+    intric.flows.flow_api_exceptions
     intric.flows.flow_authoring_name
     intric.flows.flow_authoring_runtime_input
     intric.flows.flow_authoring_spec
     intric.flows.flow_authoring_transcription
     intric.flows.flow_authoring_variable_rewriting
-    intric.flows.flow_ai_builder_budget_settings
     intric.flows.flow_capability_manifest
     intric.flows.flow_care_data_policy
     intric.flows.flow_document_limits
+    intric.flows.flow_error_taxonomy
     intric.flows.flow_evidence_policy
     intric.flows.flow_factory
-    intric.flows.flow_file_upload_service
     intric.flows.flow_input_limits
     intric.flows.flow_metadata
-    intric.flows.flow_permissions
-    intric.flows.flow_review_policy
-    intric.flows.flow_review_expiry_policy
     intric.flows.flow_resource_bindings
     intric.flows.flow_retention_policy
     intric.flows.flow_retention_tombstone
+    intric.flows.flow_review_expiry_policy
+    intric.flows.flow_review_policy
     intric.flows.flow_run_contract_models
     intric.flows.flow_run_contract_service
     intric.flows.flow_run_dispatch_request
     intric.flows.flow_run_error
     intric.flows.flow_run_evidence
     intric.flows.flow_run_evidence_bundle
-    intric.flows.flow_run_evidence_export_summary
     intric.flows.flow_run_evidence_export_manifest
+    intric.flows.flow_run_evidence_export_summary
     intric.flows.flow_run_export_json
+    intric.flows.flow_run_input_envelope
     intric.flows.flow_run_input_payload
     intric.flows.flow_run_payload_validation
     intric.flows.flow_run_provenance
     intric.flows.flow_run_redaction
     intric.flows.flow_run_rerun_graph
     intric.flows.flow_run_rerun_request
+    intric.flows.flow_run_step_input_file
     intric.flows.flow_run_step_inputs
     intric.flows.flow_run_step_result_file
+    intric.flows.flow_runtime_file_integrity
+    intric.flows.flow_runtime_file_service
     intric.flows.flow_runtime_policy
+    intric.flows.flow_runtime_upload_repo
     intric.flows.flow_security_classification
+    intric.flows.flow_settings
     intric.flows.flow_template_asset_repo
     intric.flows.flow_template_asset_service
-    intric.flows.flow_template_validation
     intric.flows.flow_validators
     intric.flows.flow_validators_form
     intric.flows.flow_validators_http
@@ -75,11 +80,11 @@ source_modules =
     intric.flows.output_processing
     intric.flows.principal
     intric.flows.published_definition
+    intric.flows.published_runtime
     intric.flows.runtime
     intric.flows.runtime_input
     intric.flows.source_display
     intric.flows.step_chain_rules
-    intric.flows.step_config_secrets
     intric.flows.step_lineage
     intric.flows.template_reference_analyzer
     intric.flows.transcription_config

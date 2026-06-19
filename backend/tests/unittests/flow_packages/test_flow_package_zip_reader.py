@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import stat
+import warnings
 import zipfile
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -22,7 +23,6 @@ from intric.flow_packages.domain.flow_package_errors import (
 )
 from intric.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifest,
-    JsonObject,
 )
 from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from intric.flow_packages.domain.flow_package_requirements import (
@@ -37,6 +37,7 @@ from intric.flows.flow_authoring_spec import (
     StepSpec,
 )
 from intric.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
+from intric.json_types import JsonObject
 
 
 def test_valid_package_parses_to_typed_envelope() -> None:
@@ -418,5 +419,12 @@ def _zip_infos(entries: list[tuple[zipfile.ZipInfo, bytes]]) -> bytes:
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as package:
         for info, payload in entries:
             info.compress_type = zipfile.ZIP_DEFLATED
-            package.writestr(info, payload)
+            with warnings.catch_warnings():
+                # Malicious fixtures need duplicate members; reader rejection is asserted.
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"Duplicate name: .*",
+                    category=UserWarning,
+                )
+                package.writestr(info, payload)
     return buffer.getvalue()

@@ -6,15 +6,29 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from intric.flows.http_transport.authored_config import HttpAuthoredConfig
-from intric.flows.http_transport.compiler import compile_http_config
-from intric.flows.http_transport.errors import HttpTransportError
+from intric.flows.http_transport.authored_config import (
+    HttpAuthoredConfig,
+    HttpMethod,
+    contains_secret_sentinel,
+)
+from intric.flows.http_transport.compiler import (
+    EffectiveHttpRequest,
+    compile_http_config,
+)
+from intric.flows.http_transport.errors import (
+    HttpTemplateInterpolationError,
+    HttpTransportError,
+)
+from intric.flows.http_transport.request_preview import HttpRequestPreview
 from intric.flows.http_transport.secret_codec import (
     SupportsEncryption,
     decrypt_authored_config,
     merge_secrets_on_update,
 )
-from intric.flows.http_transport.validator import validate_authored_config
+from intric.flows.http_transport.validator import (
+    validate_authored_config,
+    validate_http_url,
+)
 
 
 @dataclass(frozen=True)
@@ -23,8 +37,8 @@ class HttpTestResult:
     status_code: int | None = None
     duration_ms: float = 0.0
     response_preview: str | None = None
-    request_preview: dict[str, Any] | None = None
-    error_code: str | None = None
+    request_preview: HttpRequestPreview | None = None
+    error_code: HttpTransportError | None = None
     error_message: str | None = None
 
 
@@ -32,44 +46,64 @@ async def execute_http_test(
     *,
     config: HttpAuthoredConfig,
     direction: str,
-    method: str,
+    method: HttpMethod,
     test_variables: dict[str, Any] | None = None,
     stored_config: HttpAuthoredConfig | None = None,
     encryption_service: SupportsEncryption | None = None,
+    interpolate: Callable[[str, dict[str, Any]], str],
     send_http_request: Callable[..., Awaitable[httpx.Response]],
     max_timeout: float = 120.0,
 ) -> HttpTestResult:
     """Execute a draft-safe HTTP test without persisting authored config."""
-
-    errors = validate_authored_config(
-        config, direction=direction, method=method, max_timeout=max_timeout
-    )
-    if errors:
-        return HttpTestResult(
-            success=False,
-            error_code=errors[0].value,
-            error_message=_error_message(errors[0]),
-        )
 
     merged = config
     if stored_config is not None:
         merged = merge_secrets_on_update(config, stored_config)
 
     decrypted = decrypt_authored_config(merged, encryption_service)
+    if contains_secret_sentinel(decrypted.model_dump(mode="json")):
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.UNRESOLVED_STORED_SECRET,
+            error_message=_error_message(HttpTransportError.UNRESOLVED_STORED_SECRET),
+        )
 
-    effective = compile_http_config(
-        decrypted,
-        direction=direction,
-        method=method,
-        variables=test_variables,
+    errors = validate_authored_config(
+        decrypted, direction=direction, method=method, max_timeout=max_timeout
     )
+    if errors:
+        return HttpTestResult(
+            success=False,
+            error_code=errors[0],
+            error_message=_error_message(errors[0]),
+        )
 
-    request_preview = {
-        "method": effective.method,
-        "url": effective.url,
-        "headers": _mask_sensitive_headers(effective.headers),
-        "body_preview": _body_preview(effective),
-    }
+    try:
+        effective = compile_http_config(
+            decrypted,
+            direction=direction,
+            method=method,
+            variables=test_variables,
+            interpolate=interpolate,
+        )
+    except HttpTemplateInterpolationError as exc:
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.VARIABLE_RESOLUTION_FAILED,
+            error_message=str(exc)
+            or _error_message(HttpTransportError.VARIABLE_RESOLUTION_FAILED),
+            request_preview=None,
+        )
+
+    request_preview = _request_preview(effective)
+    url_error = validate_http_url(effective.url)
+    if url_error is not None:
+        return HttpTestResult(
+            success=False,
+            error_code=url_error,
+            error_message=_error_message(url_error),
+            request_preview=request_preview,
+        )
 
     start = time.monotonic()
     try:
@@ -86,7 +120,7 @@ async def execute_http_test(
         return HttpTestResult(
             success=False,
             duration_ms=duration_ms,
-            error_code=HttpTransportError.TIMEOUT.value,
+            error_code=HttpTransportError.TIMEOUT,
             error_message=f"Connection timed out after {config.timeout_seconds} seconds",
             request_preview=request_preview,
         )
@@ -95,7 +129,7 @@ async def execute_http_test(
         return HttpTestResult(
             success=False,
             duration_ms=duration_ms,
-            error_code=HttpTransportError.CONNECTION_REFUSED.value,
+            error_code=HttpTransportError.CONNECTION_REFUSED,
             error_message=f"Connection failed: {exc}",
             request_preview=request_preview,
         )
@@ -113,7 +147,7 @@ async def execute_http_test(
     error_code = None
     error_message = None
     if not success:
-        error_code = HttpTransportError.STATUS_ERROR.value
+        error_code = HttpTransportError.STATUS_ERROR
         error_message = f"Server responded with status {response.status_code}"
 
     return HttpTestResult(
@@ -138,7 +172,16 @@ def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
     return masked
 
 
-def _body_preview(effective: Any) -> str | None:
+def _request_preview(effective: EffectiveHttpRequest) -> HttpRequestPreview:
+    return HttpRequestPreview(
+        method=effective.method,
+        url=effective.url,
+        headers=_mask_sensitive_headers(effective.headers),
+        body_preview=_body_preview(effective),
+    )
+
+
+def _body_preview(effective: EffectiveHttpRequest) -> str | None:
     if effective.json_body is not None:
         import json
 
@@ -152,11 +195,12 @@ def _error_message(error: HttpTransportError) -> str:
     messages = {
         HttpTransportError.MISSING_URL: "URL required for HTTP delivery",
         HttpTransportError.INVALID_URL: "Invalid URL format",
+        HttpTransportError.VARIABLE_RESOLUTION_FAILED: "Variable resolution failed",
+        HttpTransportError.UNRESOLVED_STORED_SECRET: "Saved secret is unavailable; re-enter the secret and save the flow",
         HttpTransportError.MISSING_AUTH_CREDENTIALS: "Authentication credentials missing",
         HttpTransportError.INVALID_BODY_JSON: "Invalid JSON in request template",
         HttpTransportError.BODY_NOT_ALLOWED_FOR_GET: "GET requests cannot have a body",
         HttpTransportError.TIMEOUT_OUT_OF_RANGE: "Timeout must be between 1 and 120 seconds",
-        HttpTransportError.SSRF_BLOCKED: "Private network addresses not allowed",
         HttpTransportError.TIMEOUT: "Connection timed out",
         HttpTransportError.CONNECTION_REFUSED: "Could not connect to server",
         HttpTransportError.STATUS_ERROR: "Server responded with error",

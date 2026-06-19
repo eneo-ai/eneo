@@ -78,6 +78,7 @@ def make_api_key_with_timestamp(**overrides: Any) -> ApiKeyV2InDB:
 class ResourcePermConfig:
     resource_type: str
     read_override_endpoints: frozenset[str] | None
+    method_permission_overrides: dict[str, str] | None
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,9 @@ def walk_routes() -> list[RouteInfo]:
                     resource_perm_config = ResourcePermConfig(
                         resource_type=str(closure.get("resource_type", "")),
                         read_override_endpoints=closure.get("read_override_endpoints"),
+                        method_permission_overrides=closure.get(
+                            "method_permission_overrides"
+                        ),
                     )
             elif dep_name == "_scope_check_dep":
                 has_scope_check_dep = True

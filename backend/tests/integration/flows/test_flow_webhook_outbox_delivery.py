@@ -8,6 +8,7 @@ import httpx
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
+from sqlalchemy.exc import IntegrityError
 
 from intric.audit.domain.outcome import Outcome
 from intric.database.database import sessionmanager
@@ -15,6 +16,7 @@ from intric.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRuns,
     FlowRunWebhookDeliveries,
+    FlowStepAttempts,
     FlowStepResults,
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
@@ -27,12 +29,17 @@ from intric.flows.domain.flow import (
     FlowStep,
     FlowStepResultStatus,
 )
+from intric.flows.enums import FlowStepAttemptStatus
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
@@ -130,7 +137,6 @@ async def _create_running_webhook_run(
     await version_repo.create(
         flow_id=flow.id,
         version=1,
-        definition_checksum=f"webhook-outbox-delivery-{uuid4()}",
         definition_json=build_published_definition_json(
             flow_id=flow.id,
             name=flow.name,
@@ -180,6 +186,15 @@ async def _create_running_webhook_run(
             updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
     )
+    await run_repo.create_or_get_attempt_started(
+        run_id=run.id,
+        flow_id=flow.id,
+        tenant_id=admin_user.tenant_id,
+        step_id=step.id,
+        step_order=step.step_order,
+        attempt_no=1,
+        celery_task_id="webhook-outbox-fixture",
+    )
     pending_result = await run_repo.get_step_result(
         run_id=run.id,
         step_id=step.id,
@@ -206,6 +221,19 @@ async def _create_running_webhook_run(
         tenant_id=admin_user.tenant_id,
         attempt_no=1,
     )
+    await run_repo.finish_attempt(
+        run_id=run.id,
+        step_id=step.id,
+        attempt_no=1,
+        tenant_id=admin_user.tenant_id,
+        status=FlowStepAttemptStatus.COMPLETED,
+        requested_model="gpt-4o-mini",
+        response_model="gpt-4o-mini",
+        provider="openai",
+        finish_reason="stop",
+        num_tokens_input=1,
+        num_tokens_output=1,
+    )
     return flow, run, step
 
 
@@ -218,6 +246,24 @@ def _intent(*, run_id: UUID, step_id: UUID) -> WebhookDeliveryIntent:
         idempotency_key=f"{run_id}:{step_id}:1:webhook",
         payload=WebhookPayloadRef(
             value=f"flow_run:{run_id}:step:{step_id}:attempt:1",
+        ),
+    )
+
+
+def _intent_for_attempt(
+    *,
+    run_id: UUID,
+    step_id: UUID,
+    attempt_no: int,
+) -> WebhookDeliveryIntent:
+    return WebhookDeliveryIntent(
+        flow_run_id=run_id,
+        step_id=step_id,
+        step_order=1,
+        attempt_no=attempt_no,
+        idempotency_key=f"{run_id}:{step_id}:{attempt_no}:webhook",
+        payload=WebhookPayloadRef(
+            value=f"flow_run:{run_id}:step:{step_id}:attempt:{attempt_no}",
         ),
     )
 
@@ -252,17 +298,29 @@ def _delivery_service(
     audit_service=None,
     encryption_service=None,
 ) -> FlowRunWebhookDeliveryService:
+    flow_run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+    audit_outbox_repo = FlowRunAuditOutboxRepository(session=session)
+    review_checkpoint_repo = FlowRunReviewCheckpointRepository(
+        session=session,
+        factory=FlowFactory(),
+        audit_outbox_repo=audit_outbox_repo,
+    )
     return FlowRunWebhookDeliveryService(
         webhook_delivery_repo=webhook_repo,
         flow_repo=FlowRepository(session=session, factory=FlowFactory()),
-        flow_run_repo=FlowRunRepository(session=session, factory=FlowFactory()),
+        flow_run_repo=flow_run_repo,
         flow_version_repo=FlowVersionRepository(
             session=session,
             factory=FlowFactory(),
         ),
         flow_run_terminalizer=FlowRunTerminalizer(
-            FlowRunRepository(session=session, factory=FlowFactory()),
-            FlowRunAuditOutboxRepository(session=session),
+            flow_run_repo,
+            FlowRunRerunRepository(
+                session=flow_run_repo.session,
+                factory=flow_run_repo.factory,
+            ),
+            audit_outbox_repo,
+            review_checkpoint_repo,
         ),
         encryption_service=encryption_service or container.encryption_service(),
         audit_service=audit_service,
@@ -325,6 +383,75 @@ async def test_flow_webhook_delivery_claims_pending_rows_and_skips_stale_reconci
     assert [item.id for item in claimed] == [delivery_id]
     assert second_claim == []
     assert all(item.id != run.id for item in stale_runs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_requires_matching_step_attempt(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+
+        with pytest.raises(IntegrityError) as exc_info:
+            await webhook_repo.insert_pending_delivery(
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                intent=_intent_for_attempt(
+                    run_id=run.id, step_id=step.id, attempt_no=99
+                ),
+            )
+        assert "fk_flow_run_webhook_deliveries_step_attempt" in str(exc_info.value)
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_webhook_delivery_blocks_attempt_deletion(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        flow, run, step = await _create_running_webhook_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        webhook_repo = FlowRunWebhookDeliveryRepository(session=session)
+        await webhook_repo.insert_pending_delivery(
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            intent=_intent(run_id=run.id, step_id=step.id),
+        )
+
+        with pytest.raises(IntegrityError) as exc_info:
+            await session.execute(
+                sa.delete(FlowStepAttempts)
+                .where(FlowStepAttempts.flow_run_id == run.id)
+                .where(FlowStepAttempts.step_id == step.id)
+                .where(FlowStepAttempts.attempt_no == 1)
+                .where(FlowStepAttempts.tenant_id == admin_user.tenant_id)
+            )
+        assert "fk_flow_run_webhook_deliveries_step_attempt" in str(exc_info.value)
+        await session.rollback()
 
 
 @pytest.mark.asyncio

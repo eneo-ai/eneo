@@ -64,9 +64,14 @@ from intric.flows.flow_authoring_spec import (
 from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
 
 _LOCAL_RESOURCE_BINDING_ADAPTER = TypeAdapter(LocalResourceBinding)
+_FLOW_DRAFT_SPEC_FLOW_NAME_FIELD = "flow_name"
+_FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY = (
+    FlowDraftSpecCore.model_fields[_FLOW_DRAFT_SPEC_FLOW_NAME_FIELD].serialization_alias
+    or _FLOW_DRAFT_SPEC_FLOW_NAME_FIELD
+)
 
 
 class AIBuilderRepository:
@@ -173,16 +178,27 @@ class AIBuilderRepository:
             row = (await self.session.execute(stmt)).scalars().first()
             return _session_from_row(row) if row is not None else None
 
-    async def list_sessions_for_user(
+    async def list_sessions_with_draft_titles(
         self,
         *,
         tenant_id: UUID,
         actor_user_id: UUID,
         limit: int = 20,
-    ) -> list[BuilderSession]:
+    ) -> list[tuple[BuilderSession, str | None]]:
         async with self._transaction():
+            draft_title_label = BuilderPlans.spec_json[
+                _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY
+            ].astext.label("draft_title")
             stmt = (
-                select(BuilderSessions)
+                select(BuilderSessions, draft_title_label)
+                .outerjoin(
+                    BuilderPlans,
+                    sa.and_(
+                        BuilderPlans.id == BuilderSessions.latest_plan_id,
+                        BuilderPlans.session_id == BuilderSessions.id,
+                        BuilderPlans.tenant_id == BuilderSessions.tenant_id,
+                    ),
+                )
                 .where(
                     BuilderSessions.tenant_id == tenant_id,
                     BuilderSessions.actor_user_id == actor_user_id,
@@ -192,8 +208,11 @@ class AIBuilderRepository:
                 )
                 .limit(limit)
             )
-            rows = (await self.session.execute(stmt)).scalars().all()
-            return [_session_from_row(row) for row in rows]
+            rows = (await self.session.execute(stmt)).all()
+            return [
+                (_session_from_row(session_row), cast(str | None, draft_title_value))
+                for session_row, draft_title_value in rows
+            ]
 
     async def cancel_session(
         self,

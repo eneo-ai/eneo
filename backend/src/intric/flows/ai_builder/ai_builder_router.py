@@ -190,6 +190,7 @@ router = APIRouter(
 
 
 EventStream = AsyncGenerator[dict[str, str], None]
+ContainerWithUserDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 
 @dataclass(frozen=True)
@@ -459,7 +460,7 @@ def _ai_builder_json_error_response(
 async def create_session(
     request: Request,
     body: CreateSessionRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     authorization = await _authorize_ai_builder_request(
         request,
@@ -526,8 +527,8 @@ async def create_session(
 )
 async def list_sessions(
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
-):
+    container: ContainerWithUserDep,
+) -> SessionListResponse:
     authorization = await _authorize_ai_builder_request(
         request,
         container,
@@ -617,7 +618,7 @@ async def send_message(
         ),
     ],
     body: SendMessageRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
@@ -805,7 +806,7 @@ async def get_session(
         UUID,
         Path(description="Identifier of the AI Builder session to return."),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
@@ -839,7 +840,7 @@ async def detach_session_attachment(
     request: Request,
     session_id: UUID,
     file_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
@@ -884,7 +885,7 @@ async def get_session_models(
             description="Identifier of the AI Builder session whose planner models should be listed."
         ),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     """Return the completion models available in the session's space."""
     service = _get_ai_builder_service(container)
@@ -936,7 +937,7 @@ async def get_plan(
         UUID,
         Path(description="Identifier of the stored AI Builder plan revision to fetch."),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     plan: BuilderPlan = await service.get_plan(plan_id)
@@ -982,7 +983,7 @@ async def list_session_plans(
             description="Identifier of the AI Builder session whose stored plans should be listed."
         ),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
@@ -1025,7 +1026,7 @@ async def cancel_session(
         UUID,
         Path(description="Identifier of the active AI Builder session to cancel."),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
@@ -1085,7 +1086,7 @@ async def approve_plan(
         UUID,
         Path(description="Identifier of the AI Builder plan revision to approve."),
     ],
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
     plan: BuilderPlan = await service.get_plan(plan_id)
@@ -1166,7 +1167,7 @@ async def apply_plan(
         ),
     ],
     body: ApplyPlanRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
 
@@ -1243,7 +1244,7 @@ async def revise_plan(
         Path(description="Identifier of the proposed AI Builder plan to revise."),
     ],
     body: RevisePlanRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerWithUserDep,
 ):
     service = _get_ai_builder_service(container)
 

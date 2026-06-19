@@ -43,7 +43,7 @@ from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
 
 
 PlannerActionKind = Literal[

@@ -6,13 +6,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from intric.flows.domain.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from intric.flows.enums import FlowInputSource, FlowInputType, FlowOutputMode
 from intric.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
-    JsonObject,
     MCPPolicy,
     OutputType,
     StepSpec,
@@ -81,11 +80,11 @@ class FlowDraftCompiledStep(BaseModel):
     mcp_policy: MCPPolicy
     assistant_id: UUID | None = None
     existing_step_ref: str | None = None
-    input_bindings: JsonObject | None = None
-    input_contract: JsonObject | None = None
-    output_contract: JsonObject | None = None
-    input_config: JsonObject | None = None
-    output_config: JsonObject | None = None
+    input_bindings: FlowPersistedJsonObject | None = None
+    input_contract: FlowPersistedJsonObject | None = None
+    output_contract: FlowPersistedJsonObject | None = None
+    input_config: FlowPersistedJsonObject | None = None
+    output_config: FlowPersistedJsonObject | None = None
     review_policy: FlowStepReviewPolicy | None = None
 
 
@@ -104,7 +103,7 @@ class FlowDraftChangeSet(BaseModel):
     compiled_steps: list[FlowDraftCompiledStep] = Field(
         default_factory=_default_compiled_steps
     )
-    metadata_json: JsonObject | None = None
+    metadata_json: FlowPersistedJsonObject | None = None
 
 
 class FlowDraftMaterializationStage(str, enum.Enum):
@@ -234,15 +233,15 @@ def build_flow_draft_metadata_json(
     spec: FlowDraftSpecCore,
     current_flow: Flow | None,
     default_transcription_model_id: UUID | None = None,
-) -> JsonObject | None:
-    metadata: JsonObject = {}
+) -> FlowPersistedJsonObject | None:
+    metadata: FlowPersistedJsonObject = {}
     if current_flow and current_flow.metadata_json:
         metadata = dict(current_flow.metadata_json)
 
     if spec.form_fields is not None:
-        fields: list[JsonObject] = []
+        fields: list[FlowPersistedJsonObject] = []
         for field in spec.form_fields:
-            field_dict: JsonObject = {
+            field_dict: FlowPersistedJsonObject = {
                 "name": field.name,
                 "type": field.type,
                 "label": field.label,

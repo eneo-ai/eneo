@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from intric.main.exceptions import (
     BadRequestException,
+    ConflictException,
     ErrorCodes,
     FileTooLargeException,
 )
@@ -65,3 +66,26 @@ def test_exception_handler_omits_details_for_exceptions_without_details():
     assert body["message"] == "Bad input"
     assert body["intric_error_code"] == ErrorCodes.BAD_REQUEST
     assert "details" not in body
+
+
+def test_exception_handler_returns_conflict_contract():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/conflict")
+    async def conflict():
+        raise ConflictException(
+            "Runtime file is already attached to a flow run.",
+            code="flow_runtime_file_attached",
+            context={"file_id": "file-1"},
+        )
+
+    client = TestClient(app)
+    response = client.get("/conflict")
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["message"] == "Runtime file is already attached to a flow run."
+    assert body["intric_error_code"] == ErrorCodes.CONFLICT
+    assert body["code"] == "flow_runtime_file_attached"
+    assert body["context"] == {"file_id": "file-1"}

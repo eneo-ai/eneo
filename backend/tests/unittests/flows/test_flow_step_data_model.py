@@ -28,6 +28,7 @@ def _flow_step_result_payload() -> dict[str, object]:
         "num_tokens_input": 11,
         "num_tokens_output": 7,
         "status": FlowStepResultStatus.COMPLETED,
+        "error_code": None,
         "error_message": None,
         "flow_step_execution_hash": "hash-1",
         "started_at": now,
@@ -103,6 +104,17 @@ def test_flow_step_result_requires_snapshot_step_id(step_id_shape):
 
     with pytest.raises(ValidationError):
         FlowStepResult(**payload)
+
+
+def test_flow_step_result_preserves_failure_error_code():
+    payload = _flow_step_result_payload()
+    payload["status"] = FlowStepResultStatus.FAILED
+    payload["error_code"] = "flow_step_execution_failed"
+    payload["error_message"] = "Flow step 1 execution failed."
+
+    result = FlowStepResult(**payload)
+
+    assert result.error_code == "flow_step_execution_failed"
 
 
 @pytest.mark.parametrize("step_id_shape", ["missing", None])

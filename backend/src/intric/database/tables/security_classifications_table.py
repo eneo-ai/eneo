@@ -5,7 +5,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
@@ -25,6 +25,14 @@ class SecurityClassification(BasePublic):
     """Table for storing security levels"""
 
     __tablename__ = "security_classifications"  # type: ignore[assignment]
+    __table_args__ = (
+        UniqueConstraint("name", "tenant_id"),
+        UniqueConstraint(
+            "id",
+            "tenant_id",
+            name="uq_security_classifications_id_tenant_id",
+        ),
+    )
 
     # Core fields
     name: Mapped[str] = mapped_column()

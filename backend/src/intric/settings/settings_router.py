@@ -1,9 +1,13 @@
 from typing import Annotated, Protocol, cast
+from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path, Response, status
 
 from intric.authentication import auth_dependencies
 from intric.files.mime_support import supported_mimes
+from intric.flows.domain.flow_classification_retention_policy import (
+    FlowClassificationRetentionPolicy,
+)
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.main.logging import get_logger
@@ -19,6 +23,9 @@ from intric.settings.setting_service import (
 from intric.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
+    FlowClassificationRetentionPoliciesPublic,
+    FlowClassificationRetentionPolicyPublic,
+    FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
@@ -111,6 +118,24 @@ def _flow_settings_invalid_payload_response(
         message=message,
         intric_error_code=ErrorCodes.BAD_REQUEST,
         code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+    )
+
+
+def _flow_settings_not_found_response(description: str) -> dict[str, object]:
+    return _settings_error_response(
+        description=description,
+        message="Not found.",
+        intric_error_code=ErrorCodes.NOT_FOUND,
+        code="not_found",
+    )
+
+
+def _flow_classification_retention_policy_public(
+    policy: FlowClassificationRetentionPolicy,
+) -> FlowClassificationRetentionPolicyPublic:
+    return FlowClassificationRetentionPolicyPublic(
+        security_classification_id=policy.security_classification_id,
+        data_retention_days=policy.data_retention_days,
     )
 
 
@@ -393,8 +418,9 @@ async def get_flow_retention_policy(
     description=(
         "Update the tenant Flow retention policy for implemented runtime debug-evidence "
         "cleanup. Omitted fields are unchanged; send an integer day count to set "
-        "run_debug_evidence_days or null to fall back to Flow or space retention "
-        "defaults."
+        "run_debug_evidence_days or null to remove the tenant debug-evidence "
+        "override. Flow and space data_retention_days purge full run history; "
+        "they do not act as debug-evidence redaction fallbacks."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(
@@ -411,6 +437,107 @@ async def update_flow_retention_policy(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_retention_policy(payload)
+
+
+@settings_admin_router.get(
+    "/flow-classification-retention-policies",
+    response_model=FlowClassificationRetentionPoliciesPublic,
+    operation_id="list_flow_classification_retention_policies",
+    summary="List flow classification retention policies",
+    description=(
+        "List tenant Flow classification retention policies. Each row tightens "
+        "full run history and step history purge eligibility for spaces assigned "
+        "to the security_classification_id. This is separate from debug-evidence "
+        "redaction at /settings/flow-retention-policy; debug-evidence cleanup can "
+        "redact retained troubleshooting payloads before the full run is purged. "
+        "Policies remain enforced while tenant security_enabled is false if spaces "
+        "still store the classification id."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def list_flow_classification_retention_policies(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowClassificationRetentionPoliciesPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = container.flow_classification_retention_policy_service()
+    policies = await service.list_policies()
+    return FlowClassificationRetentionPoliciesPublic(
+        policies=[
+            _flow_classification_retention_policy_public(policy) for policy in policies
+        ]
+    )
+
+
+@settings_admin_router.put(
+    "/flow-classification-retention-policies/{security_classification_id}",
+    response_model=FlowClassificationRetentionPolicyPublic,
+    operation_id="put_flow_classification_retention_policy",
+    summary="Set flow classification retention policy",
+    description=(
+        "Create or replace the full Flow run history and step history retention "
+        "window for one tenant security classification. The value can only tighten "
+        "the effective Flow/space retention window used by the purge worker; a "
+        "classification policy with a longer window never loosens a shorter Flow "
+        "or space policy. This endpoint does not configure debug-evidence "
+        "redaction, which remains under /settings/flow-retention-policy."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_settings_not_found_response(
+            "Security classification does not exist for this tenant."
+        ),
+    },
+)
+async def put_flow_classification_retention_policy(
+    security_classification_id: Annotated[
+        UUID,
+        Path(description="Tenant security classification id to bind the policy to."),
+    ],
+    payload: FlowClassificationRetentionPolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowClassificationRetentionPolicyPublic:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = container.flow_classification_retention_policy_service()
+    policy = await service.set_policy(
+        security_classification_id=security_classification_id,
+        data_retention_days=payload.data_retention_days,
+    )
+    return _flow_classification_retention_policy_public(policy)
+
+
+@settings_admin_router.delete(
+    "/flow-classification-retention-policies/{security_classification_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="delete_flow_classification_retention_policy",
+    summary="Delete flow classification retention policy",
+    description=(
+        "Delete the Flow classification retention policy for one tenant security "
+        "classification. The delete is idempotent when the classification exists "
+        "but has no policy row. If the classification itself is missing or belongs "
+        "to another tenant, the endpoint returns 404. Removing the policy can "
+        "loosen future dynamic full run history purge eligibility back to the "
+        "Flow/space retention policy."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_settings_not_found_response(
+            "Security classification does not exist for this tenant."
+        ),
+    },
+)
+async def delete_flow_classification_retention_policy(
+    security_classification_id: Annotated[
+        UUID,
+        Path(description="Tenant security classification id whose policy is removed."),
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> Response:
+    validate_permission(container.user(), Permission.ADMIN)
+    service = container.flow_classification_retention_policy_service()
+    await service.delete_policy(
+        security_classification_id=security_classification_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @settings_admin_router.get(

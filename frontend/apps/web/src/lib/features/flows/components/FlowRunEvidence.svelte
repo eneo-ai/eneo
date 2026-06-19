@@ -321,7 +321,7 @@
         {stepDef}
         duration={getStepDuration(result.step_order)}
         transcription={getStepTranscription(result)}
-        runtimeInput={getRuntimeInputSummary(result.input_payload_json)}
+        runtimeInput={getRuntimeInputSummary(result)}
         templateProvenance={getTemplateProvenanceSummary(result.output_payload_json)}
         stepRag={getStepRag(result.step_order)}
         stepAttempts={getStepAttempts(result.step_order)}

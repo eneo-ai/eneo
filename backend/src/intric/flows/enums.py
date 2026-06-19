@@ -20,12 +20,10 @@ class RerunDependencyKind(str, Enum):
     INPUT_BINDINGS_QUESTION = "input_bindings.question"
     INPUT_CONFIG_URL = "input_config.url"
     INPUT_CONFIG_HEADERS = "input_config.headers"
-    INPUT_CONFIG_BODY_TEMPLATE = "input_config.body_template"
-    INPUT_CONFIG_BODY_JSON = "input_config.body_json"
+    INPUT_CONFIG_BODY_TEMPLATE = "input_config.body.template"
     OUTPUT_CONFIG_URL = "output_config.url"
     OUTPUT_CONFIG_HEADERS = "output_config.headers"
-    OUTPUT_CONFIG_BODY_TEMPLATE = "output_config.body_template"
-    OUTPUT_CONFIG_BODY_JSON = "output_config.body_json"
+    OUTPUT_CONFIG_BODY_TEMPLATE = "output_config.body.template"
     OUTPUT_CONFIG_BINDINGS = "output_config.bindings"
     ASSISTANT_SNAPSHOT_INSTRUCTIONS = "assistant_snapshot.instructions"
     RUNTIME_ALIAS_PREVIOUS_STEP = "runtime_alias.previous_step"
@@ -85,6 +83,13 @@ class FlowMcpPolicy(str, Enum):
     RESTRICTED = "restricted"
 
 
+FLOW_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
+FLOW_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
+FLOW_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
+FLOW_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
+FLOW_MCP_POLICY_VALUES = tuple(item.value for item in FlowMcpPolicy)
+
+
 class FlowRunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -118,67 +123,74 @@ class FlowRunStatusCapability:
     is_cancellable: bool
     is_awaiting_review: bool
     can_request_redispatch: bool
+    is_rerun_eligible: bool
 
 
-FLOW_RUN_STATUS_CAPABILITIES: Mapping[
-    FlowRunStatus, FlowRunStatusCapability
-] = MappingProxyType(
-    {
-        FlowRunStatus.QUEUED: FlowRunStatusCapability(
-            status=FlowRunStatus.QUEUED,
-            is_active=True,
-            should_poll=True,
-            is_terminal=False,
-            is_cancellable=True,
-            is_awaiting_review=False,
-            can_request_redispatch=True,
-        ),
-        FlowRunStatus.RUNNING: FlowRunStatusCapability(
-            status=FlowRunStatus.RUNNING,
-            is_active=True,
-            should_poll=True,
-            is_terminal=False,
-            is_cancellable=True,
-            is_awaiting_review=False,
-            can_request_redispatch=False,
-        ),
-        FlowRunStatus.AWAITING_REVIEW: FlowRunStatusCapability(
-            status=FlowRunStatus.AWAITING_REVIEW,
-            is_active=False,
-            should_poll=True,
-            is_terminal=False,
-            is_cancellable=True,
-            is_awaiting_review=True,
-            can_request_redispatch=False,
-        ),
-        FlowRunStatus.COMPLETED: FlowRunStatusCapability(
-            status=FlowRunStatus.COMPLETED,
-            is_active=False,
-            should_poll=False,
-            is_terminal=True,
-            is_cancellable=False,
-            is_awaiting_review=False,
-            can_request_redispatch=False,
-        ),
-        FlowRunStatus.FAILED: FlowRunStatusCapability(
-            status=FlowRunStatus.FAILED,
-            is_active=False,
-            should_poll=False,
-            is_terminal=True,
-            is_cancellable=False,
-            is_awaiting_review=False,
-            can_request_redispatch=False,
-        ),
-        FlowRunStatus.CANCELLED: FlowRunStatusCapability(
-            status=FlowRunStatus.CANCELLED,
-            is_active=False,
-            should_poll=False,
-            is_terminal=True,
-            is_cancellable=False,
-            is_awaiting_review=False,
-            can_request_redispatch=False,
-        ),
-    }
+FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = (
+    MappingProxyType(
+        {
+            FlowRunStatus.QUEUED: FlowRunStatusCapability(
+                status=FlowRunStatus.QUEUED,
+                is_active=True,
+                should_poll=True,
+                is_terminal=False,
+                is_cancellable=True,
+                is_awaiting_review=False,
+                can_request_redispatch=True,
+                is_rerun_eligible=False,
+            ),
+            FlowRunStatus.RUNNING: FlowRunStatusCapability(
+                status=FlowRunStatus.RUNNING,
+                is_active=True,
+                should_poll=True,
+                is_terminal=False,
+                is_cancellable=True,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+                is_rerun_eligible=False,
+            ),
+            FlowRunStatus.AWAITING_REVIEW: FlowRunStatusCapability(
+                status=FlowRunStatus.AWAITING_REVIEW,
+                is_active=False,
+                should_poll=True,
+                is_terminal=False,
+                is_cancellable=True,
+                is_awaiting_review=True,
+                can_request_redispatch=False,
+                is_rerun_eligible=False,
+            ),
+            FlowRunStatus.COMPLETED: FlowRunStatusCapability(
+                status=FlowRunStatus.COMPLETED,
+                is_active=False,
+                should_poll=False,
+                is_terminal=True,
+                is_cancellable=False,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+                is_rerun_eligible=True,
+            ),
+            FlowRunStatus.FAILED: FlowRunStatusCapability(
+                status=FlowRunStatus.FAILED,
+                is_active=False,
+                should_poll=False,
+                is_terminal=True,
+                is_cancellable=False,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+                is_rerun_eligible=True,
+            ),
+            FlowRunStatus.CANCELLED: FlowRunStatusCapability(
+                status=FlowRunStatus.CANCELLED,
+                is_active=False,
+                should_poll=False,
+                is_terminal=True,
+                is_cancellable=False,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+                is_rerun_eligible=False,
+            ),
+        }
+    )
 )
 FLOW_RUN_STATUS_FILTER_ORDER = (
     FlowRunStatus.COMPLETED,
@@ -199,10 +211,23 @@ TERMINAL_FLOW_RUN_STATUSES = frozenset(
     for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
     if capability.is_terminal
 )
+TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
+    status.value for status in FlowRunStatus if status in TERMINAL_FLOW_RUN_STATUSES
+)
 CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
     status
     for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
     if capability.is_cancellable
+)
+RERUN_ELIGIBLE_FLOW_RUN_STATUSES = frozenset(
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_rerun_eligible
+)
+RERUN_ELIGIBLE_FLOW_RUN_STATUS_VALUES = tuple(
+    status.value
+    for status in FlowRunStatus
+    if status in RERUN_ELIGIBLE_FLOW_RUN_STATUSES
 )
 
 
@@ -288,6 +313,30 @@ class FlowStepAttemptStatus(str, Enum):
     FAILED = "failed"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+ACTIVE_FLOW_STEP_RESULT_STATUSES = frozenset(
+    {
+        FlowStepResultStatus.PENDING,
+        FlowStepResultStatus.RUNNING,
+    }
+)
+ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES = tuple(
+    status.value
+    for status in FlowStepResultStatus
+    if status in ACTIVE_FLOW_STEP_RESULT_STATUSES
+)
+OPEN_FLOW_STEP_ATTEMPT_STATUSES = frozenset(
+    {
+        FlowStepAttemptStatus.STARTED,
+        FlowStepAttemptStatus.RETRIED,
+    }
+)
+OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(
+    status.value
+    for status in FlowStepAttemptStatus
+    if status in OPEN_FLOW_STEP_ATTEMPT_STATUSES
+)
 
 
 class FlowRuntimeInputFormat(str, Enum):

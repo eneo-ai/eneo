@@ -30,7 +30,7 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
-from intric.flows.domain.flow import Flow, FlowStep, JsonObject
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from intric.flows.enums import FlowOutputMode
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -237,7 +237,9 @@ def build_flow_package_export_envelope(
     )
 
 
-def _form_fields_from_metadata(metadata_json: JsonObject | None) -> list[FormFieldSpec]:
+def _form_fields_from_metadata(
+    metadata_json: FlowPersistedJsonObject | None,
+) -> list[FormFieldSpec]:
     try:
         form_schema = parse_flow_form_schema(
             metadata_json,

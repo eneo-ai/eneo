@@ -12,9 +12,14 @@ import pytest
 from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import FileType
 from intric.flows.domain.flow import (
+    FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
+    FlowRunStatus,
+    FlowStepAttempt,
+    FlowStepResult,
+    FlowVersion,
 )
 from intric.flows.enums import (
     FlowOutputType,
@@ -24,13 +29,6 @@ from intric.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     RerunDependencyKind,
-)
-from intric.flows.flow import (
-    FlowRun,
-    FlowRunStatus,
-    FlowStepAttempt,
-    FlowStepResult,
-    FlowVersion,
 )
 from intric.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
@@ -63,6 +61,7 @@ from intric.flows.flow_run_provenance import (
     normalize_rag_payload,
     parse_attempt_provenance,
 )
+from intric.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 
 
@@ -294,6 +293,31 @@ def _result_file_for_run(
     )
 
 
+def _input_file_metadata(
+    *,
+    file_id: UUID,
+    name: str,
+    checksum: str,
+    size: int,
+    mimetype: str | None,
+    file_type: FileType,
+    text_length: int | None = None,
+    has_text: bool = False,
+    has_transcription: bool = False,
+) -> FlowRunStepInputFileMetadata:
+    return FlowRunStepInputFileMetadata(
+        file_id=file_id,
+        name=name,
+        checksum=checksum,
+        size=size,
+        mimetype=mimetype,
+        file_type=file_type,
+        text_length=text_length,
+        has_text=has_text,
+        has_transcription=has_transcription,
+    )
+
+
 def _render_raw_export(
     run: FlowRun,
     version: FlowVersion,
@@ -388,7 +412,8 @@ def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
         accepted_run_revision=2,
         reason="refresh evidence",
         input_payload_json=None,
-        step_inputs_json=None,
+        root_step_input_override_requested=False,
+        root_step_input_override=None,
         requested_by_principal_type=PrincipalType.USER,
         requested_by_user_id=uuid4(),
         failure_code=None,
@@ -1821,6 +1846,56 @@ def test_evidence_export_summary_typed_agrees_with_legacy_summary_overlap() -> N
         assert typed_step[field] == legacy_step[field]
 
 
+def test_evidence_export_summary_shared_fields_use_typed_normalization() -> None:
+    run, _ = _evidence_run_and_version()
+    step_id = uuid4()
+    version = _evidence_version_with_steps(run, step_ids=[step_id])
+    bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[
+            _step_result_for_run(
+                run,
+                step_id=step_id,
+                output_payload_json={"text": "done"},
+            )
+        ],
+        step_attempts=[
+            _attempt_with_provenance(run, None).model_copy(
+                update={"step_id": step_id, "step_order": 1, "attempt_no": 1}
+            )
+        ],
+    )
+    debug_export = dict(bundle.debug_export)
+    debug_run = dict(debug_export["run"])
+    debug_run["summary"] = {
+        "steps_count": "1",
+        "completed_steps": True,
+        "failed_steps": "0",
+        "attempts_count": "1",
+        "artifacts_count": "0",
+        "duration_ms": "1000",
+        "models_used": "gpt-5.4-nano",
+    }
+    debug_export["run"] = debug_run
+
+    export = render_evidence_json_export(
+        bundle=replace(bundle, debug_export=debug_export),
+        context=_raw_export_context(),
+    )
+
+    for field, expected in {
+        "steps_count": 0,
+        "completed_steps": 0,
+        "failed_steps": 0,
+        "attempts_count": 0,
+        "duration_ms": None,
+        "models_used": [],
+    }.items():
+        assert export["summary_typed"][field] == expected
+        assert export["summary"][field] == expected
+
+
 def test_evidence_export_review_summary_surfaces_active_checkpoint_conflict() -> None:
     run, version = _evidence_run_and_version()
     awaiting_checkpoint = _review_checkpoint_for_run(
@@ -2086,6 +2161,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
     started_at = datetime.now(timezone.utc)
     finished_at = started_at
     artifact_file_id = uuid4()
+    runtime_input_file_id = uuid4()
     run = FlowRun(
         id=uuid4(),
         flow_id=uuid4(),
@@ -2134,13 +2210,12 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         input_payload_json={
             "input_source": "flow_input",
             "used_question_binding": False,
-            "legacy_prompt_binding_used": False,
             "runtime_input": {
-                "file_ids": [str(uuid4())],
+                "file_ids": [str(runtime_input_file_id)],
                 "files_count": 1,
                 "files": [
                     {
-                        "id": "input-file-1",
+                        "id": str(runtime_input_file_id),
                         "name": "underlag.pdf",
                         "checksum": "input-checksum",
                         "size": 2048,
@@ -2167,6 +2242,7 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
         created_at=started_at,
         updated_at=finished_at,
     )
+    assert result.id is not None
     attempt = FlowStepAttempt(
         id=uuid4(),
         flow_run_id=run.id,
@@ -2258,6 +2334,23 @@ def test_render_evidence_json_export_adds_rag_source_details_and_step_overview()
             version=version,
             step_results=[result],
             step_attempts=[attempt],
+            runtime_input_file_ids_by_step_result_id={
+                result.id: (runtime_input_file_id,)
+            },
+            runtime_input_file_metadata_by_step_result_id={
+                result.id: (
+                    _input_file_metadata(
+                        file_id=runtime_input_file_id,
+                        name="underlag.pdf",
+                        checksum="input-checksum",
+                        size=2048,
+                        mimetype="application/pdf",
+                        file_type=FileType.DOCUMENT,
+                        text_length=1024,
+                        has_text=True,
+                    ),
+                )
+            },
             result_files=[
                 _result_file_for_run(
                     run,
@@ -2343,6 +2436,8 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
     None
 ):
     now = datetime.now(timezone.utc)
+    step_one_file_id = uuid4()
+    step_two_file_id = uuid4()
     run = FlowRun(
         id=uuid4(),
         flow_id=uuid4(),
@@ -2403,13 +2498,12 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         input_payload_json={
             "input_source": "flow_input",
             "used_question_binding": False,
-            "legacy_prompt_binding_used": False,
             "runtime_input": {
-                "file_ids": ["input-file-1"],
+                "file_ids": [str(step_one_file_id)],
                 "files_count": 1,
                 "files": [
                     {
-                        "id": "input-file-1",
+                        "id": str(step_one_file_id),
                         "name": "underlag.pdf",
                         "checksum": "input-checksum",
                         "size": 100,
@@ -2447,13 +2541,12 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         input_payload_json={
             "input_source": "previous_step",
             "used_question_binding": True,
-            "legacy_prompt_binding_used": False,
             "runtime_input": {
-                "file_ids": ["input-file-2"],
+                "file_ids": [str(step_two_file_id)],
                 "files_count": 1,
                 "files": [
                     {
-                        "id": "input-file-2",
+                        "id": str(step_two_file_id),
                         "name": "frågor.txt",
                         "checksum": "question-checksum",
                         "size": 80,
@@ -2480,6 +2573,8 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         created_at=now,
         updated_at=now,
     )
+    assert step_one.id is not None
+    assert step_two.id is not None
 
     bundle = redact_evidence_bundle(
         build_evidence_bundle(
@@ -2487,6 +2582,36 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
             version=version,
             step_results=[step_one, step_two],
             step_attempts=[],
+            runtime_input_file_ids_by_step_result_id={
+                step_one.id: (step_one_file_id,),
+                step_two.id: (step_two_file_id,),
+            },
+            runtime_input_file_metadata_by_step_result_id={
+                step_one.id: (
+                    _input_file_metadata(
+                        file_id=step_one_file_id,
+                        name="underlag.pdf",
+                        checksum="input-checksum",
+                        size=100,
+                        mimetype="application/pdf",
+                        file_type=FileType.DOCUMENT,
+                        text_length=50,
+                        has_text=True,
+                    ),
+                ),
+                step_two.id: (
+                    _input_file_metadata(
+                        file_id=step_two_file_id,
+                        name="frågor.txt",
+                        checksum="question-checksum",
+                        size=80,
+                        mimetype="text/plain",
+                        file_type=FileType.TEXT,
+                        text_length=30,
+                        has_text=True,
+                    ),
+                ),
+            },
         )
     )
 
@@ -2506,6 +2631,169 @@ def test_render_evidence_json_export_adds_step_input_lineage_for_upstream_bindin
         "step_1.output.text",
         "step_input.text",
     ]
+
+
+def test_evidence_bundle_export_prefers_typed_runtime_input_file_ids() -> None:
+    run, _ = _evidence_run_and_version()
+    relational_file_id = uuid4()
+    stale_payload_file_ids = [str(uuid4()), str(uuid4())]
+    result = _step_result_for_run(run).model_copy(
+        update={
+            "input_payload_json": {
+                "input_source": "flow_input",
+                "used_question_binding": False,
+                "runtime_input": {
+                    "file_ids": stale_payload_file_ids,
+                    "files_count": len(stale_payload_file_ids),
+                    "files": [
+                        {
+                            "id": stale_payload_file_ids[0],
+                            "name": "payload.pdf",
+                            "checksum": "payload-checksum",
+                            "size": 100,
+                            "mimetype": "application/pdf",
+                            "file_type": "document",
+                        }
+                    ],
+                    "total_file_size": 100,
+                    "input_format": "document",
+                },
+            }
+        }
+    )
+    version = _evidence_version_with_steps(run, step_ids=[result.step_id])
+    assert result.id is not None
+    bundle = redact_evidence_bundle(
+        build_evidence_bundle(
+            run=run,
+            version=version,
+            step_results=[result],
+            step_attempts=[],
+            runtime_input_file_ids_by_step_result_id={result.id: (relational_file_id,)},
+        )
+    )
+
+    export = render_evidence_json_export(
+        bundle=bundle,
+        context=_redacted_export_context(),
+    )
+    dumped_result = bundle.to_dict()["step_results"][0]
+    lineage = export["summary"]["step_overview"][0]["input_lineage"]
+
+    assert dumped_result["runtime_input_file_ids"] == [str(relational_file_id)]
+    dumped_runtime_input = dumped_result["input_payload_json"]["runtime_input"]
+    assert dumped_runtime_input["file_ids"] == [str(relational_file_id)]
+    assert dumped_runtime_input["files_count"] == 1
+    assert dumped_runtime_input["files"] == []
+    assert dumped_runtime_input["total_file_size"] == 0
+    assert lineage == {
+        "input_source": "previous_step",
+        "used_question_binding": False,
+        "uses_runtime_input": True,
+        "runtime_input_format": "document",
+        "runtime_file_count": 1,
+        "runtime_file_ids": [str(relational_file_id)],
+        "runtime_file_names": [],
+        "runtime_file_checksums": [],
+        "runtime_files": [],
+        "question_binding_references_runtime_input": False,
+        "question_binding_expressions": [],
+        "upstream_step_orders": [],
+        "upstream_step_labels": [],
+    }
+
+
+def test_evidence_bundle_export_uses_relational_runtime_file_metadata() -> None:
+    run, _ = _evidence_run_and_version()
+    current_file_id = uuid4()
+    stale_file_id = uuid4()
+    result = _step_result_for_run(run).model_copy(
+        update={
+            "input_payload_json": {
+                "input_source": "flow_input",
+                "used_question_binding": False,
+                "runtime_input": {
+                    "file_ids": [str(stale_file_id), str(current_file_id)],
+                    "files_count": 2,
+                    "files": [
+                        {
+                            "id": str(stale_file_id),
+                            "name": "stale.pdf",
+                            "checksum": "stale-checksum",
+                            "size": 100,
+                            "mimetype": "application/pdf",
+                            "file_type": "document",
+                        },
+                        {
+                            "id": str(current_file_id),
+                            "name": "json-current.pdf",
+                            "checksum": "json-current-checksum",
+                            "size": 999,
+                            "mimetype": "application/pdf",
+                            "file_type": "document",
+                        },
+                    ],
+                    "total_file_size": 300,
+                    "input_format": "document",
+                },
+            }
+        }
+    )
+    version = _evidence_version_with_steps(run, step_ids=[result.step_id])
+    assert result.id is not None
+    bundle = redact_evidence_bundle(
+        build_evidence_bundle(
+            run=run,
+            version=version,
+            step_results=[result],
+            step_attempts=[],
+            runtime_input_file_ids_by_step_result_id={result.id: (current_file_id,)},
+            runtime_input_file_metadata_by_step_result_id={
+                result.id: (
+                    _input_file_metadata(
+                        file_id=current_file_id,
+                        name="current.pdf",
+                        checksum="current-checksum",
+                        size=200,
+                        mimetype="application/pdf",
+                        file_type=FileType.DOCUMENT,
+                        text_length=80,
+                        has_text=True,
+                    ),
+                )
+            },
+        )
+    )
+
+    export = render_evidence_json_export(
+        bundle=bundle,
+        context=_redacted_export_context(),
+    )
+    dumped_result = bundle.to_dict()["step_results"][0]
+    dumped_runtime_input = dumped_result["input_payload_json"]["runtime_input"]
+    lineage = export["summary"]["step_overview"][0]["input_lineage"]
+
+    expected_file = {
+        "id": str(current_file_id),
+        "name": "current.pdf",
+        "checksum": "current-checksum",
+        "size": 200,
+        "mimetype": "application/pdf",
+        "file_type": "document",
+        "text_length": 80,
+        "has_text": True,
+        "has_transcription": False,
+    }
+    assert dumped_result["runtime_input_file_ids"] == [str(current_file_id)]
+    assert dumped_runtime_input["file_ids"] == [str(current_file_id)]
+    assert dumped_runtime_input["files_count"] == 1
+    assert dumped_runtime_input["files"] == [expected_file]
+    assert dumped_runtime_input["total_file_size"] == 200
+    assert lineage["runtime_file_ids"] == [str(current_file_id)]
+    assert lineage["runtime_file_count"] == 1
+    assert lineage["runtime_file_names"] == ["current.pdf"]
+    assert lineage["runtime_file_checksums"] == ["current-checksum"]
+    assert lineage["runtime_files"] == [expected_file]
 
 
 def test_render_evidence_json_export_adds_fallback_container_display_name_and_model_default_semantics() -> (

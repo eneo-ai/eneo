@@ -20,7 +20,7 @@ from intric.flows.ai_builder.ai_builder_edit_normalizer import (
 )
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,

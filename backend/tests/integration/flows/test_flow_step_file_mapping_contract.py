@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from intric.database.database import sessionmanager
 from intric.database.tables.files_table import Files
@@ -12,27 +13,29 @@ from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
+    FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows import (
-    Flow,
-    FlowFactory,
-    FlowRepository,
-    FlowStep,
-    FlowVersionRepository,
-)
+from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.domain.flow import (
+    Flow,
     FlowRunStatus,
+    FlowStep,
     FlowStepAttemptStatus,
     FlowStepResult,
+    FlowStepResultStatus,
 )
 from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow import FlowStepResultStatus
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_step_result_file import FlowStepResultFileReference
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 
 
@@ -108,7 +111,6 @@ async def _create_version(
         flow_id=flow.id,
         version=1,
         tenant_id=tenant_id,
-        definition_checksum=f"checksum-{flow.id}",
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -128,6 +130,32 @@ async def _create_version(
             ],
         },
     )
+
+
+async def _bind_runtime_uploaded_files(
+    *,
+    session,
+    flow_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID,
+    uploaded_for_step_id: UUID,
+    file_ids: list[UUID],
+) -> None:
+    session.add_all(
+        [
+            FlowRuntimeUploadedFiles(
+                file_id=file_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                uploaded_for_step_id=uploaded_for_step_id,
+                owner_type="user",
+                owner_user_id=user_id,
+                owner_service_id=None,
+            )
+            for file_id in file_ids
+        ]
+    )
+    await session.flush()
 
 
 async def _create_running_step_file_flow(
@@ -205,7 +233,7 @@ async def _create_running_step_file_flow(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_step_inputs_snapshot_matches_input_file_projection(
+async def test_semantic_run_payload_separates_input_file_projection(
     db_container,
     completion_model_factory,
     space_factory,
@@ -255,6 +283,14 @@ async def test_step_inputs_snapshot_matches_input_file_projection(
         flow = flow.model_copy(update={"published_version": 1})
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         step = flow.steps[0]
+        await _bind_runtime_uploaded_files(
+            session=session,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            uploaded_for_step_id=step.id,
+            file_ids=[input_file_a_id, input_file_b_id],
+        )
 
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
         run = await run_repo.create(
@@ -262,14 +298,7 @@ async def test_step_inputs_snapshot_matches_input_file_projection(
             flow_version=1,
             principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
-            input_payload_json={
-                "expected_flow_version": 1,
-                "step_inputs": {
-                    str(step.id): {
-                        "file_ids": [str(input_file_a.id), str(input_file_b.id)]
-                    }
-                },
-            },
+            input_payload_json={"expected_flow_version": 1},
             preseed_steps=[
                 {
                     "step_id": step.id,
@@ -311,17 +340,517 @@ async def test_step_inputs_snapshot_matches_input_file_projection(
             )
         )
 
-    assert run_payload == {
-        "expected_flow_version": 1,
-        "step_inputs": {
-            str(step_id): {"file_ids": [str(input_file_a_id), str(input_file_b_id)]}
-        },
-    }
+    assert run_payload == {"expected_flow_version": 1}
     assert step_input_rows == [
         (step_id, input_file_a_id, 0),
         (step_id, input_file_b_id, 1),
     ]
     assert historical_top_level_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_same_runtime_file_id_can_bind_to_multiple_steps(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows shared runtime file", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Shared runtime file assistant",
+            model.id,
+            space_id=space.id,
+        )
+        input_file = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name="shared.pdf",
+        )
+        session.add(input_file)
+        await session.flush()
+        input_file_id = input_file.id
+
+        base_flow = _flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        first_step = base_flow.steps[0].model_copy(
+            update={"step_order": 1, "user_description": "First runtime document step"}
+        )
+        second_step = base_flow.steps[0].model_copy(
+            update={
+                "id": None,
+                "step_order": 2,
+                "user_description": "Second runtime document step",
+            }
+        )
+
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=base_flow.model_copy(update={"steps": [first_step, second_step]}),
+            tenant_id=admin_user.tenant_id,
+        )
+        await _create_version(
+            session=session,
+            flow=flow,
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
+        runtime_steps = sorted(flow.steps, key=lambda step: step.step_order)
+        assert len(runtime_steps) == 2
+        await _bind_runtime_uploaded_files(
+            session=session,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            uploaded_for_step_id=runtime_steps[0].id,
+            file_ids=[input_file_id],
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"expected_flow_version": 1},
+            preseed_steps=[
+                {
+                    "step_id": step.id,
+                    "assistant_id": step.assistant_id,
+                    "step_order": step.step_order,
+                }
+                for step in runtime_steps
+            ],
+            step_input_files=[
+                {
+                    "step_id": step.id,
+                    "step_order": step.step_order,
+                    "file_ids": [input_file_id],
+                }
+                for step in runtime_steps
+            ],
+        )
+        await session.flush()
+
+        rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunStepInputFiles)
+                    .where(FlowRunStepInputFiles.flow_run_id == run.id)
+                    .order_by(
+                        FlowRunStepInputFiles.step_order.asc(),
+                        FlowRunStepInputFiles.ordinal.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        row_projection = [(row.step_id, row.file_id, row.ordinal) for row in rows]
+
+    assert row_projection == [
+        (runtime_steps[0].id, input_file_id, 0),
+        (runtime_steps[1].id, input_file_id, 0),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_current_step_input_file_read_model_uses_relational_current_attempts(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flows current runtime inputs", [model.id])
+        assistant = await assistant_factory(
+            session,
+            "Current runtime input assistant",
+            model.id,
+            space_id=space.id,
+        )
+        file_a = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name="current-a.pdf",
+        )
+        file_b = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name="current-b.pdf",
+        )
+        file_c = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name="current-c.pdf",
+        )
+        session.add_all([file_a, file_b, file_c])
+        await session.flush()
+        file_a_id = file_a.id
+        file_b_id = file_b.id
+        file_c_id = file_c.id
+
+        base_flow = _flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        runtime_steps = [
+            base_flow.steps[0].model_copy(
+                update={
+                    "id": None,
+                    "step_order": step_order,
+                    "user_description": f"Runtime input step {step_order}",
+                }
+            )
+            for step_order in (1, 2, 3)
+        ]
+        flow_repo = FlowRepository(session=session, factory=FlowFactory())
+        flow = await flow_repo.create(
+            flow=base_flow.model_copy(update={"steps": runtime_steps}),
+            tenant_id=admin_user.tenant_id,
+        )
+        await _create_version(
+            session=session,
+            flow=flow,
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = await flow_repo.update(
+            flow=flow.model_copy(update={"published_version": 1}),
+            tenant_id=admin_user.tenant_id,
+        )
+        runtime_steps = sorted(flow.steps, key=lambda step: step.step_order)
+        await _bind_runtime_uploaded_files(
+            session=session,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            uploaded_for_step_id=runtime_steps[0].id,
+            file_ids=[file_a_id, file_b_id, file_c_id],
+        )
+
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        run = await run_repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            input_payload_json={"expected_flow_version": 1},
+            preseed_steps=[
+                {
+                    "step_id": step.id,
+                    "assistant_id": step.assistant_id,
+                    "step_order": step.step_order,
+                }
+                for step in runtime_steps
+            ],
+            step_input_files=[
+                {
+                    "step_id": runtime_steps[0].id,
+                    "step_order": runtime_steps[0].step_order,
+                    "file_ids": [file_b_id, file_a_id],
+                },
+                {
+                    "step_id": runtime_steps[1].id,
+                    "step_order": runtime_steps[1].step_order,
+                    "file_ids": [file_c_id],
+                },
+                {
+                    "step_id": runtime_steps[2].id,
+                    "step_order": runtime_steps[2].step_order,
+                    "file_ids": [file_a_id],
+                },
+            ],
+        )
+        now = datetime.now(timezone.utc)
+        for step in runtime_steps[:2]:
+            await flow_repo.save_step_result(
+                run.id,
+                FlowStepResult(
+                    id=uuid4(),
+                    flow_run_id=run.id,
+                    flow_id=flow.id,
+                    tenant_id=admin_user.tenant_id,
+                    step_id=step.id,
+                    step_order=step.step_order,
+                    assistant_id=step.assistant_id,
+                    input_payload_json={
+                        "runtime_input": {
+                            "file_ids": [str(uuid4())],
+                            "input_format": "document",
+                        }
+                    },
+                    effective_prompt="prompt",
+                    output_payload_json={"text": "output"},
+                    model_parameters_json={},
+                    num_tokens_input=1,
+                    num_tokens_output=1,
+                    status=FlowStepResultStatus.COMPLETED,
+                    error_message=None,
+                    flow_step_execution_hash=f"hash-{step.step_order}",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                tenant_id=admin_user.tenant_id,
+                attempt_no=1,
+            )
+        await session.flush()
+
+        step_results = await run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        step_result_id_by_order: dict[int, UUID] = {}
+        for result in step_results:
+            assert result.id is not None
+            step_result_id_by_order[result.step_order] = result.id
+        step_input_file_selects = 0
+
+        def count_step_input_file_selects(
+            _conn,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            nonlocal step_input_file_selects
+            normalized_statement = statement.lower().lstrip()
+            if (
+                normalized_statement.startswith("select")
+                and "flow_run_step_input_files" in normalized_statement
+            ):
+                step_input_file_selects += 1
+
+        sync_bind = session.sync_session.get_bind()
+        sa.event.listen(
+            sync_bind,
+            "before_cursor_execute",
+            count_step_input_file_selects,
+        )
+        try:
+            file_ids_by_step_result_id = (
+                await run_repo.list_current_step_input_file_ids_by_step_result_id(
+                    run_id=run.id,
+                    tenant_id=admin_user.tenant_id,
+                    step_results=step_results,
+                )
+            )
+        finally:
+            sa.event.remove(
+                sync_bind,
+                "before_cursor_execute",
+                count_step_input_file_selects,
+            )
+        cross_tenant_projections = (
+            await run_repo.list_current_step_input_file_ids_by_step_result_id(
+                run_id=run.id,
+                tenant_id=uuid4(),
+                step_results=step_results,
+            )
+        )
+        no_current_attempt_projections = (
+            await run_repo.list_current_step_input_file_ids_by_step_result_id(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                step_results=[
+                    result.model_copy(update={"current_attempt_no": None})
+                    for result in step_results
+                ],
+            )
+        )
+        metadata_selects = 0
+        metadata_statements: list[str] = []
+
+        def count_step_input_metadata_selects(
+            _conn,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            nonlocal metadata_selects
+            normalized_statement = statement.lower().lstrip()
+            if (
+                normalized_statement.startswith("select")
+                and "flow_run_step_input_files" in normalized_statement
+            ):
+                metadata_selects += 1
+                metadata_statements.append(normalized_statement)
+
+        sa.event.listen(
+            sync_bind,
+            "before_cursor_execute",
+            count_step_input_metadata_selects,
+        )
+        try:
+            metadata_by_step_result_id = (
+                await run_repo.list_current_step_input_file_metadata_by_step_result_id(
+                    run_id=run.id,
+                    tenant_id=admin_user.tenant_id,
+                    step_results=step_results,
+                )
+            )
+        finally:
+            sa.event.remove(
+                sync_bind,
+                "before_cursor_execute",
+                count_step_input_metadata_selects,
+            )
+        cross_tenant_metadata = (
+            await run_repo.list_current_step_input_file_metadata_by_step_result_id(
+                run_id=run.id,
+                tenant_id=uuid4(),
+                step_results=step_results,
+            )
+        )
+        no_current_attempt_metadata = (
+            await run_repo.list_current_step_input_file_metadata_by_step_result_id(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                step_results=[
+                    result.model_copy(update={"current_attempt_no": None})
+                    for result in step_results
+                ],
+            )
+        )
+
+    assert step_input_file_selects == 1
+    assert file_ids_by_step_result_id == {
+        step_result_id_by_order[1]: (file_b_id, file_a_id),
+        step_result_id_by_order[2]: (file_c_id,),
+        step_result_id_by_order[3]: (file_a_id,),
+    }
+    assert cross_tenant_projections == {}
+    assert no_current_attempt_projections == {}
+    assert metadata_selects == 1
+    assert len(metadata_statements) == 1
+    metadata_statement = metadata_statements[0]
+    assert "files.blob" not in metadata_statement
+    assert "files.text as text" not in metadata_statement
+    assert "files.transcription as transcription" not in metadata_statement
+    assert [
+        metadata.name
+        for metadata in metadata_by_step_result_id[step_result_id_by_order[1]]
+    ] == ["current-b.pdf", "current-a.pdf"]
+    assert [
+        metadata.file_id
+        for metadata in metadata_by_step_result_id[step_result_id_by_order[1]]
+    ] == [file_b_id, file_a_id]
+    first_metadata = metadata_by_step_result_id[step_result_id_by_order[1]][0]
+    assert first_metadata.checksum == "checksum-current-b.pdf"
+    assert first_metadata.size == 128
+    assert first_metadata.mimetype == "application/pdf"
+    assert first_metadata.file_type.value == "document"
+    assert first_metadata.text_length == len("file text")
+    assert first_metadata.has_text is True
+    assert first_metadata.has_transcription is False
+    assert [
+        metadata.name
+        for metadata in metadata_by_step_result_id[step_result_id_by_order[2]]
+    ] == ["current-c.pdf"]
+    assert [
+        metadata.name
+        for metadata in metadata_by_step_result_id[step_result_id_by_order[3]]
+    ] == ["current-a.pdf"]
+    assert cross_tenant_metadata == {}
+    assert no_current_attempt_metadata == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_step_result_file_requires_matching_step_attempt(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        output_file = _file(
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            name="orphan-attempt-output.pdf",
+        )
+        session.add(output_file)
+        await session.flush()
+        output_file_id = output_file.id
+
+        flow, step, run, _ = await _create_running_step_file_flow(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        result = FlowStepResult(
+            id=uuid4(),
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=step.step_order,
+            assistant_id=step.assistant_id,
+            input_payload_json={"text": "input"},
+            effective_prompt="prompt",
+            output_payload_json={"text": "output"},
+            model_parameters_json={},
+            num_tokens_input=1,
+            num_tokens_output=1,
+            status=FlowStepResultStatus.COMPLETED,
+            error_message=None,
+            flow_step_execution_hash="hash",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        saved_result = await FlowRepository(
+            session=session,
+            factory=FlowFactory(),
+        ).save_step_result(
+            run.id,
+            result,
+            tenant_id=admin_user.tenant_id,
+            attempt_no=1,
+        )
+        assert saved_result is not None
+
+        session.add(
+            FlowRunStepResultFiles(
+                flow_run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                step_result_id=saved_result.id,
+                step_id=step.id,
+                step_order=step.step_order,
+                attempt_no=2,
+                file_id=output_file_id,
+                ordinal=0,
+                source="generated_output",
+            )
+        )
+        with pytest.raises(
+            IntegrityError,
+            match="fk_flow_run_step_result_files_step_attempt",
+        ):
+            await session.flush()
+        await session.rollback()
 
 
 @pytest.mark.asyncio
@@ -421,6 +950,15 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=step.step_order,
+            attempt_no=3,
+            celery_task_id="result-files-attempt-3",
+        )
         await flow_repo.save_step_result(
             run.id,
             result,
@@ -443,6 +981,15 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
                     "text": "retry output",
                 },
             }
+        )
+        await run_repo.create_or_get_attempt_started(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=step.step_order,
+            attempt_no=4,
+            celery_task_id="result-files-attempt-4",
         )
         await flow_repo.save_step_result(
             run.id,
@@ -570,7 +1117,19 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
 
     async with sessionmanager.session() as terminal_session, terminal_session.begin():
         run_repo = FlowRunRepository(session=terminal_session, factory=FlowFactory())
-        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        terminalizer = FlowRunTerminalizer(
+            run_repo,
+            FlowRunRerunRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+            ),
+            run_repo.audit_outbox_repo,
+            FlowRunReviewCheckpointRepository(
+                session=run_repo.session,
+                factory=run_repo.factory,
+                audit_outbox_repo=run_repo.audit_outbox_repo,
+            ),
+        )
         await terminalizer.terminalize_run(
             run_id=run.id,
             tenant_id=admin_user.tenant_id,
@@ -586,7 +1145,11 @@ async def test_late_step_result_save_after_terminalization_preserves_result_file
                     if target_status == FlowRunStatus.CANCELLED
                     else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
                 ),
-                code=f"terminalized_{target_status.value}",
+                code=(
+                    FlowApiErrorCode.RUN_USER_CANCELLED
+                    if target_status == FlowRunStatus.CANCELLED
+                    else FlowApiErrorCode.RUN_WORKER_STALLED
+                ),
                 message=f"Run was terminalized as {target_status.value}.",
             ),
         )

@@ -19,13 +19,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from intric.database.tables.ai_models_table import CompletionModels
-    from intric.users.user import UserInDB
+    from intric.tenants.tenant import TenantInDB
 
 
 class CompletionModel(AIModel):
     def __init__(
         self,
-        user: "UserInDB",
+        *,
+        tenant: "TenantInDB",
         id: "UUID",
         created_at: "datetime",
         updated_at: "datetime",
@@ -65,7 +66,7 @@ class CompletionModel(AIModel):
         deleted_at: Optional["datetime"] = None,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -165,7 +166,7 @@ class CompletionModel(AIModel):
     def create_from_db(
         cls,
         completion_model_db: "CompletionModels",
-        user: "UserInDB",
+        tenant: "TenantInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ) -> "CompletionModel":
@@ -188,7 +189,7 @@ class CompletionModel(AIModel):
 
         # Settings are now directly on the model table
         return cls(
-            user=user,
+            tenant=tenant,
             id=completion_model_db.id,
             created_at=completion_model_db.created_at,
             updated_at=completion_model_db.updated_at,

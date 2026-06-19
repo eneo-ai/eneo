@@ -186,6 +186,61 @@ export function initSettings(client) {
     },
 
     /**
+     * List full run-history retention policies keyed by security classification.
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowClassificationRetentionPolicies>}
+     */
+    listFlowClassificationRetentionPolicies: async () => {
+      const res = await client.fetch("/api/v1/settings/flow-classification-retention-policies", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Create or replace a full run-history retention policy for one security classification.
+     * @param {string} securityClassificationId
+     * @param {import('../types/resources').FlowClassificationRetentionPolicyUpdate} payload
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').FlowClassificationRetentionPolicy>}
+     */
+    putFlowClassificationRetentionPolicy: async (securityClassificationId, payload) => {
+      const res = await client.fetch(
+        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
+        {
+          method: "put",
+          params: {
+            path: {
+              security_classification_id: securityClassificationId
+            }
+          },
+          requestBody: { "application/json": payload }
+        }
+      );
+      return res;
+    },
+
+    /**
+     * Delete a full run-history retention policy for one security classification.
+     * @param {string} securityClassificationId
+     * @throws {IntricError}
+     * @returns {Promise<void>}
+     */
+    deleteFlowClassificationRetentionPolicy: async (securityClassificationId) => {
+      await client.fetch(
+        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
+        {
+          method: "delete",
+          params: {
+            path: {
+              security_classification_id: securityClassificationId
+            }
+          }
+        }
+      );
+    },
+
+    /**
      * Get generated PDF/DOCX render limits for the current tenant.
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').FlowDocumentRenderLimits>}

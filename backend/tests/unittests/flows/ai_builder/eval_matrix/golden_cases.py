@@ -369,6 +369,55 @@ def _audio_transcription_basic() -> BuildableGoldenCase:
     )
 
 
+def _audio_to_docx_template_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Transkriberad rapport till DOCX-mall",
+        steps=[
+            _step(
+                "step_a",
+                "Transkribera ljud",
+                "Transkribera den uppladdade ljudfilen till text.",
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                "step_b",
+                "Extrahera avsnitt",
+                "Extrahera rapportavsnitt ur {{step_a.output.text}} som JSON.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_c",
+                "Skriv rapport",
+                "Skriv en sammanhållen rapport från "
+                "{{step_b.output.structured.sections}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_d",
+                "Fyll DOCX-mall",
+                "Fyll DOCX-mallen {{template_name}} med {{step_c.output.text}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="template_name", type="text", label="Mall")],
+    )
+    return BuildableGoldenCase(
+        case_id="audio_to_docx_template__advanced",
+        capability_row=CapabilityRow.AUDIO_TRANSCRIPTION,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+            }
+        ),
+    )
+
+
 def _comparison_basic() -> BuildableGoldenCase:
     spec = FlowDraftSpecCore(
         flow_name="Jämför offerter",
@@ -555,6 +604,52 @@ def _sectioned_form_intake_advanced() -> BuildableGoldenCase:
     )
 
 
+def _form_intake_to_docx_template_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Formulär till DOCX-mall",
+        steps=[
+            _step(
+                "step_a",
+                "Sammanställ formulär",
+                "Sammanställ avsnitt från {{applicant_name}}, {{case_type}} "
+                "och {{decision_goal}}.",
+            ),
+            _step(
+                "step_b",
+                "Skriv sluttext",
+                "Skriv en slutlig text från {{step_a.output.text}} med målet "
+                "{{decision_goal}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_c",
+                "Fyll DOCX-mall",
+                "Fyll DOCX-mallen {{template_name}} med {{step_b.output.text}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            ),
+        ],
+        form_fields=[
+            FormFieldSpec(name="applicant_name", type="text", label="Namn"),
+            FormFieldSpec(name="case_type", type="text", label="Typ"),
+            FormFieldSpec(name="decision_goal", type="text", label="Mål"),
+            FormFieldSpec(name="template_name", type="text", label="Mall"),
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="form_intake_to_docx_template__advanced",
+        capability_row=CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.FORM_FIELDS_CHAIN,
+            }
+        ),
+    )
+
+
 def _multi_step_quality_chain_form_fields() -> BuildableGoldenCase:
     spec = FlowDraftSpecCore(
         flow_name="Tonanpassad granskningskedja",
@@ -640,11 +735,13 @@ GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _structured_report_advanced(),
     _pdf_report_basic(),
     _audio_transcription_basic(),
+    _audio_to_docx_template_advanced(),
     _comparison_basic(),
     _comparison_advanced(),
     _docx_template_advanced(),
     _sectioned_form_intake_basic(),
     _sectioned_form_intake_advanced(),
+    _form_intake_to_docx_template_advanced(),
     _multi_step_quality_chain_form_fields(),
     _underlag_till_text_pipe(),
 )

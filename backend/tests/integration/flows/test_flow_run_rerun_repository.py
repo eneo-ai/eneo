@@ -11,21 +11,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.authentication.principal_types import PrincipalType
 from intric.database.database import sessionmanager
+from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRuns,
+    FlowRunStepInputFiles,
+    FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows import (
-    Flow,
-    FlowFactory,
-    FlowRepository,
-    FlowStep,
-    FlowVersionRepository,
+from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from intric.flows.domain.flow import Flow, FlowStep, RerunStepInputOverride
+from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from intric.flows.domain.rerun_exceptions import (
+    FlowRunRerunAttemptLineageConflictError,
+    FlowRunRerunInvalidTransitionError,
+    FlowRunRerunMissingCurrentResultsError,
+    FlowRunRerunRootStepIncompleteError,
+    FlowRunRerunStaleRevisionError,
+    FlowRunRerunStepInputsInvalidError,
+    FlowRunRerunStepNotFoundError,
 )
 from intric.flows.enums import (
+    FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunStatus,
@@ -33,20 +43,45 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     RerunDependencyKind,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_run_error import FlowRunError
+from intric.flows.flow_run_input_envelope import (
+    RerunInputOverride,
+)
 from intric.flows.flow_run_rerun_graph import (
     RerunInvalidatedStep,
     build_rerun_invalidation_graph,
 )
-from intric.flows.infrastructure.flow_run_repo import (
-    _RERUN_STEP_RESULT_RESET_VALUES,
-    FlowRunRepository,
+from intric.flows.flow_run_rerun_request import (
+    FlowRunRerunRequestFingerprintInput,
+    build_rerun_request_fingerprint,
+)
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
 )
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
     build_published_definition_json,
     parse_published_runtime_steps,
 )
-from intric.main.exceptions import BadRequestException, NotFoundException
+
+_DEFAULT_RERUN_FILE_IDS = object()
+_EXPECTED_RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
+    "status": FlowStepResultStatus.PENDING.value,
+    "current_attempt_no": None,
+    "input_payload_json": None,
+    "output_payload_json": None,
+    "effective_prompt": None,
+    "model_parameters_json": None,
+    "num_tokens_input": None,
+    "num_tokens_output": None,
+    "error_message": None,
+    "flow_step_execution_hash": None,
+    "started_at": None,
+    "finished_at": None,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,12 +91,29 @@ class RerunRepositoryScenario:
     flow_run_id: UUID
     requested_by_user_id: UUID
     root_step_id: UUID
+    rerun_file_ids: tuple[UUID, UUID]
     step_ids: tuple[UUID, UUID, UUID]
     invalidated_steps: tuple[RerunInvalidatedStep, ...]
 
 
 class _RollbackMarker(Exception):
     pass
+
+
+def _flow_run_terminalizer(run_repo: FlowRunRepository) -> FlowRunTerminalizer:
+    return FlowRunTerminalizer(
+        run_repo,
+        FlowRunRerunRepository(
+            session=run_repo.session,
+            factory=run_repo.factory,
+        ),
+        run_repo.audit_outbox_repo,
+        FlowRunReviewCheckpointRepository(
+            session=run_repo.session,
+            factory=run_repo.factory,
+            audit_outbox_repo=run_repo.audit_outbox_repo,
+        ),
+    )
 
 
 def _require_uuid(value: UUID | None) -> UUID:
@@ -189,6 +241,23 @@ def _published_step(step: FlowStep) -> dict[str, object]:
     }
 
 
+def _file(*, user_id: UUID, tenant_id: UUID, name: str) -> Files:
+    return Files(
+        name=name,
+        text="rerun input file",
+        blob=None,
+        checksum=f"checksum-{name}",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+        owner_type="user",
+        owner_user_id=user_id,
+        owner_service_id=None,
+        tenant_id=tenant_id,
+    )
+
+
 async def _create_completed_rerun_scenario(
     *,
     session: AsyncSession,
@@ -205,6 +274,18 @@ async def _create_completed_rerun_scenario(
         model.id,
         space_id=space.id,
     )
+    rerun_file_a = _file(
+        user_id=admin_user.id,
+        tenant_id=admin_user.tenant_id,
+        name=f"rerun-a-{uuid4()}.pdf",
+    )
+    rerun_file_b = _file(
+        user_id=admin_user.id,
+        tenant_id=admin_user.tenant_id,
+        name=f"rerun-b-{uuid4()}.pdf",
+    )
+    session.add_all([rerun_file_a, rerun_file_b])
+    await session.flush()
 
     flow_repo = FlowRepository(session=session, factory=FlowFactory())
     flow = await flow_repo.create(
@@ -220,7 +301,6 @@ async def _create_completed_rerun_scenario(
     await FlowVersionRepository(session=session, factory=FlowFactory()).create(
         flow_id=_require_uuid(flow.id),
         version=1,
-        definition_checksum=f"checksum-rerun-{uuid4()}",
         definition_json=definition_json,
         tenant_id=admin_user.tenant_id,
     )
@@ -228,6 +308,22 @@ async def _create_completed_rerun_scenario(
         flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
+    root_step_id = _require_uuid(flow.steps[0].id)
+    session.add_all(
+        [
+            FlowRuntimeUploadedFiles(
+                file_id=rerun_file.id,
+                flow_id=_require_uuid(flow.id),
+                tenant_id=admin_user.tenant_id,
+                uploaded_for_step_id=root_step_id,
+                owner_type="user",
+                owner_user_id=admin_user.id,
+                owner_service_id=None,
+            )
+            for rerun_file in (rerun_file_a, rerun_file_b)
+        ]
+    )
+    await session.flush()
 
     run_repo = FlowRunRepository(session=session, factory=FlowFactory())
     run = await run_repo.create(
@@ -255,17 +351,21 @@ async def _create_completed_rerun_scenario(
         flow_run_id=run.id,
         tenant_id=admin_user.tenant_id,
     )
-    runtime_steps = parse_published_runtime_steps(definition_json)
+    runtime_steps = parse_published_runtime_steps(
+        definition_json,
+        flow_version=1,
+    )
     graph = build_rerun_invalidation_graph(
         steps=runtime_steps,
-        root_step_id=_require_uuid(flow.steps[0].id),
+        root_step_id=root_step_id,
     )
     return RerunRepositoryScenario(
         tenant_id=admin_user.tenant_id,
         flow_id=_require_uuid(flow.id),
         flow_run_id=run.id,
         requested_by_user_id=admin_user.id,
-        root_step_id=_require_uuid(flow.steps[0].id),
+        root_step_id=root_step_id,
+        rerun_file_ids=(rerun_file_a.id, rerun_file_b.id),
         step_ids=tuple(_require_uuid(step.id) for step in flow.steps),
         invalidated_steps=graph.invalidated_steps,
     )
@@ -340,9 +440,25 @@ async def _accept_rerun(
     scenario: RerunRepositoryScenario,
     fingerprint: str = "rerun-fingerprint",
     expected_run_revision: int = 1,
+    inline_payload_json: dict[str, object] | None = None,
+    root_step_file_ids: tuple[UUID, ...] | None | object = _DEFAULT_RERUN_FILE_IDS,
+    root_step_input_step_id: UUID | None = None,
     invalidated_steps: tuple[RerunInvalidatedStep, ...] | None = None,
 ):
-    return await FlowRunRepository(
+    if root_step_file_ids is _DEFAULT_RERUN_FILE_IDS:
+        root_step_input = RerunStepInputOverride(
+            step_id=root_step_input_step_id or scenario.root_step_id,
+            file_ids=scenario.rerun_file_ids,
+        )
+    elif root_step_file_ids is None:
+        root_step_input = None
+    else:
+        root_step_input = RerunStepInputOverride(
+            step_id=root_step_input_step_id or scenario.root_step_id,
+            file_ids=root_step_file_ids,
+        )
+
+    return await FlowRunRerunRepository(
         session=session,
         factory=FlowFactory(),
     ).accept_or_replay_rerun_operation(
@@ -354,8 +470,14 @@ async def _accept_rerun(
         request_fingerprint=fingerprint,
         expected_run_revision=expected_run_revision,
         reason="Regenerate source output after reviewer edit.",
-        input_payload_json={"case_id": "case-456"},
-        step_inputs_json={"1": {"case_id": "case-456"}},
+        rerun_input_override=RerunInputOverride(
+            inline_payload_json=(
+                {"case_id": "case-456"}
+                if inline_payload_json is None
+                else inline_payload_json
+            ),
+            root_step_input=root_step_input,
+        ),
         requested_by_principal=FlowPrincipal(
             principal_type=PrincipalType.USER,
             principal_user_id=scenario.requested_by_user_id,
@@ -366,6 +488,171 @@ async def _accept_rerun(
             else invalidated_steps
         ),
     )
+
+
+def _build_rerun_fingerprint(
+    *,
+    scenario: RerunRepositoryScenario,
+    expected_run_revision: int,
+    root_step_file_ids: tuple[UUID, ...],
+    prior_root_attempt_id: UUID | None,
+) -> str:
+    return build_rerun_request_fingerprint(
+        FlowRunRerunRequestFingerprintInput(
+            tenant_id=scenario.tenant_id,
+            requested_by_principal_type=PrincipalType.USER,
+            requested_by_user_id=scenario.requested_by_user_id,
+            requested_by_service_id=None,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            rerun_step_id=scenario.root_step_id,
+            expected_run_revision=expected_run_revision,
+            prior_root_attempt_id=prior_root_attempt_id,
+            input_payload_json={"case_id": "case-456"},
+            root_step_inputs={scenario.root_step_id: root_step_file_ids},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("root_step_file_ids", "expected_override_requested"),
+    (
+        pytest.param(None, False, id="inherit-root-files"),
+        pytest.param((), True, id="clear-root-files"),
+        pytest.param(_DEFAULT_RERUN_FILE_IDS, True, id="replace-root-files"),
+    ),
+)
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_accept_rerun_records_root_step_input_override_intent(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    root_step_file_ids,
+    expected_override_requested,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+
+        accepted = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            root_step_file_ids=root_step_file_ids,
+        )
+
+        assert (
+            accepted.operation.root_step_input_override_requested
+            is expected_override_requested
+        )
+        if expected_override_requested:
+            expected_file_ids = (
+                scenario.rerun_file_ids
+                if root_step_file_ids is _DEFAULT_RERUN_FILE_IDS
+                else tuple(root_step_file_ids or ())
+            )
+            assert accepted.operation.root_step_input_override is not None
+            assert accepted.operation.root_step_input_override.step_id == (
+                scenario.root_step_id
+            )
+            assert accepted.operation.root_step_input_override.file_ids == (
+                expected_file_ids
+            )
+        else:
+            assert accepted.operation.root_step_input_override is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_terminalizer_closes_active_rerun_operation_with_structured_failure_code(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        accepted = await _accept_rerun(session=session, scenario=scenario)
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+
+        await _flow_run_terminalizer(run_repo).terminalize_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.TASK_FAILURE,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.TASK_FAILURE,
+                code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                message="Step execution failed.",
+            ),
+        )
+
+        operation_row = await session.scalar(
+            sa.select(FlowRunRerunOperations).where(
+                FlowRunRerunOperations.id == accepted.operation.id
+            )
+        )
+        assert operation_row is not None
+        assert operation_row.status == FlowRunRerunOperationStatus.FAILED.value
+        assert (
+            operation_row.failure_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
+        )
+        assert operation_row.failure_message == "Step execution failed."
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_terminalizer_closes_active_rerun_operation_with_null_failure_code_without_structured_error(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        accepted = await _accept_rerun(session=session, scenario=scenario)
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+
+        await _flow_run_terminalizer(run_repo).terminalize_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            target_status=FlowRunStatus.CANCELLED,
+            source=FlowRunLifecycleSource.USER_CANCEL,
+        )
+
+        operation_row = await session.scalar(
+            sa.select(FlowRunRerunOperations).where(
+                FlowRunRerunOperations.id == accepted.operation.id
+            )
+        )
+        assert operation_row is not None
+        assert operation_row.status == FlowRunRerunOperationStatus.CANCELLED.value
+        assert operation_row.failure_code is None
+        assert operation_row.failure_message is None
 
 
 @pytest.mark.asyncio
@@ -387,6 +674,7 @@ async def test_get_latest_completed_attempt_id_for_step_uses_highest_completed_a
             admin_user=admin_user,
         )
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
         first_attempt = await session.scalar(
             sa.select(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
@@ -453,20 +741,22 @@ async def test_get_latest_completed_attempt_id_for_step_uses_highest_completed_a
             .values(started_at=third_started_at, finished_at=third_started_at)
         )
 
-        latest_attempt_id = await run_repo.get_latest_completed_attempt_id_for_step(
+        latest_attempt_id = await rerun_repo.get_latest_completed_attempt_id_for_step(
             run_id=scenario.flow_run_id,
             flow_id=scenario.flow_id,
             tenant_id=scenario.tenant_id,
             step_id=scenario.root_step_id,
         )
-        wrong_flow_attempt_id = await run_repo.get_latest_completed_attempt_id_for_step(
-            run_id=scenario.flow_run_id,
-            flow_id=uuid4(),
-            tenant_id=scenario.tenant_id,
-            step_id=scenario.root_step_id,
+        wrong_flow_attempt_id = (
+            await rerun_repo.get_latest_completed_attempt_id_for_step(
+                run_id=scenario.flow_run_id,
+                flow_id=uuid4(),
+                tenant_id=scenario.tenant_id,
+                step_id=scenario.root_step_id,
+            )
         )
         missing_step_attempt_id = (
-            await run_repo.get_latest_completed_attempt_id_for_step(
+            await rerun_repo.get_latest_completed_attempt_id_for_step(
                 run_id=scenario.flow_run_id,
                 flow_id=scenario.flow_id,
                 tenant_id=scenario.tenant_id,
@@ -502,8 +792,36 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         )
         assert run_before is not None
 
-        accepted = await _accept_rerun(session=session, scenario=scenario)
+        requested_file_order = tuple(
+            sorted(
+                scenario.rerun_file_ids, key=lambda file_id: str(file_id), reverse=True
+            )
+        )
+
+        accepted = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            root_step_file_ids=requested_file_order,
+        )
+        projection_count_after_accept = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRunStepInputFiles)
+            .where(FlowRunStepInputFiles.flow_run_id == scenario.flow_run_id)
+            .where(FlowRunStepInputFiles.step_id == scenario.root_step_id)
+            .where(
+                FlowRunStepInputFiles.attempt_no == accepted.operation.root_attempt_no
+            )
+        )
         replayed = await _accept_rerun(session=session, scenario=scenario)
+        projection_count_after_replay = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRunStepInputFiles)
+            .where(FlowRunStepInputFiles.flow_run_id == scenario.flow_run_id)
+            .where(FlowRunStepInputFiles.step_id == scenario.root_step_id)
+            .where(
+                FlowRunStepInputFiles.attempt_no == accepted.operation.root_attempt_no
+            )
+        )
 
         assert accepted.created is True
         assert replayed.created is False
@@ -516,7 +834,58 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         assert accepted.run.status == FlowRunStatus.QUEUED
         assert accepted.run.revision == 2
         assert accepted.run.trace_id == run_before.trace_id
-        assert accepted.run.input_payload_json == {"case_id": "case-123"}
+        assert accepted.run.input_payload_json == {"case_id": "case-456"}
+        assert replayed.run.revision == 2
+        assert replayed.run.input_payload_json == accepted.run.input_payload_json
+        assert accepted.operation.input_payload_json == {"case_id": "case-456"}
+        assert accepted.operation.root_step_input_override is not None
+        assert (
+            accepted.operation.root_step_input_override.step_id == scenario.root_step_id
+        )
+        assert (
+            accepted.operation.root_step_input_override.file_ids == requested_file_order
+        )
+        assert projection_count_after_accept == len(scenario.rerun_file_ids)
+        assert projection_count_after_replay == projection_count_after_accept
+        projection_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunStepInputFiles)
+                    .where(FlowRunStepInputFiles.flow_run_id == scenario.flow_run_id)
+                    .where(FlowRunStepInputFiles.step_id == scenario.root_step_id)
+                    .where(
+                        FlowRunStepInputFiles.attempt_no
+                        == accepted.operation.root_attempt_no
+                    )
+                    .order_by(FlowRunStepInputFiles.ordinal.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [
+            (row.file_id, row.ordinal, row.step_order) for row in projection_rows
+        ] == [
+            (requested_file_order[0], 0, accepted.operation.rerun_step_order),
+            (requested_file_order[1], 1, accepted.operation.rerun_step_order),
+        ]
+        listed_operations = await FlowRunRerunRepository(
+            session=session,
+            factory=FlowFactory(),
+        ).list_rerun_operations_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        listed_operation = next(
+            operation
+            for operation in listed_operations
+            if operation.id == accepted.operation.id
+        )
+
+        assert listed_operation.root_step_input_override is not None
+        assert (
+            listed_operation.root_step_input_override.file_ids == requested_file_order
+        )
         assert accepted.run.output_payload_json is None
         assert accepted.run.error is None
         assert accepted.run.started_at is None
@@ -556,8 +925,8 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         for row in result_rows:
             assert {
                 column_name: getattr(row, column_name)
-                for column_name in _RERUN_STEP_RESULT_RESET_VALUES
-            } == _RERUN_STEP_RESULT_RESET_VALUES
+                for column_name in _EXPECTED_RERUN_STEP_RESULT_RESET_VALUES
+            } == _EXPECTED_RERUN_STEP_RESULT_RESET_VALUES
 
         await session.execute(
             sa.update(FlowRuns)
@@ -573,6 +942,403 @@ async def test_accept_rerun_operation_resets_run_results_and_records_invalidatio
         assert replayed_after_run_update.operation.id == accepted.operation.id
         assert replayed_after_run_update.run.status == FlowRunStatus.RUNNING
         assert replayed_after_run_update.run.revision == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_accept_rerun_distinguishes_ordered_file_input_sequences(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        first_order = scenario.rerun_file_ids
+        reversed_order = tuple(reversed(first_order))
+        prior_root_attempt_id = await session.scalar(
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepAttempts.flow_id == scenario.flow_id)
+            .where(FlowStepAttempts.tenant_id == scenario.tenant_id)
+            .where(FlowStepAttempts.step_id == scenario.root_step_id)
+            .where(FlowStepAttempts.attempt_no == 1)
+        )
+        assert prior_root_attempt_id is not None
+        first_fingerprint = _build_rerun_fingerprint(
+            scenario=scenario,
+            expected_run_revision=1,
+            root_step_file_ids=first_order,
+            prior_root_attempt_id=prior_root_attempt_id,
+        )
+        same_revision_reversed_fingerprint = _build_rerun_fingerprint(
+            scenario=scenario,
+            expected_run_revision=1,
+            root_step_file_ids=reversed_order,
+            prior_root_attempt_id=prior_root_attempt_id,
+        )
+        assert first_fingerprint != same_revision_reversed_fingerprint
+
+        first = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            fingerprint=first_fingerprint,
+            root_step_file_ids=first_order,
+        )
+        first_root_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=first.operation.root_attempt_no,
+            celery_task_id="complete-first-ordered-rerun",
+            rerun_operation_id=first.operation.id,
+            predecessor_attempt_id=prior_root_attempt_id,
+        )
+        finished_root_attempt = await run_repo.finish_attempt(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.root_step_id,
+            attempt_no=first_root_attempt.attempt_no,
+            tenant_id=scenario.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+        )
+        assert finished_root_attempt is not None
+        now = datetime.now(timezone.utc)
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepResults.tenant_id == scenario.tenant_id)
+            .values(
+                status=FlowStepResultStatus.COMPLETED.value,
+                error_message=None,
+                output_payload_json={"text": "first ordered rerun completed"},
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepResults.tenant_id == scenario.tenant_id)
+            .where(FlowStepResults.step_id == scenario.root_step_id)
+            .values(current_attempt_no=first_root_attempt.attempt_no)
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepResults.tenant_id == scenario.tenant_id)
+            .where(FlowStepResults.step_id != scenario.root_step_id)
+            .values(current_attempt_no=1)
+        )
+        assert (
+            await rerun_repo.close_active_rerun_operations_for_terminal_run(
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                target_status=FlowRunStatus.COMPLETED,
+            )
+            == 1
+        )
+        completed_run = await run_repo.terminalize_run_status(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            target_status=FlowRunStatus.COMPLETED,
+            output_payload_json={"answer": "first ordered rerun completed"},
+        )
+        assert completed_run is not None
+        assert completed_run.revision == 2
+
+        second_fingerprint = _build_rerun_fingerprint(
+            scenario=scenario,
+            expected_run_revision=2,
+            root_step_file_ids=reversed_order,
+            prior_root_attempt_id=first_root_attempt.id,
+        )
+        second = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            fingerprint=second_fingerprint,
+            expected_run_revision=2,
+            root_step_file_ids=reversed_order,
+        )
+        operation_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunRerunOperations)
+                    .where(FlowRunRerunOperations.flow_run_id == scenario.flow_run_id)
+                    .where(
+                        FlowRunRerunOperations.request_fingerprint.in_(
+                            (first_fingerprint, second_fingerprint)
+                        )
+                    )
+                    .order_by(FlowRunRerunOperations.expected_run_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        projection_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunStepInputFiles)
+                    .where(FlowRunStepInputFiles.flow_run_id == scenario.flow_run_id)
+                    .where(FlowRunStepInputFiles.step_id == scenario.root_step_id)
+                    .where(
+                        FlowRunStepInputFiles.attempt_no.in_(
+                            (
+                                first.operation.root_attempt_no,
+                                second.operation.root_attempt_no,
+                            )
+                        )
+                    )
+                    .order_by(
+                        FlowRunStepInputFiles.attempt_no.asc(),
+                        FlowRunStepInputFiles.ordinal.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        projected_file_ids_by_attempt: dict[int, list[tuple[UUID, int]]] = {}
+        for row in projection_rows:
+            projected_file_ids_by_attempt.setdefault(row.attempt_no, []).append(
+                (row.file_id, row.ordinal)
+            )
+
+        assert first.created is True
+        assert second.created is True
+        assert first.operation.id != second.operation.id
+        assert second.operation.root_attempt_no == first_root_attempt.attempt_no + 1
+        assert [(row.request_fingerprint, row.status) for row in operation_rows] == [
+            (first_fingerprint, FlowRunRerunOperationStatus.COMPLETED.value),
+            (second_fingerprint, FlowRunRerunOperationStatus.QUEUED.value),
+        ]
+        assert projected_file_ids_by_attempt == {
+            first.operation.root_attempt_no: [
+                (first_order[0], 0),
+                (first_order[1], 1),
+            ],
+            second.operation.root_attempt_no: [
+                (reversed_order[0], 0),
+                (reversed_order[1], 1),
+            ],
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_copy_step_input_files_from_predecessor_attempt_preserves_order(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        source_attempt_id = await session.scalar(
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepAttempts.flow_id == scenario.flow_id)
+            .where(FlowStepAttempts.tenant_id == scenario.tenant_id)
+            .where(FlowStepAttempts.step_id == scenario.root_step_id)
+            .where(FlowStepAttempts.attempt_no == 1)
+        )
+        assert source_attempt_id is not None
+        session.add_all(
+            [
+                FlowRunStepInputFiles(
+                    flow_run_id=scenario.flow_run_id,
+                    flow_id=scenario.flow_id,
+                    tenant_id=scenario.tenant_id,
+                    step_id=scenario.root_step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    file_id=scenario.rerun_file_ids[1],
+                    ordinal=0,
+                ),
+                FlowRunStepInputFiles(
+                    flow_run_id=scenario.flow_run_id,
+                    flow_id=scenario.flow_id,
+                    tenant_id=scenario.tenant_id,
+                    step_id=scenario.root_step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    file_id=scenario.rerun_file_ids[0],
+                    ordinal=1,
+                ),
+            ]
+        )
+        await session.flush()
+        target_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="copy-step-input-files",
+        )
+
+        for _ in range(2):
+            await run_repo.copy_step_input_files_from_predecessor_attempt(
+                run_id=scenario.flow_run_id,
+                flow_id=scenario.flow_id,
+                tenant_id=scenario.tenant_id,
+                step_id=scenario.root_step_id,
+                step_order=1,
+                predecessor_attempt_id=source_attempt_id,
+                target_attempt_no=target_attempt.attempt_no,
+            )
+        copied_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunStepInputFiles)
+                    .where(FlowRunStepInputFiles.flow_run_id == scenario.flow_run_id)
+                    .where(FlowRunStepInputFiles.step_id == scenario.root_step_id)
+                    .where(
+                        FlowRunStepInputFiles.attempt_no == target_attempt.attempt_no
+                    )
+                    .order_by(FlowRunStepInputFiles.ordinal.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        copied_projection = [
+            (row.file_id, row.ordinal, row.step_order) for row in copied_rows
+        ]
+
+    assert copied_projection == [
+        (scenario.rerun_file_ids[1], 0, 1),
+        (scenario.rerun_file_ids[0], 1, 1),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_non_override_rerun_does_not_project_copied_rows_as_override(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        source_attempt_id = await session.scalar(
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepAttempts.flow_id == scenario.flow_id)
+            .where(FlowStepAttempts.tenant_id == scenario.tenant_id)
+            .where(FlowStepAttempts.step_id == scenario.root_step_id)
+            .where(FlowStepAttempts.attempt_no == 1)
+        )
+        assert source_attempt_id is not None
+        session.add_all(
+            [
+                FlowRunStepInputFiles(
+                    flow_run_id=scenario.flow_run_id,
+                    flow_id=scenario.flow_id,
+                    tenant_id=scenario.tenant_id,
+                    step_id=scenario.root_step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    file_id=scenario.rerun_file_ids[0],
+                    ordinal=0,
+                ),
+                FlowRunStepInputFiles(
+                    flow_run_id=scenario.flow_run_id,
+                    flow_id=scenario.flow_id,
+                    tenant_id=scenario.tenant_id,
+                    step_id=scenario.root_step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    file_id=scenario.rerun_file_ids[1],
+                    ordinal=1,
+                ),
+            ]
+        )
+        await session.flush()
+        accepted = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            root_step_file_ids=None,
+        )
+        target_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=accepted.operation.root_attempt_no,
+            celery_task_id="non-override-copied-input-files",
+            rerun_operation_id=accepted.operation.id,
+            predecessor_attempt_id=source_attempt_id,
+        )
+        await run_repo.copy_step_input_files_from_predecessor_attempt(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            predecessor_attempt_id=source_attempt_id,
+            target_attempt_no=target_attempt.attempt_no,
+        )
+
+        replayed = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            root_step_file_ids=None,
+        )
+        listed_operations = await rerun_repo.list_rerun_operations_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        active_operation = await rerun_repo.get_active_rerun_operation(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+        )
+
+        assert accepted.operation.root_step_input_override_requested is False
+        assert replayed.operation.root_step_input_override is None
+        listed_operation = next(
+            operation
+            for operation in listed_operations
+            if operation.id == accepted.operation.id
+        )
+        assert listed_operation.root_step_input_override is None
+        assert active_operation is not None
+        assert active_operation.operation.root_step_input_override is None
 
 
 @pytest.mark.asyncio
@@ -594,6 +1360,7 @@ async def test_rerun_attempt_start_and_success_records_lineage(
             admin_user=admin_user,
         )
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
         accepted = await _accept_rerun(session=session, scenario=scenario)
         root_invalidated_step = accepted.invalidated_steps[0]
         assert root_invalidated_step.prior_attempt_id is not None
@@ -619,14 +1386,14 @@ async def test_rerun_attempt_start_and_success_records_lineage(
             rerun_operation_id=accepted.operation.id,
             predecessor_attempt_id=root_invalidated_step.prior_attempt_id,
         )
-        await run_repo.link_rerun_invalidated_step_attempt(
+        await rerun_repo.link_rerun_invalidated_step_attempt(
             operation_id=accepted.operation.id,
             tenant_id=scenario.tenant_id,
             step_id=scenario.root_step_id,
             new_attempt_no=started_attempt.attempt_no,
             new_attempt_id=started_attempt.id,
         )
-        await run_repo.mark_rerun_operation_running(
+        await rerun_repo.mark_rerun_operation_running(
             operation_id=accepted.operation.id,
             tenant_id=scenario.tenant_id,
             root_attempt_id=started_attempt.id,
@@ -640,7 +1407,7 @@ async def test_rerun_attempt_start_and_success_records_lineage(
         first_started_at = operation_after_first_start.started_at
         assert first_started_at is not None
 
-        await run_repo.mark_rerun_operation_running(
+        await rerun_repo.mark_rerun_operation_running(
             operation_id=accepted.operation.id,
             tenant_id=scenario.tenant_id,
             root_attempt_id=started_attempt.id,
@@ -709,7 +1476,7 @@ async def test_rerun_attempt_start_and_success_records_lineage(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
+async def test_rerun_invalidated_step_link_conflict_raises_typed_error(
     db_container,
     completion_model_factory,
     space_factory,
@@ -726,6 +1493,141 @@ async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
             admin_user=admin_user,
         )
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
+        accepted = await _accept_rerun(session=session, scenario=scenario)
+        root_invalidated_step = accepted.invalidated_steps[0]
+        assert root_invalidated_step.prior_attempt_id is not None
+        assert await run_repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        claimed = await run_repo.claim_step_result(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.root_step_id,
+            tenant_id=scenario.tenant_id,
+        )
+        assert claimed is not None
+
+        started_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=accepted.operation.root_attempt_no,
+            celery_task_id="rerun-root-attempt",
+            rerun_operation_id=accepted.operation.id,
+            predecessor_attempt_id=root_invalidated_step.prior_attempt_id,
+        )
+        await rerun_repo.link_rerun_invalidated_step_attempt(
+            operation_id=accepted.operation.id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            new_attempt_no=started_attempt.attempt_no,
+            new_attempt_id=started_attempt.id,
+        )
+        conflicting_attempt_id = uuid4()
+
+        with pytest.raises(FlowRunRerunAttemptLineageConflictError) as exc_info:
+            await rerun_repo.link_rerun_invalidated_step_attempt(
+                operation_id=accepted.operation.id,
+                tenant_id=scenario.tenant_id,
+                step_id=scenario.root_step_id,
+                new_attempt_no=started_attempt.attempt_no + 1,
+                new_attempt_id=conflicting_attempt_id,
+            )
+
+        assert exc_info.value.operation_id == accepted.operation.id
+        assert exc_info.value.step_id == scenario.root_step_id
+        assert exc_info.value.new_attempt_id == conflicting_attempt_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_accept_rerun_projects_file_inputs_at_next_root_attempt(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session, factory=FlowFactory())
+        second_attempt = await run_repo.create_or_get_attempt_started(
+            run_id=scenario.flow_run_id,
+            flow_id=scenario.flow_id,
+            tenant_id=scenario.tenant_id,
+            step_id=scenario.root_step_id,
+            step_order=1,
+            attempt_no=2,
+            celery_task_id="completed-second-root-attempt",
+        )
+        finished_second_attempt = await run_repo.finish_attempt(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.root_step_id,
+            attempt_no=second_attempt.attempt_no,
+            tenant_id=scenario.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+        )
+        assert finished_second_attempt is not None
+
+        accepted = await _accept_rerun(
+            session=session,
+            scenario=scenario,
+            fingerprint="rerun-after-second-attempt",
+        )
+
+        assert accepted.operation.root_attempt_no == 3
+        projection_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunStepInputFiles)
+                    .where(FlowRunStepInputFiles.flow_run_id == scenario.flow_run_id)
+                    .where(FlowRunStepInputFiles.step_id == scenario.root_step_id)
+                    .order_by(
+                        FlowRunStepInputFiles.attempt_no.asc(),
+                        FlowRunStepInputFiles.ordinal.asc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [
+            (row.attempt_no, row.file_id, row.ordinal) for row in projection_rows
+        ] == [
+            (3, scenario.rerun_file_ids[0], 0),
+            (3, scenario.rerun_file_ids[1], 1),
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        rerun_repo = FlowRunRerunRepository(session=session, factory=FlowFactory())
         started_at = datetime(2026, 1, 1, 10, tzinfo=timezone.utc)
         later_operation = FlowRunRerunOperations(
             tenant_id=scenario.tenant_id,
@@ -740,7 +1642,7 @@ async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
             accepted_run_revision=3,
             reason="Later evidence operation",
             input_payload_json={"case_id": "later"},
-            step_inputs_json=None,
+            root_step_input_override_requested=False,
             requested_by_principal_type=PrincipalType.USER.value,
             requested_by_user_id=scenario.requested_by_user_id,
             failure_code="step_failed",
@@ -763,7 +1665,7 @@ async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
             accepted_run_revision=2,
             reason="Earlier evidence operation",
             input_payload_json={"case_id": "earlier"},
-            step_inputs_json={"step_inputs": []},
+            root_step_input_override_requested=True,
             requested_by_principal_type=PrincipalType.USER.value,
             requested_by_user_id=scenario.requested_by_user_id,
             failure_code=None,
@@ -830,20 +1732,20 @@ async def test_list_rerun_lineage_for_evidence_is_tenant_scoped_and_ordered(
         )
         await session.flush()
 
-        operations = await run_repo.list_rerun_operations_for_run(
+        operations = await rerun_repo.list_rerun_operations_for_run(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
         )
-        invalidated_steps = await run_repo.list_rerun_invalidated_steps_for_run(
+        invalidated_steps = await rerun_repo.list_rerun_invalidated_steps_for_run(
             run_id=scenario.flow_run_id,
             tenant_id=scenario.tenant_id,
         )
-        wrong_tenant_operations = await run_repo.list_rerun_operations_for_run(
+        wrong_tenant_operations = await rerun_repo.list_rerun_operations_for_run(
             run_id=scenario.flow_run_id,
             tenant_id=uuid4(),
         )
         missing_run_invalidated_steps = (
-            await run_repo.list_rerun_invalidated_steps_for_run(
+            await rerun_repo.list_rerun_invalidated_steps_for_run(
                 run_id=uuid4(),
                 tenant_id=scenario.tenant_id,
             )
@@ -988,7 +1890,7 @@ async def test_stale_revision_rejects_without_mutation(
             admin_user=admin_user,
         )
 
-        with pytest.raises(BadRequestException) as exc_info:
+        with pytest.raises(FlowRunRerunStaleRevisionError) as exc_info:
             await _accept_rerun(
                 session=session,
                 scenario=scenario,
@@ -1008,7 +1910,8 @@ async def test_stale_revision_rejects_without_mutation(
             )
         ).one()
 
-    assert exc_info.value.code == "flow_run_rerun_stale_revision"
+    assert exc_info.value.expected_run_revision == 0
+    assert exc_info.value.current_run_revision == 1
     assert operation_count == 0
     assert run_state == (FlowRunStatus.COMPLETED.value, 1)
 
@@ -1047,7 +1950,7 @@ async def test_non_rerunnable_run_status_rejects_without_mutation(
             .values(status=run_status.value)
         )
 
-        with pytest.raises(BadRequestException) as exc_info:
+        with pytest.raises(FlowRunRerunInvalidTransitionError) as exc_info:
             await _accept_rerun(session=session, scenario=scenario)
 
         operation_count = await session.scalar(
@@ -1056,7 +1959,7 @@ async def test_non_rerunnable_run_status_rejects_without_mutation(
             .where(FlowRunRerunOperations.flow_run_id == scenario.flow_run_id)
         )
 
-    assert exc_info.value.code == "flow_run_rerun_invalid_transition"
+    assert exc_info.value.status == run_status.value
     assert operation_count == 0
 
 
@@ -1090,7 +1993,7 @@ async def test_failed_root_step_result_rejects_without_mutation(
             .values(status=FlowStepResultStatus.FAILED.value)
         )
 
-        with pytest.raises(BadRequestException) as exc_info:
+        with pytest.raises(FlowRunRerunRootStepIncompleteError) as exc_info:
             await _accept_rerun(session=session, scenario=scenario)
 
         operation_count = await session.scalar(
@@ -1099,7 +2002,7 @@ async def test_failed_root_step_result_rejects_without_mutation(
             .where(FlowRunRerunOperations.flow_run_id == scenario.flow_run_id)
         )
 
-    assert exc_info.value.code == "flow_run_rerun_step_incomplete"
+    assert exc_info.value.step_ids == (scenario.root_step_id,)
     assert operation_count == 0
 
 
@@ -1127,7 +2030,7 @@ async def test_missing_downstream_current_result_rejects_without_mutation(
             .where(FlowStepResults.step_id == scenario.step_ids[2])
         )
 
-        with pytest.raises(BadRequestException) as exc_info:
+        with pytest.raises(FlowRunRerunMissingCurrentResultsError) as exc_info:
             await _accept_rerun(session=session, scenario=scenario)
 
         operation_count = await session.scalar(
@@ -1143,7 +2046,7 @@ async def test_missing_downstream_current_result_rejects_without_mutation(
             )
         ).one()
 
-    assert exc_info.value.code == "flow_run_rerun_step_incomplete"
+    assert exc_info.value.step_ids == (scenario.step_ids[2],)
     assert operation_count == 0
     assert run_state == (FlowRunStatus.COMPLETED.value, 1)
 
@@ -1167,7 +2070,7 @@ async def test_missing_step_from_invalidation_graph_rejects_without_mutation(
             admin_user=admin_user,
         )
 
-        with pytest.raises(BadRequestException) as exc_info:
+        with pytest.raises(FlowRunRerunStepNotFoundError):
             await _accept_rerun(
                 session=session,
                 scenario=scenario,
@@ -1180,7 +2083,43 @@ async def test_missing_step_from_invalidation_graph_rejects_without_mutation(
             .where(FlowRunRerunOperations.flow_run_id == scenario.flow_run_id)
         )
 
-    assert exc_info.value.code == "flow_run_rerun_step_not_found"
+    assert operation_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_wrong_root_step_input_rejects_without_mutation(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_completed_rerun_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        invalid_step_id = scenario.step_ids[1]
+
+        with pytest.raises(FlowRunRerunStepInputsInvalidError) as exc_info:
+            await _accept_rerun(
+                session=session,
+                scenario=scenario,
+                root_step_input_step_id=invalid_step_id,
+            )
+
+        operation_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRunRerunOperations)
+            .where(FlowRunRerunOperations.flow_run_id == scenario.flow_run_id)
+        )
+
+    assert exc_info.value.step_ids == (invalid_step_id,)
     assert operation_count == 0
 
 
@@ -1208,11 +2147,12 @@ async def test_wrong_tenant_cannot_accept_rerun(
             flow_run_id=scenario.flow_run_id,
             requested_by_user_id=scenario.requested_by_user_id,
             root_step_id=scenario.root_step_id,
+            rerun_file_ids=scenario.rerun_file_ids,
             step_ids=scenario.step_ids,
             invalidated_steps=scenario.invalidated_steps,
         )
 
-        with pytest.raises(NotFoundException):
+        with pytest.raises(FlowRunNotFoundError):
             await _accept_rerun(session=session, scenario=wrong_tenant)
 
         operation_count = await session.scalar(

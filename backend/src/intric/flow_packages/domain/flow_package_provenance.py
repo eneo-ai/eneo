@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.flow_packages.domain.flow_package_checksum import json_object_from_model
-from intric.flow_packages.domain.flow_package_manifest import JsonObject
+from intric.json_types import JsonObject
 
 
 class FlowPackageProvenance(BaseModel):

@@ -103,7 +103,6 @@ async def _create_flow_and_run(
     await version_repo.create(
         flow_id=flow.id,
         version=1,
-        definition_checksum=f"audit-outbox-delivery-{uuid4()}",
         definition_json={
             "steps": [
                 {

@@ -1,4 +1,5 @@
 /** @typedef {import('../client/client').IntricError} IntricError */
+import { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "../flows/flow-run-reserved-input-payload-keys";
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -16,6 +17,7 @@ export function initFlows(client) {
   const _textEncoder = new TextEncoder();
 
   /**
+   * Sort object keys for stable JSON while preserving array order.
    * @param {any} value
    * @returns {any}
    */
@@ -65,7 +67,8 @@ export function initFlows(client) {
     }
   };
 
-  const _reservedInputPayloadKeys = new Set(["expected_flow_version", "file_ids", "step_inputs"]);
+  /** @type {ReadonlySet<string>} */
+  const _reservedInputPayloadKeys = new Set(FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS);
 
   /** @param {unknown} input_payload_json */
   const _rejectReservedInputPayloadKeys = (input_payload_json) => {
@@ -101,11 +104,7 @@ export function initFlows(client) {
       : Object.keys(step_inputs)
           .sort()
           .reduce((acc, stepId) => {
-            const stepInput = step_inputs[stepId] ?? {};
-            acc[stepId] = {
-              ..._stableSortObjectKeys(stepInput),
-              ...(stepInput.file_ids ? { file_ids: [...stepInput.file_ids].sort() } : {})
-            };
+            acc[stepId] = _stableSortObjectKeys(step_inputs[stepId] ?? {});
             return acc;
           }, /** @type {Record<string, any>} */ ({}));
 
@@ -169,7 +168,7 @@ export function initFlows(client) {
    *   expectedFlowVersion?: number,
    *   input_payload_json?: any,
    *   step_inputs?: Record<string, {file_ids?: string[]}>,
-   *   file_ids?: string[]
+   *   file_ids?: never
    * }} params
    * @returns {Promise<string>}
    */
@@ -469,7 +468,8 @@ export function initFlows(client) {
         /**
          * Upload runtime files for a specific flow step. Pass onProgress to use
          * XHR progress events and keep long browser uploads alive while bytes
-         * continue to transfer.
+         * continue to transfer. The returned file id may be reused under
+         * multiple compatible step_inputs entries when creating the run.
          * @param {{id: string, stepId: string, file: File, signal?: AbortSignal, abortController?: AbortController, onProgress?: (ev: ProgressEvent) => void}} params
          * @throws {IntricError}
          */
@@ -500,24 +500,22 @@ export function initFlows(client) {
             requestBody: { "multipart/form-data": formData },
             signal
           });
-        }
-      }
-    },
+        },
 
-    files: {
-      /**
-       * Upload a file scoped to a specific flow.
-       * @param {{id: string, file: File, signal?: AbortSignal}} params
-       * @throws {IntricError}
-       */
-      upload: async ({ id, file, signal }) => {
-        const formData = new FormData();
-        formData.append("upload_file", file);
-        return _fetch(`/api/v1/flows/${id}/files/`, {
-          method: "post",
-          requestBody: { "multipart/form-data": formData },
-          signal
-        });
+        /**
+         * Delete an orphan runtime file before it is attached to a flow run.
+         * Files already persisted in run input or output state return a typed
+         * 409 conflict from the API.
+         * @param {{id: string, fileId: string, signal?: AbortSignal}} params
+         * @throws {IntricError}
+         */
+        delete: async ({ id, fileId, signal }) => {
+          return _fetch("/api/v1/flows/{id}/runtime-files/{file_id}/", {
+            method: "delete",
+            params: { path: { id, file_id: fileId } },
+            signal
+          });
+        }
       }
     },
 
@@ -600,6 +598,8 @@ export function initFlows(client) {
        *  step_inputs?: Record<string, {file_ids: string[]}>,
        *  file_ids?: never
        * }} params
+       * `step_inputs[stepId].file_ids` is ordered run input. The SDK preserves
+       * caller order and leaves duplicate collapse to the API.
        * @throws {IntricError}
        */
       create: async ({
@@ -633,8 +633,10 @@ export function initFlows(client) {
        *  expectedFlowVersion?: number,
        *  input_payload_json?: any,
        *  step_inputs?: Record<string, {file_ids?: string[]}>,
-       *  file_ids?: string[]
+       *  file_ids?: never
        * }} params
+       * `step_inputs[stepId].file_ids` order contributes to the derived key.
+       * Reordering the same file ids produces a different key.
        * @returns {Promise<string>}
        */
       deriveUploadIntentIdempotencyKey: async (params) => {

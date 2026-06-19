@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.runtime.document_rendering.blocks import DocumentBlock
 from intric.main.exceptions import TypedIOValidationException
 
@@ -181,7 +182,7 @@ def _reject_reused_container(
     if container_id in seen_container_ids:
         raise TypedIOValidationException(
             "Document output contains a cyclic or reused structured value.",
-            code="typed_io_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
             context={"metric": "structured_cycle"},
         )
     seen_container_ids.add(container_id)
@@ -196,7 +197,7 @@ def _check_text_limit(text_chars: int, limits: DocumentRenderLimits) -> None:
 def _raise_document_too_large(metric: str, actual: int, limit: int) -> None:
     raise DocumentRenderLimitExceeded(
         "Document output is too large to render as a file.",
-        code="typed_io_render_failed",
+        code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
         context={"metric": metric, "actual": actual, "limit": limit},
     )
 

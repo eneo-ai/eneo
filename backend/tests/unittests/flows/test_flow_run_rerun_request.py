@@ -5,7 +5,9 @@ from uuid import UUID
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.flow_run_rerun_request import (
+    RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION,
     FlowRunRerunRequestFingerprintInput,
     build_rerun_request_fingerprint,
 )
@@ -18,7 +20,9 @@ def _uuid(value: int) -> UUID:
 def _request() -> FlowRunRerunRequestFingerprintInput:
     return FlowRunRerunRequestFingerprintInput(
         tenant_id=_uuid(1),
+        requested_by_principal_type=PrincipalType.USER,
         requested_by_user_id=_uuid(2),
+        requested_by_service_id=None,
         flow_id=_uuid(3),
         flow_run_id=_uuid(4),
         rerun_step_id=_uuid(5),
@@ -42,8 +46,14 @@ def _fingerprint(
     return build_rerun_request_fingerprint(request)
 
 
-def test_rerun_request_fingerprint_is_stable_for_equivalent_json_and_file_order():
-    first = _request()
+def test_rerun_request_fingerprint_is_stable_for_equivalent_json_key_order():
+    first = replace(
+        _request(),
+        root_step_inputs={
+            _uuid(7): [_uuid(13)],
+            _uuid(5): [_uuid(12), _uuid(11)],
+        },
+    )
     second = replace(
         first,
         input_payload_json={
@@ -53,18 +63,33 @@ def test_rerun_request_fingerprint_is_stable_for_equivalent_json_and_file_order(
             }
         },
         root_step_inputs={
-            _uuid(5): [_uuid(11), _uuid(12)],
+            _uuid(5): [_uuid(12), _uuid(11)],
+            _uuid(7): [_uuid(13)],
         },
     )
 
     assert _fingerprint(first) == _fingerprint(second)
 
 
+def test_rerun_request_fingerprint_changes_for_distinct_file_order():
+    first = replace(_request(), root_step_inputs={_uuid(5): [_uuid(12), _uuid(11)]})
+    second = replace(_request(), root_step_inputs={_uuid(5): [_uuid(11), _uuid(12)]})
+
+    assert _fingerprint(first) != _fingerprint(second)
+
+
 @pytest.mark.parametrize(
     "changed",
     [
         replace(_request(), tenant_id=_uuid(10)),
+        replace(
+            _request(),
+            requested_by_principal_type=PrincipalType.SERVICE_KEY,
+            requested_by_user_id=None,
+            requested_by_service_id=_uuid(21),
+        ),
         replace(_request(), requested_by_user_id=_uuid(20)),
+        replace(_request(), requested_by_service_id=_uuid(22)),
         replace(_request(), flow_id=_uuid(30)),
         replace(_request(), flow_run_id=_uuid(40)),
         replace(_request(), rerun_step_id=_uuid(50)),
@@ -73,6 +98,10 @@ def test_rerun_request_fingerprint_is_stable_for_equivalent_json_and_file_order(
         replace(_request(), prior_root_attempt_id=None),
         replace(_request(), input_payload_json={"case": {"id": "B-456"}}),
         replace(_request(), root_step_inputs={_uuid(5): [_uuid(13)]}),
+        pytest.param(
+            replace(_request(), root_step_inputs={_uuid(5): [_uuid(11), _uuid(12)]}),
+            id="root-file-order",
+        ),
     ],
 )
 def test_rerun_request_fingerprint_changes_for_replay_relevant_fields(
@@ -93,6 +122,14 @@ def test_rerun_request_fingerprint_treats_missing_step_inputs_as_empty():
     empty_inputs = replace(_request(), root_step_inputs={})
 
     assert _fingerprint(missing_inputs) == _fingerprint(empty_inputs)
+
+
+def test_rerun_request_fingerprint_algorithm_version_is_pinned():
+    assert RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION == 3
+    assert (
+        _fingerprint(_request())
+        == "6446948d9291baf56e47e658f1486ba4f9235e8fb23d9c39277ccdfd6fc420f5"
+    )
 
 
 def test_rerun_request_fingerprint_rejects_non_json_values():

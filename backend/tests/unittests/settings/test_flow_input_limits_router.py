@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
+from intric.flows.domain.flow_classification_retention_policy import (
+    FlowClassificationRetentionPolicy,
+)
 from intric.roles.permissions import Permission
 from intric.settings.settings import (
     AIBuilderBudgetSettingsPublic,
     AIBuilderBudgetSettingsUpdate,
+    FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
@@ -21,12 +26,15 @@ from intric.settings.settings import (
     FlowRuntimePolicyUpdate,
 )
 from intric.settings.settings_router import (
+    delete_flow_classification_retention_policy,
     get_ai_builder_budget_settings,
     get_flow_document_render_limits,
     get_flow_evidence_policy,
     get_flow_input_limits,
     get_flow_retention_policy,
     get_flow_runtime_policy,
+    list_flow_classification_retention_policies,
+    put_flow_classification_retention_policy,
     update_ai_builder_budget_settings,
     update_flow_document_render_limits,
     update_flow_evidence_policy,
@@ -363,3 +371,83 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
 
     assert response.run_debug_evidence_days == 14
     service.update_flow_retention_policy.assert_awaited_once_with(payload)
+
+
+@pytest.mark.asyncio
+async def test_list_flow_classification_retention_policies_delegates_to_flow_service() -> (
+    None
+):
+    classification_id = uuid4()
+    container = MagicMock()
+    service = AsyncMock()
+    service.list_policies.return_value = [
+        FlowClassificationRetentionPolicy(
+            tenant_id=uuid4(),
+            security_classification_id=classification_id,
+            data_retention_days=7,
+        )
+    ]
+    container.flow_classification_retention_policy_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    response = await list_flow_classification_retention_policies(container=container)
+
+    assert response.policies[0].security_classification_id == classification_id
+    assert response.policies[0].data_retention_days == 7
+    service.list_policies.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_put_flow_classification_retention_policy_delegates_to_flow_service() -> (
+    None
+):
+    classification_id = uuid4()
+    container = MagicMock()
+    service = AsyncMock()
+    service.set_policy.return_value = FlowClassificationRetentionPolicy(
+        tenant_id=uuid4(),
+        security_classification_id=classification_id,
+        data_retention_days=14,
+    )
+    container.flow_classification_retention_policy_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+    payload = FlowClassificationRetentionPolicyUpdate(data_retention_days=14)
+
+    response = await put_flow_classification_retention_policy(
+        security_classification_id=classification_id,
+        payload=payload,
+        container=container,
+    )
+
+    assert response.data_retention_days == 14
+    service.set_policy.assert_awaited_once_with(
+        security_classification_id=classification_id,
+        data_retention_days=14,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_flow_classification_retention_policy_delegates_to_flow_service() -> (
+    None
+):
+    classification_id = uuid4()
+    container = MagicMock()
+    service = AsyncMock()
+    container.flow_classification_retention_policy_service.return_value = service
+    container.user.return_value = SimpleNamespace(
+        id="u", tenant_id="t", permissions=[Permission.ADMIN]
+    )
+
+    response = await delete_flow_classification_retention_policy(
+        security_classification_id=classification_id,
+        container=container,
+    )
+
+    assert response.status_code == 204
+    service.delete_policy.assert_awaited_once_with(
+        security_classification_id=classification_id
+    )

@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 
 FlowRunErrorJson: TypeAlias = dict[str, object]
 
@@ -95,14 +96,14 @@ class FlowRunError(BaseModel):
         cls,
         source: FlowRunLifecycleSource,
         *,
-        code: str,
+        code: FlowApiErrorCode,
         message: str,
         step_id: UUID | None = None,
         step_order: int | None = None,
         details: FlowRunErrorDetails | None = None,
     ) -> FlowRunError:
         return cls(
-            code=code,
+            code=code.value,
             message=_bound_message(message),
             source=source,
             step_id=step_id,

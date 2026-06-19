@@ -27,7 +27,7 @@ class PrepareAssistantStepFn(Protocol):
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> PreparedAssistantStep: ...
 
 
@@ -42,5 +42,5 @@ class StepHandler(Protocol):
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> StepExecutionResult: ...

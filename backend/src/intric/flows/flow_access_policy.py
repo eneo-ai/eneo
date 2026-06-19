@@ -5,6 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable, NoReturn
 from uuid import UUID
 
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.principal import FlowPrincipal
 from intric.main.exceptions import UnauthorizedException
 from intric.roles.permissions import Permission, has_permission
@@ -261,7 +262,7 @@ def raise_service_key_not_supported(
 
     raise UnauthorizedException(
         "This Flows endpoint requires a user principal. Service-key principals cannot use this action.",
-        code="flow_service_key_principal_not_supported",
+        code=FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value,
         context=context,
     )
 

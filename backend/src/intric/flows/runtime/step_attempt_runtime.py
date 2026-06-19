@@ -11,6 +11,8 @@ from intric.flows.domain.flow import (
     FlowStepResult,
 )
 from intric.flows.enums import is_terminal_flow_run_status
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from intric.flows.runtime.claim_resolution import StepClaimResolution
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime.step_execution_result import (
@@ -43,7 +45,7 @@ class StepGateDecision:
 @dataclass(frozen=True)
 class StepFailurePlan:
     attempt_status: FlowStepAttemptStatus
-    error_code: str
+    error_code: FlowApiErrorCode
     error_message: str
     failed_result: FlowStepResult
     run_error_message: str
@@ -72,7 +74,10 @@ def build_step_gate_decision(
     if not flow_active:
         return StepGateDecision(
             action="cancel_flow_deleted",
-            result={"status": "cancelled", "reason": "flow_deleted"},
+            result={
+                "status": "cancelled",
+                "reason": FlowApiErrorCode.FLOW_DELETED.value,
+            },
             run_error_message="Flow was deleted during execution.",
         )
 
@@ -82,7 +87,7 @@ def build_step_gate_decision(
     if claim_resolution.action == "missing_step_result":
         return StepGateDecision(
             action="fail_step_missing",
-            result={"status": "failed", "error": "step_missing"},
+            result={"status": "failed", "error": FlowApiErrorCode.STEP_MISSING.value},
             run_error_message=f"Missing step result for step {step_id}",
         )
 
@@ -104,7 +109,7 @@ def build_step_gate_decision(
 def build_typed_failure_plan(
     *,
     claimed: FlowStepResult,
-    error_code: str,
+    error_code: FlowApiErrorCode,
     error_message: str,
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
@@ -117,6 +122,7 @@ def build_typed_failure_plan(
         error_message=error_message,
         failed_result=build_failed_step_result(
             claimed=claimed,
+            error_code=error_code.value,
             error_message=error_message,
             input_payload_json=input_payload_json,
             effective_prompt=effective_prompt,
@@ -129,13 +135,18 @@ def build_typed_failure_plan(
 def build_typed_failure_run_error_message(
     *,
     step_order: int,
-    error_code: str,
+    error_code: FlowApiErrorCode,
     contract_validation: object | None,
 ) -> str:
     summary = _contract_validation_summary(contract_validation)
-    if summary is not None:
-        return f"Step {step_order}: {summary} ({error_code})."
-    return f"Step {step_order}: typed input/output validation failed ({error_code})."
+    if summary is None:
+        summary = FLOW_ERROR_TAXONOMY[error_code].cause
+    safe_summary = _strip_sentence_terminator(summary)
+    return f"Step {step_order}: {safe_summary} ({error_code.value})."
+
+
+def _strip_sentence_terminator(value: str) -> str:
+    return value[:-1] if value.endswith((".", "!", "?")) else value
 
 
 def _contract_validation_summary(contract_validation: object | None) -> str | None:
@@ -159,14 +170,18 @@ def build_generic_failure_plan(
 ) -> StepFailurePlan:
     return StepFailurePlan(
         attempt_status=FlowStepAttemptStatus.FAILED,
-        error_code="step_execution_failed",
+        error_code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
         error_message=public_error,
         failed_result=build_failed_step_result(
             claimed=claimed,
+            error_code=FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
             error_message=public_error,
         ),
         run_error_message=public_error,
-        return_result={"status": "failed", "error": "step_execution_failed"},
+        return_result={
+            "status": "failed",
+            "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+        },
     )
 
 

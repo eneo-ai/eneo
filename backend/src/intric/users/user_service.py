@@ -196,14 +196,25 @@ def _check_method_resource_permission(
     read_override_endpoints = cast(
         "frozenset[str] | None", config.get("read_override_endpoints")
     )
+    method_permission_overrides = cast(
+        "dict[str, str] | None", config.get("method_permission_overrides")
+    )
 
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
-
-    if required != "read" and read_override_endpoints:
-        route = request.scope.get("route")
-        endpoint = getattr(route, "endpoint", None)
-        endpoint_name = getattr(endpoint, "__name__", None)
-        if isinstance(endpoint_name, str) and endpoint_name in read_override_endpoints:
+    route = request.scope.get("route")
+    endpoint = getattr(route, "endpoint", None)
+    endpoint_name = getattr(endpoint, "__name__", None)
+    if isinstance(endpoint_name, str):
+        if (
+            method_permission_overrides is not None
+            and endpoint_name in method_permission_overrides
+        ):
+            required = method_permission_overrides[endpoint_name]
+        elif (
+            required != "read"
+            and read_override_endpoints is not None
+            and endpoint_name in read_override_endpoints
+        ):
             required = "read"
 
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)

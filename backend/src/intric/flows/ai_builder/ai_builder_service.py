@@ -7,7 +7,6 @@ conversation loop and plan lifecycle live in focused collaborators.
 from __future__ import annotations
 
 import inspect
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Protocol, cast
@@ -107,8 +106,6 @@ SSE_EVENT_ERROR = _SSE_EVENT_ERROR
 SSE_EVENT_STATUS = _SSE_EVENT_STATUS
 SSE_EVENT_USAGE = _SSE_EVENT_USAGE
 SSE_EVENT_DONE = _SSE_EVENT_DONE
-
-logger = logging.getLogger(__name__)
 
 _AI_BUILDER_CONTROLLED_TOOL_KEYS = frozenset({"tools", "tool_choice", "function_call"})
 
@@ -280,33 +277,12 @@ class AIBuilderService:
         )
 
     async def list_sessions(self) -> list[SessionListItemResponse]:
-        sessions = await self.repo.list_sessions_for_user(
+        sessions = await self.repo.list_sessions_with_draft_titles(
             tenant_id=self.user.tenant_id,
             actor_user_id=self.user.id,
         )
-        summaries: list[SessionListItemResponse] = []
-        for session in sessions:
-            draft_title = None
-            if session.latest_plan_id is not None:
-                try:
-                    plan = await self.repo.get_plan(
-                        plan_id=session.latest_plan_id,
-                        tenant_id=self.user.tenant_id,
-                    )
-                    draft_title = plan.spec.flow_name
-                except Exception:
-                    logger.warning(
-                        "Failed to resolve AI builder draft title for session list item.",
-                        extra={
-                            "session_id": str(session.id),
-                            "latest_plan_id": str(session.latest_plan_id),
-                            "tenant_id": str(self.user.tenant_id),
-                        },
-                        exc_info=True,
-                    )
-                    draft_title = None
-
-            summaries.append(
+        return [
+            (
                 SessionListItemResponse(
                     session_id=session.id,
                     space_id=session.space_id,
@@ -319,7 +295,8 @@ class AIBuilderService:
                     updated_at=session.updated_at,
                 )
             )
-        return summaries
+            for session, draft_title in sessions
+        ]
 
     async def cancel_session(self, session_id: UUID) -> BuilderSession:
         await self.get_session(session_id)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.domain.flow import FlowStep, JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from intric.flows.flow_metadata import (
     FlowFormSchemaParseMode,
     form_field_name_error,
@@ -15,14 +15,14 @@ from intric.flows.flow_variable_definitions import (
 from intric.main.exceptions import BadRequestException
 
 
-def validate_form_schema(metadata_json: JsonObject | None) -> None:
+def validate_form_schema(metadata_json: FlowPersistedJsonObject | None) -> None:
     parse_flow_form_schema(metadata_json, mode=FlowFormSchemaParseMode.WRITE)
 
 
 def validate_variable_alias_collisions(
     *,
     steps: list[FlowStep],
-    metadata_json: JsonObject | None,
+    metadata_json: FlowPersistedJsonObject | None,
 ) -> None:
     field_names: dict[str, str] = {}
 

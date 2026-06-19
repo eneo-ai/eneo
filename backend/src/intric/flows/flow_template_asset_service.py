@@ -9,6 +9,7 @@ from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
 from intric.files.file_service import FileService
 from intric.flows.domain.flow import FlowTemplateAsset, FlowTemplateAssetStatus
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.runtime.docx_template_runtime import (
@@ -43,10 +44,9 @@ class FlowTemplateAssetService:
         can_download: bool,
     ) -> list[FlowTemplateAsset]:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
-        if flow.id is None:
-            raise NotFoundException("Flow template asset parent flow is missing an id.")
+        persisted_flow_id = flow.require_persisted_id()
         assets = await self.template_asset_repo.list_for_flow(
-            flow_id=flow.id,
+            flow_id=persisted_flow_id,
             tenant_id=self.user.tenant_id,
         )
         return [
@@ -65,13 +65,12 @@ class FlowTemplateAssetService:
         upload_file: UploadFile,
     ) -> FlowTemplateAsset:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
-        if flow.id is None:
-            raise NotFoundException("Flow template asset parent flow is missing an id.")
+        persisted_flow_id = flow.require_persisted_id()
         document_file = await self.file_service.document_from_upload(upload_file)
         if document_file.blob is None:
             raise BadRequestException(
                 "The uploaded DOCX template could not be saved with file content.",
-                code="flow_template_missing_content",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
             )
         placeholders = inspect_docx_template_bytes(
             document_file.blob,
@@ -79,7 +78,7 @@ class FlowTemplateAssetService:
         )
         saved_file = await self.file_service.save_file_content(document_file)
         asset = await self.template_asset_repo.create(
-            flow_id=flow.id,
+            flow_id=persisted_flow_id,
             space_id=flow.space_id,
             tenant_id=self.user.tenant_id,
             file_id=saved_file.id,
@@ -103,7 +102,7 @@ class FlowTemplateAssetService:
         if file.blob is None:
             raise BadRequestException(
                 "The selected DOCX template could not be read because the file content is missing.",
-                code="flow_template_missing_content",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
             )
         return {
             "asset_id": asset.id,
@@ -122,41 +121,15 @@ class FlowTemplateAssetService:
         asset_id: UUID,
     ) -> tuple[FlowTemplateAsset, File]:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
-        if flow.id is None:
-            raise NotFoundException("Flow template asset parent flow is missing an id.")
+        persisted_flow_id = flow.require_persisted_id()
         asset = await self.template_asset_repo.get(
             asset_id=asset_id, tenant_id=self.user.tenant_id
         )
-        if asset.flow_id != flow.id:
+        if asset.flow_id != persisted_flow_id:
             raise NotFoundException("Flow template asset not found.")
         file = await self.file_repo.get_by_id(file_id=asset.file_id)
         if file.tenant_id != self.user.tenant_id:
             raise NotFoundException("Flow template asset file not found.")
-        return asset, file
-
-    async def get_published_template_file(
-        self,
-        *,
-        tenant_id: UUID,
-        asset_id: UUID,
-        expected_checksum: str | None,
-    ) -> tuple[FlowTemplateAsset, File]:
-        asset = await self.template_asset_repo.get(
-            asset_id=asset_id, tenant_id=tenant_id
-        )
-        file = await self.file_repo.get_by_id(file_id=asset.file_id)
-        if file.tenant_id != tenant_id:
-            raise NotFoundException("Flow template asset file not found.")
-        if file.blob is None:
-            raise BadRequestException(
-                "The published DOCX template could not be read because the saved file content is missing.",
-                code="flow_template_missing_content",
-            )
-        if expected_checksum is not None and file.checksum != expected_checksum:
-            raise BadRequestException(
-                "The published DOCX template checksum no longer matches the selected asset.",
-                code="flow_template_not_accessible",
-            )
         return asset, file
 
     @staticmethod

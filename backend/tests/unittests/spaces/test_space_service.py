@@ -4,7 +4,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    UnauthorizedException,
+)
 from intric.spaces.api.space_models import SpaceRoleValue
 from intric.spaces.space_service import SpaceService
 from tests.fixtures import TEST_USER
@@ -88,6 +92,30 @@ async def test_raise_unauthorized_if_user_can_not_delete(
 
     with pytest.raises(UnauthorizedException):
         await service.delete_space(uuid4())
+
+
+async def test_delete_space_rejects_flow_delete_blockers_before_side_effects(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_delete_space.return_value = True
+    space_id = uuid4()
+    space = MagicMock(
+        id=space_id,
+        icon_id=uuid4(),
+        assistants=[],
+        apps=[],
+    )
+    service.get_space = AsyncMock(return_value=space)
+    service.repo.has_flow_delete_blockers.return_value = True
+    service.api_key_scope_revoker = AsyncMock()
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.delete_space(space_id)
+
+    assert exc_info.value.code == "space_contains_flow_delete_blockers"
+    service.api_key_scope_revoker.revoke_scope.assert_not_awaited()
+    service.repo.delete.assert_not_awaited()
+    service.icon_repo.delete.assert_not_awaited()
 
 
 async def test_only_admins_can_add_members(service: SpaceService, actor: MagicMock):

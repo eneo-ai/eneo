@@ -4,7 +4,7 @@ import asyncio
 import concurrent.futures
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, assert_never
 from uuid import UUID
 
 from dependency_injector import providers
@@ -25,12 +25,20 @@ from intric.flows.application.flow_webhook_delivery_policy import (
 )
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_document_limits import resolve_flow_document_render_limits
 from intric.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     resolve_flow_input_limits,
 )
-from intric.flows.flow_run_dispatch_request import build_flow_run_dispatch_request
+from intric.flows.flow_run_dispatch_request import (
+    FlowRunDispatchMalformedPayload,
+    FlowRunDispatchMissingPrincipal,
+    FlowRunServiceKeyDispatchRequest,
+    FlowRunUserDispatchRequest,
+    build_flow_run_dispatch_request,
+    parse_flow_run_dispatch_task_kwargs,
+)
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_runtime_policy import resolve_flow_runtime_policy
 from intric.flows.runtime.celery_app import celery_app
@@ -40,9 +48,9 @@ from intric.flows.runtime.flow_run_actor import (
     FlowRunActorError,
     FlowRunServicePrincipalInactiveError,
 )
+from intric.flows.runtime.flow_runtime_trace import FlowRunSpanContext, trace_flow_run
 from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.container.container_overrides import override_user
 from intric.main.logging import get_logger
 from intric.users.user_repo import UsersRepository
 
@@ -138,7 +146,7 @@ async def _terminalize_actor_resolution_failure(
     session: AsyncSession,
     run_id: UUID,
     tenant_id: UUID,
-    code: str,
+    code: FlowApiErrorCode,
     message: str,
 ) -> None:
     await container.flow_run_terminalizer().terminalize_run(
@@ -166,23 +174,61 @@ async def _execute_flow_run_async(
     celery_task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
+    with trace_flow_run(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        celery_task_id=celery_task_id,
+        retry_count=retry_count,
+    ) as flow_span:
+        return await _execute_flow_run_async_traced(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            principal_type=principal_type,
+            principal_user_id=principal_user_id,
+            principal_service_id=principal_service_id,
+            celery_task_id=celery_task_id,
+            retry_count=retry_count,
+            flow_span=flow_span,
+        )
+
+
+async def _execute_flow_run_async_traced(
+    *,
+    run_id: UUID,
+    flow_id: UUID,
+    tenant_id: UUID,
+    principal_type: PrincipalType,
+    principal_user_id: UUID | None,
+    principal_service_id: UUID | None,
+    celery_task_id: str | None,
+    retry_count: int,
+    flow_span: FlowRunSpanContext,
+) -> dict[str, str]:
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
-        container = Container(session=providers.Object(session))
+        bootstrap_container = Container(session=providers.Object(session))
         user_repo = UsersRepository(session=session)
-        tenant = await container.tenant_repo().get(tenant_id)
+        tenant = await bootstrap_container.tenant_repo().get(tenant_id)
         if tenant is None:
+            flow_span.set_result(status="failed", reason="tenant_not_found")
             raise RuntimeError("Flow execution task tenant not found.")
+        runtime_container = Container(
+            session=providers.Object(session),
+            tenant=providers.Object(tenant),
+        )
 
-        flow_run_repo = container.flow_run_repo()
+        flow_run_repo = runtime_container.flow_run_repo()
         run = await flow_run_repo.get(
             run_id=run_id,
             tenant_id=tenant_id,
             flow_id=flow_id,
         )
+        flow_span.set_run_trace_id(run.trace_id)
         try:
             run_actor = await _resolve_flow_run_actor(
-                container=container,
+                container=runtime_container,
                 user_repo=user_repo,
                 run=run,
                 expected_principal_type=principal_type,
@@ -191,55 +237,52 @@ async def _execute_flow_run_async(
             )
         except FlowRunServicePrincipalInactiveError as exc:
             await _terminalize_actor_resolution_failure(
-                container=container,
+                container=runtime_container,
                 session=session,
                 run_id=run_id,
                 tenant_id=tenant_id,
-                code="flow_service_principal_disabled",
+                code=FlowApiErrorCode.RUN_SERVICE_PRINCIPAL_DISABLED,
                 message=f"flow_service_principal_disabled: {exc}",
             )
-            return {"status": "failed", "reason": "service_principal_disabled"}
+            result = {"status": "failed", "reason": "service_principal_disabled"}
+            flow_span.set_result_from_mapping(result)
+            return result
         except FlowRunActorError as exc:
             await _terminalize_actor_resolution_failure(
-                container=container,
+                container=runtime_container,
                 session=session,
                 run_id=run_id,
                 tenant_id=tenant_id,
-                code="flow_runtime_actor_invalid",
+                code=FlowApiErrorCode.RUN_RUNTIME_ACTOR_INVALID,
                 message=f"flow_runtime_actor_invalid: {exc}",
             )
-            return {"status": "failed", "reason": "runtime_actor_invalid"}
+            result = {"status": "failed", "reason": "runtime_actor_invalid"}
+            flow_span.set_result_from_mapping(result)
+            return result
 
-        user = run_actor.container_user_bridge(tenant=tenant)
-        override_user(container=container, user=user)
-
-        flow_limits = resolve_flow_input_limits(
-            tenant.flow_settings if tenant else None
-        )
+        flow_limits = resolve_flow_input_limits(tenant.flow_settings)
         document_render_limits = resolve_flow_document_render_limits(
-            tenant.flow_settings if tenant else None
+            tenant.flow_settings
         )
-        runtime_policy = resolve_flow_runtime_policy(
-            tenant.flow_settings if tenant else None
-        )
+        runtime_policy = resolve_flow_runtime_policy(tenant.flow_settings)
 
         executor = FlowRunExecutor(
-            user=user,
-            session=session,
-            flow_repo=container.flow_repo(),
-            flow_run_repo=flow_run_repo,
-            flow_run_terminalizer=container.flow_run_terminalizer(),
-            flow_version_repo=container.flow_version_repo(),
-            space_repo=container.space_repo(),
-            completion_service=container.completion_service(),
-            file_repo=container.file_repo(),
-            template_asset_service=container.flow_template_asset_service(),
-            encryption_service=container.encryption_service(),
-            audit_service=container.audit_service(),
-            references_service=container.references_service(),
-            transcriber=container.transcriber(),
-            principal=run_actor.principal,
             runtime_actor=run_actor,
+            session=session,
+            flow_repo=runtime_container.flow_repo(),
+            flow_run_repo=flow_run_repo,
+            flow_run_rerun_repo=runtime_container.flow_run_rerun_repo(),
+            flow_run_review_checkpoint_repo=runtime_container.flow_run_review_checkpoint_repo(),
+            flow_run_terminalizer=runtime_container.flow_run_terminalizer(),
+            flow_version_repo=runtime_container.flow_version_repo(),
+            space_repo=runtime_container.tenant_scoped_space_repo(),
+            completion_service=runtime_container.completion_service(),
+            file_repo=runtime_container.file_repo(),
+            template_asset_repo=runtime_container.flow_template_asset_repo(),
+            encryption_service=runtime_container.encryption_service(),
+            audit_service=runtime_container.audit_service(),
+            references_service=runtime_container.references_service(),
+            transcriber=runtime_container.transcriber(),
             config=FlowRunExecutorConfig.from_settings(
                 max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
                 max_audio_files=flow_limits.audio_max_files_per_run
@@ -256,6 +299,7 @@ async def _execute_flow_run_async(
             celery_task_id=celery_task_id,
             retry_count=retry_count,
         )
+        flow_span.set_result_from_mapping(result)
         return {key: str(value) for key, value in result.items()}
 
 
@@ -316,8 +360,6 @@ def _execute_flow_run_task(
     task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
-    run_id_uuid = UUID(run_id)
-    tenant_id_uuid = UUID(tenant_id)
     logger.info(
         "Received flow execution task",
         extra={
@@ -331,38 +373,73 @@ def _execute_flow_run_task(
             "principal_service_id": principal_service_id,
         },
     )
-    resolved_principal_type = (
-        PrincipalType(principal_type) if principal_type is not None else None
+
+    dispatch_request = parse_flow_run_dispatch_task_kwargs(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        principal_type=principal_type,
+        principal_user_id=principal_user_id,
+        principal_service_id=principal_service_id,
     )
-    if (
-        resolved_principal_type is None
-        or (resolved_principal_type == PrincipalType.USER and principal_user_id is None)
-    ) or (
-        resolved_principal_type == PrincipalType.SERVICE_KEY
-        and principal_service_id is None
-    ):
-        loop = _get_flow_task_loop()
-        asyncio.run_coroutine_threadsafe(
-            terminalize_flow_run_failure(
-                run_id=run_id_uuid,
-                tenant_id=tenant_id_uuid,
-                source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.MISSING_PRINCIPAL,
-                    code="flow_missing_principal",
-                    message=(
-                        "flow_missing_principal: "
-                        "Flow run execution skipped because run has no execution principal."
+    match dispatch_request:
+        case FlowRunUserDispatchRequest() as user_dispatch:
+            run_id_uuid = user_dispatch.run_id
+            flow_id_uuid = user_dispatch.flow_id
+            tenant_id_uuid = user_dispatch.tenant_id
+            resolved_principal_type = PrincipalType.USER
+            resolved_principal_user_id = user_dispatch.principal_user_id
+            resolved_principal_service_id = None
+        case FlowRunServiceKeyDispatchRequest() as service_dispatch:
+            run_id_uuid = service_dispatch.run_id
+            flow_id_uuid = service_dispatch.flow_id
+            tenant_id_uuid = service_dispatch.tenant_id
+            resolved_principal_type = PrincipalType.SERVICE_KEY
+            resolved_principal_user_id = service_dispatch.principal_user_id
+            resolved_principal_service_id = service_dispatch.principal_service_id
+        case FlowRunDispatchMissingPrincipal() as missing_principal:
+            run_id_uuid = missing_principal.run_id
+            tenant_id_uuid = missing_principal.tenant_id
+            loop = _get_flow_task_loop()
+            asyncio.run_coroutine_threadsafe(
+                terminalize_flow_run_failure(
+                    run_id=run_id_uuid,
+                    tenant_id=tenant_id_uuid,
+                    source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
+                    error=FlowRunError.from_source(
+                        FlowRunLifecycleSource.MISSING_PRINCIPAL,
+                        code=FlowApiErrorCode.RUN_MISSING_PRINCIPAL,
+                        message=(
+                            "flow_missing_principal: "
+                            "Flow run execution skipped because run has no execution principal."
+                        ),
                     ),
                 ),
-            ),
-            loop,
-        ).result(timeout=10)
-        logger.error(
-            "Flow run execution skipped because run has no execution principal",
-            extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
-        )
-        return {"status": "failed", "reason": "missing_principal"}
+                loop,
+            ).result(timeout=10)
+            logger.error(
+                "Flow run execution skipped because run has no execution principal",
+                extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
+            )
+            return {"status": "failed", "reason": "missing_principal"}
+        case FlowRunDispatchMalformedPayload(reason=reason):
+            logger.error(
+                "Flow run execution task has malformed dispatch payload",
+                extra={
+                    "task_id": task_id,
+                    "retries": retry_count,
+                    "run_id": run_id,
+                    "flow_id": flow_id,
+                    "tenant_id": tenant_id,
+                    "principal_type": principal_type,
+                    "principal_user_id": principal_user_id,
+                    "principal_service_id": principal_service_id,
+                    "parse_reason": reason.value,
+                },
+            )
+            return {"status": "failed", "reason": "invalid_dispatch_payload"}
+        case _:
+            assert_never(dispatch_request)
 
     loop = _get_flow_task_loop()
     future: concurrent.futures.Future[dict[str, str]] | None = None
@@ -370,17 +447,11 @@ def _execute_flow_run_task(
         future = asyncio.run_coroutine_threadsafe(
             _execute_flow_run_async(
                 run_id=run_id_uuid,
-                flow_id=UUID(flow_id),
+                flow_id=flow_id_uuid,
                 tenant_id=tenant_id_uuid,
                 principal_type=resolved_principal_type,
-                principal_user_id=(
-                    UUID(principal_user_id) if principal_user_id is not None else None
-                ),
-                principal_service_id=(
-                    UUID(principal_service_id)
-                    if principal_service_id is not None
-                    else None
-                ),
+                principal_user_id=resolved_principal_user_id,
+                principal_service_id=resolved_principal_service_id,
                 celery_task_id=task_id,
                 retry_count=retry_count,
             ),
@@ -404,7 +475,7 @@ def _execute_flow_run_task(
                 source=FlowRunLifecycleSource.TASK_TIMEOUT,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.TASK_TIMEOUT,
-                    code="flow_task_timeout",
+                    code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
                     message=error_message,
                 ),
             ),
@@ -426,7 +497,7 @@ def _execute_flow_run_task(
                 source=FlowRunLifecycleSource.TASK_FAILURE,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.TASK_FAILURE,
-                    code="flow_task_failure",
+                    code=FlowApiErrorCode.RUN_TASK_FAILURE,
                     message=error_message,
                 ),
             ),
@@ -463,7 +534,7 @@ async def _reconcile_stale_running_runs_all_tenants(
                     stale_before=stale_before,
                     error=FlowRunError.from_source(
                         FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                        code="flow_worker_stalled",
+                        code=FlowApiErrorCode.RUN_WORKER_STALLED,
                         message=(
                             "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
                         ),

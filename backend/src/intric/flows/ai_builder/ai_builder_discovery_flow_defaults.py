@@ -13,7 +13,7 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     resolve_final_output_artifact,
     resolve_runtime_input_mode,
 )
-from intric.flows.domain.flow import Flow, FlowStep, JsonObject
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,13 +166,15 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
     )
 
 
-def _runtime_input_max_files(input_config: JsonObject | None) -> int | None:
+def _runtime_input_max_files(
+    input_config: FlowPersistedJsonObject | None,
+) -> int | None:
     if not isinstance(input_config, dict):
         return None
     runtime_input = input_config.get("runtime_input")
     if not isinstance(runtime_input, dict):
         return None
-    max_files = cast(JsonObject, runtime_input).get("max_files")
+    max_files = cast(FlowPersistedJsonObject, runtime_input).get("max_files")
     return max_files if isinstance(max_files, int) else None
 
 
@@ -230,7 +232,7 @@ def _has_variable_bindings(step: FlowStep) -> bool:
     bindings = (
         step.output_config["bindings"] if "bindings" in step.output_config else None
     )
-    return isinstance(bindings, dict) and bool(cast(JsonObject, bindings))
+    return isinstance(bindings, dict) and bool(cast(FlowPersistedJsonObject, bindings))
 
 
 def _enum_value(value: object) -> str:
@@ -245,6 +247,6 @@ def _has_form_fields(flow: Flow) -> bool:
     form_schema = metadata_json.get("form_schema")
     if not isinstance(form_schema, dict):
         return False
-    form_schema_dict = cast(JsonObject, form_schema)
+    form_schema_dict = cast(FlowPersistedJsonObject, form_schema)
     fields = form_schema_dict.get("fields")
     return isinstance(fields, list) and len(cast(list[object], fields)) > 0

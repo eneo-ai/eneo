@@ -13,7 +13,7 @@ from intric.flows.citation_sidecar import (
     resolve_citation_mode,
     summarize_step_citations,
 )
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.flows.flow_retention_tombstone import (
     FlowRetentionTombstone,
@@ -31,11 +31,16 @@ from intric.flows.flow_run_evidence_export_manifest import (
     EvidenceReviewCheckpointSummary,
 )
 from intric.flows.flow_run_evidence_export_summary import (
-    build_evidence_export_summary,
+    EvidenceExportSummary,
+    EvidenceFinalOutputSummary,
+    EvidenceStepOverview,
+    build_evidence_step_review_impacts_by_step_order,
+    empty_evidence_step_review_impact,
 )
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenanceParseResult,
+    PayloadPreview,
     default_rag_tracking,
     normalize_text_preview,
 )
@@ -67,24 +72,30 @@ _ARTIFACT_ROW_TRACKED_NOTE = (
 )
 
 
-def _as_json_object(value: Any) -> JsonObject | None:
-    return cast(JsonObject, value) if isinstance(value, dict) else None
+def _as_json_object(value: Any) -> FlowPersistedJsonObject | None:
+    return cast(FlowPersistedJsonObject, value) if isinstance(value, dict) else None
 
 
-def _as_json_object_or_empty(value: Any) -> JsonObject:
-    return cast(JsonObject, value) if isinstance(value, dict) else {}
+def _as_json_object_or_empty(value: Any) -> FlowPersistedJsonObject:
+    return cast(FlowPersistedJsonObject, value) if isinstance(value, dict) else {}
 
 
 def _as_json_list(value: Any) -> list[object]:
     return cast(list[object], value) if isinstance(value, list) else []
 
 
-def _as_json_object_list(value: Any) -> list[JsonObject]:
+def _as_json_object_list(value: Any) -> list[FlowPersistedJsonObject]:
     return [
-        cast(JsonObject, item)
+        cast(FlowPersistedJsonObject, item)
         for item in _as_json_list(value)
         if isinstance(item, dict)
     ]
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in _as_json_list(value) if isinstance(item, str)]
 
 
 def render_evidence_json_export(
@@ -122,13 +133,11 @@ def render_evidence_json_export(
         redaction_applied = False
 
     exported_at = datetime.now(timezone.utc)
-    summary = _build_summary(
+    review_checkpoint_summary = _build_review_checkpoint_summary(bundle_payload)
+    summary_typed, summary = _build_summary_payloads(
         bundle_payload,
         provenance_parse_results=export_payload.provenance_parse_results,
-    )
-    summary_typed = build_evidence_export_summary(
-        summary,
-        review_checkpoints=_review_checkpoint_records(bundle_payload),
+        review_checkpoint_summary=review_checkpoint_summary,
     )
     manifest = _build_manifest(
         bundle_payload,
@@ -137,7 +146,7 @@ def render_evidence_json_export(
         exported_at=exported_at,
         redaction_applied=redaction_applied,
         masked_fields_count=masked_fields_count,
-        summary=summary,
+        review_checkpoint_summary=review_checkpoint_summary,
         provenance_parse_results=export_payload.provenance_parse_results,
     )
     manifest_payload = manifest.model_dump(mode="json")
@@ -167,7 +176,7 @@ def _build_manifest(
     exported_at: datetime,
     redaction_applied: bool,
     masked_fields_count: int,
-    summary: dict[str, Any],
+    review_checkpoint_summary: EvidenceReviewCheckpointSummary,
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
 ) -> EvidenceExportManifest:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
@@ -197,9 +206,7 @@ def _build_manifest(
             provenance_parse_results=provenance_parse_results,
         ),
         artifact_availability_summary=_artifact_availability_summary(bundle_payload),
-        review_checkpoint_summary=EvidenceReviewCheckpointSummary.model_validate(
-            summary["review_checkpoints"]
-        ),
+        review_checkpoint_summary=review_checkpoint_summary,
     )
 
 
@@ -323,11 +330,12 @@ def _artifact_availability_summary(
     )
 
 
-def _build_summary(
+def _build_summary_payloads(
     bundle_payload: dict[str, Any],
     *,
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
-) -> dict[str, Any]:
+    review_checkpoint_summary: EvidenceReviewCheckpointSummary,
+) -> tuple[EvidenceExportSummary, dict[str, Any]]:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     step_results = _as_json_object_list(bundle_payload.get("step_results"))
     step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
@@ -346,28 +354,66 @@ def _build_summary(
         for source in rag_sources
         if isinstance(source.get("name"), str)
     ]
-    step_overview = _build_step_overview(bundle_payload)
-    citations = _build_summary_citations(bundle_payload, step_overview=step_overview)
-    return {
-        "status": run.get("status"),
-        "trace_id": run.get("trace_id"),
-        "steps_count": debug_summary.get("steps_count", len(step_results)),
-        "completed_steps": debug_summary.get(
-            "completed_steps",
-            sum(1 for result in step_results if result.get("status") == "completed"),
+    typed_step_overview, legacy_step_overview = _build_step_overview_payloads(
+        bundle_payload
+    )
+    citations = _build_summary_citations(
+        bundle_payload, step_overview=legacy_step_overview
+    )
+    final_output_payload = _build_final_output_summary(
+        run.get("output_payload_json"),
+        artifact_details=_collect_artifact_details(
+            _terminal_step_result_files(result_files)
         ),
-        "failed_steps": debug_summary.get(
-            "failed_steps",
-            sum(1 for result in step_results if result.get("status") == "failed"),
+    )
+    final_output_typed = _typed_final_output_summary(final_output_payload)
+    final_output_artifact_details = _as_json_object_list(
+        final_output_payload["artifact_details"]
+    )
+    summary_typed = EvidenceExportSummary(
+        status=_str_or_none(run.get("status")),
+        trace_id=_str_or_none(run.get("trace_id")),
+        steps_count=_strict_int_or_default(
+            debug_summary.get("steps_count", len(step_results))
         ),
-        "attempts_count": debug_summary.get("attempts_count", len(step_attempts)),
-        "artifacts_count": len(artifact_details),
+        completed_steps=_strict_int_or_default(
+            debug_summary.get(
+                "completed_steps",
+                sum(
+                    1 for result in step_results if result.get("status") == "completed"
+                ),
+            )
+        ),
+        failed_steps=_strict_int_or_default(
+            debug_summary.get(
+                "failed_steps",
+                sum(1 for result in step_results if result.get("status") == "failed"),
+            )
+        ),
+        attempts_count=_strict_int_or_default(
+            debug_summary.get("attempts_count", len(step_attempts))
+        ),
+        artifacts_count=len(artifact_details),
+        duration_ms=_strict_int_or_none(debug_summary.get("duration_ms")),
+        models_used=_strict_str_list(
+            debug_summary.get("models_used", _collect_models_used(step_attempts))
+        ),
+        review_checkpoints=review_checkpoint_summary,
+        final_output=final_output_typed,
+        step_overview=typed_step_overview,
+    )
+    summary = {
+        "status": summary_typed.status,
+        "trace_id": summary_typed.trace_id,
+        "steps_count": summary_typed.steps_count,
+        "completed_steps": summary_typed.completed_steps,
+        "failed_steps": summary_typed.failed_steps,
+        "attempts_count": summary_typed.attempts_count,
+        "artifacts_count": summary_typed.artifacts_count,
         "artifact_names": artifact_names,
         "artifact_details": artifact_details,
-        "duration_ms": debug_summary.get("duration_ms"),
-        "models_used": debug_summary.get(
-            "models_used", _collect_models_used(step_attempts)
-        ),
+        "duration_ms": summary_typed.duration_ms,
+        "models_used": summary_typed.models_used,
         "rag_sources_count": len(rag_source_names),
         "rag_source_names": rag_source_names,
         "rag_source_display_names": [
@@ -380,17 +426,74 @@ def _build_summary(
         ),
         "citations": citations,
         "rerun_lineage": rerun_lineage,
-        "review_checkpoints": _build_review_checkpoint_summary(
-            bundle_payload
-        ).model_dump(mode="json"),
-        "final_output": _build_final_output_summary(
-            run.get("output_payload_json"),
-            artifact_details=_collect_artifact_details(
-                _terminal_step_result_files(result_files)
-            ),
+        "review_checkpoints": review_checkpoint_summary.model_dump(mode="json"),
+        "final_output": _legacy_final_output_summary(
+            final_output_typed,
+            artifact_details=final_output_artifact_details,
         ),
-        "step_overview": step_overview,
+        "step_overview": legacy_step_overview,
     }
+    return summary_typed, summary
+
+
+def _typed_final_output_summary(value: dict[str, Any]) -> EvidenceFinalOutputSummary:
+    return EvidenceFinalOutputSummary(
+        kind=value["kind"],
+        text_present=bool(value["text_present"]),
+        text_preview=(
+            PayloadPreview.model_validate(value["text_preview"])
+            if value.get("text_preview") is not None
+            else None
+        ),
+        structured_present=bool(value["structured_present"]),
+        artifact_count=_strict_int_or_default(value.get("artifact_count")),
+        artifact_names=_strict_str_list(value.get("artifact_names")),
+    )
+
+
+def _legacy_final_output_summary(
+    typed: EvidenceFinalOutputSummary,
+    *,
+    artifact_details: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "kind": typed.kind,
+        "text_present": typed.text_present,
+        "text_preview": (
+            typed.text_preview.model_dump(mode="json")
+            if typed.text_preview is not None
+            else None
+        ),
+        "structured_present": typed.structured_present,
+        "artifact_count": typed.artifact_count,
+        "artifact_names": typed.artifact_names,
+        "artifact_details": artifact_details,
+    }
+
+
+def _typed_payload_preview_or_none(
+    value: dict[str, Any] | None,
+) -> PayloadPreview | None:
+    return PayloadPreview.model_validate(value) if value is not None else None
+
+
+def _str_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _strict_int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _strict_int_or_default(value: Any) -> int:
+    return _strict_int_or_none(value) or 0
+
+
+def _strict_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list | tuple):
+        return []
+    items = cast(list[object] | tuple[object, ...], value)
+    return [item for item in items if isinstance(item, str)]
 
 
 def _collect_models_used(step_attempts: Any) -> list[str]:
@@ -436,17 +539,21 @@ def _build_rerun_lineage_summary(bundle_payload: dict[str, Any]) -> dict[str, An
     }
 
 
-def _rerun_operation_records(bundle_payload: dict[str, Any]) -> list[JsonObject]:
+def _rerun_operation_records(
+    bundle_payload: dict[str, Any],
+) -> list[FlowPersistedJsonObject]:
     return _as_json_object_list(bundle_payload.get("rerun_operations"))
 
 
 def _rerun_invalidated_step_records(
     bundle_payload: dict[str, Any],
-) -> list[JsonObject]:
+) -> list[FlowPersistedJsonObject]:
     return _as_json_object_list(bundle_payload.get("rerun_invalidated_steps"))
 
 
-def _review_checkpoint_records(bundle_payload: dict[str, Any]) -> list[JsonObject]:
+def _review_checkpoint_records(
+    bundle_payload: dict[str, Any],
+) -> list[FlowPersistedJsonObject]:
     return _as_json_object_list(bundle_payload.get("review_checkpoints"))
 
 
@@ -600,8 +707,8 @@ def derive_rag_usage_tracking(
 
 def _rag_payloads_from_parse_results(
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
-) -> list[JsonObject]:
-    payloads: list[JsonObject] = []
+) -> list[FlowPersistedJsonObject]:
+    payloads: list[FlowPersistedJsonObject] = []
     for result in provenance_parse_results:
         provenance = result.provenance
         if result.status != "tracked" or provenance is None or provenance.rag is None:
@@ -610,7 +717,9 @@ def _rag_payloads_from_parse_results(
     return payloads
 
 
-def _merge_tracked_rag_summaries(rag_payloads: list[JsonObject]) -> dict[str, Any]:
+def _merge_tracked_rag_summaries(
+    rag_payloads: list[FlowPersistedJsonObject],
+) -> dict[str, Any]:
     summary: dict[str, Any] | None = None
     for payload in rag_payloads:
         tracking = _as_json_object(payload.get("tracking"))
@@ -681,15 +790,20 @@ def _build_final_output_summary(
     }
 
 
-def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _build_step_overview_payloads(
+    bundle_payload: dict[str, Any],
+) -> tuple[list[EvidenceStepOverview], list[dict[str, Any]]]:
     definition_snapshot = _as_json_object(bundle_payload.get("definition_snapshot"))
     raw_steps = _as_json_object_list(
         definition_snapshot.get("steps") if definition_snapshot is not None else None
     )
     if not raw_steps:
-        return []
+        return [], []
     result_files_by_step_order = _latest_attempt_result_files_by_step_order(
         _result_file_records(bundle_payload)
+    )
+    review_impacts_by_step_order = build_evidence_step_review_impacts_by_step_order(
+        _review_checkpoint_records(bundle_payload)
     )
     step_ref_mapping = build_step_ref_mapping(raw_steps)
     step_labels_by_order: dict[int, str] = {}
@@ -711,7 +825,8 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
         if isinstance(step_order, int):
             attempts_by_order.setdefault(step_order, []).append(attempt)
 
-    overview: list[dict[str, Any]] = []
+    typed_overview: list[EvidenceStepOverview] = []
+    legacy_overview: list[dict[str, Any]] = []
     for step in raw_steps:
         step_order = step.get("step_order")
         if not isinstance(step_order, int):
@@ -726,16 +841,39 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
             result.get("output_payload_json"),
             artifact_details=artifact_details,
         )
-        overview.append(
+        step_output_summary = _build_step_output_summary(
+            result.get("output_payload_json")
+        )
+        review_impact = review_impacts_by_step_order.get(
+            step_order, empty_evidence_step_review_impact()
+        )
+        typed_step = EvidenceStepOverview(
+            step_order=step_order,
+            step_id=_str_or_none(step.get("step_id")),
+            user_description=_str_or_none(step.get("user_description")),
+            status=_str_or_none(result.get("status")),
+            attempts_count=len(attempts),
+            retries=max(len(attempts) - 1, 0),
+            duration_ms=_sum_attempt_durations(attempts),
+            models_used=_collect_models_used(attempts),
+            artifact_names=_collect_artifact_names(artifact_details),
+            result_output_kind=_typed_final_output_summary(output_summary).kind,
+            output_summary=_typed_payload_preview_or_none(step_output_summary),
+            configured_input_type=_str_or_none(step.get("input_type")),
+            configured_output_type=_str_or_none(step.get("output_type")),
+            review_impact=review_impact,
+        )
+        typed_overview.append(typed_step)
+        legacy_overview.append(
             {
-                "step_order": step_order,
-                "step_id": step.get("step_id"),
-                "user_description": step.get("user_description"),
-                "status": result.get("status"),
-                "attempts_count": len(attempts),
-                "retries": max(len(attempts) - 1, 0),
-                "duration_ms": _sum_attempt_durations(attempts),
-                "models_used": _collect_models_used(attempts),
+                "step_order": typed_step.step_order,
+                "step_id": typed_step.step_id,
+                "user_description": typed_step.user_description,
+                "status": typed_step.status,
+                "attempts_count": typed_step.attempts_count,
+                "retries": typed_step.retries,
+                "duration_ms": typed_step.duration_ms,
+                "models_used": typed_step.models_used,
                 "knowledge_sources_count": len(rag_sources),
                 "knowledge_usage_state": _resolve_step_knowledge_usage_state(
                     rag_sources
@@ -748,11 +886,13 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                     attempts=attempts,
                     step=step,
                 ),
-                "artifact_names": _collect_artifact_names(artifact_details),
+                "artifact_names": typed_step.artifact_names,
                 "artifact_details": artifact_details,
-                "result_output_kind": output_summary.get("kind"),
-                "output_summary": _build_step_output_summary(
-                    result.get("output_payload_json")
+                "result_output_kind": typed_step.result_output_kind,
+                "output_summary": (
+                    typed_step.output_summary.model_dump(mode="json")
+                    if typed_step.output_summary is not None
+                    else None
                 ),
                 "input_lineage": _build_input_lineage(
                     step=step,
@@ -762,19 +902,21 @@ def _build_step_overview(bundle_payload: dict[str, Any]) -> list[dict[str, Any]]
                     result=result,
                     max_prior_step_order=max(step_labels_by_order, default=0),
                 ),
-                "configured_input_type": step.get("input_type"),
-                "configured_output_type": step.get("output_type"),
+                "configured_input_type": typed_step.configured_input_type,
+                "configured_output_type": typed_step.configured_output_type,
             }
         )
-    return overview
+    return typed_overview, legacy_overview
 
 
-def _result_file_records(bundle_payload: dict[str, Any]) -> list[JsonObject]:
+def _result_file_records(
+    bundle_payload: dict[str, Any],
+) -> list[FlowPersistedJsonObject]:
     return _as_json_object_list(bundle_payload.get("result_files"))
 
 
-def _unique_result_file_records(result_files: Any) -> list[JsonObject]:
-    by_file_id: dict[str, JsonObject] = {}
+def _unique_result_file_records(result_files: Any) -> list[FlowPersistedJsonObject]:
+    by_file_id: dict[str, FlowPersistedJsonObject] = {}
     for item in _as_json_object_list(result_files):
         file_id = item.get("file_id")
         if file_id is None:
@@ -785,8 +927,8 @@ def _unique_result_file_records(result_files: Any) -> list[JsonObject]:
 
 def _latest_attempt_result_files_by_step_order(
     result_files: Any,
-) -> dict[int, list[JsonObject]]:
-    rows_by_step_attempt: dict[int, dict[int, list[JsonObject]]] = {}
+) -> dict[int, list[FlowPersistedJsonObject]]:
+    rows_by_step_attempt: dict[int, dict[int, list[FlowPersistedJsonObject]]] = {}
     for item in _as_json_object_list(result_files):
         step_order = _int_or_none(item.get("step_order"))
         attempt_no = _int_or_none(item.get("attempt_no"))
@@ -796,7 +938,7 @@ def _latest_attempt_result_files_by_step_order(
             attempt_no, []
         ).append(item)
 
-    result: dict[int, list[JsonObject]] = {}
+    result: dict[int, list[FlowPersistedJsonObject]] = {}
     for step_order, attempts in rows_by_step_attempt.items():
         latest_attempt_no = max(attempts)
         result[step_order] = sorted(
@@ -806,7 +948,7 @@ def _latest_attempt_result_files_by_step_order(
     return result
 
 
-def _terminal_step_result_files(result_files: Any) -> list[JsonObject]:
+def _terminal_step_result_files(result_files: Any) -> list[FlowPersistedJsonObject]:
     rows = _as_json_object_list(result_files)
     step_orders = [
         step_order
@@ -844,7 +986,7 @@ def _collect_artifact_details(result_files: Any) -> list[dict[str, Any]]:
     )
 
 
-def _artifact_detail_from_result_file(item: JsonObject) -> dict[str, Any]:
+def _artifact_detail_from_result_file(item: FlowPersistedJsonObject) -> dict[str, Any]:
     return {
         "flow_run_id": item.get("flow_run_id"),
         "flow_id": item.get("flow_id"),
@@ -978,6 +1120,7 @@ def _build_input_lineage(
     input_payload = _as_json_object_or_empty(result.get("input_payload_json"))
     runtime_input = _as_json_object_or_empty(input_payload.get("runtime_input"))
     runtime_files = _as_json_object_list(runtime_input.get("files"))
+    runtime_file_ids = _as_string_list(result.get("runtime_input_file_ids"))
     question_template = None
     bindings = _as_json_object(step.get("input_bindings"))
     if bindings is not None:
@@ -1000,11 +1143,10 @@ def _build_input_lineage(
     return {
         "input_source": step.get("input_source"),
         "used_question_binding": input_payload.get("used_question_binding"),
-        "legacy_prompt_binding_used": input_payload.get("legacy_prompt_binding_used"),
         "uses_runtime_input": bool(runtime_input),
         "runtime_input_format": runtime_input.get("input_format"),
-        "runtime_file_count": runtime_input.get("files_count", len(runtime_files)),
-        "runtime_file_ids": runtime_input.get("file_ids", []),
+        "runtime_file_count": len(runtime_file_ids),
+        "runtime_file_ids": runtime_file_ids,
         "runtime_file_names": [
             file_item.get("name")
             for file_item in runtime_files
@@ -1173,7 +1315,7 @@ def _build_summary_citations(
         step=_resolve_last_definition_step(bundle_payload),
     )
     step_citations = [
-        cast(JsonObject, citations)
+        cast(FlowPersistedJsonObject, citations)
         for item in step_overview
         if isinstance((citations := item.get("citations")), dict)
     ]

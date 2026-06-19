@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from intric.flows.enums import ACTIVE_FLOW_STEP_RESULT_STATUSES
 from intric.flows.runtime.models import RunExecutionState
 
-
-ClaimAction = Literal["proceed", "missing_step_result", "step_already_claimed", "append_completed", "skip"]
+ClaimAction = Literal[
+    "proceed", "missing_step_result", "step_already_claimed", "append_completed", "skip"
+]
 
 
 @dataclass(frozen=True)
@@ -33,10 +35,7 @@ def resolve_step_claim(
             error="Missing claimed step result.",
         )
 
-    if existing.status in (
-        FlowStepResultStatus.PENDING,
-        FlowStepResultStatus.RUNNING,
-    ):
+    if existing.status in ACTIVE_FLOW_STEP_RESULT_STATUSES:
         return StepClaimResolution(
             action="step_already_claimed",
             reason="step_already_claimed",

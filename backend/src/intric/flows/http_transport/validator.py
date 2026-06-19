@@ -10,15 +10,9 @@ from intric.flows.http_transport.authored_config import (
     HttpAuthNone,
     HttpAuthoredConfig,
     HttpBodyMode,
+    is_secret_sentinel,
 )
 from intric.flows.http_transport.errors import HttpTransportError
-
-
-def _is_secret_sentinel(value: object) -> bool:
-    return (
-        isinstance(value, dict)
-        and cast(dict[str, object], value).get("$secret") == "stored"
-    )
 
 
 def validate_authored_config(
@@ -31,27 +25,21 @@ def validate_authored_config(
     """Validate authored config. Returns list of error codes (empty = valid)."""
     errors: list[HttpTransportError] = []
 
-    # URL validation
-    if not config.url.strip():
-        errors.append(HttpTransportError.MISSING_URL)
-    else:
-        try:
-            parsed = urlparse(config.url.strip())
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                errors.append(HttpTransportError.INVALID_URL)
-        except Exception:
-            errors.append(HttpTransportError.INVALID_URL)
+    url_error = validate_http_url(config.url)
+    # Template URLs are validated after interpolation by the draft/runtime sender.
+    if url_error is not None and not _contains_template_marker(config.url):
+        errors.append(url_error)
 
     # Auth credentials validation (skip sentinel values — already stored)
     match config.auth:
         case HttpAuthBearer(token=token):
-            if not token and not _is_secret_sentinel(token):
+            if not token and not is_secret_sentinel(token):
                 errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
         case HttpAuthApiKey(key=key):
-            if not key and not _is_secret_sentinel(key):
+            if not key and not is_secret_sentinel(key):
                 errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
         case HttpAuthBasicAuth(username=username, password=password):
-            if not username and not password and not _is_secret_sentinel(password):
+            if not username and not password and not is_secret_sentinel(password):
                 errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
         case HttpAuthNone():
             pass
@@ -78,4 +66,17 @@ def validate_authored_config(
     return errors
 
 
-from typing import cast
+def validate_http_url(url: str) -> HttpTransportError | None:
+    if not url.strip():
+        return HttpTransportError.MISSING_URL
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        return HttpTransportError.INVALID_URL
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return HttpTransportError.INVALID_URL
+    return None
+
+
+def _contains_template_marker(value: str) -> bool:
+    return "{{" in value

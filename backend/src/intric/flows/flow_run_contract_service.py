@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from intric.flows.domain.flow import Flow, FlowTemplateAsset, FlowVersion
+from intric.flows.domain.flow import Flow, FlowTemplateAsset
 from intric.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
-from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.flow_input_limits import FlowInputLimitsSource
 from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
@@ -19,29 +20,23 @@ from intric.flows.flow_run_contract_models import (
     FormFieldPublic,
     default_runtime_upload_policy_public,
 )
-from intric.flows.flow_run_step_inputs import build_runtime_step_input_specs
+from intric.flows.flow_run_step_inputs import (
+    RuntimeStepInputSpec,
+    aggregate_runtime_file_limit,
+)
 from intric.flows.published_definition import (
     PublishedFlowDefinition,
-    parse_published_definition,
+)
+from intric.flows.published_runtime import (
+    FlowRuntimeFlowSource,
+    FlowRuntimePublicationIntent,
+    FlowRuntimeVersionSource,
+    load_published_runtime_inputs,
 )
 from intric.flows.runtime.models import RuntimeStep
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.exceptions import NotFoundException
 
 logger = logging.getLogger(__name__)
-
-
-class _FlowServiceProtocol(Protocol):
-    async def get_flow(self, flow_id: UUID) -> Flow: ...
-
-
-class _SettingsServiceProtocol(Protocol):
-    async def get_flow_input_limits_resolved(self) -> FlowInputLimits: ...
-
-
-class _FlowVersionRepositoryProtocol(Protocol):
-    async def get(
-        self, flow_id: UUID, version: int, tenant_id: UUID
-    ) -> FlowVersion: ...
 
 
 class _FlowTemplateAssetRepositoryProtocol(Protocol):
@@ -58,43 +53,37 @@ class _FlowTemplateAssetRepositoryProtocol(Protocol):
 
 @dataclass(frozen=True)
 class FlowRunContractService:
-    flow_service: _FlowServiceProtocol
-    settings_service: _SettingsServiceProtocol
-    flow_version_repo: _FlowVersionRepositoryProtocol
+    flow_service: FlowRuntimeFlowSource
+    settings_service: FlowInputLimitsSource
+    flow_version_repo: FlowRuntimeVersionSource
     template_asset_repo: _FlowTemplateAssetRepositoryProtocol
 
     async def get_run_contract(self, *, flow_id: UUID) -> FlowRunContractPublic:
-        flow = await self.flow_service.get_flow(flow_id)
-        persisted_flow_id = _require_flow_id(flow)
-        if flow.published_version is None:
-            raise BadRequestException(
-                "Flow must be published before a run contract can be created.",
-                code="flow_not_published",
-            )
-
-        version = await self.flow_version_repo.get(
-            flow_id=persisted_flow_id,
-            version=flow.published_version,
-            tenant_id=flow.tenant_id,
+        runtime_inputs = await load_published_runtime_inputs(
+            flow_service=self.flow_service,
+            flow_version_repo=self.flow_version_repo,
+            settings_source=self.settings_service,
+            flow_id=flow_id,
+            intent=FlowRuntimePublicationIntent.RUN_CONTRACT,
         )
-        published_definition = parse_published_definition(version.definition_json)
-        steps = published_definition.runtime_steps()
-        limits = await self.settings_service.get_flow_input_limits_resolved()
+        published = runtime_inputs.published
 
         return FlowRunContractPublic(
-            flow_id=persisted_flow_id,
-            published_flow_version=flow.published_version,
-            final_output=_build_final_output(steps),
-            form_fields=_published_form_fields(published_definition),
-            steps_requiring_input=_runtime_input_contracts(steps, limits),
+            flow_id=published.flow_id,
+            published_flow_version=published.published_version,
+            final_output=_build_final_output(runtime_inputs.steps),
+            form_fields=_published_form_fields(runtime_inputs.definition),
+            steps_requiring_input=_runtime_input_contracts(runtime_inputs.input_specs),
             runtime_upload_policy=default_runtime_upload_policy_public(),
-            steps_requiring_review=_review_step_contracts(steps),
-            aggregate_max_files=_aggregate_max_files(steps, limits),
+            steps_requiring_review=_review_step_contracts(runtime_inputs.steps),
+            aggregate_max_files=aggregate_runtime_file_limit(
+                specs=runtime_inputs.input_specs
+            ),
             template_readiness=await self._template_readiness(
-                flow=flow,
-                flow_id=persisted_flow_id,
-                published_version=flow.published_version,
-                steps=steps,
+                flow=published.flow,
+                flow_id=published.flow_id,
+                published_version=published.published_version,
+                steps=runtime_inputs.steps,
             ),
         )
 
@@ -104,7 +93,7 @@ class FlowRunContractService:
         flow: Flow,
         flow_id: UUID,
         published_version: int,
-        steps: list[RuntimeStep],
+        steps: Sequence[RuntimeStep],
     ) -> list[FlowTemplateReadinessPublic]:
         items: list[FlowTemplateReadinessPublic] = []
         for step in steps:
@@ -199,17 +188,8 @@ class FlowRunContractService:
         )
 
 
-def _require_flow_id(flow: Flow) -> UUID:
-    if flow.id is None:
-        raise BadRequestException(
-            "Flow id is missing.",
-            code="flow_id_missing",
-        )
-    return flow.id
-
-
 def _build_final_output(
-    steps: list[RuntimeStep],
+    steps: Sequence[RuntimeStep],
 ) -> FlowFinalOutputContractPublic | None:
     final_step = steps[-1] if steps else None
     if final_step is None:
@@ -248,7 +228,7 @@ def _published_form_fields(
     fields = [
         FormFieldPublic(
             name=field.name,
-            type=field.type.value,
+            type=field.type,
             label=field.label,
             required=field.required,
             options=field.options,
@@ -260,10 +240,8 @@ def _published_form_fields(
 
 
 def _runtime_input_contracts(
-    steps: list[RuntimeStep],
-    limits: FlowInputLimits,
+    specs: Mapping[UUID, RuntimeStepInputSpec],
 ) -> list[FlowRuntimeInputContractPublic]:
-    specs = build_runtime_step_input_specs(steps=steps, limits=limits)
     return [
         FlowRuntimeInputContractPublic(
             step_id=spec.step.step_id,
@@ -284,7 +262,7 @@ def _runtime_input_contracts(
 
 
 def _review_step_contracts(
-    steps: list[RuntimeStep],
+    steps: Sequence[RuntimeStep],
 ) -> list[FlowReviewStepContractPublic]:
     return [
         FlowReviewStepContractPublic(
@@ -303,19 +281,6 @@ def _review_step_contracts(
         for step in steps
         if step.review_policy is not None
     ]
-
-
-def _aggregate_max_files(
-    steps: list[RuntimeStep],
-    limits: FlowInputLimits,
-) -> int | None:
-    specs = build_runtime_step_input_specs(steps=steps, limits=limits)
-    aggregate: int | None = 0
-    for spec in specs.values():
-        if spec.max_files is None:
-            return None
-        aggregate = (aggregate or 0) + spec.max_files
-    return aggregate
 
 
 def _uuid_or_none(value: object) -> UUID | None:

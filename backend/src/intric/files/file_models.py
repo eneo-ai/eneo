@@ -111,7 +111,7 @@ class SignedURLRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "expires_in": 900,
+                "expires_in": 3600,
                 "content_disposition": "attachment",
             }
         }

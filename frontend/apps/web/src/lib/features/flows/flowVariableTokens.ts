@@ -1,4 +1,8 @@
-import { isFlowFormFieldBareAliasSafe, PRIMARY_FLOW_INPUT_KEYS } from "./flowFormSchema";
+import {
+  isFlowFormFieldBareAliasSafe,
+  PRIMARY_FLOW_INPUT_KEYS,
+  RESERVED_RUNTIME_VARIABLES
+} from "./flowFormSchema";
 
 const TEMPLATE_TOKEN_PATTERN_SOURCE = String.raw`\{\{\s*([^{}]+)\s*\}\}`;
 const TEMPLATE_TOKEN_PATTERN = new RegExp(TEMPLATE_TOKEN_PATTERN_SOURCE, "g");
@@ -6,14 +10,11 @@ const STEP_ORDER_TOKEN_PATTERN = /^step_(\d+)(\..+)?$/;
 const STEP_REFERENCE_TOKEN_PATTERN = /^step_(\d+)(\.|$)/;
 const STRUCTURED_OUTPUT_TOKEN_PATTERN = /^step_(\d+)\.output\.structured(?:\.|$)/;
 const DELETED_STEP_TOKEN_PATTERN = /^step_(\d+)_deleted(?:\.|$)/;
-const SYSTEM_VARIABLE_NAMES = new Set([
-  "datum",
-  "transkribering",
-  "föregående_steg",
-  "indata_text",
-  "indata_json",
-  "indata_filer"
-]);
+const TEMPLATE_NAMESPACE_VARIABLES = new Set(["flow", "flow_input", "step_input"]);
+const SYSTEM_VARIABLE_NAMES = new Set(
+  [...RESERVED_RUNTIME_VARIABLES].filter((name) => !TEMPLATE_NAMESPACE_VARIABLES.has(name))
+);
+const REMOVED_FLOW_INPUT_TEMPLATE_KEYS = new Set(["file_ids"]);
 export type StepOrderRemapResult = {
   text: string;
   changed: boolean;
@@ -235,6 +236,10 @@ function analyzeTemplateToken(
   if (flowInputFieldName !== null) {
     if (context.knownFieldNames.has(flowInputFieldName)) {
       return { token, kind: "valid", category: "field" };
+    }
+    const flowInputRoot = flowInputFieldName.split(".", 1)[0]?.toLowerCase();
+    if (flowInputRoot && REMOVED_FLOW_INPUT_TEMPLATE_KEYS.has(flowInputRoot)) {
+      return { token, kind: "invalid", category: "unknown", reason: "unknown_variable" };
     }
     if (PRIMARY_FLOW_INPUT_KEYS.has(flowInputFieldName.toLowerCase())) {
       return { token, kind: "valid", category: "technical" };

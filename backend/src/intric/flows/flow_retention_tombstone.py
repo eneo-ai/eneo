@@ -166,15 +166,6 @@ def has_retention_tombstone(
     )
 
 
-def is_tombstone_only_payload(payload: Any) -> bool:
-    if not isinstance(payload, dict):
-        return False
-    payload_dict = cast(dict[str, Any], payload)
-    return set(payload_dict) == {FLOW_RETENTION_TOMBSTONES_KEY} and bool(
-        extract_retention_tombstones(payload_dict)
-    )
-
-
 def _same_marker(left: FlowRetentionTombstone, right: FlowRetentionTombstone) -> bool:
     return (
         left.data_class == right.data_class

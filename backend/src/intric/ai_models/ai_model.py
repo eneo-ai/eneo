@@ -10,14 +10,14 @@ if TYPE_CHECKING:
     from intric.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
     )
-    from intric.users.user import UserInDB
+    from intric.tenants.tenant import TenantInDB
 
 
 class AIModel(Entity):
     def __init__(
         self,
         *,
-        user: "UserInDB",
+        tenant: "TenantInDB",
         nickname: Optional[str],
         name: str,
         family: Optional[str],
@@ -35,7 +35,7 @@ class AIModel(Entity):
         security_classification: Optional["SecurityClassification"] = None,
     ):
         super().__init__(id, created_at, updated_at)
-        self.user = user
+        self.tenant = tenant
         self.nickname = nickname
         self.name = name
         self.family = family
@@ -65,12 +65,11 @@ class AIModel(Entity):
 
     @property
     def lock_reason(self) -> Optional[str]:
-        # Check if tenant credentials are missing
         if get_settings().tenant_credentials_enabled:
             provider = self.get_credential_provider_name()
-            if not self.user.tenant or not self.user.tenant.api_credentials:
+            if not self.tenant.api_credentials:
                 return "credentials"
-            if provider not in self.user.tenant.api_credentials:
+            if provider not in self.tenant.api_credentials:
                 return "credentials"
 
         return None

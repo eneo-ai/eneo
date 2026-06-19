@@ -10,7 +10,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from intric.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
 
 
 def _make_flow_step(

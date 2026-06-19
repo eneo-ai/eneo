@@ -17,22 +17,26 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export function getRuntimeInputSummary(payload: unknown): RuntimeInputSummary | null {
-  const root = asObject(payload);
-  const runtimeInput = asObject(root?.runtime_input);
-  if (!runtimeInput) return null;
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter((item): item is string => typeof item === "string");
+}
 
-  const fileIds = Array.isArray(runtimeInput.file_ids)
-    ? runtimeInput.file_ids.filter((value): value is string => typeof value === "string")
-    : [];
+export function getRuntimeInputSummary(stepResultOrPayload: unknown): RuntimeInputSummary | null {
+  const root = asObject(stepResultOrPayload);
+  const payload = asObject(root?.input_payload_json) ?? root;
+  const runtimeInput = asObject(payload?.runtime_input);
+  const typedFileIds = stringArray(root?.runtime_input_file_ids);
+  const payloadFileIds = stringArray(runtimeInput?.file_ids) ?? [];
+  if (!runtimeInput && (typedFileIds === null || typedFileIds.length === 0)) return null;
 
   return {
-    fileCount: fileIds.length,
+    fileCount: typedFileIds === null ? payloadFileIds.length : typedFileIds.length,
     extractedTextLength:
-      typeof runtimeInput.extracted_text_length === "number"
+      typeof runtimeInput?.extracted_text_length === "number"
         ? runtimeInput.extracted_text_length
         : null,
-    inputFormat: typeof runtimeInput.input_format === "string" ? runtimeInput.input_format : null
+    inputFormat: typeof runtimeInput?.input_format === "string" ? runtimeInput.input_format : null
   };
 }
 

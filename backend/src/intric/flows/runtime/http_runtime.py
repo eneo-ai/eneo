@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import json
-import re
 import socket
 from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlsplit
 
 import httpx
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.config import get_settings
 from intric.main.exceptions import TypedIOValidationException
 
@@ -18,7 +16,6 @@ if TYPE_CHECKING:
     from intric.flows.variable_resolver import FlowVariableResolver
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
-_TEMPLATE_ONLY_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
 
 
 class AssertConnectedPeerAllowedFn(Protocol):
@@ -58,108 +55,20 @@ class FlowHttpRuntimeHelper:
         if not isinstance(timeout_value, (int, float)):
             raise TypedIOValidationException(
                 f"Step {step_order}: {config_label}.timeout_seconds must be a number.",
-                code="typed_io_http_invalid_config",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
             )
         timeout_seconds = float(timeout_value)
         if timeout_seconds <= 0:
             raise TypedIOValidationException(
                 f"Step {step_order}: {config_label}.timeout_seconds must be greater than zero.",
-                code="typed_io_http_invalid_config",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
             )
         if timeout_seconds > self.max_timeout_seconds:
             raise TypedIOValidationException(
                 f"Step {step_order}: {config_label}.timeout_seconds cannot exceed {self.max_timeout_seconds:g}.",
-                code="typed_io_http_invalid_config",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
             )
         return timeout_seconds
-
-    def build_headers(
-        self,
-        headers_raw: Any,
-        *,
-        context: dict[str, Any],
-        step_order: int,
-        config_label: str,
-    ) -> dict[str, str]:
-        if headers_raw is None:
-            return {}
-        if not isinstance(headers_raw, dict):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.headers must be an object.",
-                code="typed_io_http_invalid_config",
-            )
-        headers: dict[str, str] = {}
-        for key, value in cast(dict[Any, Any], headers_raw).items():
-            if not isinstance(key, str):
-                raise TypedIOValidationException(
-                    f"Step {step_order}: {config_label}.headers keys must be strings.",
-                    code="typed_io_http_invalid_config",
-                )
-            rendered = self.interpolate_value(value, context=context)
-            headers[key] = str(rendered)
-        return headers
-
-    def resolve_request_body(
-        self,
-        *,
-        method: str,
-        config: dict[str, Any],
-        context: dict[str, Any],
-        step_order: int,
-        config_label: str,
-    ) -> tuple[bytes | None, dict[str, Any] | list[Any] | None]:
-        if method != "POST":
-            return None, None
-        body_template = config.get("body_template")
-        body_json = config.get("body_json")
-        if body_template is not None and not isinstance(body_template, str):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.body_template must be a string.",
-                code="typed_io_http_invalid_config",
-            )
-        if body_json is not None and not isinstance(body_json, (dict, list)):
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label}.body_json must be an object or array.",
-                code="typed_io_http_invalid_config",
-            )
-        if body_template is not None and body_json is not None:
-            raise TypedIOValidationException(
-                f"Step {step_order}: {config_label} cannot define both body_template and body_json.",
-                code="typed_io_http_invalid_config",
-            )
-        if body_json is not None:
-            interpolated_json = self.interpolate_value(body_json, context=context)
-            if not isinstance(interpolated_json, (dict, list)):
-                raise TypedIOValidationException(
-                    f"Step {step_order}: {config_label}.body_json interpolation must produce object or array.",
-                    code="typed_io_http_invalid_config",
-                )
-            return None, cast(dict[str, Any] | list[Any], interpolated_json)
-        if body_template is not None:
-            rendered = self.variable_resolver.interpolate(body_template, context)
-            return rendered.encode("utf-8"), None
-        return None, None
-
-    def interpolate_value(self, value: Any, *, context: dict[str, Any]) -> Any:
-        if isinstance(value, str):
-            if _TEMPLATE_ONLY_PATTERN.match(value):
-                rendered = self.variable_resolver.interpolate(value, context)
-                try:
-                    return json.loads(rendered)
-                except (ValueError, json.JSONDecodeError):
-                    return rendered
-            return self.variable_resolver.interpolate(value, context)
-        if isinstance(value, list):
-            return [
-                self.interpolate_value(item, context=context)
-                for item in cast(list[Any], value)
-            ]
-        if isinstance(value, dict):
-            return {
-                str(item_key): self.interpolate_value(item_value, context=context)
-                for item_key, item_value in cast(JsonObject, value).items()
-            }
-        return value
 
     @staticmethod
     def read_response_text(
@@ -225,7 +134,7 @@ class FlowHttpRuntimeHelper:
                     await response.aclose()
                     raise TypedIOValidationException(
                         "HTTP response exceeded max inline text bytes.",
-                        code="typed_io_http_response_too_large",
+                        code=FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value,
                     )
 
             detached = httpx.Response(
@@ -242,19 +151,19 @@ class FlowHttpRuntimeHelper:
         if parsed.scheme not in {"http", "https"}:
             raise TypedIOValidationException(
                 f"Unsupported HTTP URL scheme: '{parsed.scheme}'.",
-                code="typed_io_http_invalid_url",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
             )
         host = parsed.hostname
         if not host:
             raise TypedIOValidationException(
                 "HTTP URL must include a hostname.",
-                code="typed_io_http_invalid_url",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value,
             )
         host_lower = host.strip().lower()
         if host_lower in {"localhost", "localhost.localdomain"}:
             raise TypedIOValidationException(
                 "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
             )
         if self.allow_private_networks:
             return None
@@ -271,7 +180,7 @@ class FlowHttpRuntimeHelper:
         if any(self.is_private_or_local_ip(item) for item in resolved_ips):
             raise TypedIOValidationException(
                 "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
             )
         return set(resolved_ips)
 
@@ -288,14 +197,14 @@ class FlowHttpRuntimeHelper:
         if network_stream is None:
             raise TypedIOValidationException(
                 "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             )
 
         server_addr = network_stream.get_extra_info("server_addr")
         if not isinstance(server_addr, tuple) or not server_addr:
             raise TypedIOValidationException(
                 "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             )
 
         peer_value = cast(str, server_addr[0])
@@ -305,19 +214,19 @@ class FlowHttpRuntimeHelper:
         except ValueError as exc:
             raise TypedIOValidationException(
                 "Unable to verify HTTP peer address.",
-                code="typed_io_http_connection_error",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             ) from exc
 
         if self.is_private_or_local_ip(peer_ip):
             raise TypedIOValidationException(
                 "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
             )
 
         if preflight_resolved_ips and peer_ip not in preflight_resolved_ips:
             raise TypedIOValidationException(
                 "HTTP URL blocked by SSRF policy.",
-                code="typed_io_http_ssrf_blocked",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value,
             )
 
     @staticmethod
@@ -332,7 +241,7 @@ class FlowHttpRuntimeHelper:
         except socket.gaierror as exc:
             raise TypedIOValidationException(
                 f"Unable to resolve HTTP host '{host}'.",
-                code="typed_io_http_connection_error",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             ) from exc
         resolved: list[IPAddress] = []
         for _, _, _, _, sockaddr in infos:
@@ -343,7 +252,7 @@ class FlowHttpRuntimeHelper:
         if not resolved:
             raise TypedIOValidationException(
                 f"Unable to resolve HTTP host '{host}'.",
-                code="typed_io_http_connection_error",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
             )
         return resolved
 

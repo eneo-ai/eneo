@@ -10,7 +10,7 @@ import pytest
 from docx import Document
 
 from intric.flows.application.flow_service import FlowService
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.flow_input_limits import FlowInputLimits
 from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
@@ -311,6 +311,7 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
         max_files_per_run=5,
     )
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -326,8 +327,8 @@ async def test_run_contract_marks_legacy_template_file_selection_as_ready_when_a
                     "output_config": template_step.output_config,
                     "mcp_policy": "inherit",
                 }
-            ]
-        }
+            ],
+        },
     )
     template_asset_repo.get_by_flow_file.return_value = SimpleNamespace(
         id=template_asset_id,

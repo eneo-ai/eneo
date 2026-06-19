@@ -6,13 +6,13 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict
 
 from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
-    JsonObject,
 )
 from intric.flows.flow_run_provenance import normalize_rag_payload
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -117,7 +117,7 @@ def build_debug_export(
     if isinstance(raw_steps, list):
         for raw_step in cast(list[object], raw_steps):
             if isinstance(raw_step, dict):
-                raw_step_dict = cast(JsonObject, raw_step)
+                raw_step_dict = cast(FlowPersistedJsonObject, raw_step)
                 parsed_step_order = parse_step_order(
                     raw_step_dict.get("step_order"), default=0
                 )
@@ -289,10 +289,10 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
     if isinstance(attempt.provenance_json, dict):
         llm_payload = attempt.provenance_json.get("llm")
         if isinstance(llm_payload, dict):
-            llm_payload_dict = cast(JsonObject, llm_payload)
+            llm_payload_dict = cast(FlowPersistedJsonObject, llm_payload)
             raw_model_parameters = llm_payload_dict.get("model_parameters")
             if isinstance(raw_model_parameters, dict):
-                model_parameters = cast(JsonObject, raw_model_parameters)
+                model_parameters = cast(FlowPersistedJsonObject, raw_model_parameters)
     provider = attempt.provider
     if provider is None and isinstance(model_parameters, dict):
         raw_provider = model_parameters.get("provider")
@@ -337,10 +337,12 @@ def _collect_models_used(step_attempts: list[FlowStepAttempt]) -> list[str]:
         if candidate is None and isinstance(attempt.provenance_json, dict):
             llm_payload = attempt.provenance_json.get("llm")
             if isinstance(llm_payload, dict):
-                llm_payload_dict = cast(JsonObject, llm_payload)
+                llm_payload_dict = cast(FlowPersistedJsonObject, llm_payload)
                 model_parameters = llm_payload_dict.get("model_parameters")
                 if isinstance(model_parameters, dict):
-                    model_parameters_dict = cast(JsonObject, model_parameters)
+                    model_parameters_dict = cast(
+                        FlowPersistedJsonObject, model_parameters
+                    )
                     raw_model_name = model_parameters_dict.get("model_name")
                     if isinstance(raw_model_name, str) and raw_model_name.strip():
                         candidate = raw_model_name.strip()

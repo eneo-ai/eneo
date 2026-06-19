@@ -17,16 +17,17 @@ if TYPE_CHECKING:
         EmbeddingModels as EmbeddingModelDB,
     )
     from intric.main.models import NotProvided
-    from intric.users.user import UserInDB
+    from intric.tenants.tenant import TenantInDB
 
 
 class EmbeddingModel(AIModel):
     def __init__(
         self,
+        *,
         id: Optional["UUID"],
         created_at: Optional["datetime"],
         updated_at: Optional["datetime"],
-        user: "UserInDB",
+        tenant: "TenantInDB",
         nickname: Optional[str],
         name: str,
         family: Optional[str],
@@ -51,7 +52,7 @@ class EmbeddingModel(AIModel):
         provider_type: Optional[str] = None,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -95,7 +96,7 @@ class EmbeddingModel(AIModel):
     def to_domain(  # type: ignore[override]  # noqa: PYI019 – parent uses generic DB TypeVar, we specialize
         cls,
         db_model: "EmbeddingModelDB",
-        user: "UserInDB",
+        tenant: "TenantInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ) -> "EmbeddingModel":
@@ -104,7 +105,7 @@ class EmbeddingModel(AIModel):
             id=db_model.id,
             created_at=db_model.created_at,
             updated_at=db_model.updated_at,
-            user=user,
+            tenant=tenant,
             name=db_model.name,
             nickname=db_model.nickname,
             family=db_model.family,

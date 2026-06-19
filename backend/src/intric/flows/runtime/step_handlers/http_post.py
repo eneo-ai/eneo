@@ -25,7 +25,7 @@ class HttpPostStepHandler:
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> StepExecutionResult:
         result = await self.completion_handler.execute(
             step=step,
@@ -34,8 +34,6 @@ class HttpPostStepHandler:
             version_metadata=version_metadata,
             attempt_no=attempt_no,
         )
-        if attempt_no is None:
-            raise ValueError("HttpPostStepHandler requires attempt_no.")
         intent = WebhookDeliveryIntent(
             flow_run_id=run.id,
             step_id=step.step_id,

@@ -1,9 +1,35 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal, TypeAlias, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from typing_extensions import TypedDict, TypeGuard
+
+SecretSentinel = TypedDict("SecretSentinel", {"$secret": Literal["stored"]})
+SecretValue: TypeAlias = str | SecretSentinel
+HttpMethod: TypeAlias = Literal["GET", "POST"]
+HttpResponseFormat: TypeAlias = Literal["text", "json"]
+SECRET_SENTINEL: SecretSentinel = {"$secret": "stored"}
+
+
+def is_secret_sentinel(value: object) -> TypeGuard[SecretSentinel]:
+    if not isinstance(value, dict):
+        return False
+    candidate = cast(dict[str, object], value)
+    return candidate.get("$secret") == "stored"
+
+
+def contains_secret_sentinel(value: object) -> bool:
+    if is_secret_sentinel(value):
+        return True
+    if isinstance(value, dict):
+        nested_values = cast(dict[object, object], value).values()
+        return any(contains_secret_sentinel(nested) for nested in nested_values)
+    if isinstance(value, list):
+        nested_items = cast(list[object], value)
+        return any(contains_secret_sentinel(nested) for nested in nested_items)
+    return False
 
 
 class HttpAuthMode(str, Enum):
@@ -19,19 +45,19 @@ class HttpAuthNone(BaseModel):
 
 class HttpAuthBearer(BaseModel):
     mode: Literal["bearer_token"] = "bearer_token"
-    token: str = ""
+    token: SecretValue = ""
 
 
 class HttpAuthApiKey(BaseModel):
     mode: Literal["api_key"] = "api_key"
     header_name: str = "X-API-Key"
-    key: str = ""
+    key: SecretValue = ""
 
 
 class HttpAuthBasicAuth(BaseModel):
     mode: Literal["basic_auth"] = "basic_auth"
     username: str = ""
-    password: str = ""
+    password: SecretValue = ""
 
 
 HttpAuth = Annotated[
@@ -54,8 +80,8 @@ class HttpBody(BaseModel):
 
 class CustomHeader(BaseModel):
     name: str = ""
-    value: str | dict[str, Any] = ""
-    secret: bool = False
+    value: SecretValue = ""
+    secret: StrictBool = False
 
 
 def _default_custom_headers() -> list[CustomHeader]:
@@ -66,12 +92,14 @@ class HttpAuthoredConfig(BaseModel):
     """Authored HTTP config — what the user configured.
 
     Stored in ``input_config`` / ``output_config`` JSONB columns.
-    The ``auth`` field distinguishes this from legacy dict configs.
+    The ``auth`` field is required by the Flow authored HTTP contract gate.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     url: str = ""
     auth: HttpAuth = Field(default_factory=HttpAuthNone)
-    timeout_seconds: int = 30
+    timeout_seconds: StrictInt = 30
     body: HttpBody = Field(default_factory=lambda: HttpBody(mode=HttpBodyMode.AUTO))
     custom_headers: list[CustomHeader] = Field(default_factory=_default_custom_headers)
-    response_format: str | None = None
+    response_format: HttpResponseFormat | None = None

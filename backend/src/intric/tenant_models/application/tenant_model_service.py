@@ -220,7 +220,7 @@ class TenantCompletionModelService:
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = CompletionModelRepository(self.session, self.user)
+        repo = CompletionModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model_id=new_model.id)
 
         await _audit(
@@ -293,7 +293,7 @@ class TenantCompletionModelService:
 
         await self.session.flush()
 
-        repo = CompletionModelRepository(self.session, self.user)
+        repo = CompletionModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model_id=model.id)
 
         await _audit(
@@ -399,7 +399,7 @@ class TenantEmbeddingModelService:
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = EmbeddingModelRepository(self.session, self.user)
+        repo = EmbeddingModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(new_model.id)
 
         await _audit(
@@ -466,7 +466,7 @@ class TenantEmbeddingModelService:
 
         await self.session.flush()
 
-        repo = EmbeddingModelRepository(self.session, self.user)
+        repo = EmbeddingModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model.id)
 
         await _audit(
@@ -594,7 +594,9 @@ class TenantTranscriptionModelService:
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = TranscriptionModelRepository(self.session, self.user)
+        repo = TranscriptionModelRepository(
+            session=self.session, tenant=self.user.tenant
+        )
         loaded = await repo.one(new_model.id)
 
         await _audit(
@@ -653,7 +655,9 @@ class TenantTranscriptionModelService:
 
         await self.session.flush()
 
-        repo = TranscriptionModelRepository(self.session, self.user)
+        repo = TranscriptionModelRepository(
+            session=self.session, tenant=self.user.tenant
+        )
         loaded = await repo.one(model.id)
 
         await _audit(

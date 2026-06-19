@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
 from intric.authentication.principal_types import PrincipalType
+from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from intric.flows.application.flow_run_service import FlowRunService
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunStatus,
     FlowStep,
     FlowVersion,
 )
+from intric.flows.flow_run_input_envelope import FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import BadRequestException
@@ -27,6 +30,52 @@ def _flow_repo() -> AsyncMock:
     repo.session = AsyncMock()
     repo.session.execute = AsyncMock()
     return repo
+
+
+def _runtime_upload_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.list_bound_file_ids_for_owner.return_value = set()
+    return repo
+
+
+_FILE_REPO_UNSET = object()
+
+
+def _file_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.get_list_by_id_for_owner.return_value = []
+    return repo
+
+
+def _flow_run_service(
+    *,
+    user,
+    flow_repo,
+    flow_run_repo,
+    flow_version_repo,
+    runtime_upload_repo,
+    file_repo=_FILE_REPO_UNSET,
+    max_concurrent_runs=None,
+) -> FlowRunService:
+    resolved_file_repo = _file_repo() if file_repo is _FILE_REPO_UNSET else file_repo
+    if resolved_file_repo is None:
+        raise AssertionError("FlowRunService tests must provide a file repository.")
+    return FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=runtime_upload_repo,
+        file_repo=resolved_file_repo,
+        flow_run_terminalizer=AsyncMock(),
+        access_policy=FlowRunAccessPolicy(
+            user=user,
+            flow_repo=flow_repo,
+            flow_run_repo=flow_run_repo,
+        ),
+        max_concurrent_runs=max_concurrent_runs,
+    )
 
 
 def _step(step_order: int = 1) -> FlowStep:
@@ -92,9 +141,7 @@ def _version(user, flow: Flow) -> FlowVersion:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "reserved_key", ["expected_flow_version", "file_ids", "step_inputs"]
-)
+@pytest.mark.parametrize("reserved_key", sorted(FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS))
 async def test_create_run_rejects_reserved_input_payload_keys(user, reserved_key: str):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -103,11 +150,12 @@ async def test_create_run_rejects_reserved_input_payload_keys(user, reserved_key
     flow_repo.get = AsyncMock(return_value=flow)
     flow_version_repo.get = AsyncMock(return_value=_version(user, flow))
 
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=10,
     )
 
@@ -123,7 +171,7 @@ async def test_create_run_rejects_reserved_input_payload_keys(user, reserved_key
 
 
 @pytest.mark.asyncio
-async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
+async def test_create_run_stores_step_inputs_as_execution_file_rows(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
@@ -151,17 +199,29 @@ async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
         updated_at=datetime.now(timezone.utc),
     )
     flow_run_repo.create = AsyncMock(return_value=created_run)
+    file_repo = _file_repo()
+    runtime_upload_repo = _runtime_upload_repo()
 
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=runtime_upload_repo,
+        file_repo=file_repo,
         max_concurrent_runs=10,
     )
 
     file_id_1 = uuid4()
     file_id_2 = uuid4()
+    runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {
+        file_id_1,
+        file_id_2,
+    }
+    file_repo.get_list_by_id_for_owner.return_value = [
+        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
+        for file_id in (file_id_2, file_id_1)
+    ]
     await service.create_run(
         flow_id=flow.id,
         input_payload_json={"text": "hello"},
@@ -173,15 +233,13 @@ async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
     create_kwargs = flow_run_repo.create.await_args.kwargs
     payload = create_kwargs["input_payload_json"]
     assert payload["expected_flow_version"] == 1
-    assert payload["step_inputs"] == {
-        str(flow.steps[0].id): {"file_ids": sorted([str(file_id_1), str(file_id_2)])}
-    }
+    assert "step_inputs" not in payload
     assert payload["text"] == "hello"
     assert create_kwargs["step_input_files"] == [
         {
             "step_id": flow.steps[0].id,
             "step_order": 1,
-            "file_ids": sorted([file_id_1, file_id_2], key=str),
+            "file_ids": [file_id_2, file_id_1],
         }
     ]
 
@@ -216,11 +274,12 @@ async def test_create_run_without_step_inputs_preserves_inline_payload(user):
     )
     flow_run_repo.create = AsyncMock(return_value=created_run)
 
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=10,
     )
 

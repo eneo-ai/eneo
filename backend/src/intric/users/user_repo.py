@@ -18,6 +18,7 @@ from intric.database.tables.widget_table import Widgets
 from intric.main.exceptions import UniqueException
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
+from intric.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
 from intric.users.user import (
     PaginatedResult,
     PaginationParams,
@@ -227,9 +228,26 @@ class UsersRepository:
         return await self.delegate.delete(id)
 
     async def soft_delete(self, id: UUID):
-        # Cleanup personal space
-        stmt = sa.delete(Spaces).where(Spaces.user_id == id)
-        await self.session.execute(stmt)
+        preserved_space_ids: list[UUID] = []
+        personal_space_ids = list(
+            await self.session.scalars(sa.select(Spaces.id).where(Spaces.user_id == id))
+        )
+        for space_id in personal_space_ids:
+            if await space_has_flow_delete_blockers(self.session, space_id):
+                preserved_space_ids.append(space_id)
+                continue
+
+            await self.session.execute(sa.delete(Spaces).where(Spaces.id == space_id))
+
+        if preserved_space_ids:
+            logger.info(
+                "Preserved personal space during user soft delete because it has "
+                "Flow delete blockers.",
+                extra={
+                    "user_id": str(id),
+                    "space_ids": [str(space_id) for space_id in preserved_space_ids],
+                },
+            )
 
         stmt = (
             sa.update(Users)

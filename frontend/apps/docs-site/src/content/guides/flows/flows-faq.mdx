@@ -1,0 +1,103 @@
+import { Callout } from "nextra/components";
+
+# Flows FAQ
+
+This page is for teams that need a short answer about Eneo Flows capability or operations before they open the full API reference.
+
+You are near the end of the consumer journey, where common design, run, review, file, and failure questions are answered in one place.
+
+Use this FAQ for quick capability and operations answers. Use the reference for schemas: [Flows API Guide](/guides/flows-api-guide).
+
+## What can flows do?
+
+- Accept text, JSON, document, file, and audio runtime inputs that the published run contract exposes.
+- Produce text, JSON, PDF, and DOCX final outputs.
+- Use different step designs for extraction, comparison, review, and artifact generation.
+- Use step-specific knowledge when the published Flow includes it.
+- Be edited after publish; consumers should pin `expected_flow_version` when creating runs.
+
+<Callout type="warning">
+
+**Not supported: AI Builder-authored HTTP steps.**
+
+Published flows can deliver final output through outbound HTTP; delivery failures surface as flow_webhook_delivery_failed. AI Builder cannot author HTTP steps today.
+
+Closest supported alternative: Configure supported published-flow outputs and use your app or backend to call external APIs around the run.
+
+</Callout>
+
+<Callout type="warning">
+
+**Not supported: Image input.**
+
+Image input is not supported by the Flow runtime today.
+
+Closest supported alternative: Convert the image into a supported document or text input before starting the run.
+
+</Callout>
+
+## Can I build this case?
+
+- Speech to structured report: yes. See [Designing Flows](/guides/flows/designing-flows#speech-to-structured-report).
+- Document intake with human gate: yes. See [Designing Flows](/guides/flows/designing-flows#document-intake-with-human-gate).
+- Compare and decide: yes. See [Designing Flows](/guides/flows/designing-flows#compare-and-decide).
+- Form intake to artifact: yes. See [Designing Flows](/guides/flows/designing-flows#form-intake-to-artifact).
+
+## Capability and endpoint pitfalls
+
+| What you can do                     | Endpoint owner                                                                                                                             | Trap                                                                 | Consumer action                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Start a run safely                  | `POST create_flow_run` (`201 Created`)                                                                                                     | Reusing a retry key with different input returns a conflict.         | Retry with the original payload or choose a new idempotency key.                                                                |
+| Poll without hammering              | `GET get_flow_run_status_capabilities` (`200 OK`); `GET get_flow_run` (`200 OK`); `GET list_flow_run_steps` (`200 OK`)                     | Status capabilities tell you when polling should slow down or stop.  | Use status capabilities for cadence and poll run or step endpoints only while progress can change.                              |
+| Continue after review or rerun      | `POST resume_flow_run_review_checkpoint` (`202 Accepted`); `POST rerun_flow_run_step` (`202 Accepted`)                                     | `202 Accepted` means work was queued, not finished.                  | Poll the run and step list for completion before showing final output.                                                          |
+| Open retained artifacts or evidence | `POST generate_flow_run_artifact_signed_url` (`200 OK`); `GET get_flow_run_evidence` (`200 OK`); `GET export_flow_run_evidence` (`200 OK`) | Purged content can leave metadata but no downloadable file content.  | Show retention-aware messaging and avoid retry loops for purged content.                                                        |
+| Handle outbound delivery failure    | `GET get_flow_run` (`200 OK`); `GET list_flow_run_steps` (`200 OK`); `POST generate_flow_run_artifact_signed_url` (`200 OK`)               | The run can finish but final outbound delivery can be dead-lettered. | Read the result through run and step endpoints because delivery retries are exhausted and no public redelivery endpoint exists. |
+
+## Operations
+
+- Pause and resume: runs pause at review-marked steps; arbitrary mid-run pause is not supported.
+- Mid-run files: use review design or rerun overrides; do not inject files into an executing step.
+- Results: read per-step results as they complete and use final output for the terminal answer.
+
+<Callout type="warning">
+
+**Not supported: Run-status webhooks.**
+
+Eneo Flows does not expose a run-status webhook subscription surface today.
+
+Closest supported alternative: Poll the run and step endpoints and use status capabilities to decide when polling should stop.
+
+</Callout>
+
+<Callout type="warning">
+
+**Not supported: Live audio streaming.**
+
+Runtime uploads accept completed files, not live browser audio chunks.
+
+Closest supported alternative: Upload the completed audio file, then start the run with a stable idempotency key.
+
+</Callout>
+
+### Testing your integration
+
+Use the published contract and OpenAPI error examples as the smoke-test source.
+
+1. Call `runtime_paths.run_contract` in test setup and assert your UI can render every required input.
+2. Create a run with a deterministic `Idempotency-Key` and assert replay returns the same run.
+3. Poll run and step endpoints and assert your UI branches on known `FlowApiErrorCode` values.
+
+Endpoint facts:
+
+| Endpoint                                  | Method | Success       | Operation               |
+| ----------------------------------------- | ------ | ------------- | ----------------------- |
+| `/api/v1/flows/{id}/run-contract/`        | `GET`  | `200 OK`      | `get_flow_run_contract` |
+| `/api/v1/flows/{id}/runs/`                | `POST` | `201 Created` | `create_flow_run`       |
+| `/api/v1/flows/{id}/runs/{run_id}/`       | `GET`  | `200 OK`      | `get_flow_run`          |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/` | `GET`  | `200 OK`      | `list_flow_run_steps`   |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_run_idempotency_conflict`, `flow_run_invalid_step_inputs`, `flow_run_access_denied`.
+
+Next: [Reference](/guides/flows/reference/errors).

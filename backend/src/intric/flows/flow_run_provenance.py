@@ -9,7 +9,7 @@ from typing import Any, Literal, TypeAlias, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_retention_tombstone import (
     FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
     FlowAttemptRetentionMarker,
@@ -391,7 +391,9 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
     llm_raw = raw.get("llm")
     llm: LlmProvenance | None = None
     if isinstance(llm_raw, dict):
-        llm_payload: JsonObject = dict(cast(JsonObject, llm_raw))
+        llm_payload: FlowPersistedJsonObject = dict(
+            cast(FlowPersistedJsonObject, llm_raw)
+        )
         effective_prompt = llm_payload.get("effective_prompt")
         if isinstance(effective_prompt, str):
             llm_payload["effective_prompt"] = normalize_text_preview(effective_prompt)
@@ -406,7 +408,7 @@ def _normalize_attempt_provenance_v1(raw: dict[str, Any]) -> FlowAttemptProvenan
         model_parameters = llm_payload.get("model_parameters")
         if isinstance(model_parameters, dict):
             llm_payload["model_parameters"] = normalize_model_parameters_payload(
-                cast(JsonObject, model_parameters)
+                cast(FlowPersistedJsonObject, model_parameters)
             )
         llm = LlmProvenance.model_validate(llm_payload)
 
@@ -467,7 +469,7 @@ def _normalize_rag_provenance(value: Any) -> RagProvenance | None:
 def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    payload: JsonObject = dict(cast(JsonObject, value))
+    payload: FlowPersistedJsonObject = dict(cast(FlowPersistedJsonObject, value))
     payload["tracking"] = _normalize_rag_tracking(payload.get("tracking"))
     prompt_context = _normalize_rag_prompt_context(payload.get("prompt_context"))
     if prompt_context is not None:
@@ -489,7 +491,9 @@ def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
         for reference in cast(list[object], references):
             if not isinstance(reference, dict):
                 continue
-            normalized_reference: JsonObject = dict(cast(JsonObject, reference))
+            normalized_reference: FlowPersistedJsonObject = dict(
+                cast(FlowPersistedJsonObject, reference)
+            )
             normalized_reference["usage_state"] = _normalize_usage_state(
                 normalized_reference.get("usage_state")
             )
@@ -522,7 +526,7 @@ def normalize_rag_payload(value: Any) -> dict[str, Any] | None:
 def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    payload: JsonObject = dict(cast(JsonObject, value))
+    payload: FlowPersistedJsonObject = dict(cast(FlowPersistedJsonObject, value))
 
     included_source_ids = [
         str(source_id).strip()
@@ -542,7 +546,9 @@ def _normalize_rag_prompt_context(value: Any) -> dict[str, Any] | None:
         for group in cast(list[object], raw_groups):
             if not isinstance(group, dict):
                 continue
-            normalized_group: JsonObject = dict(cast(JsonObject, group))
+            normalized_group: FlowPersistedJsonObject = dict(
+                cast(FlowPersistedJsonObject, group)
+            )
             source_id = normalized_group.get("source_id")
             if source_id is not None:
                 normalized_group["source_id"] = str(source_id)
@@ -600,7 +606,9 @@ def normalize_model_parameters_payload(
     semantics = payload.get("parameter_semantics")
     payload["parameter_semantics"] = _normalize_parameter_semantics(
         payload,
-        cast(JsonObject, semantics) if isinstance(semantics, dict) else None,
+        cast(FlowPersistedJsonObject, semantics)
+        if isinstance(semantics, dict)
+        else None,
     )
     for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
         payload.setdefault(key, None)
@@ -613,7 +621,7 @@ def _normalize_rag_tracking(value: Any) -> dict[str, Any]:
         return defaults
 
     normalized = dict(defaults)
-    value_dict = cast(JsonObject, value)
+    value_dict = cast(FlowPersistedJsonObject, value)
     for key in (
         "retrieval_tracked",
         "prompt_context_inclusion_tracked",
@@ -698,7 +706,7 @@ def _normalize_parameter_semantics(
     for key in ("temperature", "top_p", "reasoning_effort", "verbosity"):
         existing = semantics_dict.get(key)
         if isinstance(existing, dict):
-            existing_dict = cast(JsonObject, existing)
+            existing_dict = cast(FlowPersistedJsonObject, existing)
             existing_mode = existing_dict.get("mode")
         else:
             existing_mode = None

@@ -12,7 +12,11 @@ from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.application.flow_service import FlowService
 from intric.flows.assistant_execution_snapshot import stable_hash
-from intric.flows.flow import Flow, FlowStep, FlowVersion
+from intric.flows.domain.flow import Flow, FlowStep, FlowVersion
+from intric.flows.domain.flow_invariant_exceptions import (
+    FlowPersistedIdMissingError,
+    FlowPublishedDefinitionInvalidError,
+)
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -21,7 +25,7 @@ from intric.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from intric.flows.http_transport.secret_codec import SECRET_SENTINEL
+from intric.flows.http_transport import SECRET_SENTINEL
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED
 from intric.prompts.api.prompt_models import PromptCreate
@@ -166,6 +170,35 @@ def _service(
         [],
     )
     return service
+
+
+@pytest.mark.asyncio
+async def test_template_file_reference_requires_persisted_flow_id(user) -> None:
+    service = _service(
+        user=user,
+        flow_repo=AsyncMock(),
+        version_repo=AsyncMock(),
+    )
+    template_file_id = uuid4()
+    step = _step(step_order=1).model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": {"template_file_id": str(template_file_id)},
+        }
+    )
+    flow = Flow(
+        id=None,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Template flow",
+        steps=[step],
+    )
+
+    with pytest.raises(FlowPersistedIdMissingError):
+        await service._resolve_template_asset_reference(step=step, flow=flow)
+
+    service.template_asset_repo.get_by_flow_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -354,6 +387,7 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
         published_version=None,
         metadata_json=None,
         data_retention_days=None,
+        draft_revision=7,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
         steps=[_step(step_order=1), _step(step_order=2)],
@@ -380,6 +414,77 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
     assert result.published_version == 1
     version_repo.create.assert_awaited_once()
     flow_repo.update.assert_awaited_once()
+    assert flow_repo.update.await_args.kwargs["expected_revision"] == 7
+
+
+@pytest.mark.asyncio
+async def test_publish_flow_rejects_snapshot_missing_stable_step_id(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    source_flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Publishable Flow",
+        description="Test flow",
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=7,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1).model_copy(update={"id": None})],
+    )
+
+    flow_repo.get.return_value = source_flow
+    version_repo.get_latest.return_value = None
+
+    with pytest.raises(FlowPublishedDefinitionInvalidError) as exc_info:
+        await service.publish_flow(flow_id=flow_id)
+
+    assert exc_info.value.flow_id == flow_id
+    assert exc_info.value.flow_version == 1
+    assert exc_info.value.parser_code == "flow_version_missing_step_identifiers"
+    assert exc_info.value.parser_context == {"step_order": 1}
+    version_repo.create.assert_not_awaited()
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unpublish_flow_updates_with_expected_revision(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Published Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=2,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=9,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = flow
+    flow_repo.update.side_effect = lambda flow, **_: flow
+
+    result = await service.unpublish_flow(flow_id=flow_id)
+
+    assert result.published_version is None
+    assert flow_repo.update.await_args.kwargs["expected_revision"] == 9
 
 
 @pytest.mark.asyncio
@@ -422,9 +527,7 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
         "care_data_policy": {"sensitive": False},
         "ai_builder": {"description": "Generated draft"},
     }
-    assert version_repo.create.await_args.kwargs["definition_checksum"] == stable_hash(
-        definition
-    )
+    assert "definition_checksum" not in version_repo.create.await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -1093,7 +1196,7 @@ async def test_update_flow_allows_incomplete_template_fill_during_draft_editing(
         steps=[_step(step_order=1)],
     )
     draft_steps = [
-        _step(step_order=1).model_copy(
+        existing.steps[0].model_copy(
             update={
                 "output_mode": "template_fill",
                 "output_type": "docx",
@@ -1273,7 +1376,7 @@ async def test_update_flow_allows_explicit_description_clear(user):
 
 
 @pytest.mark.asyncio
-async def test_create_flow_encrypts_step_header_values(user):
+async def test_create_flow_encrypts_authored_http_secret_values(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     flow_repo.create.side_effect = lambda flow, tenant_id: flow
@@ -1285,13 +1388,25 @@ async def test_create_flow_encrypts_step_header_values(user):
     )
     step = _step(step_order=1).model_copy(
         update={
+            "input_source": "http_get",
             "input_config": {
                 "url": "https://example.org/input",
-                "headers": {"Authorization": "Bearer topsecret"},
+                "auth": {
+                    "mode": "bearer_token",
+                    "token": "Bearer topsecret",
+                },
+                "custom_headers": [
+                    {"name": "X-Trace", "value": "visible", "secret": False}
+                ],
             },
+            "output_mode": "http_post",
             "output_config": {
                 "url": "https://example.org/output",
-                "headers": {"X-Api-Key": "abc123"},
+                "auth": {
+                    "mode": "api_key",
+                    "header_name": "X-Api-Key",
+                    "key": "abc123",
+                },
             },
         }
     )
@@ -1303,69 +1418,11 @@ async def test_create_flow_encrypts_step_header_values(user):
         metadata_json=None,
     )
 
-    assert (
-        created.steps[0].input_config["headers"]["Authorization"]
-        == "enc:Bearer topsecret"
-    )
-    assert created.steps[0].output_config["headers"]["X-Api-Key"] == "enc:abc123"
-
-
-@pytest.mark.asyncio
-async def test_create_flow_rejects_header_secrets_without_encryption_key(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=version_repo,
-        encryption_service=None,
-    )
-    step = _step(step_order=1).model_copy(
-        update={
-            "input_config": {
-                "url": "https://example.org/input",
-                "headers": {"Authorization": "Bearer topsecret"},
-            }
-        }
-    )
-
-    with pytest.raises(BadRequestException, match="ENCRYPTION_KEY"):
-        await service.create_flow(
-            space_id=uuid4(),
-            name="Flow",
-            steps=[step],
-            metadata_json=None,
-        )
-
-
-@pytest.mark.asyncio
-async def test_create_flow_allows_empty_headers_without_encryption_key(user):
-    flow_repo = AsyncMock()
-    version_repo = AsyncMock()
-    flow_repo.create.side_effect = lambda flow, tenant_id: flow
-    service = _service(
-        user=user,
-        flow_repo=flow_repo,
-        version_repo=version_repo,
-        encryption_service=None,
-    )
-    step = _step(step_order=1).model_copy(
-        update={
-            "input_config": {
-                "url": "https://example.org/input",
-                "headers": {},
-            }
-        }
-    )
-
-    created = await service.create_flow(
-        space_id=uuid4(),
-        name="Flow",
-        steps=[step],
-        metadata_json=None,
-    )
-
-    assert created.steps[0].input_config["headers"] == {}
+    input_config = created.steps[0].input_config
+    output_config = created.steps[0].output_config
+    assert input_config["auth"]["token"] == "enc:Bearer topsecret"
+    assert input_config["custom_headers"][0]["value"] == "visible"
+    assert output_config["auth"]["key"] == "enc:abc123"
 
 
 @pytest.mark.asyncio
@@ -1395,6 +1452,7 @@ async def test_create_flow_allows_http_get_input_source_with_valid_config(user):
             "input_source": "http_get",
             "input_config": {
                 "url": "https://example.org/source",
+                "auth": {"mode": "none"},
                 "timeout_seconds": 12,
             },
             "input_type": "text",
@@ -1420,11 +1478,11 @@ async def test_create_flow_rejects_http_get_input_without_url(user):
     step = _step(step_order=1).model_copy(
         update={
             "input_source": "http_get",
-            "input_config": {"timeout_seconds": 5},
+            "input_config": {"auth": {"mode": "none"}, "timeout_seconds": 5},
         }
     )
 
-    with pytest.raises(BadRequestException, match="input_config.url"):
+    with pytest.raises(BadRequestException, match="HTTP_MISSING_URL"):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
@@ -1441,11 +1499,15 @@ async def test_create_flow_rejects_http_post_input_invalid_timeout(user):
     step = _step(step_order=1).model_copy(
         update={
             "input_source": "http_post",
-            "input_config": {"url": "https://example.org/source", "timeout_seconds": 0},
+            "input_config": {
+                "url": "https://example.org/source",
+                "auth": {"mode": "none"},
+                "timeout_seconds": 0,
+            },
         }
     )
 
-    with pytest.raises(BadRequestException, match="timeout_seconds"):
+    with pytest.raises(BadRequestException, match="HTTP_TIMEOUT_OUT_OF_RANGE"):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
@@ -1462,11 +1524,11 @@ async def test_create_flow_rejects_http_post_output_without_url(user):
     step = _step(step_order=1).model_copy(
         update={
             "output_mode": "http_post",
-            "output_config": {},
+            "output_config": {"auth": {"mode": "none"}},
         }
     )
 
-    with pytest.raises(BadRequestException, match="output_config.url"):
+    with pytest.raises(BadRequestException, match="HTTP_MISSING_URL"):
         await service.create_flow(
             space_id=uuid4(),
             name="Flow",
@@ -1486,8 +1548,12 @@ async def test_create_flow_allows_http_post_output_with_valid_config(user):
             "output_mode": "http_post",
             "output_config": {
                 "url": "https://example.org/hook",
+                "auth": {"mode": "none"},
                 "timeout_seconds": 25,
-                "body_template": '{"message":"{{flow_input.text}}"}',
+                "body": {
+                    "mode": "text_template",
+                    "template": '{"message":"{{flow_input.text}}"}',
+                },
             },
         }
     )
@@ -1643,12 +1709,7 @@ async def test_update_flow_rejects_flow_managed_assistants_not_owned_by_flow(use
         BadRequestException,
         match="Flow steps must reference flow-managed assistants owned by the flow",
     ):
-        await service.update_flow(
-            flow_id=flow_id,
-            steps=[
-                _step(step_order=1).model_copy(update={"assistant_id": assistant_id})
-            ],
-        )
+        await service.update_flow(flow_id=flow_id, steps=[existing_flow.steps[0]])
 
 
 @pytest.mark.asyncio

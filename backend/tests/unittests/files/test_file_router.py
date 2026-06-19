@@ -4,8 +4,39 @@ from uuid import uuid4
 
 import pytest
 
+from intric.authentication.signed_urls import verify_signed_token
 from intric.files import file_router
+from intric.files.file_models import SignedURLRequest
 from intric.main.exceptions import NotFoundException, UnauthorizedException
+
+
+async def test_generate_signed_url_uses_file_tenant_for_token():
+    file_id = uuid4()
+    tenant_id = uuid4()
+    file_service = SimpleNamespace(
+        get_file_infos=AsyncMock(return_value=[SimpleNamespace(tenant_id=tenant_id)])
+    )
+    container = SimpleNamespace(file_service=lambda: file_service)
+
+    response = await file_router.generate_signed_url(
+        id=file_id,
+        request=SimpleNamespace(base_url="https://app.example.com/"),
+        signed_url_req=SignedURLRequest(expires_in=120),
+        container=container,
+    )
+
+    file_service.get_file_infos.assert_awaited_once_with(file_ids=[file_id])
+    assert response.url.startswith(
+        f"https://app.example.com/api/v1/files/{file_id}/download/?token="
+    )
+    token = response.url.split("token=", 1)[1]
+    payload = verify_signed_token(
+        token,
+        expected_file_id=file_id,
+        expected_tenant_id=tenant_id,
+    )
+    assert payload is not None
+    assert payload["expires_at"] == response.expires_at
 
 
 async def test_download_file_signed_raises_not_found_for_missing_content(monkeypatch):

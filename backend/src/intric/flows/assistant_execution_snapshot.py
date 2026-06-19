@@ -4,14 +4,14 @@ import hashlib
 import json
 from typing import Any, cast
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 
 ASSISTANT_SNAPSHOT_SCHEMA_VERSION = 1
 
 
 def build_assistant_execution_snapshot(
     *, assistant: Any | None, mcp_server_entities: list[Any]
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     """Capture the assistant execution surface used by published flow versions."""
     if assistant is None:
         return None
@@ -25,7 +25,7 @@ def build_assistant_execution_snapshot(
     mcp_tool_surface = (
         [] if knowledge_refs else _mcp_tool_surface_snapshot(mcp_server_entities)
     )
-    snapshot: JsonObject = {
+    snapshot: FlowPersistedJsonObject = {
         "schema_version": ASSISTANT_SNAPSHOT_SCHEMA_VERSION,
         "assistant_id": str(assistant_id),
         "origin": _enum_value(getattr(assistant, "origin", None)),
@@ -64,7 +64,9 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _execution_surface_from_snapshot(snapshot: dict[str, Any]) -> JsonObject:
+def _execution_surface_from_snapshot(
+    snapshot: dict[str, Any],
+) -> FlowPersistedJsonObject:
     """Return only fields that affect execution semantics.
 
     Display labels are intentionally excluded unless they are part of the LLM
@@ -99,7 +101,7 @@ def _assistant_instructions(assistant: Any) -> str | None:
     return text if isinstance(text, str) else None
 
 
-def _completion_model_snapshot(model: Any | None) -> JsonObject | None:
+def _completion_model_snapshot(model: Any | None) -> FlowPersistedJsonObject | None:
     if model is None:
         return None
     return {
@@ -112,7 +114,7 @@ def _completion_model_snapshot(model: Any | None) -> JsonObject | None:
 
 def _completion_model_execution_surface(
     model: dict[str, Any] | None,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     if model is None:
         return None
     return {
@@ -121,12 +123,12 @@ def _completion_model_execution_surface(
     }
 
 
-def _model_kwargs_snapshot(model_kwargs: Any | None) -> JsonObject:
+def _model_kwargs_snapshot(model_kwargs: Any | None) -> FlowPersistedJsonObject:
     if model_kwargs is None:
         return {}
     if hasattr(model_kwargs, "model_dump"):
         return cast(
-            JsonObject,
+            FlowPersistedJsonObject,
             model_kwargs.model_dump(mode="json", exclude_none=True),
         )
     if isinstance(model_kwargs, dict):
@@ -137,8 +139,8 @@ def _model_kwargs_snapshot(model_kwargs: Any | None) -> JsonObject:
     return {}
 
 
-def _assistant_knowledge_snapshot(assistant: Any) -> list[JsonObject]:
-    refs: list[JsonObject] = []
+def _assistant_knowledge_snapshot(assistant: Any) -> list[FlowPersistedJsonObject]:
+    refs: list[FlowPersistedJsonObject] = []
     for attr, kind in (
         ("collections", "collection"),
         ("websites", "website"),
@@ -155,9 +157,9 @@ def _assistant_knowledge_snapshot(assistant: Any) -> list[JsonObject]:
     return refs
 
 
-def _knowledge_execution_surface(value: Any) -> list[JsonObject]:
+def _knowledge_execution_surface(value: Any) -> list[FlowPersistedJsonObject]:
     refs = cast(list[Any], value) if isinstance(value, list) else []
-    normalized: list[JsonObject] = []
+    normalized: list[FlowPersistedJsonObject] = []
     for item in refs:
         if not isinstance(item, dict):
             continue
@@ -171,8 +173,8 @@ def _knowledge_execution_surface(value: Any) -> list[JsonObject]:
     return sorted(normalized, key=lambda item: (str(item["kind"]), str(item["id"])))
 
 
-def _mcp_tool_surface_snapshot(mcp_servers: list[Any]) -> list[JsonObject]:
-    tools: list[JsonObject] = []
+def _mcp_tool_surface_snapshot(mcp_servers: list[Any]) -> list[FlowPersistedJsonObject]:
+    tools: list[FlowPersistedJsonObject] = []
     for server in mcp_servers:
         for tool in cast(list[Any], getattr(server, "tools", []) or []):
             if cast(bool, getattr(tool, "is_enabled", False)) is not True:
@@ -194,9 +196,9 @@ def _mcp_tool_surface_snapshot(mcp_servers: list[Any]) -> list[JsonObject]:
     return tools
 
 
-def _mcp_tool_execution_surface(value: Any) -> list[JsonObject]:
+def _mcp_tool_execution_surface(value: Any) -> list[FlowPersistedJsonObject]:
     tools = cast(list[Any], value) if isinstance(value, list) else []
-    normalized: list[JsonObject] = []
+    normalized: list[FlowPersistedJsonObject] = []
     for item in tools:
         if not isinstance(item, dict):
             continue

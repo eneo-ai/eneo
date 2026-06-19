@@ -8,7 +8,7 @@ from intric.assistants.reference_tags import (
     INLINE_REFERENCE_PATTERN,
     extract_inline_reference_ids,
 )
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 
 CITATION_MODE_OFF = "off"
 CITATION_MODE_INLINE_INREF_SIDECAR = "inline_inref_sidecar"
@@ -25,7 +25,7 @@ _EXTRA_INLINE_REFERENCE_SPACE_PATTERN = re.compile(r"[ \t]{2,}")
 def resolve_citation_mode(output_config: Any) -> str:
     if not isinstance(output_config, dict):
         return CITATION_MODE_OFF
-    raw_mode = cast(JsonObject, output_config).get("citation_mode")
+    raw_mode = cast(FlowPersistedJsonObject, output_config).get("citation_mode")
     if not isinstance(raw_mode, str):
         return CITATION_MODE_OFF
     normalized = raw_mode.strip()
@@ -361,7 +361,7 @@ def _iter_strings(value: Any) -> Iterable[str]:
         yield value
         return
     if isinstance(value, dict):
-        for nested in cast(JsonObject, value).values():
+        for nested in cast(FlowPersistedJsonObject, value).values():
             yield from _iter_strings(nested)
         return
     if isinstance(value, list):

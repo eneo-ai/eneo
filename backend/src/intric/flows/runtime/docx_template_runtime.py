@@ -12,6 +12,7 @@ from docx.oxml.ns import qn
 from jinja2.sandbox import SandboxedEnvironment
 
 from intric.files.docx_template_validation import validate_docx_template_archive
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.exceptions import TypedIOValidationException
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ def render_docx_template(
     if missing:
         raise TypedIOValidationException(
             f"Unresolved template placeholders: {', '.join(missing)}",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         )
 
     try:
@@ -143,7 +144,7 @@ def render_docx_template(
     except Exception as exc:  # pragma: no cover - environment guard
         raise TypedIOValidationException(
             f"DOCX template rendering dependency is unavailable: {exc}",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         ) from exc
 
     normalized_template_bytes, alias_by_name = _normalize_docx_template_placeholders(
@@ -172,11 +173,11 @@ def render_docx_template(
             if "UndefinedError" in message or "is undefined" in message:
                 raise TypedIOValidationException(
                     "Template rendering failed. Check that placeholders are written directly in the DOCX without extra formatting inside the braces.",
-                    code="typed_io_template_render_failed",
+                    code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
                 ) from exc
             raise TypedIOValidationException(
                 f"DOCX template render failed: {exc}",
-                code="typed_io_template_render_failed",
+                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
             ) from exc
 
     return blob, _DOCX_MIMETYPE, f"step_{step_order}_output.docx"

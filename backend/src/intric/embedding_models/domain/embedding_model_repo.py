@@ -13,14 +13,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from intric.database.database import AsyncSession
-    from intric.users.user import UserInDB
+    from intric.tenants.tenant import TenantInDB
 
 
 class EmbeddingModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+    def __init__(self, *, session: "AsyncSession", tenant: "TenantInDB") -> None:
         super().__init__()
         self.session = session
-        self.user = user
+        self.tenant = tenant
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
@@ -40,7 +40,7 @@ class EmbeddingModelRepository:
                 # UI filtering happens at the presentation layer
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == self.user.tenant_id,
+                    EmbeddingModels.tenant_id == self.tenant.id,
                 )
             )
             .order_by(
@@ -59,7 +59,7 @@ class EmbeddingModelRepository:
         return [
             EmbeddingModel.to_domain(
                 db_model=embedding_model,
-                user=self.user,
+                tenant=self.tenant,
                 provider_name=provider_name,
                 provider_type=provider_type,
             )
@@ -81,10 +81,10 @@ class EmbeddingModelRepository:
             )
             .where(
                 EmbeddingModels.id == model_id,
-                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
+                # Allow both global models and models owned by the requesting tenant.
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == self.user.tenant_id,
+                    EmbeddingModels.tenant_id == self.tenant.id,
                 ),
             )
         )
@@ -98,7 +98,7 @@ class EmbeddingModelRepository:
         embedding_model, provider_name, provider_type = row
         return EmbeddingModel.to_domain(
             db_model=embedding_model,
-            user=self.user,
+            tenant=self.tenant,
             provider_name=provider_name,
             provider_type=provider_type,
         )
@@ -127,7 +127,7 @@ class EmbeddingModelRepository:
             )
             .where(
                 EmbeddingModels.id == embedding_model.id,
-                EmbeddingModels.tenant_id == self.user.tenant_id,
+                EmbeddingModels.tenant_id == self.tenant.id,
             )
         )
         await self.session.execute(stmt)

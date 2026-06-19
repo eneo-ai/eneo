@@ -20,7 +20,7 @@ from intric.flows.application.flow_draft_materialization import (
 from intric.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 from intric.flows.flow_authoring_spec import AssistantSpec
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,

@@ -30,7 +30,7 @@ from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
     build_planner_telemetry_from_turn,
 )
-from intric.flows.flow_authoring_spec import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
@@ -53,7 +53,7 @@ def build_accepted_action_messages(
     used_auxiliary_llm: bool,
 ) -> list[ConversationMessage]:
     action = accepted.planner_action
-    base_metadata: JsonObject | None = None
+    base_metadata: FlowPersistedJsonObject | None = None
 
     match action:
         case AskQuestionAction():

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 from intric.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
     CustomHeader,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
@@ -14,7 +14,6 @@ from intric.flows.http_transport.authored_config import (
     HttpBodyMode,
 )
 from intric.flows.http_transport.secret_codec import (
-    SECRET_SENTINEL,
     decrypt_authored_config,
     encrypt_authored_config,
     merge_secrets_on_update,
@@ -202,6 +201,53 @@ def test_decrypt_skips_non_encrypted_values() -> None:
     assert result.auth.token == "plain-text"
 
 
+def test_authored_config_accepts_bearer_secret_sentinel_wire_shape() -> None:
+    config = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {"mode": "bearer_token", "token": SECRET_SENTINEL},
+            "timeout_seconds": 30,
+        }
+    )
+
+    assert config.auth.token == SECRET_SENTINEL
+    assert config.model_dump(mode="json")["auth"]["token"] == SECRET_SENTINEL
+
+
+def test_authored_config_accepts_api_key_secret_sentinel_wire_shape() -> None:
+    config = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {
+                "mode": "api_key",
+                "header_name": "X-Key",
+                "key": SECRET_SENTINEL,
+            },
+            "timeout_seconds": 30,
+        }
+    )
+
+    assert config.auth.key == SECRET_SENTINEL
+    assert config.model_dump(mode="json")["auth"]["key"] == SECRET_SENTINEL
+
+
+def test_authored_config_accepts_basic_auth_secret_sentinel_wire_shape() -> None:
+    config = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {
+                "mode": "basic_auth",
+                "username": "alice",
+                "password": SECRET_SENTINEL,
+            },
+            "timeout_seconds": 30,
+        }
+    )
+
+    assert config.auth.password == SECRET_SENTINEL
+    assert config.model_dump(mode="json")["auth"]["password"] == SECRET_SENTINEL
+
+
 # --- redact_authored_config ---
 
 
@@ -253,17 +299,14 @@ def test_redact_no_auth_leaves_config_unchanged() -> None:
     assert result.auth.mode == "none"
 
 
-# --- merge_secrets_on_update ---
-
-
-def _with_sentinel(auth_model, field: str):
-    """Inject sentinel dict into an auth model via model_copy (bypasses Pydantic str validation)."""
-    return auth_model.model_copy(update={field: SECRET_SENTINEL})
-
-
 def test_merge_sentinel_preserves_stored_bearer_token() -> None:
-    incoming_auth = _with_sentinel(HttpAuthBearer(token="placeholder"), "token")
-    incoming = _config(auth=incoming_auth)
+    incoming = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {"mode": "bearer_token", "token": SECRET_SENTINEL},
+            "timeout_seconds": 30,
+        }
+    )
     stored = _config(auth=HttpAuthBearer(token="ENC:stored-token"))
 
     result = merge_secrets_on_update(incoming, stored)
@@ -281,8 +324,17 @@ def test_merge_new_value_passes_through_for_bearer() -> None:
 
 
 def test_merge_sentinel_preserves_stored_api_key() -> None:
-    incoming_auth = _with_sentinel(HttpAuthApiKey(header_name="X-Key", key="placeholder"), "key")
-    incoming = _config(auth=incoming_auth)
+    incoming = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {
+                "mode": "api_key",
+                "header_name": "X-Key",
+                "key": SECRET_SENTINEL,
+            },
+            "timeout_seconds": 30,
+        }
+    )
     stored = _config(auth=HttpAuthApiKey(header_name="X-Key", key="ENC:stored-key"))
 
     result = merge_secrets_on_update(incoming, stored)
@@ -291,10 +343,17 @@ def test_merge_sentinel_preserves_stored_api_key() -> None:
 
 
 def test_merge_sentinel_preserves_stored_basic_auth_password() -> None:
-    incoming_auth = _with_sentinel(
-        HttpAuthBasicAuth(username="alice", password="placeholder"), "password"
+    incoming = HttpAuthoredConfig.model_validate(
+        {
+            "url": "https://example.org/api",
+            "auth": {
+                "mode": "basic_auth",
+                "username": "alice",
+                "password": SECRET_SENTINEL,
+            },
+            "timeout_seconds": 30,
+        }
     )
-    incoming = _config(auth=incoming_auth)
     stored = _config(
         auth=HttpAuthBasicAuth(username="alice", password="ENC:stored-pass")
     )
@@ -306,10 +365,14 @@ def test_merge_sentinel_preserves_stored_basic_auth_password() -> None:
 
 def test_merge_sentinel_preserves_stored_secret_custom_header() -> None:
     incoming = _config(
-        custom_headers=[CustomHeader(name="X-Secret", value=SECRET_SENTINEL, secret=True)]
+        custom_headers=[
+            CustomHeader(name="X-Secret", value=SECRET_SENTINEL, secret=True)
+        ]
     )
     stored = _config(
-        custom_headers=[CustomHeader(name="X-Secret", value="ENC:stored-val", secret=True)]
+        custom_headers=[
+            CustomHeader(name="X-Secret", value="ENC:stored-val", secret=True)
+        ]
     )
 
     result = merge_secrets_on_update(incoming, stored)
@@ -322,7 +385,9 @@ def test_merge_new_custom_header_value_passes_through() -> None:
         custom_headers=[CustomHeader(name="X-Secret", value="new-val", secret=True)]
     )
     stored = _config(
-        custom_headers=[CustomHeader(name="X-Secret", value="ENC:stored-val", secret=True)]
+        custom_headers=[
+            CustomHeader(name="X-Secret", value="ENC:stored-val", secret=True)
+        ]
     )
 
     result = merge_secrets_on_update(incoming, stored)

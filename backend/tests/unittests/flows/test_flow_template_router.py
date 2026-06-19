@@ -11,12 +11,18 @@ from uuid import uuid4
 import pytest
 from fastapi import UploadFile
 
-from intric.flows.api import flow_router_common as router_common_module
+from intric.authentication.signed_urls import verify_signed_token
+from intric.files.file_models import SignedURLRequest
+from intric.flows.api import flow_access_context as flow_access_context_module
+from intric.flows.api import flow_template_router as flow_template_router_module
 from intric.flows.api.flow_template_router import (
+    generate_flow_template_signed_url,
     inspect_flow_template,
     upload_flow_template_file,
 )
-from intric.flows.flow import FlowTemplateAsset
+from intric.flows.domain.flow import FlowTemplateAsset
+from intric.flows.flow_access_policy import FlowApiAction
+from intric.main.exceptions import UnauthorizedException
 from intric.roles.permissions import Permission
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
@@ -55,12 +61,12 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         _container,
         *,
         flow_id,
-        required_access=router_common_module.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         load_actor_context=True,
         allow_service_key_principals=False,
     ):
         requested_flow_ids.append(str(flow_id))
-        assert required_access == router_common_module.FlowApiAction.EDIT
+        assert required_access == FlowApiAction.EDIT
         assert load_actor_context is True
         assert allow_service_key_principals is False
         flow = _flow(flow_id)
@@ -71,8 +77,8 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         )
 
     monkeypatch.setattr(
-        router_common_module,
-        "get_flow_access_context_for_request",
+        flow_access_context_module,
+        "resolve_flow_access_context",
         fake_access_context,
     )
 
@@ -143,12 +149,12 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         _container,
         *,
         flow_id,
-        required_access=router_common_module.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         load_actor_context=True,
         allow_service_key_principals=False,
     ):
         requested_flow_ids.append(str(flow_id))
-        assert required_access == router_common_module.FlowApiAction.EDIT
+        assert required_access == FlowApiAction.EDIT
         assert load_actor_context is True
         assert allow_service_key_principals is False
         flow = _flow(flow_id)
@@ -159,8 +165,8 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         )
 
     monkeypatch.setattr(
-        router_common_module,
-        "get_flow_access_context_for_request",
+        flow_access_context_module,
+        "resolve_flow_access_context",
         fake_access_context,
     )
 
@@ -176,4 +182,100 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         flow_id=flow_id, upload_file=upload
     )
     audit_service.log_async.assert_awaited_once()
+    audit_kwargs = audit_service.log_async.await_args.kwargs
+    assert asset.id != asset.file_id
+    assert audit_kwargs["entity_id"] == asset.file_id
     assert result.id == asset.id
+
+
+@pytest.mark.asyncio
+async def test_generate_flow_template_signed_url_uses_template_file_tenant(
+    monkeypatch,
+):
+    container = MagicMock()
+    template_asset_service = AsyncMock()
+    container.flow_template_asset_service.return_value = template_asset_service
+    flow_id = uuid4()
+    asset_file_id = uuid4()
+    file_tenant_id = uuid4()
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
+    container.user.return_value = user
+
+    async def allow_edit_access(request, _container, *, flow_id):
+        return SimpleNamespace(flow=_flow(flow_id), actor=MagicMock())
+
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "require_flow_edit_access",
+        allow_edit_access,
+    )
+    template_asset_service.get_asset_with_file.return_value = (
+        SimpleNamespace(file_id=asset_file_id),
+        SimpleNamespace(tenant_id=file_tenant_id),
+    )
+
+    response = await generate_flow_template_signed_url(
+        id=flow_id,
+        file_id=uuid4(),
+        request=SimpleNamespace(base_url="https://app.example.com/"),
+        signed_url_req=SignedURLRequest(expires_in=120),
+        container=container,
+    )
+
+    template_asset_service.get_asset_with_file.assert_awaited_once()
+    assert response.url.startswith(
+        f"https://app.example.com/api/v1/files/{asset_file_id}/download/?token="
+    )
+    token = response.url.split("token=", 1)[1]
+    payload = verify_signed_token(
+        token,
+        expected_file_id=asset_file_id,
+        expected_tenant_id=file_tenant_id,
+    )
+    assert payload is not None
+    assert payload["expires_at"] == response.expires_at
+
+
+@pytest.mark.asyncio
+async def test_generate_flow_template_signed_url_checks_edit_access_before_url_build(
+    monkeypatch,
+):
+    container = MagicMock()
+    template_asset_service = AsyncMock()
+    container.flow_template_asset_service.return_value = template_asset_service
+    calls: list[str] = []
+
+    async def deny_edit_access(request, _container, *, flow_id):
+        calls.append("access")
+        raise UnauthorizedException("No edit access.")
+
+    def unexpected_url_build(**kwargs):
+        calls.append("url")
+        raise AssertionError("URL generation must not happen before edit access.")
+
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "require_flow_edit_access",
+        deny_edit_access,
+    )
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "build_signed_download_response",
+        unexpected_url_build,
+    )
+
+    with pytest.raises(UnauthorizedException):
+        await generate_flow_template_signed_url(
+            id=uuid4(),
+            file_id=uuid4(),
+            request=SimpleNamespace(base_url="https://app.example.com/"),
+            signed_url_req=SignedURLRequest(),
+            container=container,
+        )
+
+    assert calls == ["access"]
+    template_asset_service.get_asset_with_file.assert_not_awaited()

@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    DiscoveryRuntimeResult,
     RuntimeDiscoveryContext,
     _targeted_classification_bias,
     analyze_discovery_runtime,
@@ -714,7 +715,13 @@ def test_targeted_bias_is_none_when_target_already_resolved() -> None:
     assert bias is None
 
 
-async def _run_with_followup(conversation: list[ConversationMessage]):
+async def _run_with_followup(
+    conversation: list[ConversationMessage],
+) -> tuple[DiscoveryRuntimeResult, AsyncMock]:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        "Omformulerad ledtext med PDF-exempel."
+    )
     with (
         patch.object(
             runtime,
@@ -729,24 +736,18 @@ async def _run_with_followup(conversation: list[ConversationMessage]):
             runtime, "build_discovery_followup", return_value=_clarification_question()
         ),
         patch.object(runtime, "build_discovery_block_message", return_value=None),
-        patch.object(
-            runtime,
-            "phrase_clarification_question",
-            new_callable=AsyncMock,
-            return_value="Omformulerad ledtext med PDF-exempel.",
-        ) as phrasing,
     ):
         result = await build_discovery_runtime_result(
             conversation,
-            litellm_client=MagicMock(),
+            litellm_client=litellm_client,
             litellm_model="gpt-test",
             tenant_id=uuid4(),
         )
-    return result, phrasing
+    return result, litellm_client
 
 
 @pytest.mark.asyncio
-async def test_reask_is_phrased_without_changing_question_data() -> None:
+async def test_reask_keeps_catalog_text_without_llm_call() -> None:
     conversation = [
         ConversationMessage(role="user", content="Bygg ett flöde."),
         ConversationMessage(
@@ -757,12 +758,11 @@ async def test_reask_is_phrased_without_changing_question_data() -> None:
         ConversationMessage(role="user", content="vet inte"),
     ]
 
-    result, phrasing = await _run_with_followup(conversation)
+    result, litellm_client = await _run_with_followup(conversation)
 
-    phrasing.assert_awaited_once()
+    litellm_client.acompletion.assert_not_awaited()
     assert result.followup is not None
-    assert result.followup.assistant_text == "Omformulerad ledtext med PDF-exempel."
-    # The structured payload (slot identity + options) must be untouched.
+    assert result.followup.assistant_text == "Jag behöver förstå slutresultatet."
     assert result.followup.question_data.question_id == "terminal_output"
     assert (
         result.followup.question_data.question == "Vilket format ska slutresultatet ha?"
@@ -771,11 +771,11 @@ async def test_reask_is_phrased_without_changing_question_data() -> None:
 
 
 @pytest.mark.asyncio
-async def test_first_ask_keeps_catalog_text_and_skips_phrasing() -> None:
+async def test_first_ask_keeps_catalog_text_without_llm_call() -> None:
     conversation = [ConversationMessage(role="user", content="Bygg ett flöde.")]
 
-    result, phrasing = await _run_with_followup(conversation)
+    result, litellm_client = await _run_with_followup(conversation)
 
-    phrasing.assert_not_awaited()
+    litellm_client.acompletion.assert_not_awaited()
     assert result.followup is not None
     assert result.followup.assistant_text == "Jag behöver förstå slutresultatet."

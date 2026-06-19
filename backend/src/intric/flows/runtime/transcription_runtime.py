@@ -8,6 +8,10 @@ from uuid import UUID
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    FlowRunInputEnvelopePatch,
+)
 from intric.flows.runtime.flow_run_actor import FlowRunActor
 
 from .transcription import resolve_and_transcribe_audio_for_step
@@ -21,8 +25,6 @@ if TYPE_CHECKING:
     from intric.spaces.space_repo import SpaceRepository
 
 logger = logging.getLogger(__name__)
-
-FLOW_INPUT_TRANSCRIPTION_KEY = "transkribering"
 
 
 @dataclass(frozen=True)
@@ -77,12 +79,12 @@ async def persist_transcription_on_run_input(
     run: "FlowRun",
     transcript: str,
 ) -> None:
-    updated_payload = dict(run.input_payload_json or {})
-    updated_payload[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript
-    await flow_run_repo.update_input_payload(
+    updated_payload = await flow_run_repo.update_input_payload(
         run_id=run.id,
         tenant_id=run.tenant_id,
-        input_payload_json={FLOW_INPUT_TRANSCRIPTION_KEY: transcript},
+        input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+            transcript=transcript
+        ),
     )
     run.input_payload_json = updated_payload
 

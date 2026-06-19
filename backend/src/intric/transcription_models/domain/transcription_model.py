@@ -13,13 +13,14 @@ if TYPE_CHECKING:
     from intric.database.tables.ai_models_table import (
         TranscriptionModels as TranscriptionModelsDB,
     )
-    from intric.users.user import UserInDB
+    from intric.tenants.tenant import TenantInDB
 
 
 class TranscriptionModel(AIModel):
     def __init__(
         self,
-        user: "UserInDB",
+        *,
+        tenant: "TenantInDB",
         id: "UUID",
         created_at: "datetime",
         updated_at: "datetime",
@@ -44,7 +45,7 @@ class TranscriptionModel(AIModel):
         provider_type: Optional[str] = None,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -83,13 +84,13 @@ class TranscriptionModel(AIModel):
     def create_from_db(
         cls,
         transcription_model_db: "TranscriptionModelsDB",
-        user: "UserInDB",
+        tenant: "TenantInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ):
         # Settings are now directly on the model table
         return cls(
-            user=user,
+            tenant=tenant,
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
             updated_at=transcription_model_db.updated_at,

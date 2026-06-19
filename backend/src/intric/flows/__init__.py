@@ -1,20 +1,6 @@
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from intric.flows.domain.flow import (
-    Flow,
-    FlowRun,
-    FlowRunReviewCheckpoint,
-    FlowRunReviewCheckpointState,
-    FlowRunStatus,
-    FlowSparse,
-    FlowStep,
-    FlowStepAttempt,
-    FlowStepAttemptStatus,
-    FlowStepResult,
-    FlowStepResultStatus,
-    FlowVersion,
-)
 from intric.flows.execution_backend import FlowExecutionBackend
 from intric.flows.variable_resolver import (
     FlowVariableResolver,
@@ -35,12 +21,12 @@ _LAZY_EXPORTS = {
         "FlowVersionRepository",
     ),
     "ai_builder": ("intric.flows.ai_builder", None),
-    "flow_file_upload_service": ("intric.flows.flow_file_upload_service", None),
+    "flow_runtime_file_service": ("intric.flows.flow_runtime_file_service", None),
     "flow_input_limits": ("intric.flows.flow_input_limits", None),
 }
 
 if TYPE_CHECKING:
-    from intric.flows import ai_builder, flow_file_upload_service, flow_input_limits
+    from intric.flows import ai_builder, flow_input_limits, flow_runtime_file_service
     from intric.flows.application.flow_run_service import FlowRunService
     from intric.flows.application.flow_service import FlowService
     from intric.flows.flow_factory import FlowFactory
@@ -49,18 +35,6 @@ if TYPE_CHECKING:
     from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 
 __all__ = [
-    "Flow",
-    "FlowSparse",
-    "FlowStep",
-    "FlowVersion",
-    "FlowRun",
-    "FlowRunReviewCheckpoint",
-    "FlowRunReviewCheckpointState",
-    "FlowRunStatus",
-    "FlowStepResult",
-    "FlowStepResultStatus",
-    "FlowStepAttempt",
-    "FlowStepAttemptStatus",
     "FlowFactory",
     "FlowExecutionBackend",
     "FlowRepository",
@@ -70,7 +44,7 @@ __all__ = [
     "FlowService",
     "FlowVariableResolver",
     "ai_builder",
-    "flow_file_upload_service",
+    "flow_runtime_file_service",
     "flow_input_limits",
     "iter_template_expressions",
 ]

@@ -95,3 +95,41 @@ def test_apply_patch_rejects_values_over_hard_ceiling() -> None:
 def test_validate_rejects_unknown_fields() -> None:
     with pytest.raises(BadRequestException, match="Unsupported document render limit"):
         validate_flow_document_render_limits_object({"unknown": 1})
+
+
+def test_validate_returns_typed_limit_overrides() -> None:
+    assert validate_flow_document_render_limits_object(
+        {
+            "max_source_chars": 750_000,
+            "max_table_cells": 75_000,
+        }
+    ) == {
+        "max_source_chars": 750_000,
+        "max_table_cells": 75_000,
+    }
+
+
+def test_validate_rejects_non_string_limit_names() -> None:
+    with pytest.raises(BadRequestException, match="limit names must be strings"):
+        validate_flow_document_render_limits_object({1: 750_000})
+
+
+def test_validate_rejects_bool_limit_values() -> None:
+    with pytest.raises(BadRequestException, match="max_blocks must be an integer"):
+        validate_flow_document_render_limits_object({"max_blocks": True})
+
+
+def test_validate_rejects_non_positive_limit_values() -> None:
+    with pytest.raises(
+        BadRequestException, match="max_source_chars must be greater than zero"
+    ):
+        validate_flow_document_render_limits_object({"max_source_chars": 0})
+
+
+def test_validate_rejects_values_over_hard_ceiling() -> None:
+    with pytest.raises(
+        BadRequestException, match="max_source_chars must be less than or equal to"
+    ):
+        validate_flow_document_render_limits_object(
+            {"max_source_chars": FLOW_DOCUMENT_RENDER_HARD_LIMITS.max_source_chars + 1}
+        )

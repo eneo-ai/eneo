@@ -343,7 +343,6 @@
     const nextBindings: Record<string, unknown> = {
       ...((activeStep.input_bindings as Record<string, unknown> | null) ?? {})
     };
-    delete nextBindings.text;
     if (value.trim().length === 0) {
       delete nextBindings.question;
     } else {

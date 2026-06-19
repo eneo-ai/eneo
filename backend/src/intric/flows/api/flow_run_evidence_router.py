@@ -7,19 +7,28 @@ from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from intric.audit.domain.action_types import ActionType
-from intric.flows.api import flow_router_common as common
+from intric.authentication.auth_models import (
+    FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
+)
+from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_models import (
     FlowRunEvidenceExportResponse,
     FlowRunEvidenceResponse,
 )
+from intric.flows.api.flow_runtime_paths import (
+    FLOW_RUN_EVIDENCE_EXPORT_PATH,
+    FLOW_RUN_EVIDENCE_PATH,
+)
 from intric.flows.api.flow_service_principal_actor_read_model import (
-    enrich_evidence_service_principal_summaries,
+    FlowServicePrincipalActorPresenter,
 )
 from intric.flows.api.flow_trace_audit import (
     build_flow_trace_error_payload,
     log_flow_trace_audit_or_deny,
 )
+from intric.flows.flow_access_policy import FlowApiAction
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -27,13 +36,11 @@ from intric.server.dependencies.container import get_container
 router = APIRouter()
 
 _FLOW_TRACE_FORBIDDEN_DESCRIPTION = (
-    "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
-    "space scope does not match the flow, `insufficient_tenant_permission` when an "
-    "ordinary principal lacks trace permission, `flow_run_access_denied` when a caller "
-    "tries to inspect another principal's run, `flow_run_evidence_forbidden` when a "
-    "service key lacks explicit own-run evidence capability, and "
-    "`flow_run_evidence_raw_export_forbidden` when raw export is blocked by "
-    "classification-aware policy."
+    f"Forbidden. {FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE} Scope, resource "
+    "permission, tenant permission, run ownership, and evidence policy are "
+    "evaluated before returning Flow evidence. Machine-readable codes include "
+    "`insufficient_scope`, `insufficient_resource_permission`, and "
+    "`flow_run_evidence_forbidden`."
 )
 
 _FLOW_EVIDENCE_DESCRIPTION = """
@@ -60,17 +67,16 @@ Evidence export is policy-based and tiered:
     """
 
 _DEFAULT_EVIDENCE_EXPORT_REASON: Final[str] = "support_debug"
-_RAW_REASON_REQUIRED_CODE: Final[str] = "flow_evidence_export_reason_required"
 _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
     "Raw evidence export requires an explicit non-default reason."
 )
 
 
 @router.get(
-    "/{id}/runs/{run_id}/evidence/",
+    FLOW_RUN_EVIDENCE_PATH,
     response_model=FlowRunEvidenceResponse,
     status_code=status.HTTP_200_OK,
-    operation_id="get_flow_run_evidence_alias",
+    operation_id="get_flow_run_evidence",
     summary="Get flow run evidence trace",
     description=_FLOW_EVIDENCE_DESCRIPTION,
     responses={
@@ -91,12 +97,12 @@ _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
             description="Evidence audit logging is unavailable for this request.",
             message="Evidence audit logging is unavailable.",
             intric_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
-            code="flow_evidence_audit_logging_failed",
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
             context={"audit_required": True},
         ),
     },
 )
-async def get_flow_run_evidence_alias(
+async def get_flow_run_evidence(
     id: Annotated[
         UUID,
         Path(description="Identifier of the flow that owns the run evidence export."),
@@ -110,11 +116,11 @@ async def get_flow_run_evidence_alias(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     user = container.user()
@@ -138,18 +144,18 @@ async def get_flow_run_evidence_alias(
     )
     if audit_failure is not None:
         return audit_failure
-    payload = await enrich_evidence_service_principal_summaries(
+    presenter = FlowServicePrincipalActorPresenter(
         api_key_repo=container.api_key_v2_repo(),
         tenant_id=user.tenant_id,
-        payload=evidence.to_dict(),
     )
+    payload = await presenter.present_evidence(evidence.to_dict())
     return FlowRunEvidenceResponse.model_validate(payload)
 
 
 @router.get(
-    "/{id}/runs/{run_id}/evidence/export",
+    FLOW_RUN_EVIDENCE_EXPORT_PATH,
     status_code=status.HTTP_200_OK,
-    operation_id="export_flow_run_evidence_alias",
+    operation_id="export_flow_run_evidence",
     summary="Export flow run evidence bundle",
     description=_FLOW_EVIDENCE_EXPORT_DESCRIPTION,
     responses={
@@ -170,7 +176,7 @@ async def get_flow_run_evidence_alias(
             description="Raw evidence export requires an explicit non-default reason.",
             message=_RAW_REASON_REQUIRED_MESSAGE,
             intric_error_code=ErrorCodes.BAD_REQUEST,
-            code=_RAW_REASON_REQUIRED_CODE,
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED,
             context={
                 "detail": "raw",
                 "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
@@ -193,12 +199,12 @@ async def get_flow_run_evidence_alias(
             description="Evidence audit logging is unavailable for this request.",
             message="Evidence audit logging is unavailable.",
             intric_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
-            code="flow_evidence_audit_logging_failed",
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
             context={"audit_required": True},
         ),
     },
 )
-async def export_flow_run_evidence_alias(
+async def export_flow_run_evidence(
     id: Annotated[
         UUID,
         Path(description="Identifier of the flow that owns the run evidence export."),
@@ -230,11 +236,11 @@ async def export_flow_run_evidence_alias(
     ] = _DEFAULT_EVIDENCE_EXPORT_REASON,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     access_kind = (
@@ -249,7 +255,7 @@ async def export_flow_run_evidence_alias(
             content=build_flow_trace_error_payload(
                 message=_RAW_REASON_REQUIRED_MESSAGE,
                 intric_error_code=ErrorCodes.BAD_REQUEST,
-                code=_RAW_REASON_REQUIRED_CODE,
+                code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
                 context={
                     "detail": "raw",
                     "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
@@ -286,3 +292,6 @@ async def export_flow_run_evidence_alias(
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+__all__ = ["router"]

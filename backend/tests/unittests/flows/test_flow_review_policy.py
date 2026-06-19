@@ -6,8 +6,8 @@ import pytest
 
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import FlowStepCreateRequest, FlowStepUpdateRequest
+from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
-from intric.flows.flow import FlowStep
 from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_MAX_SECONDS,
     FLOW_REVIEW_EXPIRY_MIN_SECONDS,

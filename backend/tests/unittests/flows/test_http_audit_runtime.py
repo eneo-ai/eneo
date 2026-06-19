@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 
 from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.http_audit import HttpAuditDeps, audit_http_outbound
+from intric.users.user import UserInDB
 
 
 @dataclass
@@ -26,12 +31,28 @@ class _Step:
     user_description: str | None = None
 
 
+def _actor() -> FlowRunActor:
+    user_id = UUID(int=1)
+    tenant_id = UUID(int=2)
+    user = cast(
+        UserInDB,
+        SimpleNamespace(
+            id=user_id,
+            tenant_id=tenant_id,
+            username="Test User",
+            email="test@example.org",
+            active_api_key=None,
+        ),
+    )
+    return FlowRunActor.from_user(user=user)
+
+
 @pytest.mark.asyncio
 async def test_audit_http_outbound_logs_sanitized_metadata() -> None:
     audit_service = SimpleNamespace(log_async=AsyncMock())
     deps = HttpAuditDeps(
         audit_service=audit_service,
-        user=SimpleNamespace(id="user-1"),
+        actor=_actor(),
         logger=MagicMock(),
     )
     run = _Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1")
@@ -53,6 +74,9 @@ async def test_audit_http_outbound_logs_sanitized_metadata() -> None:
     kwargs = audit_service.log_async.await_args.kwargs
     assert kwargs["action"] == ActionType.FLOW_HTTP_OUTBOUND_CALL
     assert kwargs["entity_type"] == EntityType.FLOW_RUN
+    assert kwargs["actor_id"] == UUID(int=1)
+    assert kwargs["actor_type"] == ActorType.USER
+    assert kwargs["actor_api_key_id"] is None
     extra = kwargs["metadata"]["extra"]
     assert extra["url_host"] == "https://example.org"
     assert extra["url_path"] == "/hook"
@@ -66,7 +90,7 @@ async def test_audit_http_outbound_logs_sanitized_metadata() -> None:
 async def test_audit_http_outbound_noop_without_service() -> None:
     deps = HttpAuditDeps(
         audit_service=None,
-        user=SimpleNamespace(id="user-1"),
+        actor=_actor(),
         logger=MagicMock(),
     )
     run = _Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1")
@@ -85,11 +109,13 @@ async def test_audit_http_outbound_noop_without_service() -> None:
 
 @pytest.mark.asyncio
 async def test_audit_http_outbound_never_breaks_flow_on_logger_failure() -> None:
-    audit_service = SimpleNamespace(log_async=AsyncMock(side_effect=RuntimeError("audit down")))
+    audit_service = SimpleNamespace(
+        log_async=AsyncMock(side_effect=RuntimeError("audit down"))
+    )
     fake_logger = MagicMock()
     deps = HttpAuditDeps(
         audit_service=audit_service,
-        user=SimpleNamespace(id="user-1"),
+        actor=_actor(),
         logger=fake_logger,
     )
     run = _Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1")
@@ -114,7 +140,7 @@ async def test_audit_http_outbound_handles_url_without_hostname() -> None:
     audit_service = SimpleNamespace(log_async=AsyncMock())
     deps = HttpAuditDeps(
         audit_service=audit_service,
-        user=SimpleNamespace(id="user-1"),
+        actor=_actor(),
         logger=MagicMock(),
     )
     run = _Run(id="run-2", flow_id="flow-2", tenant_id="tenant-2")
@@ -143,7 +169,7 @@ async def test_audit_http_outbound_uses_step_label_when_description_missing() ->
     audit_service = SimpleNamespace(log_async=AsyncMock())
     deps = HttpAuditDeps(
         audit_service=audit_service,
-        user=SimpleNamespace(id="user-1"),
+        actor=_actor(),
         logger=MagicMock(),
     )
     run = _Run(id="run-3", flow_id="flow-3", tenant_id="tenant-3")

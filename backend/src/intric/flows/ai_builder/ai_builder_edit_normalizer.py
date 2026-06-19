@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, TypeAlias, cast
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -36,8 +36,9 @@ from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_structured_output_path,
 )
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_review_policy import FlowStepReviewMode
+from intric.json_types import JsonValue
 from intric.main.logging import get_logger
 
 _ADDITIVE_PATCH_FIELDS = frozenset({"uses_previous_fields", "uses_form_fields"})
@@ -47,9 +48,6 @@ _OUTPUT_MODE_DOCUMENT_DELIVERY_ALIASES: dict[str, DocumentDeliveryMode] = {
     "generated": "generated"
 }
 logger = get_logger(__name__)
-JsonValue: TypeAlias = (
-    None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
-)
 
 
 @dataclass(frozen=True, slots=True)

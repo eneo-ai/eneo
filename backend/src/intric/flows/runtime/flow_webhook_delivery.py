@@ -22,6 +22,7 @@ from intric.flows.application.flow_webhook_delivery_policy import (
 )
 from intric.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResult
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -215,7 +216,11 @@ class FlowRunWebhookDeliveryService:
             version=run.flow_version,
             tenant_id=row.tenant_id,
         )
-        steps = parse_published_runtime_steps(flow_version.definition_json)
+        # Delivery does not own run terminalization for invalid definitions.
+        steps = parse_published_runtime_steps(
+            flow_version.definition_json,
+            flow_version=flow_version.version,
+        )
         step = next((item for item in steps if item.step_id == row.step_id), None)
         if step is None:
             raise ValueError(
@@ -298,8 +303,6 @@ class FlowRunWebhookDeliveryService:
             encryption_service=self.encryption_service,
             variable_resolver=self.variable_resolver,
             resolve_timeout_seconds=self.http_runtime.resolve_timeout_seconds,
-            build_headers=self.http_runtime.build_headers,
-            resolve_request_body=self.http_runtime.resolve_request_body,
             read_response_text=self.http_runtime.read_response_text,
             send_http_request=self._send_http_request,
             audit_http_outbound=audit_http_outbound,
@@ -411,7 +414,7 @@ class FlowRunWebhookDeliveryService:
                 source=FlowRunLifecycleSource.EXECUTOR_FAILED,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.EXECUTOR_FAILED,
-                    code="webhook_delivery_failed",
+                    code=FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED,
                     message=f"Webhook delivery failed: {error_message}",
                     step_order=row.step_order,
                 ),

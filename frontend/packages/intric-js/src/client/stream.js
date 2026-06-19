@@ -13,6 +13,7 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
   if (response.ok) {
     if (onOpen) await onOpen?.(response);
 
+    /** @param {{ id: string; event: string; data: string }} message */
     const handleMessage = (message) => {
       if (isEmptySseFrame(message)) return;
       (onMessage ?? (() => {}))(message);
@@ -36,6 +37,10 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
   }
 }
 
+/**
+ * @param {{ id: string; event: string; data: string }} message
+ * @returns {boolean}
+ */
 function isEmptySseFrame(message) {
   return message.event === "" && message.data === "" && message.id === "";
 }

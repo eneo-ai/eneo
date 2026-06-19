@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Final, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -135,6 +135,15 @@ class ResourcePermissionLevel(str, Enum):
     ADMIN = "admin"
 
 
+FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE: Final[str] = (
+    "Service keys (`sk_`) need `resource_permissions.flows >= read` before "
+    "`resource_permissions.flow_evidence` is evaluated. For own-run evidence, "
+    "`flow_evidence >= read` allows view, `flow_evidence >= write` allows redacted "
+    "export, and `flow_evidence = admin` allows raw export when tenant Flow evidence "
+    "policy also permits it."
+)
+
+
 class ResourcePermissions(BaseModel):
     """Per-resource-type permission overrides for API keys.
 
@@ -153,9 +162,11 @@ class ResourcePermissions(BaseModel):
             "runs, cancel own runs, and edit, approve, reject, or resume human-review "
             "checkpoints for runs created by that same API key. `admin` satisfies "
             "DELETE-level Flow resource checks, but service-key principals still "
-            "cannot use endpoints whose Flow policy requires a user principal. Null "
-            "means this key has no fine-grained Flow grant; keys without "
-            "resource_permissions use their top-level permission."
+            "cannot use endpoints whose Flow policy requires a user principal. "
+            "Evidence endpoints still require `resource_permissions.flows >= read` "
+            "before evidence capability is evaluated. Null means this key has no "
+            "fine-grained Flow grant; keys without resource_permissions use their "
+            "top-level permission."
         ),
     )
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -169,11 +180,9 @@ class ResourcePermissions(BaseModel):
     flow_evidence: ResourcePermissionLevel = Field(
         default=ResourcePermissionLevel.NONE,
         description=(
-            "Explicit Flow evidence access for trace/evidence inspection and export. "
-            "This is separate from `flows`: evidence access does not grant run "
-            "creation or human-review checkpoint edit, approve, reject, or resume "
-            "permissions. Omitted or 'none' means this key has no fine-grained "
-            "evidence grant."
+            f"{FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE} Personal keys (`pk_`) "
+            "cannot set this field. Omitted or `none` means this key has no "
+            "fine-grained evidence grant."
         ),
     )
 

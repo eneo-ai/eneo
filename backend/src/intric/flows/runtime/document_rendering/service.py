@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterable, Sequence
 from typing import Any, NoReturn
 
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.runtime.document_rendering.blocks import DocumentBlock
 from intric.flows.runtime.document_rendering.docx_renderer import DocxDocumentRenderer
 from intric.flows.runtime.document_rendering.limits import (
@@ -91,7 +92,7 @@ class DocumentRenderService:
         if renderer is None:
             raise TypedIOValidationException(
                 f"Unsupported document type: {output_type}",
-                code="typed_io_render_failed",
+                code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
             )
         try:
             return renderer.render(blocks, step_order=step_order).as_tuple()
@@ -128,5 +129,5 @@ def _raise_render_failed(
     )
     raise TypedIOValidationException(
         "Document render failed.",
-        code="typed_io_render_failed",
+        code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
     ) from exc

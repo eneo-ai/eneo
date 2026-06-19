@@ -59,10 +59,6 @@ def resolve_reference_title(reference: dict[str, Any]) -> str | None:
     return None
 
 
-def resolve_reference_url(reference: dict[str, Any]) -> str | None:
-    return _resolve_reference_url(reference)
-
-
 def _resolve_reference_url(reference: dict[str, Any]) -> str | None:
     for key in ("source_url", "source_title", "title"):
         raw_value = reference.get(key)

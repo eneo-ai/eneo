@@ -41,8 +41,6 @@ class _Deps:
     encryption_service: Any
     variable_resolver: Any
     resolve_timeout_seconds: Any
-    build_headers: Any
-    resolve_request_body: Any
     read_response_text: Any
     send_http_request: Any
     audit_http_outbound: Any
@@ -75,8 +73,6 @@ def _make_deps(
         encryption_service=encryption_service or object(),
         variable_resolver=variable_resolver or resolver,
         resolve_timeout_seconds=resolve_timeout_seconds or (lambda value, **_: 5.0),
-        build_headers=lambda value, **_: {"X-Test": "1"},
-        resolve_request_body=lambda **_: (None, None),
         read_response_text=read_response_text or (lambda **_: "ok"),
         send_http_request=send_http_request,
         audit_http_outbound=AsyncMock(),
@@ -90,7 +86,7 @@ async def test_resolve_http_input_source_text_json_success_audits_success() -> N
         step_id="s1",
         input_type="json",
         input_source="http_get",
-        input_config={"url": "https://example.org/data"},
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
     )
     run = _Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("GET", "https://example.org/data")
@@ -189,6 +185,33 @@ async def test_resolve_http_input_source_text_authored_config_compiles_request()
 
 
 @pytest.mark.asyncio
+async def test_resolve_http_input_source_text_rejects_flat_config_before_send() -> None:
+    step = _Step(
+        step_order=12,
+        step_id="s12",
+        input_type="text",
+        input_source="http_get",
+        input_config={"url": "https://example.org/data"},
+    )
+    request = httpx.Request("GET", "https://example.org/data")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="ok")
+    )
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(TypedIOValidationException, match="authored HTTP config") as exc:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-12", flow_id="flow-1", tenant_id="tenant-1"),
+            context={},
+            deps=deps,
+        )
+
+    assert exc.value.code == "typed_io_http_invalid_config"
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_resolve_http_input_source_text_authored_timeout_uses_runtime_cap() -> (
     None
 ):
@@ -233,7 +256,7 @@ async def test_resolve_http_input_source_text_timeout_maps_to_typed_code() -> No
         step_id="s2",
         input_type="text",
         input_source="http_get",
-        input_config={"url": "https://example.org/data"},
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
     )
     run = _Run(id="run-2", flow_id="flow-1", tenant_id="tenant-1")
     send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
@@ -253,7 +276,7 @@ async def test_resolve_http_input_source_text_non_success_maps_to_typed_code() -
         step_id="s3",
         input_type="text",
         input_source="http_get",
-        input_config={"url": "https://example.org/data"},
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
     )
     run = _Run(id="run-3", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("GET", "https://example.org/data")
@@ -277,7 +300,7 @@ async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code(
         step_id="s31",
         input_type="json",
         input_source="http_get",
-        input_config={"url": "https://example.org/data"},
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
     )
     run = _Run(id="run-31", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("GET", "https://example.org/data")
@@ -305,7 +328,10 @@ async def test_deliver_webhook_timeout_maps_to_bad_request_and_audits() -> None:
         step_id="step-4",
         input_type="text",
         input_source="flow_input",
-        output_config={"url": "https://example.org/webhook"},
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
     )
     run = _Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1")
     send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
@@ -333,7 +359,7 @@ async def test_deliver_webhook_requires_url_in_output_config() -> None:
         step_id="step-41",
         input_type="text",
         input_source="flow_input",
-        output_config={"url": "   "},
+        output_config={"url": "   ", "auth": {"mode": "none"}},
     )
     run = _Run(id="run-41", flow_id="flow-1", tenant_id="tenant-1")
     deps = _make_deps(send_http_request=AsyncMock())
@@ -358,7 +384,10 @@ async def test_deliver_webhook_maps_typed_transport_error_to_bad_request() -> No
         step_id="step-42",
         input_type="text",
         input_source="flow_input",
-        output_config={"url": "https://example.org/webhook"},
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
     )
     run = _Run(id="run-42", flow_id="flow-1", tenant_id="tenant-1")
     send_http_request = AsyncMock(
@@ -392,7 +421,10 @@ async def test_deliver_webhook_sets_idempotency_key() -> None:
         step_id="step-5",
         input_type="text",
         input_source="flow_input",
-        output_config={"url": "https://example.org/webhook"},
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
     )
     run = _Run(id="run-5", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("POST", "https://example.org/webhook")
@@ -537,6 +569,33 @@ async def test_deliver_webhook_authored_auto_body_uses_text_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deliver_webhook_rejects_flat_config_before_send() -> None:
+    step = _Step(
+        step_order=53,
+        step_id="step-53",
+        input_type="text",
+        input_source="flow_input",
+        output_config={"url": "https://example.org/webhook"},
+    )
+    request = httpx.Request("POST", "https://example.org/webhook")
+    send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(BadRequestException, match="authored HTTP config"):
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=_Run(id="run-53", flow_id="flow-1", tenant_id="tenant-1"),
+            context={},
+            deps=deps,
+            idempotency_key="run-53:step-53:1:webhook",
+        )
+
+    send_http_request.assert_not_awaited()
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_failure() -> (
     None
 ):
@@ -545,7 +604,10 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
         step_id="step-6",
         input_type="text",
         input_source="flow_input",
-        output_config={"url": "https://example.org/webhook"},
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
     )
     run = _Run(id="run-6", flow_id="flow-1", tenant_id="tenant-1")
     keys: list[str] = []

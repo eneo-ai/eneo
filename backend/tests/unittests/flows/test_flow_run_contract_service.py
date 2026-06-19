@@ -8,8 +8,15 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.flows.api.flow_models import FlowOutputDelivery
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
+from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from intric.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_api_exceptions import FlowBadRequestException
 from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.flow_metadata import FlowFormFieldType
 from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.flows.published_definition import (
@@ -66,6 +73,55 @@ def _service(
         flow_version_repo=flow_version_repo,
         template_asset_repo=template_asset_repo or AsyncMock(),
     )
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_requires_persisted_flow_id() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    step = _step(step_order=1, input_type="text")
+    flow_service.get_flow.return_value = _flow(step=step).model_copy(
+        update={"id": None, "published_version": 1}
+    )
+    service = _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(FlowPersistedIdMissingError):
+        await service.get_run_contract(flow_id=uuid4())
+
+    flow_version_repo.get.assert_not_awaited()
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_requires_published_flow() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(
+        update={"published_version": None, "steps": [step]}
+    )
+    flow_service.get_flow.return_value = flow
+    service = _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.get_run_contract(flow_id=flow.id)
+
+    assert exc_info.value.code is FlowApiErrorCode.FLOW_NOT_PUBLISHED
+    assert str(exc_info.value) == (
+        "Flow must be published before a run contract can be created."
+    )
+    flow_version_repo.get.assert_not_awaited()
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -131,6 +187,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
         checksum="published-checksum",
     )
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -171,7 +228,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
                     "mcp_policy": "inherit",
                 },
             ],
-        }
+        },
     )
 
     contract = await _service(
@@ -189,7 +246,7 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
     assert contract.aggregate_max_files == 2
     assert contract.form_fields[0].name == "published_field"
-    assert contract.form_fields[0].type == "text"
+    assert contract.form_fields[0].type is FlowFormFieldType.TEXT
     assert contract.form_fields[0].label == "Published field"
     assert contract.steps_requiring_input[0].step_id == runtime_step.id
     assert contract.steps_requiring_input[0].label == "Upload"
@@ -219,6 +276,7 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -242,7 +300,7 @@ async def test_get_run_contract_normalizes_and_sorts_published_form_fields() -> 
                     "mcp_policy": "inherit",
                 }
             ],
-        }
+        },
     )
 
     contract = await _service(
@@ -268,6 +326,7 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -284,7 +343,7 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
                     "mcp_policy": "inherit",
                 }
             ],
-        }
+        },
     )
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -295,6 +354,38 @@ async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> No
         ).get_run_contract(flow_id=flow.id)
 
     assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_rejects_published_snapshot_without_executable_steps() -> (
+    None
+):
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 7, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [],
+        },
+    )
+
+    with pytest.raises(FlowPublishedDefinitionWithoutExecutableStepsError) as exc_info:
+        await _service(
+            flow_service=flow_service,
+            settings_service=settings_service,
+            flow_version_repo=flow_version_repo,
+        ).get_run_contract(flow_id=flow.id)
+
+    assert exc_info.value.flow_id == flow.id
+    assert exc_info.value.flow_version == 7
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -321,6 +412,7 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -337,7 +429,7 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
                     "mcp_policy": "inherit",
                 }
             ],
-        }
+        },
     )
 
     contract = await _service(
@@ -348,6 +440,105 @@ async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
 
     assert contract.aggregate_max_files == 5
     assert contract.steps_requiring_input[0].max_files == 5
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id)
+
+    assert contract.aggregate_max_files == 0
+    assert contract.steps_requiring_input == []
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_unbounded_aggregate_when_step_is_unbounded() -> (
+    None
+):
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "input_format": "document",
+                    "label": "Upload",
+                }
+            }
+        }
+    )
+    flow = _flow(step=runtime_step).model_copy(
+        update={"published_version": 1, "steps": [runtime_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+        max_files_per_run=None,
+    )
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "mcp_policy": "inherit",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id)
+
+    assert contract.aggregate_max_files is None
+    assert contract.steps_requiring_input[0].max_files is None
 
 
 @pytest.mark.asyncio
@@ -375,6 +566,7 @@ async def test_get_run_contract_returns_review_steps() -> None:
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -393,7 +585,7 @@ async def test_get_run_contract_returns_review_steps() -> None:
                     "mcp_policy": "inherit",
                 }
             ],
-        }
+        },
     )
 
     contract = await _service(
@@ -442,6 +634,7 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -471,7 +664,7 @@ async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
                     "mcp_policy": "inherit",
                 },
             ],
-        }
+        },
     )
 
     contract = await _service(
@@ -517,6 +710,7 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
     settings_service.get_flow_input_limits_resolved.return_value = _limits()
     template_asset_repo.get.side_effect = NotFoundException("missing")
     flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
         definition_json={
             "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
             "flow_id": str(flow.id),
@@ -533,7 +727,7 @@ async def test_get_run_contract_marks_missing_template_assets_unavailable() -> N
                     "mcp_policy": "inherit",
                 }
             ],
-        }
+        },
     )
 
     contract = await _service(

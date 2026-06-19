@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -19,6 +20,7 @@ from intric.database.tables.flow_tables import (
     FlowStepResults,
 )
 from intric.flows.api.flow_models import FlowRunRerunOperationPublic
+from intric.flows.domain.flow import FlowRunRerunOperation, RerunStepInputOverride
 from intric.flows.enums import (
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
@@ -82,11 +84,168 @@ def _rerun_operation_public_payload() -> dict[str, object]:
         "expected_run_revision": 1,
         "accepted_run_revision": 1,
         "reason": "Refresh output",
+        "root_step_input_override_requested": False,
         "requested_by_principal_type": PrincipalType.SERVICE_KEY,
         "requested_by_service_principal": _service_principal_actor(),
         "created_at": now,
         "updated_at": now,
     }
+
+
+def _rerun_operation_domain_payload() -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "flow_id": uuid4(),
+        "flow_run_id": uuid4(),
+        "rerun_step_id": uuid4(),
+        "rerun_step_order": 1,
+        "root_attempt_no": 2,
+        "root_attempt_id": None,
+        "status": FlowRunRerunOperationStatus.QUEUED,
+        "request_fingerprint": "fingerprint",
+        "expected_run_revision": 1,
+        "accepted_run_revision": 1,
+        "reason": "Refresh output",
+        "input_payload_json": None,
+        "root_step_input_override_requested": False,
+        "root_step_input_override": None,
+        "requested_by_principal_type": PrincipalType.USER,
+        "requested_by_user_id": uuid4(),
+        "requested_by_service_id": None,
+        "failure_code": None,
+        "failure_message": None,
+        "started_at": None,
+        "finished_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def test_rerun_operation_public_projects_input_payload_from_internal_column():
+    payload = _rerun_operation_public_payload()
+    payload["input_payload_json"] = {"case_id": "CASE-1"}
+
+    operation = FlowRunRerunOperationPublic.model_validate(payload)
+    dumped = operation.model_dump(mode="json")
+
+    assert operation.input_payload == {"case_id": "CASE-1"}
+    assert "input_payload" in dumped
+    assert "input_payload_json" not in dumped
+
+
+def test_rerun_operation_public_projects_explicit_file_override():
+    step_id = uuid4()
+    file_id = uuid4()
+    payload = _rerun_operation_public_payload()
+    payload["root_step_input_override"] = {
+        "step_id": str(step_id),
+        "file_ids": [str(file_id)],
+    }
+    payload["root_step_input_override_requested"] = True
+
+    operation = FlowRunRerunOperationPublic.model_validate(payload)
+
+    assert operation.root_step_input_override_requested is True
+    assert operation.root_step_input_override is not None
+    assert operation.root_step_input_override.step_id == step_id
+    assert operation.root_step_input_override.file_ids == [file_id]
+
+
+def test_rerun_operation_public_projects_explicit_empty_override():
+    step_id = uuid4()
+    payload = _rerun_operation_public_payload()
+    payload["root_step_input_override"] = {"step_id": str(step_id), "file_ids": []}
+    payload["root_step_input_override_requested"] = True
+
+    operation = FlowRunRerunOperationPublic.model_validate(payload)
+
+    assert operation.root_step_input_override_requested is True
+    assert operation.root_step_input_override is not None
+    assert operation.root_step_input_override.step_id == step_id
+    assert operation.root_step_input_override.file_ids == []
+
+
+def test_rerun_operation_public_keeps_inherited_override_empty():
+    payload = _rerun_operation_public_payload()
+
+    operation = FlowRunRerunOperationPublic.model_validate(payload)
+
+    assert operation.root_step_input_override_requested is False
+    assert operation.root_step_input_override is None
+
+
+def test_rerun_operation_public_rejects_contradictory_override_intent():
+    payload = _rerun_operation_public_payload()
+    payload["root_step_input_override_requested"] = True
+
+    with pytest.raises(ValueError, match="root_step_input_override must be present"):
+        FlowRunRerunOperationPublic.model_validate(payload)
+
+
+def test_rerun_operation_domain_rejects_contradictory_override_intent():
+    payload = _rerun_operation_domain_payload()
+    payload["root_step_input_override_requested"] = True
+
+    with pytest.raises(
+        ValidationError, match="root_step_input_override must be present"
+    ):
+        FlowRunRerunOperation.model_validate(payload)
+
+
+def test_rerun_operation_domain_rejects_mismatched_override_step_id():
+    payload = _rerun_operation_domain_payload()
+    payload["root_step_input_override_requested"] = True
+    payload["root_step_input_override"] = RerunStepInputOverride(
+        step_id=uuid4(),
+        file_ids=(),
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="root_step_input_override.step_id must match rerun_step_id",
+    ):
+        FlowRunRerunOperation.model_validate(payload)
+
+
+def test_rerun_operation_public_projects_from_attribute_object():
+    step_id = uuid4()
+    file_id = uuid4()
+    payload = _rerun_operation_public_payload()
+    payload["requested_by_principal_type"] = PrincipalType.USER
+    payload["requested_by_user_id"] = uuid4()
+    payload["requested_by_service_principal"] = None
+    payload["input_payload_json"] = {"case_id": "CASE-2"}
+    payload["root_step_input_override"] = {
+        "step_id": str(step_id),
+        "file_ids": [str(file_id)],
+    }
+    payload["root_step_input_override_requested"] = True
+
+    operation = FlowRunRerunOperationPublic.model_validate(SimpleNamespace(**payload))
+
+    assert operation.input_payload == {"case_id": "CASE-2"}
+    assert operation.root_step_input_override is not None
+    assert operation.root_step_input_override.step_id == step_id
+    assert operation.root_step_input_override.file_ids == [file_id]
+
+
+def test_rerun_operation_public_projects_typed_override_from_attribute_object():
+    step_id = uuid4()
+    file_id = uuid4()
+    payload = _rerun_operation_public_payload()
+    payload["root_step_input_override"] = RerunStepInputOverride(
+        step_id=step_id,
+        file_ids=(file_id,),
+    )
+    payload["root_step_input_override_requested"] = True
+
+    operation = FlowRunRerunOperationPublic.model_validate(SimpleNamespace(**payload))
+
+    assert operation.root_step_input_override is not None
+    assert operation.root_step_input_override.step_id == step_id
+    assert operation.root_step_input_override.file_ids == [file_id]
 
 
 def test_rerun_status_and_role_values_are_canonical_enum_values():
@@ -146,6 +305,7 @@ def test_rerun_operation_table_owns_request_identity_and_status():
         "expected_run_revision",
         "accepted_run_revision",
         "reason",
+        "root_step_input_override_requested",
         "requested_by_principal_type",
         "requested_by_user_id",
         "requested_by_service_id",
@@ -164,6 +324,11 @@ def test_rerun_operation_table_owns_request_identity_and_status():
     assert "requested_by_principal_type = 'user'" in requester_constraint
     assert "requested_by_service_id IS NOT NULL" in requester_constraint
     assert FlowRunRerunOperations.__table__.columns["failure_code"].type.length == 64
+    override_column = FlowRunRerunOperations.__table__.columns[
+        "root_step_input_override_requested"
+    ]
+    assert override_column.nullable is False
+    assert override_column.server_default is None
     active_index = _index_by_name(
         FlowRunRerunOperations,
         "uq_flow_run_rerun_operations_one_active_per_run",

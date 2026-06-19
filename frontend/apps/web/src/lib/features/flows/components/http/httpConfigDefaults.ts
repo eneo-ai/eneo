@@ -21,6 +21,30 @@ export interface HttpValidationError {
   message: string;
 }
 
+export type HttpUrlValidationCode = "HTTP_MISSING_URL" | "HTTP_INVALID_URL";
+
+const LITERAL_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+export function getAuthoredHttpUrlError(url: string): HttpUrlValidationCode | null {
+  const trimmed = url.trim();
+  if (!trimmed) return "HTTP_MISSING_URL";
+
+  const schemeMatch = LITERAL_SCHEME_RE.exec(trimmed);
+  if (schemeMatch && !["http:", "https:"].includes(schemeMatch[0].toLowerCase())) {
+    return "HTTP_INVALID_URL";
+  }
+
+  // Template URLs are validated after backend interpolation; literal non-HTTP schemes stay invalid above.
+  if (trimmed.includes("{{")) return null;
+
+  try {
+    const parsed = new URL(trimmed);
+    return ["http:", "https:"].includes(parsed.protocol) ? null : "HTTP_INVALID_URL";
+  } catch {
+    return "HTTP_INVALID_URL";
+  }
+}
+
 export function validateHttpConfig(
   config: HttpAuthoredConfig,
   direction: HttpDirection,
@@ -28,21 +52,11 @@ export function validateHttpConfig(
 ): HttpValidationError[] {
   const errors: HttpValidationError[] = [];
 
-  // URL required
-  if (!config.url.trim()) {
-    errors.push({ field: "url", code: "HTTP_MISSING_URL", message: "" });
-  } else {
-    try {
-      const parsed = new URL(config.url.trim());
-      if (!["http:", "https:"].includes(parsed.protocol)) {
-        errors.push({ field: "url", code: "HTTP_INVALID_URL", message: "" });
-      }
-    } catch {
-      errors.push({ field: "url", code: "HTTP_INVALID_URL", message: "" });
-    }
+  const urlError = getAuthoredHttpUrlError(config.url);
+  if (urlError) {
+    errors.push({ field: "url", code: urlError, message: "" });
   }
 
-  // Auth credentials (skip sentinel)
   if (config.auth.mode === "bearer_token") {
     const token = config.auth.token;
     if (!token && !isSecretSentinel(token)) {
@@ -59,12 +73,10 @@ export function validateHttpConfig(
     }
   }
 
-  // Body: GET cannot have body template
   if (method === "GET" && config.body.mode !== "none" && config.body.mode !== "auto") {
     errors.push({ field: "body", code: "HTTP_BODY_NOT_ALLOWED_FOR_GET", message: "" });
   }
 
-  // JSON template must be valid JSON (allow template expressions)
   if (config.body.mode === "json_template" && config.body.template) {
     try {
       JSON.parse(config.body.template);
@@ -75,7 +87,6 @@ export function validateHttpConfig(
     }
   }
 
-  // Timeout range
   if (config.timeout_seconds < 1 || config.timeout_seconds > 120) {
     errors.push({ field: "timeout", code: "HTTP_TIMEOUT_OUT_OF_RANGE", message: "" });
   }

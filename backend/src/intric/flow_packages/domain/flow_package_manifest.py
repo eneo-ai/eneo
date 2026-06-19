@@ -3,13 +3,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from enum import StrEnum
-from typing import Literal, TypeAlias
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-JsonScalar: TypeAlias = str | int | float | bool | None
-JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
-JsonObject: TypeAlias = dict[str, JsonValue]
+from intric.json_types import JsonObject
 
 _PACKAGE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")

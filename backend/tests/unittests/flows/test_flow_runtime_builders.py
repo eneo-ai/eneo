@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from intric.flows.flow import FlowStepResult, FlowStepResultStatus
+from intric.flows.api.flow_assembler import FlowAssembler
+from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from intric.flows.runtime.execution_state_builder import build_run_execution_state
 from intric.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from intric.flows.runtime.step_result_builder import (
@@ -86,6 +87,7 @@ def test_build_failed_step_result_carries_optional_payload_and_prompt():
 
     failed = build_failed_step_result(
         claimed=claimed,
+        error_code="typed_io_contract_violation",
         error_message="typed failure",
         input_payload_json=build_default_failed_input_payload(
             input_source="flow_input"
@@ -94,6 +96,7 @@ def test_build_failed_step_result_carries_optional_payload_and_prompt():
     )
 
     assert failed.status == FlowStepResultStatus.FAILED
+    assert failed.error_code == "typed_io_contract_violation"
     assert failed.error_message == "typed failure"
     assert failed.input_payload_json == build_default_failed_input_payload(
         input_source="flow_input"
@@ -109,7 +112,6 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
         source_text="source",
         input_source="previous_step",
         used_question_binding=True,
-        legacy_prompt_binding_used=False,
         full_text="answer",
         persisted_text="answer",
         generated_file_ids=[uuid4()],
@@ -144,11 +146,58 @@ def test_build_completed_step_result_includes_optional_sections_and_hash():
     assert built.input_payload_json["diagnostics"] == [
         {"code": "diag", "message": "detail", "severity": "info"}
     ]
+    public_step = FlowAssembler().to_step_public(built)
+    assert [diagnostic.model_dump() for diagnostic in public_step.diagnostics] == [
+        {"code": "diag", "message": "detail", "severity": "info"}
+    ]
     assert built.output_payload_json == {
         "text": "answer",
         "structured": {"result": "ok"},
     }
     assert built.flow_step_execution_hash == "abc123"
+
+
+def test_step_public_exposes_runtime_input_file_ids_from_typed_projection():
+    stale_file_id = uuid4()
+    relational_file_id = uuid4()
+    built = _step_result(
+        1,
+        status=FlowStepResultStatus.COMPLETED,
+        text="answer",
+    ).model_copy(
+        update={
+            "current_attempt_no": 1,
+            "input_payload_json": {
+                "runtime_input": {
+                    "file_ids": [str(stale_file_id)],
+                    "extracted_text_length": 120,
+                    "input_format": "document",
+                }
+            },
+        }
+    )
+
+    public_step = FlowAssembler().to_step_public(
+        built,
+        runtime_input_file_ids=(relational_file_id,),
+    )
+
+    assert public_step.runtime_input_file_ids == [relational_file_id]
+    assert public_step.input_payload_json == {
+        "runtime_input": {
+            "file_ids": [str(stale_file_id)],
+            "extracted_text_length": 120,
+            "input_format": "document",
+        }
+    }
+
+
+def test_step_public_defaults_runtime_input_file_ids_to_empty_list():
+    built = _step_result(1, status=FlowStepResultStatus.COMPLETED, text="answer")
+
+    public_step = FlowAssembler().to_step_public(built)
+
+    assert public_step.runtime_input_file_ids == []
 
 
 def test_with_webhook_delivery_status_updates_payload_without_losing_existing_fields():

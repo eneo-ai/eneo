@@ -1,12 +1,21 @@
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from intric.flows.flow_evidence_policy import (
+    FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
+    FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
+)
+from intric.flows.flow_retention_policy import (
+    FLOW_RETENTION_POLICY_STORAGE_VERSION,
+    FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
+)
 from intric.main.exceptions import BadRequestException
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
     AIBuilderBudgetSettingsUpdate,
+    FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
@@ -81,6 +90,55 @@ class MockAuditService:
 
     async def log_async(self, *args, **kwargs):
         pass
+
+
+def _assert_extra_forbidden(model: type[BaseModel], payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        model.model_validate({**payload, "unexpected": True})
+
+    assert any(
+        error.get("type") == "extra_forbidden" for error in exc_info.value.errors()
+    )
+
+
+def test_flow_settings_update_models_reject_unknown_fields() -> None:
+    cases: tuple[tuple[type[BaseModel], dict[str, object]], ...] = (
+        (FlowInputLimitsUpdate, {"file_max_size_bytes": 10_000_000}),
+        (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
+        (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
+        (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
+        (FlowClassificationRetentionPolicyUpdate, {"data_retention_days": 7}),
+        (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": 14}),
+    )
+
+    for model, payload in cases:
+        _assert_extra_forbidden(model, payload)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "allow_sensitive_flow_exports",
+        "allow_space_admin_raw_export_class3",
+        "allow_run_owner_raw_export_class3",
+        "allow_service_key_raw_export_class3",
+    ),
+)
+def test_flow_evidence_policy_update_rejects_null_flags(field_name: str) -> None:
+    with pytest.raises(ValidationError):
+        FlowEvidencePolicyUpdate.model_validate({field_name: None})
+
+
+def test_flow_settings_update_models_keep_intentional_null_clear_contracts() -> None:
+    cases: tuple[tuple[type[BaseModel], dict[str, object | None]], ...] = (
+        (FlowInputLimitsUpdate, {"max_files_per_run": None}),
+        (FlowDocumentRenderLimitsUpdate, {"max_source_chars": None}),
+        (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": None}),
+        (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": None}),
+    )
+
+    for model, payload in cases:
+        assert model.model_validate(payload).model_dump(exclude_unset=True) == payload
 
 
 async def test_get_settings_if_settings():
@@ -249,6 +307,45 @@ async def test_update_flow_input_limits_persists_and_audits(monkeypatch):
     assert calls[0]["metadata"]["changes"] == {
         "audio_max_size_bytes": {"old": 25_000_000, "new": 35_000_000}
     }
+
+
+async def test_update_flow_input_limits_scrubs_unknown_top_level_flow_settings(
+    monkeypatch,
+):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "evidence_polici": {"allow_sensitive_flow_exports": True},
+                "input_limits": {"max_files_per_run": 25},
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        "intric.flows.flow_input_limits.get_settings",
+        lambda: SimpleNamespace(
+            upload_max_file_size=10_000_000,
+            transcription_max_file_size=25_000_000,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    await service.update_flow_input_limits(FlowInputLimitsUpdate(max_files_per_run=30))
+
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "evidence_polici" not in tenant.flow_settings
+    assert tenant.flow_settings["input_limits"]["max_files_per_run"] == 30
 
 
 async def test_update_flow_input_limits_null_clears_nullable_overrides(monkeypatch):
@@ -491,6 +588,12 @@ async def test_update_flow_evidence_policy_persists_and_audits():
     assert updated.allow_sensitive_flow_exports is True
     assert updated.allow_service_key_raw_export_class3 is True
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert (
+        tenant.flow_settings["evidence_policy"][
+            FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY
+        ]
+        == FLOW_EVIDENCE_POLICY_STORAGE_VERSION
+    )
     assert (
         tenant.flow_settings["evidence_policy"]["allow_sensitive_flow_exports"] is True
     )
@@ -738,9 +841,11 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
     assert updated.default_step_timeout_seconds == 1200
     assert updated.max_step_timeout_seconds == 2400
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert (
-        tenant.flow_settings["runtime_policy"]["default_step_timeout_seconds"] == 1200
-    )
+    assert tenant.flow_settings["runtime_policy"] == {
+        "version": 1,
+        "default_step_timeout_seconds": 1200,
+        "max_step_timeout_seconds": 2400,
+    }
     assert calls[0]["metadata"]["setting"] == "flow_runtime_policy"
 
 
@@ -799,7 +904,10 @@ async def test_update_flow_retention_policy_persists_and_audits():
 
     assert updated.run_debug_evidence_days == 14
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert tenant.flow_settings["retention_policy"] == {"run_debug_evidence_days": 14}
+    assert tenant.flow_settings["retention_policy"] == {
+        "run_debug_evidence_days": 14,
+        FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY: FLOW_RETENTION_POLICY_STORAGE_VERSION,
+    }
     assert calls[0]["metadata"]["setting"] == "flow_retention_policy"
 
 
@@ -841,6 +949,31 @@ async def test_update_flow_retention_policy_rejects_deleted_fields():
         FlowRetentionPolicyUpdate(source_audio_days=3)
 
 
+async def test_update_flow_retention_policy_rejects_stored_unknown_keys():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={"flow_settings": {"retention_policy": {"unexpected_days": 7}}}
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_retention_policy(
+            FlowRetentionPolicyUpdate(run_debug_evidence_days=14)
+        )
+
+    assert exc_info.value.code == "flow_settings_invalid_payload"
+    assert "unexpected_days" in str(exc_info.value)
+
+
 async def test_update_flow_runtime_policy_scrubs_stale_retention_policy_keys():
     repo = MockRepo()
     tenant_repo = MockTenantRepo()
@@ -871,7 +1004,8 @@ async def test_update_flow_runtime_policy_scrubs_stale_retention_policy_keys():
     assert updated.default_step_timeout_seconds == 1200
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
     assert tenant.flow_settings["runtime_policy"] == {
-        "default_step_timeout_seconds": 1200
+        "version": 1,
+        "default_step_timeout_seconds": 1200,
     }
     assert tenant.flow_settings["retention_policy"] == {"run_debug_evidence_days": 7}
 

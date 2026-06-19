@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from intric.authentication.auth_models import (
+    FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
+)
 from intric.server.main import get_application
 
 
@@ -77,8 +80,11 @@ def test_resource_permissions_document_flow_runtime_review_levels(openapi_spec: 
         "edit, approve, reject, or resume human-review checkpoints" in flows_description
     )
     assert "runs created by that same API key" in flows_description
+    assert "resource_permissions.flows >= read" in flows_description
 
     evidence_description = properties["flow_evidence"].get("description", "")
-    assert "separate from `flows`" in evidence_description
-    assert "does not grant run creation" in evidence_description
-    assert "human-review checkpoint edit" in evidence_description
+    assert FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE in evidence_description
+    assert "Personal keys (`pk_`) cannot set this field" in evidence_description
+    assert "`none` means this key has no fine-grained evidence grant" in (
+        evidence_description
+    )

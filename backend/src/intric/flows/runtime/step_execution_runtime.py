@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Final, Protocol, cast
+from typing import Any, Awaitable, Final, Protocol, Sequence, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import Completion
@@ -24,6 +24,7 @@ from intric.flows.citation_sidecar import (
 )
 from intric.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from intric.flows.enums import FlowOutputMode, FlowOutputType
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_capability_manifest import is_citation_capable_step
 from intric.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
@@ -93,9 +94,9 @@ class ResolveStepInputFn(Protocol):
         context: dict[str, Any],
         run: FlowRun,
         prior_results: list[FlowStepResult],
-        assistant_prompt_text: str | None,
         state: RunExecutionState,
         version_metadata: dict[str, Any] | None,
+        requested_file_ids: Sequence[UUID],
     ) -> Awaitable[StepInputValue]: ...
 
 
@@ -273,7 +274,6 @@ def attach_typed_failure_context(
         payload.setdefault("source_text", payload.get("text", ""))
         payload.setdefault("input_source", "")
         payload.setdefault("used_question_binding", False)
-        payload.setdefault("legacy_prompt_binding_used", False)
         setattr(exc, "input_payload_json", payload)
     existing_prompt = getattr(exc, "effective_prompt", None)
     if not isinstance(existing_prompt, str):
@@ -322,7 +322,7 @@ async def call_assistant_with_timeout(
             TypedIOValidationException(
                 f"Step {step.step_order}: LLM request exceeded "
                 f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                code="flow_llm_request_timeout",
+                code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
             ),
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=prepared.effective_prompt,
@@ -428,7 +428,7 @@ async def call_assistant_with_timeout(
                     TypedIOValidationException(
                         f"Step {step.step_order}: LLM request exceeded "
                         f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                        code="flow_llm_request_timeout",
+                        code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
                     effective_prompt=prepared.effective_prompt,
@@ -455,7 +455,7 @@ async def call_assistant_with_timeout(
                     TypedIOValidationException(
                         f"Step {step.step_order}: LLM request exceeded "
                         f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                        code="flow_llm_request_timeout",
+                        code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
                     effective_prompt=prepared.effective_prompt,
@@ -485,7 +485,7 @@ async def call_assistant_with_timeout(
             TypedIOValidationException(
                 f"Step {step.step_order}: LLM request exceeded "
                 f"{deps.llm_request_timeout_seconds:g}s timeout.",
-                code="flow_llm_request_timeout",
+                code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
             ),
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=prepared.effective_prompt,
@@ -771,6 +771,7 @@ async def prepare_step_execution(
     run: FlowRun,
     state: RunExecutionState,
     version_metadata: dict[str, Any] | None,
+    requested_file_ids: Sequence[UUID],
     deps: StepExecutionRuntimeDeps,
 ) -> PreparedStepExecution:
     context_results = [
@@ -792,7 +793,6 @@ async def prepare_step_execution(
         "source_text": "",
         "input_source": step.input_source,
         "used_question_binding": False,
-        "legacy_prompt_binding_used": False,
     }
     try:
         step_input = await deps.resolve_step_input(
@@ -800,9 +800,9 @@ async def prepare_step_execution(
             context=context,
             run=run,
             prior_results=state.prior_results,
-            assistant_prompt_text=prompt_text,
             state=state,
             version_metadata=version_metadata,
+            requested_file_ids=requested_file_ids,
         )
     except TypedIOValidationException as exc:
         raise deps.attach_typed_failure_context(
@@ -817,7 +817,6 @@ async def prepare_step_execution(
             "source_text": step_input.source_text,
             "input_source": step_input.input_source,
             "used_question_binding": step_input.used_question_binding,
-            "legacy_prompt_binding_used": step_input.legacy_prompt_binding_used,
         }
     )
     if step_input.transcription_metadata is not None:
@@ -1148,7 +1147,6 @@ async def complete_step_execution(
         source_text=prepared.step_input.source_text,
         input_source=prepared.step_input.input_source,
         used_question_binding=prepared.step_input.used_question_binding,
-        legacy_prompt_binding_used=prepared.step_input.legacy_prompt_binding_used,
         full_text=full_text,
         persisted_text=persisted_text,
         generated_file_ids=generated_file_ids,

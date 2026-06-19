@@ -178,8 +178,12 @@ const validRerunOperation: FlowRunRerunOperation = {
   expected_run_revision: 1,
   accepted_run_revision: 2,
   reason: "Refresh the source document.",
-  input_payload_json: { case_id: "CASE-2" },
-  step_inputs_json: { [stepId]: { file_ids: ["00000000-0000-0000-0000-000000000702"] } },
+  input_payload: { case_id: "CASE-2" },
+  root_step_input_override: {
+    step_id: stepId,
+    file_ids: ["00000000-0000-0000-0000-000000000702"]
+  },
+  root_step_input_override_requested: true,
   requested_by_principal_type: "user",
   requested_by_user_id: "00000000-0000-0000-0000-000000000030",
   failure_code: null,
@@ -294,11 +298,11 @@ const validFlowEvidence: FlowRunEvidenceWithTypedSteps = {
 };
 
 const validFlowEvidenceExport: FlowRunEvidenceExport = {
-  schema_version: "flow-evidence-export.v5",
+  schema_version: "flow-evidence-export.v6",
   generated_at: isoTimestamp,
   content_hash: "sha256:evidence",
   manifest: {
-    schema_version: "flow-evidence-export.v5",
+    schema_version: "flow-evidence-export.v6",
     provenance_schema_version_min: "flow-attempt-provenance.v1",
     provenance_schema_version_current: "flow-attempt-provenance.v1",
     provenance_persisted_version_status: "not_tracked",
@@ -442,6 +446,9 @@ const invalidStepInputs: FlowRunStepInputs = {
   // @ts-expect-error frontend run intent requires populated file_ids per step.
   [stepId]: {}
 };
+
+// @ts-expect-error public rerun operations expose input_payload, not the raw JSONB column name.
+validRerunOperation.input_payload_json = { case_id: "CASE-2" };
 
 void validFlow;
 void validRunContract;

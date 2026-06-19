@@ -20,13 +20,30 @@ from intric.files.file_models import FileType
 from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from intric.flows.application.flow_run_service import (
+    FlowRunPageWithResultFilesAndTokenUsage,
     FlowRunService,
-    build_persisted_run_payload,
+    FlowRunVersionedView,
+    FlowRunWithResultFilesAndTokenUsage,
 )
 from intric.flows.domain.flow import (
+    Flow,
+    FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunRerunOperation,
+    FlowRunStatus,
     FlowRunTokenUsage,
+    FlowStep,
+    FlowStepAttempt,
+    FlowStepResult,
+    FlowVersion,
+)
+from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from intric.flows.domain.run_step_input_exceptions import (
+    FlowRunRuntimeUploadBindingRaceError,
+)
+from intric.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
 )
 from intric.flows.enums import (
     FlowRunLifecycleSource,
@@ -36,28 +53,21 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     RerunDependencyKind,
 )
-from intric.flows.flow import (
-    Flow,
-    FlowRun,
-    FlowRunStatus,
-    FlowStep,
-    FlowStepAttempt,
-    FlowStepResult,
-    FlowVersion,
-)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_dispatch_request import (
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
 )
+from intric.flows.flow_run_input_envelope import build_initial_run_input_envelope
 from intric.flows.flow_run_provenance import FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
 from intric.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
     normalize_step_inputs_payload,
-    serialize_step_inputs_payload,
 )
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
-from intric.flows.infrastructure.flow_run_repo import (
+from intric.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
+    FlowRunRerunRepository,
 )
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
@@ -76,6 +86,72 @@ from intric.roles.permissions import Permission
 
 def _flow_repo() -> AsyncMock:
     return AsyncMock()
+
+
+def _runtime_upload_repo(*bound_file_ids: UUID) -> AsyncMock:
+    repo = AsyncMock()
+    repo.list_bound_file_ids_for_owner.return_value = set(bound_file_ids)
+    return repo
+
+
+_FILE_REPO_UNSET = object()
+
+
+def _file_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.get_list_by_id_for_owner.return_value = []
+    return repo
+
+
+def _flow_run_rerun_repo() -> AsyncMock:
+    repo = AsyncMock(spec=FlowRunRerunRepository)
+    repo.list_rerun_operations_for_run.return_value = []
+    repo.list_rerun_invalidated_steps_for_run.return_value = []
+    return repo
+
+
+def _flow_run_service(
+    *,
+    user,
+    flow_repo,
+    flow_run_repo,
+    flow_version_repo,
+    runtime_upload_repo,
+    flow_run_review_checkpoint_repo=None,
+    file_repo=_FILE_REPO_UNSET,
+    flow_run_terminalizer=None,
+    settings_service=None,
+    execution_backend=None,
+    access_policy=None,
+    max_concurrent_runs=None,
+    queued_redispatch_after_seconds=None,
+) -> FlowRunService:
+    resolved_file_repo = _file_repo() if file_repo is _FILE_REPO_UNSET else file_repo
+    if resolved_file_repo is None:
+        raise AssertionError("FlowRunService tests must provide a file repository.")
+    resolved_terminalizer = flow_run_terminalizer or AsyncMock()
+    resolved_access_policy = access_policy or _access_policy(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+    )
+    return FlowRunService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=(
+            flow_run_review_checkpoint_repo or AsyncMock()
+        ),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=runtime_upload_repo,
+        file_repo=resolved_file_repo,
+        flow_run_terminalizer=resolved_terminalizer,
+        settings_service=settings_service,
+        execution_backend=execution_backend,
+        access_policy=resolved_access_policy,
+        max_concurrent_runs=max_concurrent_runs,
+        queued_redispatch_after_seconds=queued_redispatch_after_seconds,
+    )
 
 
 def _access_policy(
@@ -355,7 +431,8 @@ def _rerun_command_result(
         accepted_run_revision=run.revision,
         reason="Fix source",
         input_payload_json=None,
-        step_inputs_json=None,
+        root_step_input_override_requested=False,
+        root_step_input_override=None,
         requested_by_principal_type=PrincipalType.USER,
         requested_by_user_id=user.id,
         requested_by_service_id=None,
@@ -457,11 +534,13 @@ async def test_create_run_rejects_unpublished_flow(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=2,
     )
     flow_repo.get.return_value = _flow(user=user, published_version=None)
@@ -476,11 +555,13 @@ async def test_create_run_enforces_tenant_concurrency_limit(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=1,
     )
     flow = _flow(user=user, published_version=1)
@@ -502,11 +583,13 @@ async def test_create_run_creates_preseeded_run(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=2)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -519,7 +602,8 @@ async def test_create_run_creates_preseeded_run(user):
         flow_id=flow.id, input_payload_json={"case": "123"}
     )
 
-    assert created.status == FlowRunStatus.QUEUED
+    assert created.created is True
+    assert created.run.status == FlowRunStatus.QUEUED
     flow_run_repo.acquire_tenant_run_creation_lock.assert_awaited_once_with(
         tenant_id=user.tenant_id
     )
@@ -543,6 +627,42 @@ async def test_create_run_creates_preseeded_run(user):
 
 
 @pytest.mark.asyncio
+async def test_create_run_maps_runtime_upload_binding_race_to_public_error(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    step_id = uuid4()
+    file_id = uuid4()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    flow_repo.get.return_value = flow
+    flow_run_repo.get_idempotent_run.return_value = None
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.create.side_effect = FlowRunRuntimeUploadBindingRaceError(
+        step_id=step_id,
+        file_ids=(file_id,),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert exc_info.value.code == "flow_run_file_not_bound_to_flow"
+    assert exc_info.value.context == {
+        "step_id": str(step_id),
+        "file_ids": [str(file_id)],
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_run_returns_created_run_without_dispatching(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -550,11 +670,13 @@ async def test_create_run_returns_created_run_without_dispatching(user):
     execution_backend = AsyncMock()
     flow = _flow(user=user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         execution_backend=execution_backend,
         max_concurrent_runs=5,
     )
@@ -566,7 +688,8 @@ async def test_create_run_returns_created_run_without_dispatching(user):
 
     result = await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
 
-    assert result.id == created_run.id
+    assert result.created is True
+    assert result.run.id == created_run.id
     execution_backend.dispatch.assert_not_awaited()
 
 
@@ -578,11 +701,13 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
     flow = _flow(user=user, published_version=1)
     existing_run = _run(user=user, flow_id=flow.id)
     version = _version(user=user, flow=flow, version=1)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -610,29 +735,28 @@ async def test_create_run_replays_existing_run_for_matching_idempotency_key(user
         idempotency_key="abc123",
     )
 
-    assert result == existing_run
+    assert result.run == existing_run
+    assert result.created is False
     flow_run_repo.create.assert_not_awaited()
     flow_run_repo.get_idempotent_run.assert_awaited_once()
 
 
 def test_create_run_idempotency_fingerprint_shape_is_stable(user):
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=_flow_repo(),
         flow_run_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
-    payload = build_persisted_run_payload(
+    payload = build_initial_run_input_envelope(
         normalized_inline_payload={"case_id": "A-123", "tags": ["one", "two"]},
         flow_version=7,
-        normalized_step_inputs={
-            UUID("00000000-0000-0000-0000-000000000003"): [
-                UUID("00000000-0000-0000-0000-000000000004"),
-                UUID("00000000-0000-0000-0000-000000000005"),
-            ]
-        },
     )
+    step_id = UUID("00000000-0000-0000-0000-000000000003")
+    file_id_1 = UUID("00000000-0000-0000-0000-000000000004")
+    file_id_2 = UUID("00000000-0000-0000-0000-000000000005")
 
     fingerprint = service._build_idempotency_fingerprint(
         tenant_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -643,14 +767,68 @@ def test_create_run_idempotency_fingerprint_shape_is_stable(user):
         flow_id=UUID("00000000-0000-0000-0000-000000000006"),
         flow_version=7,
         input_payload_json=payload,
+        step_input_files=[
+            {
+                "step_id": step_id,
+                "step_order": 1,
+                "file_ids": [file_id_1, file_id_2],
+            }
+        ],
     )
 
     assert fingerprint == (
-        "8715930761bd747292bf49e3f1986baf7aab7f4f0502c7725d39f6667b72b875"
+        "7c11e7738bb53084971053e6719133e2acb33a18c6a5ade511735406a8f21910"
     )
 
 
-def test_step_inputs_boundary_normalizes_and_serializes_file_ids():
+def test_create_run_idempotency_fingerprint_includes_ordered_step_files(user):
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    step_id = UUID("00000000-0000-0000-0000-000000000010")
+    file_a = UUID("00000000-0000-0000-0000-000000000011")
+    file_b = UUID("00000000-0000-0000-0000-000000000012")
+    payload = {"case_id": "A-123", "expected_flow_version": 1}
+    base_kwargs = {
+        "tenant_id": user.tenant_id,
+        "principal": service._principal(),
+        "flow_id": UUID("00000000-0000-0000-0000-000000000013"),
+        "flow_version": 1,
+        "input_payload_json": payload,
+    }
+
+    first_order = service._build_idempotency_fingerprint(
+        **base_kwargs,
+        step_input_files=[
+            {
+                "step_id": step_id,
+                "step_order": 1,
+                "file_ids": [file_a, file_b],
+            }
+        ],
+    )
+    second_order = service._build_idempotency_fingerprint(
+        **base_kwargs,
+        step_input_files=[
+            {
+                "step_id": step_id,
+                "step_order": 1,
+                "file_ids": [file_b, file_a],
+            }
+        ],
+    )
+    no_files = service._build_idempotency_fingerprint(**base_kwargs)
+
+    assert first_order != second_order
+    assert first_order != no_files
+
+
+def test_step_inputs_boundary_normalizes_file_ids():
     step_id = UUID("00000000-0000-0000-0000-000000000010")
     file_b = UUID("00000000-0000-0000-0000-000000000012")
     file_a = UUID("00000000-0000-0000-0000-000000000011")
@@ -658,10 +836,8 @@ def test_step_inputs_boundary_normalizes_and_serializes_file_ids():
     normalized = normalize_step_inputs_payload(
         {step_id: FlowRunStepInputFiles(file_ids=(file_b, file_a, file_b))}
     )
-    serialized = serialize_step_inputs_payload(normalized)
 
-    assert normalized == {step_id: [file_a, file_b]}
-    assert serialized == {str(step_id): {"file_ids": [str(file_a), str(file_b)]}}
+    assert normalized == {step_id: [file_b, file_a]}
 
 
 @pytest.mark.asyncio
@@ -673,11 +849,13 @@ async def test_create_run_with_idempotency_key_creates_when_no_retained_row_exis
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -692,7 +870,8 @@ async def test_create_run_with_idempotency_key_creates_when_no_retained_row_exis
         idempotency_key="abc123",
     )
 
-    assert result == created_run
+    assert result.run == created_run
+    assert result.created is True
     flow_run_repo.get_idempotent_run.assert_awaited_once()
     flow_run_repo.count_active_runs.assert_awaited_once()
     flow_run_repo.create.assert_awaited_once()
@@ -707,18 +886,20 @@ async def test_create_run_persists_service_key_principal(user):
     flow = _flow(user=service_user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
             "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -735,7 +916,8 @@ async def test_create_run_persists_service_key_principal(user):
         idempotency_key="svc-123",
     )
 
-    assert result == created_run
+    assert result.run == created_run
+    assert result.created is True
     flow_run_repo.create.assert_awaited_once()
     kwargs = flow_run_repo.create.await_args.kwargs
     assert kwargs["principal_type"] == "service_key"
@@ -755,11 +937,13 @@ async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
     existing_run = _run(user=user, flow_id=flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=0,
     )
     flow_repo.get.return_value = flow
@@ -782,7 +966,8 @@ async def test_create_run_replays_idempotent_run_before_concurrency_limit(user):
         idempotency_key="abc123",
     )
 
-    assert result == existing_run
+    assert result.run == existing_run
+    assert result.created is False
     flow_run_repo.count_active_runs.assert_not_awaited()
 
 
@@ -792,11 +977,13 @@ async def test_create_run_rejects_invalid_idempotency_key(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -819,11 +1006,13 @@ async def test_create_run_rejects_idempotency_key_replay_with_different_payload(
     flow = _flow(user=user, published_version=1)
     existing_run = _run(user=user, flow_id=flow.id)
     version = _version(user=user, flow=flow, version=1)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -853,11 +1042,13 @@ async def test_create_run_persists_even_when_execution_backend_is_configured(use
     execution_backend = AsyncMock()
     flow = _flow(user=user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         execution_backend=execution_backend,
         max_concurrent_runs=5,
     )
@@ -868,7 +1059,8 @@ async def test_create_run_persists_even_when_execution_backend_is_configured(use
 
     result = await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
 
-    assert result.id == created_run.id
+    assert result.created is True
+    assert result.run.id == created_run.id
     execution_backend.dispatch.assert_not_awaited()
 
 
@@ -878,11 +1070,13 @@ async def test_create_run_rejects_missing_required_form_field(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -920,11 +1114,13 @@ async def test_create_run_validates_against_published_metadata(user):
         }
     }
     published_flow = draft_flow.model_copy(update={"metadata_json": published_metadata})
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = draft_flow
@@ -968,11 +1164,13 @@ async def test_create_run_ignores_draft_only_form_fields(user):
     )
     published_flow = draft_flow.model_copy(update={"metadata_json": None})
     created_run = _run(user=user, flow_id=draft_flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = draft_flow
@@ -985,7 +1183,8 @@ async def test_create_run_ignores_draft_only_form_fields(user):
 
     result = await service.create_run(flow_id=draft_flow.id, input_payload_json={})
 
-    assert result == created_run
+    assert result.run == created_run
+    assert result.created is True
     assert flow_run_repo.create.await_args.kwargs["input_payload_json"] == {
         "expected_flow_version": 1,
     }
@@ -1009,11 +1208,13 @@ async def test_create_run_ignores_malformed_draft_metadata(
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1, metadata_json=metadata_json)
     created_run = _run(user=user, flow_id=flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1027,7 +1228,8 @@ async def test_create_run_ignores_malformed_draft_metadata(
 
     result = await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
 
-    assert result == created_run
+    assert result.run == created_run
+    assert result.created is True
     assert flow_run_repo.create.await_args.kwargs["input_payload_json"] == {
         "x": "y",
         "expected_flow_version": 1,
@@ -1049,11 +1251,13 @@ async def test_create_run_rejects_malformed_published_form_schema_before_side_ef
             }
         }
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = draft_flow
@@ -1080,11 +1284,13 @@ async def test_create_run_rejects_invalid_select_option(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1116,11 +1322,13 @@ async def test_create_run_rejects_invalid_multiselect_shape(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _form_schema_flow(user)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1153,11 +1361,13 @@ async def test_create_run_normalizes_multiselect_number_and_date_fields(user):
     flow = _form_schema_flow(user)
     created_run = _run(user=user, flow_id=flow.id)
     flow_run_repo.create.return_value = created_run
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1190,11 +1400,13 @@ async def test_create_run_preserves_unknown_payload_fields_for_forward_compat(us
     flow = _form_schema_flow(user)
     created_run = _run(user=user, flow_id=flow.id)
     flow_run_repo.create.return_value = created_run
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1231,11 +1443,13 @@ async def test_create_run_rejects_stale_expected_flow_version(user):
             }
         },
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1260,6 +1474,7 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
+    runtime_upload_repo = AsyncMock()
     flow = _flow(user=user, published_version=2)
     runtime_step = flow.steps[0].model_copy(
         update={
@@ -1275,20 +1490,23 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     )
     flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
     created_run = _run(user=user, flow_id=flow.id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
+        runtime_upload_repo=runtime_upload_repo,
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
+    runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
     file_repo.get_list_by_id_for_owner.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf")
+        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
     flow_version_repo.get.return_value = FlowVersion(
         flow_id=flow.id,
@@ -1334,9 +1552,7 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
 
     payload = flow_run_repo.create.await_args.kwargs["input_payload_json"]
     assert payload["expected_flow_version"] == 2
-    assert payload["step_inputs"] == {
-        str(runtime_step.id): {"file_ids": [str(file_id)]}
-    }
+    assert "step_inputs" not in payload
     assert flow_run_repo.create.await_args.kwargs["step_input_files"] == [
         {
             "step_id": runtime_step.id,
@@ -1358,6 +1574,7 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
+    runtime_upload_repo = AsyncMock()
     flow = _flow(user=user, published_version=2)
     runtime_step = flow.steps[0].model_copy(
         update={
@@ -1374,27 +1591,30 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
     flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
     created_run = _run(user=user, flow_id=flow.id).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
             "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
+        runtime_upload_repo=runtime_upload_repo,
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
     flow_run_repo.count_active_runs.return_value = 0
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
+    runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
     file_repo.get_list_by_id_for_owner.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf")
+        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
     flow_version_repo.get.return_value = FlowVersion(
         flow_id=flow.id,
@@ -1436,6 +1656,7 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         tenant_id=service_user.tenant_id,
         include_transcription=False,
     )
+    runtime_upload_repo.list_bound_file_ids_for_owner.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1444,6 +1665,7 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     file_repo = AsyncMock()
+    runtime_upload_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
     runtime_step = flow.steps[0].model_copy(
         update={
@@ -1458,12 +1680,14 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         }
     )
     flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
+        runtime_upload_repo=runtime_upload_repo,
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -1492,8 +1716,9 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         updated_at=datetime.now(timezone.utc),
     )
     file_id = uuid4()
+    runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
     file_repo.get_list_by_id_for_owner.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf")
+        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
     ]
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -1519,11 +1744,13 @@ async def test_list_runs_delegates_to_repo(user):
     flow_id = uuid4()
     expected = [_run(user=user, flow_id=flow_id)]
     flow_run_repo.list_runs.return_value = expected
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
 
@@ -1551,11 +1778,13 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
     admin_user = user.model_copy(
         update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
 
@@ -1582,7 +1811,7 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
     expected = [
         _run(user=user, flow_id=flow_id).model_copy(
             update={
-                "principal_type": "service_key",
+                "principal_type": PrincipalType.SERVICE_KEY,
                 "principal_user_id": None,
                 "principal_service_id": service_user.active_api_key.service_principal_id,
                 "created_by_api_key_id": service_user.active_api_key.id,
@@ -1591,11 +1820,13 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
         )
     ]
     flow_run_repo.list_runs.return_value = expected
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
 
@@ -1626,11 +1857,13 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
     flow_run_repo.list_runs.return_value = []
     flow_repo.get.return_value = flow
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         access_policy=_access_policy(
             user=service_user,
             flow_repo=flow_repo,
@@ -1653,6 +1886,197 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
 
 
 @pytest.mark.asyncio
+async def test_list_runs_with_result_files_and_token_usage_enriches_page(user):
+    flow_run_repo = AsyncMock()
+    flow_id = uuid4()
+    run_with_file = _run(user=user, flow_id=flow_id)
+    run_with_usage = _run(user=user, flow_id=flow_id)
+    extra_run = _run(user=user, flow_id=flow_id)
+    result_file = _result_file(user=user, run=run_with_file, file_id=uuid4())
+    usage = FlowRunTokenUsage(
+        num_tokens_input=12,
+        num_tokens_output=5,
+        num_tokens_total=17,
+    )
+    flow_run_repo.list_runs.return_value = [run_with_file, run_with_usage, extra_run]
+    flow_run_repo.list_result_files_for_runs.return_value = [result_file]
+    flow_run_repo.list_token_usage_for_runs.return_value = {run_with_usage.id: usage}
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    page = await service.list_runs_with_result_files_and_token_usage(
+        flow_id=flow_id,
+        limit=2,
+        offset=4,
+    )
+
+    assert isinstance(page, FlowRunPageWithResultFilesAndTokenUsage)
+    assert page.has_more is True
+    assert [item.run for item in page.items] == [run_with_file, run_with_usage]
+    assert page.items[0].result_files == (result_file,)
+    assert page.items[0].token_usage is None
+    assert page.items[1].result_files == ()
+    assert page.items[1].token_usage == usage
+    flow_run_repo.list_runs.assert_awaited_once_with(
+        tenant_id=user.tenant_id,
+        flow_id=flow_id,
+        principal_user_id=user.id,
+        principal_service_id=None,
+        limit=3,
+        offset=4,
+    )
+    flow_run_repo.list_result_files_for_runs.assert_awaited_once_with(
+        run_ids=[run_with_file.id, run_with_usage.id],
+        tenant_id=user.tenant_id,
+    )
+    flow_run_repo.list_token_usage_for_runs.assert_awaited_once_with(
+        run_ids=[run_with_file.id, run_with_usage.id],
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_runs_with_result_files_and_token_usage_exact_limit_has_no_more(
+    user,
+):
+    flow_run_repo = AsyncMock()
+    flow_id = uuid4()
+    run_one = _run(user=user, flow_id=flow_id)
+    run_two = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_runs.return_value = [run_one, run_two]
+    flow_run_repo.list_result_files_for_runs.return_value = []
+    flow_run_repo.list_token_usage_for_runs.return_value = {}
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    page = await service.list_runs_with_result_files_and_token_usage(
+        flow_id=flow_id,
+        limit=2,
+        offset=0,
+    )
+
+    assert page.has_more is False
+    assert [item.run for item in page.items] == [run_one, run_two]
+    flow_run_repo.list_result_files_for_runs.assert_awaited_once_with(
+        run_ids=[run_one.id, run_two.id],
+        tenant_id=user.tenant_id,
+    )
+    flow_run_repo.list_token_usage_for_runs.assert_awaited_once_with(
+        run_ids=[run_one.id, run_two.id],
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_runs_with_result_files_and_token_usage_empty_page_skips_enrichment(
+    user,
+):
+    flow_run_repo = AsyncMock()
+    flow_id = uuid4()
+    flow_run_repo.list_runs.return_value = []
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    page = await service.list_runs_with_result_files_and_token_usage(
+        flow_id=flow_id,
+        limit=20,
+        offset=0,
+    )
+
+    assert page.items == ()
+    assert page.has_more is False
+    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
+    flow_run_repo.list_token_usage_for_runs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_runs_with_result_files_and_token_usage_rejects_foreign_tenant_row(
+    user,
+):
+    flow_run_repo = AsyncMock()
+    flow_id = uuid4()
+    foreign_run = _run(user=user, flow_id=flow_id).model_copy(
+        update={"tenant_id": uuid4()}
+    )
+    flow_run_repo.list_runs.return_value = [foreign_run]
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.list_runs_with_result_files_and_token_usage(
+            flow_id=flow_id,
+            limit=1,
+            offset=0,
+        )
+
+    assert exc_info.value.code == "flow_run_access_denied"
+    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
+    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
+    flow_run_repo.list_token_usage_for_runs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_with_result_files_and_token_usage_enriches_single_run(user):
+    flow_run_repo = AsyncMock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    result_file = _result_file(user=user, run=run, file_id=uuid4())
+    usage = FlowRunTokenUsage(
+        num_tokens_input=20,
+        num_tokens_output=8,
+        num_tokens_total=28,
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_result_files_for_runs.return_value = [result_file]
+    flow_run_repo.list_token_usage_for_runs.return_value = {run.id: usage}
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    view = await service.get_run_with_result_files_and_token_usage(
+        flow_id=flow_id,
+        run_id=run.id,
+    )
+
+    assert isinstance(view, FlowRunWithResultFilesAndTokenUsage)
+    assert view.run == run
+    assert view.result_files == (result_file,)
+    assert view.token_usage == usage
+    flow_run_repo.list_result_files_for_runs.assert_awaited_once_with(
+        run_ids=[run.id],
+        tenant_id=user.tenant_id,
+    )
+    flow_run_repo.list_token_usage_for_runs.assert_awaited_once_with(
+        run_ids=[run.id],
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
@@ -1662,11 +2086,14 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
@@ -1692,7 +2119,7 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
@@ -1712,7 +2139,10 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -1733,7 +2163,7 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
@@ -1753,7 +2183,10 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     export = await service.export_evidence_json(run_id=run.id, detail="redacted")
@@ -1780,7 +2213,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     flow = _flow(user=user)
     run = _run(user=user, flow_id=flow.id).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
@@ -1801,7 +2234,10 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
         access_policy=_access_policy(
             user=service_user,
             flow_repo=flow_repo,
@@ -1835,7 +2271,10 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -1877,7 +2316,10 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
         user=allowed_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     export = await service.export_evidence_json(run_id=run.id, detail="redacted")
@@ -1912,7 +2354,10 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -1955,7 +2400,10 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -1985,7 +2433,10 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
         user=_trace_user(user),
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2018,7 +2469,10 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2042,7 +2496,7 @@ async def test_service_key_unknown_access_kind_fails_closed(user):
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_user.active_api_key.service_principal_id,
             "created_by_api_key_id": service_user.active_api_key.id,
@@ -2050,11 +2504,13 @@ async def test_service_key_unknown_access_kind_fails_closed(user):
         }
     )
     flow_run_repo.get.return_value = run
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -2083,11 +2539,13 @@ async def test_get_run_rejects_other_service_key_run_even_with_space_admin_role(
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = flow
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         access_policy=_access_policy(
             user=service_user,
             flow_repo=flow_repo,
@@ -2109,16 +2567,18 @@ async def test_get_run_rejects_service_key_for_other_principals_run(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
     other_service_principal_id = uuid4()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "principal_type": "service_key",
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": other_service_principal_id,
             "created_by_api_key_id": uuid4(),
@@ -2138,11 +2598,13 @@ async def test_get_run_rejects_other_users_run_for_non_admin(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=uuid4())
@@ -2162,11 +2624,13 @@ async def test_get_run_allows_other_users_run_for_tenant_admin(user):
     admin_user = user.model_copy(
         update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=admin_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=uuid4())
@@ -2192,11 +2656,13 @@ async def test_get_run_allows_space_admin_to_view_other_users_run_status(user):
     flow_run_repo.get.return_value = run
     flow_repo.get.return_value = flow
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -2227,11 +2693,13 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     flow_run_repo.list_step_results.return_value = []
     flow_repo.get.return_value = flow
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -2244,6 +2712,94 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     result = await service.list_step_results(run_id=run.id, flow_id=run.flow_id)
 
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_run_versioned_view_loads_run_definition_and_results(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    assert flow.id is not None
+    run = _run(user=user, flow_id=flow.id)
+    version = _runtime_version(user=user, flow=flow, version=run.flow_version)
+    step_result = _step_result_record(run, step_order=1)
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = [step_result]
+    flow_version_repo.get.return_value = version
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    result = await service.get_run_versioned_view(
+        flow_id=run.flow_id,
+        run_id=run.id,
+    )
+
+    assert isinstance(result, FlowRunVersionedView)
+    assert result.published_definition.flow_id == run.flow_id
+    assert result.published_definition.schema_version == FLOW_DEFINITION_SCHEMA_VERSION
+    assert result.step_results == (step_result,)
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+    )
+    flow_version_repo.get.assert_awaited_once_with(
+        flow_id=run.flow_id,
+        version=run.flow_version,
+        tenant_id=run.tenant_id,
+    )
+    flow_run_repo.list_step_results.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    assert flow.id is not None
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=run.flow_version,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json=build_published_definition_json(
+            flow_id=flow.id,
+            name=flow.name,
+            description=flow.description,
+            metadata_json=flow.metadata_json,
+            steps=[],
+        ),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    with pytest.raises(FlowPublishedDefinitionWithoutExecutableStepsError) as exc_info:
+        await service.get_run_versioned_view(flow_id=flow.id, run_id=run.id)
+
+    assert exc_info.value.flow_id == flow.id
+    assert exc_info.value.flow_version == run.flow_version
+    flow_run_repo.list_step_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2268,7 +2824,10 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -2308,7 +2867,10 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -2351,7 +2913,10 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
         access_policy=_access_policy(
             user=user,
             flow_repo=flow_repo,
@@ -2403,7 +2968,10 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         user=trace_user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
         access_policy=_access_policy(
             user=trace_user,
             flow_repo=flow_repo,
@@ -2422,11 +2990,13 @@ def test_build_dispatch_request_uses_run_identity(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
     run = _run(user=user, flow_id=uuid4())
 
@@ -2444,17 +3014,19 @@ def test_build_dispatch_request_uses_service_key_identity(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
     service_principal_id = uuid4()
     api_key_id = uuid4()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_type": PrincipalType.SERVICE_KEY,
             "principal_user_id": None,
             "principal_service_id": service_principal_id,
             "created_by_api_key_id": api_key_id,
@@ -2473,44 +3045,86 @@ def test_build_dispatch_request_uses_service_key_identity(user):
 
 
 @pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_dispatches_with_backend(user):
+async def test_redispatch_run_propagates_initial_lookup_error(user, monkeypatch):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     execution_backend = AsyncMock()
     flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
-    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = stale_run
-    service = FlowRunService(
+    run_id = uuid4()
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
+    get_run = AsyncMock(side_effect=NotFoundException("Flow run not found."))
+    monkeypatch.setattr(service, "get_run", get_run)
 
-    count = await service.redispatch_stale_queued_runs(
+    with pytest.raises(NotFoundException):
+        await service.redispatch_run(
+            flow_id=flow_id,
+            run_id=run_id,
+            execution_backend=execution_backend,
+        )
+
+    get_run.assert_awaited_once_with(run_id=run_id, flow_id=flow_id)
+    flow_run_repo.claim_stale_queued_run_for_redispatch.assert_not_awaited()
+    execution_backend.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_redispatch_run_claims_dispatches_and_returns_reloaded_run(
+    user, monkeypatch
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    execution_backend = AsyncMock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    reloaded_run = run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = run
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    get_run = AsyncMock(side_effect=[run, reloaded_run])
+    monkeypatch.setattr(service, "get_run", get_run)
+
+    result = await service.redispatch_run(
         flow_id=flow_id,
+        run_id=run.id,
         execution_backend=execution_backend,
     )
 
-    assert count == 1
-    flow_run_repo.list_stale_queued_runs.assert_awaited_once()
-    kwargs = flow_run_repo.list_stale_queued_runs.await_args.kwargs
-    assert kwargs["tenant_id"] == user.tenant_id
-    assert kwargs["flow_id"] == flow_id
-    assert kwargs["run_id"] is None
-    assert kwargs["limit"] == 25
-    assert isinstance(kwargs["stale_before"], datetime)
+    assert result.run is reloaded_run
+    assert result.redispatched_count == 1
+    assert get_run.await_count == 2
+    assert get_run.await_args_list[0].kwargs == {
+        "run_id": run.id,
+        "flow_id": flow_id,
+    }
+    assert get_run.await_args_list[1].kwargs == {
+        "run_id": run.id,
+        "flow_id": flow_id,
+    }
     claim_kwargs = flow_run_repo.claim_stale_queued_run_for_redispatch.await_args.kwargs
-    assert claim_kwargs["run_id"] == stale_run.id
+    assert claim_kwargs["run_id"] == run.id
     assert claim_kwargs["tenant_id"] == user.tenant_id
     assert claim_kwargs["flow_id"] == flow_id
     assert isinstance(claim_kwargs["stale_before"], datetime)
     execution_backend.dispatch.assert_awaited_once_with(
         request=FlowRunUserDispatchRequest(
-            run_id=stale_run.id,
+            run_id=run.id,
             flow_id=flow_id,
             tenant_id=user.tenant_id,
             principal_user_id=user.id,
@@ -2519,279 +3133,138 @@ async def test_redispatch_stale_queued_runs_dispatches_with_backend(user):
 
 
 @pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_returns_zero_without_backend(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    count = await service.redispatch_stale_queued_runs(flow_id=uuid4())
-
-    assert count == 0
-    flow_run_repo.list_stale_queued_runs.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_skips_runs_without_user_id(user):
+async def test_redispatch_run_reloads_when_claim_returns_none(user, monkeypatch):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     execution_backend = AsyncMock()
     flow_id = uuid4()
-    missing_user_run = _run(user=user, flow_id=flow_id).model_copy(
-        update={
-            "principal_type": None,
-            "principal_user_id": None,
-        }
-    )
-    dispatchable_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [
-        missing_user_run,
-        dispatchable_run,
-    ]
-    flow_run_repo.claim_stale_queued_run_for_redispatch.side_effect = [
-        missing_user_run,
-        dispatchable_run,
-    ]
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    count = await service.redispatch_stale_queued_runs(
-        flow_id=flow_id,
-        execution_backend=execution_backend,
-    )
-
-    assert count == 1
-    assert flow_run_repo.claim_stale_queued_run_for_redispatch.await_count == 2
-    execution_backend.dispatch.assert_awaited_once_with(
-        request=FlowRunUserDispatchRequest(
-            run_id=dispatchable_run.id,
-            flow_id=flow_id,
-            tenant_id=user.tenant_id,
-            principal_user_id=user.id,
-        )
-    )
-
-
-@pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_skips_when_claim_returns_none(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    execution_backend = AsyncMock()
-    flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
+    run = _run(user=user, flow_id=flow_id)
+    reloaded_run = run.model_copy(update={"status": FlowRunStatus.RUNNING})
     flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = None
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
+    get_run = AsyncMock(side_effect=[run, reloaded_run])
+    monkeypatch.setattr(service, "get_run", get_run)
 
-    count = await service.redispatch_stale_queued_runs(
+    result = await service.redispatch_run(
         flow_id=flow_id,
+        run_id=run.id,
         execution_backend=execution_backend,
     )
 
-    assert count == 0
+    assert result.run is reloaded_run
+    assert result.redispatched_count == 0
+    assert get_run.await_count == 2
     execution_backend.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_continues_on_dispatch_failure(user):
+async def test_redispatch_run_reloads_without_backend(user, monkeypatch):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    execution_backend = AsyncMock()
     flow_id = uuid4()
-    failed_run = _run(user=user, flow_id=flow_id)
-    succeeded_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [failed_run, succeeded_run]
-    flow_run_repo.claim_stale_queued_run_for_redispatch.side_effect = [
-        failed_run,
-        succeeded_run,
-    ]
-    execution_backend.dispatch.side_effect = [RuntimeError("broker down"), None]
-    service = FlowRunService(
+    run = _run(user=user, flow_id=flow_id)
+    reloaded_run = run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
+    get_run = AsyncMock(side_effect=[run, reloaded_run])
+    monkeypatch.setattr(service, "get_run", get_run)
 
-    count = await service.redispatch_stale_queued_runs(
-        flow_id=flow_id,
-        execution_backend=execution_backend,
-    )
+    result = await service.redispatch_run(flow_id=flow_id, run_id=run.id)
 
-    assert count == 1
-    assert execution_backend.dispatch.await_count == 2
+    assert result.run is reloaded_run
+    assert result.redispatched_count == 0
+    assert get_run.await_count == 2
+    flow_run_repo.claim_stale_queued_run_for_redispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_supports_run_scoped_filter(user):
+async def test_redispatch_run_reloads_when_dispatch_request_is_invalid(
+    user, monkeypatch
+):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     execution_backend = AsyncMock()
     flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
-    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = stale_run
-    service = FlowRunService(
+    run = _run(user=user, flow_id=flow_id)
+    invalid_principal_run = run.model_copy(
+        update={"principal_type": None, "principal_user_id": None}
+    )
+    reloaded_run = run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = (
+        invalid_principal_run
+    )
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
+    get_run = AsyncMock(side_effect=[run, reloaded_run])
+    monkeypatch.setattr(service, "get_run", get_run)
 
-    count = await service.redispatch_stale_queued_runs(
+    result = await service.redispatch_run(
         flow_id=flow_id,
-        run_id=stale_run.id,
-        limit=1,
+        run_id=run.id,
         execution_backend=execution_backend,
     )
 
-    assert count == 1
-    kwargs = flow_run_repo.list_stale_queued_runs.await_args.kwargs
-    assert kwargs["run_id"] == stale_run.id
-    assert kwargs["limit"] == 1
+    assert result.run is reloaded_run
+    assert result.redispatched_count == 0
+    execution_backend.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_raises_on_run_scoped_dispatch_failure(user):
+async def test_redispatch_run_propagates_dispatch_failure(user, monkeypatch):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     execution_backend = AsyncMock()
     flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
-    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = stale_run
+    run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = run
     execution_backend.dispatch.side_effect = RuntimeError("broker down")
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
+    get_run = AsyncMock(return_value=run)
+    monkeypatch.setattr(service, "get_run", get_run)
 
     with pytest.raises(RuntimeError, match="broker down"):
-        await service.redispatch_stale_queued_runs(
+        await service.redispatch_run(
             flow_id=flow_id,
-            run_id=stale_run.id,
-            limit=1,
+            run_id=run.id,
             execution_backend=execution_backend,
         )
 
+    assert get_run.await_count == 1
     execution_backend.dispatch.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_redispatch_stale_queued_runs_skips_unclaimable_runs(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    execution_backend = AsyncMock()
-    flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_stale_queued_runs.return_value = [stale_run]
-    flow_run_repo.claim_stale_queued_run_for_redispatch.return_value = None
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        max_concurrent_runs=5,
-    )
-
-    count = await service.redispatch_stale_queued_runs(
-        flow_id=flow_id,
-        execution_backend=execution_backend,
-    )
-
-    assert count == 0
-    execution_backend.dispatch.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reconcile_stale_running_runs_marks_stale_runs_failed(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id).model_copy(
-        update={"status": FlowRunStatus.RUNNING}
-    )
-    flow_run_repo.list_stale_running_runs.return_value = [stale_run]
-    terminalizer = AsyncMock()
-    terminalizer.terminalize_stale_running_run.return_value = SimpleNamespace(
-        did_transition=True
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_terminalizer=terminalizer,
-        flow_version_repo=flow_version_repo,
-        queued_redispatch_after_seconds=30,
-    )
-
-    count = await service.reconcile_stale_running_runs(limit=10)
-
-    assert count == 1
-    flow_run_repo.list_stale_running_runs.assert_awaited_once()
-    terminalizer.terminalize_stale_running_run.assert_awaited_once()
-    terminal_kwargs = terminalizer.terminalize_stale_running_run.await_args.kwargs
-    assert terminal_kwargs["error"].code == "flow_worker_stalled"
-    assert terminal_kwargs["error"].message == (
-        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
-    )
-
-
-@pytest.mark.asyncio
-async def test_reconcile_stale_running_runs_skips_already_reconciled_runs(user):
-    flow_repo = _flow_repo()
-    flow_run_repo = AsyncMock()
-    flow_version_repo = AsyncMock()
-    flow_id = uuid4()
-    stale_run = _run(user=user, flow_id=flow_id).model_copy(
-        update={"status": FlowRunStatus.RUNNING}
-    )
-    flow_run_repo.list_stale_running_runs.return_value = [stale_run]
-    terminalizer = AsyncMock()
-    terminalizer.terminalize_stale_running_run.return_value = SimpleNamespace(
-        did_transition=False
-    )
-    service = FlowRunService(
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_terminalizer=terminalizer,
-        flow_version_repo=flow_version_repo,
-    )
-
-    count = await service.reconcile_stale_running_runs(limit=10)
-
-    assert count == 0
-    terminalizer.terminalize_stale_running_run.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2799,11 +3272,13 @@ async def test_create_run_rejects_oversized_input_payload(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow = _flow(user=user, published_version=1)
@@ -2829,12 +3304,6 @@ async def test_create_run_rejects_oversized_input_payload(user):
             {},
             "missing schema_version",
             "flow_definition_schema_version_missing",
-            None,
-        ),
-        (
-            {"schema_version": 1, "flow_id": str(uuid4()), "steps": []},
-            "does not contain executable steps",
-            "flow_version_no_executable_steps",
             None,
         ),
         (
@@ -2935,11 +3404,13 @@ async def test_create_run_rejects_invalid_published_snapshot(
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow = _flow(user=user, published_version=1)
@@ -2963,6 +3434,91 @@ async def test_create_run_rejects_invalid_published_snapshot(
 
 
 @pytest.mark.asyncio
+async def test_create_run_rejects_published_snapshot_without_executable_steps_as_internal_invariant(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    flow = _flow(user=user, published_version=1)
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json={"schema_version": 1, "flow_id": str(flow.id), "steps": []},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(
+        FlowPublishedDefinitionWithoutExecutableStepsError,
+        match="does not contain executable steps",
+    ) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+
+    assert exc_info.value.flow_id == flow.id
+    assert exc_info.value.flow_version == 1
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_loaded_published_flow_without_id_as_internal_invariant(
+    user,
+):
+    requested_flow_id = uuid4()
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    flow = _flow(user=user, published_version=1).model_copy(update={"id": None})
+    flow_repo.get.return_value = flow
+    flow_run_repo.count_active_runs.return_value = 0
+    flow_version_repo.get.return_value = FlowVersion(
+        flow_id=requested_flow_id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="checksum",
+        definition_json=build_published_definition_json(
+            flow_id=requested_flow_id,
+            name=flow.name,
+            description=flow.description,
+            metadata_json=flow.metadata_json,
+            steps=[_published_runtime_step(_step(1))],
+        ),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(FlowPersistedIdMissingError):
+        await service.create_run(
+            flow_id=requested_flow_id,
+            input_payload_json={"x": "y"},
+        )
+
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_cancel_run_marks_pending_steps_cancelled(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -2974,24 +3530,98 @@ async def test_cancel_run_marks_pending_steps_cancelled(user):
     flow_run_repo.get.return_value = run
     terminalizer = AsyncMock()
     terminalizer.terminalize_run.return_value = SimpleNamespace(run=cancelled_run)
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_run_terminalizer=terminalizer,
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
 
-    result = await service.cancel_run(run_id=run.id)
+    result = await service.cancel_run(run_id=run.id, flow_id=run.flow_id)
 
     assert result.status == FlowRunStatus.CANCELLED
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+    )
     terminalizer.terminalize_run.assert_awaited_once()
     terminal_kwargs = terminalizer.terminalize_run.await_args.kwargs
     assert terminal_kwargs["target_status"] == FlowRunStatus.CANCELLED
     assert terminal_kwargs["source"] == FlowRunLifecycleSource.USER_CANCEL
-    assert terminal_kwargs["error"].code == "user_cancelled"
+    assert terminal_kwargs["error"].code == FlowApiErrorCode.RUN_USER_CANCELLED.value
     assert terminal_kwargs["error"].message == "Run cancelled by user."
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_translates_terminalizer_missing_run_race_to_public_not_found(
+    user,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    run = _run(user=user, flow_id=uuid4()).model_copy(
+        update={"status": FlowRunStatus.RUNNING}
+    )
+    flow_run_repo.get.return_value = run
+    terminalizer = AsyncMock()
+    terminalizer.terminalize_run.side_effect = FlowRunNotFoundError(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.cancel_run(run_id=run.id, flow_id=run.flow_id)
+
+    assert exc_info.value.code is None
+    terminalizer.terminalize_run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_does_not_terminalize_flow_mismatch(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    terminalizer = AsyncMock()
+    run_id = uuid4()
+    flow_id = uuid4()
+    flow_run_repo.get.side_effect = FlowRunNotFoundError(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        flow_id=flow_id,
+    )
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_terminalizer=terminalizer,
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    with pytest.raises(NotFoundException):
+        await service.cancel_run(run_id=run_id, flow_id=flow_id)
+
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        flow_id=flow_id,
+    )
+    terminalizer.terminalize_run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3010,18 +3640,24 @@ async def test_cancel_run_is_noop_for_terminal_status(user, status):
     run = _run(user=user, flow_id=uuid4()).model_copy(update={"status": status})
     flow_run_repo.get.return_value = run
     terminalizer = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         flow_run_terminalizer=terminalizer,
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
 
-    result = await service.cancel_run(run_id=run.id)
+    result = await service.cancel_run(run_id=run.id, flow_id=run.flow_id)
 
     assert result.status == status
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+    )
     terminalizer.terminalize_run.assert_not_awaited()
 
 
@@ -3055,11 +3691,13 @@ async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_c
         for step in flow.steps
     ]
     published_steps[broken_order - 1] = broken_step
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -3095,11 +3733,13 @@ async def test_create_run_rejects_missing_snapshot_identifiers_without_fallback(
     flow = _flow(user=user, published_version=1).model_copy(
         update={"steps": [_step(1)]}
     )
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
         max_concurrent_runs=5,
     )
     flow_repo.get.return_value = flow
@@ -3196,6 +3836,7 @@ async def test_get_evidence_redacts_sensitive_values(user):
             },
         )
     ]
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_run_repo.list_step_attempts.return_value = [
         _step_attempt_record(
             run,
@@ -3208,7 +3849,10 @@ async def test_get_evidence_redacts_sensitive_values(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3345,13 +3989,17 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
             },
         )
     ]
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_run_repo.list_step_attempts.return_value = []
 
     service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3415,6 +4063,7 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
             input_payload_json={"text": "hello"},
         )
     ]
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_run_repo.list_step_attempts.return_value = [
         _step_attempt_record(
             run,
@@ -3436,7 +4085,10 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3466,7 +4118,10 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json=_published_definition_json(flow, []),
+        definition_json=_published_definition_json(
+            flow,
+            [_published_runtime_step(flow.steps[0])],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -3477,7 +4132,10 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     redacted_export = await service.export_evidence_json(run_id=run.id)
@@ -3493,7 +4151,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v5"
+        assert export["schema_version"] == "flow-evidence-export.v6"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert export["manifest"]["content_hash"] == export["content_hash"]
         assert export["manifest"]["content_hash_input"] == hash_input
@@ -3534,7 +4192,10 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         version=1,
         tenant_id=user.tenant_id,
         definition_checksum="checksum",
-        definition_json=_published_definition_json(flow, []),
+        definition_json=_published_definition_json(
+            flow,
+            [_published_runtime_step(flow.steps[0])],
+        ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -3557,7 +4218,10 @@ async def test_get_evidence_normalizes_attempt_provenance_payloads(user):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3607,13 +4271,17 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
             input_payload_json={"text": "hello"},
         )
     ]
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_run_repo.list_step_attempts.return_value = []
 
     service = FlowRunEvidenceService(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3660,7 +4328,10 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
     )
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
@@ -3673,11 +4344,13 @@ async def test_list_step_results_filters_by_run_and_flow(user):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
-    service = FlowRunService(
+    service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
     )
     run = _run(user=user, flow_id=uuid4())
     flow_run_repo.get.return_value = run
@@ -3700,22 +4373,117 @@ async def test_list_step_results_filters_by_run_and_flow(user):
     )
 
 
+@pytest.mark.asyncio
+async def test_list_step_results_with_files_composes_per_step_views(user):
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+    run = _run(user=user, flow_id=uuid4())
+    step_result_1 = _step_result_record(run, step_order=1)
+    step_result_2 = _step_result_record(run, step_order=2)
+    step_result_3 = _step_result_record(run, step_order=3)
+    step_result_1_id = step_result_1.id
+    step_result_2_id = step_result_2.id
+    assert step_result_1_id is not None
+    assert step_result_2_id is not None
+
+    file_2 = _result_file(
+        user=user,
+        run=run,
+        file_id=uuid4(),
+        step_result_id=step_result_2_id,
+        step_id=step_result_2.step_id,
+        step_order=2,
+    )
+    file_1 = _result_file(
+        user=user,
+        run=run,
+        file_id=uuid4(),
+        step_result_id=step_result_1_id,
+        step_id=step_result_1.step_id,
+        step_order=1,
+    )
+    orphan_file = _result_file(
+        user=user,
+        run=run,
+        file_id=uuid4(),
+        step_result_id=uuid4(),
+        step_id=uuid4(),
+        step_order=3,
+    )
+    runtime_input_file_id = uuid4()
+    orphan_runtime_input_file_id = uuid4()
+
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = [
+        step_result_1,
+        step_result_2,
+        step_result_3,
+    ]
+    flow_run_repo.list_result_files.return_value = [file_2, orphan_file, file_1]
+    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {
+        step_result_1_id: (runtime_input_file_id,),
+        uuid4(): (orphan_runtime_input_file_id,),
+    }
+
+    result = await service.list_step_results_with_files(
+        run_id=run.id,
+        flow_id=run.flow_id,
+    )
+
+    assert tuple(item.step_result for item in result) == (
+        step_result_1,
+        step_result_2,
+        step_result_3,
+    )
+    assert result[0].result_files == (file_1,)
+    assert result[1].result_files == (file_2,)
+    assert result[2].result_files == ()
+    assert orphan_file not in result[0].result_files
+    assert orphan_file not in result[1].result_files
+    assert orphan_file not in result[2].result_files
+    assert result[0].runtime_input_file_ids == (runtime_input_file_id,)
+    assert result[1].runtime_input_file_ids == ()
+    assert result[2].runtime_input_file_ids == ()
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
+    )
+    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_results=[step_result_1, step_result_2, step_result_3],
+    )
+
+
 # ---------------------------------------------------------------------------
 def _result_file(
     *,
     user,
     run,
     file_id,
+    step_result_id=None,
+    step_id=None,
+    step_order=1,
     availability="available",
 ) -> FlowRunStepResultFile:
-    step_id = uuid4()
+    resolved_step_id = step_id or uuid4()
     return FlowRunStepResultFile(
         flow_run_id=run.id,
         flow_id=run.flow_id,
         tenant_id=user.tenant_id,
-        step_result_id=uuid4(),
-        step_id=step_id,
-        step_order=1,
+        step_result_id=step_result_id or uuid4(),
+        step_id=resolved_step_id,
+        step_order=step_order,
         attempt_no=1,
         file_id=file_id,
         ordinal=0,
@@ -3748,7 +4516,7 @@ def _file(
     )
 
 
-def _artifact_service(user, file_repo=None, result_file=None, run=None):
+def _artifact_service(user, *, file_repo, result_file=None, run=None):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
@@ -3760,82 +4528,11 @@ def _artifact_service(user, file_repo=None, result_file=None, run=None):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=_flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
     ), run
-
-
-@pytest.mark.asyncio
-async def test_list_result_files_for_runs_rejects_foreign_tenant_run(user):
-    flow_run_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=AsyncMock(),
-    )
-    foreign_run = _run(user=user, flow_id=uuid4()).model_copy(
-        update={"tenant_id": uuid4()}
-    )
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        await service.list_result_files_for_runs(runs=[foreign_run])
-
-    assert exc_info.value.code == "flow_run_access_denied"
-    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
-    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_list_token_usage_for_runs_delegates_for_authorized_runs(user):
-    flow_run_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=AsyncMock(),
-    )
-    run_with_usage = _run(user=user, flow_id=uuid4())
-    run_without_usage = _run(user=user, flow_id=run_with_usage.flow_id)
-    usage = FlowRunTokenUsage(
-        num_tokens_input=12,
-        num_tokens_output=5,
-        num_tokens_total=17,
-    )
-    flow_run_repo.list_token_usage_for_runs.return_value = {
-        run_with_usage.id: usage,
-    }
-
-    result = await service.list_token_usage_for_runs(
-        runs=[run_with_usage, run_without_usage],
-    )
-
-    assert result == {run_with_usage.id: usage}
-    flow_run_repo.list_token_usage_for_runs.assert_awaited_once_with(
-        run_ids=[run_with_usage.id, run_without_usage.id],
-        tenant_id=user.tenant_id,
-    )
-
-
-@pytest.mark.asyncio
-async def test_list_token_usage_for_runs_rejects_foreign_tenant_run(user):
-    flow_run_repo = AsyncMock()
-    service = FlowRunService(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=AsyncMock(),
-    )
-    foreign_run = _run(user=user, flow_id=uuid4()).model_copy(
-        update={"tenant_id": uuid4()}
-    )
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        await service.list_token_usage_for_runs(runs=[foreign_run])
-
-    assert exc_info.value.code == "flow_run_access_denied"
-    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
-    flow_run_repo.list_token_usage_for_runs.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4017,16 +4714,3 @@ async def test_get_run_artifact_file_missing_result_file_row(user):
             file_id=file_id,
         )
     assert exc_info.value.code == "flow_run_artifact_not_found"
-
-
-@pytest.mark.asyncio
-async def test_get_run_artifact_file_no_file_repo(user):
-    service, run = _artifact_service(user, file_repo=None)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        await service.get_run_artifact_file(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            file_id=uuid4(),
-        )
-    assert exc_info.value.code == "file_repo_unavailable"

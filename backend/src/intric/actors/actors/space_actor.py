@@ -9,7 +9,7 @@ from intric.roles.permissions import Permission, has_permission
 if TYPE_CHECKING:
     from intric.apps.apps.app import App
     from intric.assistants.assistant import Assistant
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
     from intric.group_chat.domain.entities.group_chat import GroupChat
     from intric.spaces.space import Space
     from intric.users.user import UserInDB
@@ -651,7 +651,9 @@ class SpaceActor:
         if resource_type in PERMISSION_RESOURCES and not self._is_service_api_key():
             permission = self._to_permisson(resource_type=resource_type)
             user_has_permission = (
-                has_permission(self.user.permissions, permission) if permission else False
+                has_permission(self.user.permissions, permission)
+                if permission
+                else False
             )
             if not user_has_permission and not (
                 resource_type

@@ -10,3 +10,5 @@ router.include_router(flow_definition_router)
 router.include_router(flow_assistant_router)
 router.include_router(flow_consumer_router)
 router.include_router(ai_builder_router)
+
+__all__ = ["router"]

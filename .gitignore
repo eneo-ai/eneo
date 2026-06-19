@@ -46,6 +46,7 @@ specs/
 .serena/
 .speckit/
 .playwright-mcp/
+.remember/
 
 # OpenAI Codex configuration
 .codex

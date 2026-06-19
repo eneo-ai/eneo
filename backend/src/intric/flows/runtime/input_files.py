@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from intric.flows.principal import FlowPrincipal
-from intric.main.exceptions import TypedIOValidationException
 
 if TYPE_CHECKING:
     from intric.files.file_models import File
@@ -19,26 +18,7 @@ class RuntimeInputFileRepository(Protocol):
         owner_user_id: UUID | None = None,
         owner_service_id: UUID | None = None,
         tenant_id: UUID | None = None,
-        include_transcription: bool = True,
     ) -> list["File"]: ...
-
-
-def parse_requested_file_ids(*, raw_file_ids: object) -> list[UUID]:
-    if raw_file_ids is None:
-        return []
-    if not isinstance(raw_file_ids, list):
-        raise TypedIOValidationException(
-            "file_ids must be a list.",
-            code="typed_io_invalid_file_ids",
-        )
-    file_ids = cast(list[object], raw_file_ids)
-    try:
-        return [UUID(str(file_id)) for file_id in file_ids]
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise TypedIOValidationException(
-            f"Invalid file_ids payload: {raw_file_ids}",
-            code="typed_io_invalid_file_ids",
-        ) from exc
 
 
 async def load_files_by_requested_ids(
@@ -51,7 +31,10 @@ async def load_files_by_requested_ids(
 ) -> list["File"]:
     cache_key = frozenset(requested_ids)
     if file_cache is not None and cache_key in file_cache:
-        return file_cache[cache_key]
+        return _order_files_by_requested_ids(
+            files=file_cache[cache_key],
+            requested_ids=requested_ids,
+        )
     files = await file_repo.get_list_by_id_for_owner(
         ids=requested_ids,
         owner_type=principal.principal_type.value,
@@ -61,4 +44,15 @@ async def load_files_by_requested_ids(
     )
     if file_cache is not None:
         file_cache[cache_key] = files
-    return files
+    return _order_files_by_requested_ids(files=files, requested_ids=requested_ids)
+
+
+def _order_files_by_requested_ids(
+    *, files: list["File"], requested_ids: list[UUID]
+) -> list["File"]:
+    file_by_id = {file.id: file for file in files}
+    return [
+        file_by_id[file_id]
+        for file_id in dict.fromkeys(requested_ids)
+        if file_id in file_by_id
+    ]

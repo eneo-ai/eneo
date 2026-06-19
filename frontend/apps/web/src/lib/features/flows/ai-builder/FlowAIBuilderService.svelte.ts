@@ -52,8 +52,8 @@ export class FlowAIBuilderService {
 
   constructor(intric: Intric, spaceId: string, flowId: string | null) {
     const transport: AIBuilderClientTransport = {
-      fetch: intric.client.fetch as AIBuilderClientTransport["fetch"],
-      stream: intric.client.stream as AIBuilderClientTransport["stream"]
+      fetch: intric.client.fetch,
+      stream: intric.client.stream
     };
     this.#driver = new FlowAIBuilderDriver(transport, spaceId, flowId, (state) => {
       this.#stateVersion += 1;

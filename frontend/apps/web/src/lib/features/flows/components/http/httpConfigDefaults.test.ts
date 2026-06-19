@@ -8,8 +8,10 @@ import {
 import {
   createDefaultHttpConfig,
   validateHttpConfig,
-  isHttpConfigured
+  isHttpConfigured,
+  getAuthoredHttpUrlError
 } from "./httpConfigDefaults";
+import { parseHttpTestVariables } from "./httpTestVariables";
 
 function makeConfig(overrides: Partial<HttpAuthoredConfig> = {}): HttpAuthoredConfig {
   return {
@@ -148,6 +150,16 @@ describe("validateHttpConfig", () => {
     expect(errors).toEqual([expect.objectContaining({ field: "url", code: "HTTP_INVALID_URL" })]);
   });
 
+  it("keeps literal non-http schemes invalid when the URL contains templates", () => {
+    const errors = validateHttpConfig(
+      makeConfig({ url: "ftp://{{host}}/upload" }),
+      "output",
+      "POST"
+    );
+
+    expect(errors).toEqual([expect.objectContaining({ field: "url", code: "HTTP_INVALID_URL" })]);
+  });
+
   it("reports unparseable URL", () => {
     const errors = validateHttpConfig(makeConfig({ url: "not-a-url" }), "output", "POST");
 
@@ -162,6 +174,19 @@ describe("validateHttpConfig", () => {
     );
 
     expect(errors).toEqual([]);
+  });
+
+  it("accepts templated authored URLs that the backend validates after interpolation", () => {
+    expect(validateHttpConfig(makeConfig({ url: "{{base_url}}/hook" }), "output", "POST")).toEqual(
+      []
+    );
+    expect(
+      validateHttpConfig(makeConfig({ url: "https://{{host}}/hook" }), "output", "POST")
+    ).toEqual([]);
+  });
+
+  it("accepts uppercase HTTP schemes", () => {
+    expect(getAuthoredHttpUrlError("HTTPS://api.example.com/hook")).toBeNull();
   });
 
   it("reports missing bearer token", () => {
@@ -291,5 +316,28 @@ describe("isHttpConfigured", () => {
 
   it("returns true for config with a URL", () => {
     expect(isHttpConfigured(makeConfig({ url: "https://example.com" }))).toBe(true);
+  });
+});
+
+describe("parseHttpTestVariables", () => {
+  it("treats an empty variables editor as an empty context", () => {
+    expect(parseHttpTestVariables("  \n ")).toEqual({ ok: true, value: {} });
+  });
+
+  it("parses JSON objects", () => {
+    expect(parseHttpTestVariables('{"base_url":"https://api.example.com","case":7}')).toEqual({
+      ok: true,
+      value: { base_url: "https://api.example.com", case: 7 }
+    });
+  });
+
+  it("rejects malformed JSON", () => {
+    expect(parseHttpTestVariables("{bad")).toEqual({ ok: false });
+  });
+
+  it("rejects non-object JSON values", () => {
+    expect(parseHttpTestVariables("[1,2]")).toEqual({ ok: false });
+    expect(parseHttpTestVariables("null")).toEqual({ ok: false });
+    expect(parseHttpTestVariables('"value"')).toEqual({ ok: false });
   });
 });

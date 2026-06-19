@@ -3,23 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+
 
 class StepChainShape(Protocol):
     @property
-    def step_order(self) -> int:
-        ...
+    def step_order(self) -> int: ...
 
     @property
-    def input_source(self) -> str:
-        ...
+    def input_source(self) -> str: ...
 
     @property
-    def input_type(self) -> str:
-        ...
+    def input_type(self) -> str: ...
 
     @property
-    def output_type(self) -> str:
-        ...
+    def output_type(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -43,13 +41,17 @@ COMPATIBLE_TYPE_COERCIONS = {
 }
 
 
-def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChainViolation | None:
+def find_first_step_chain_violation(
+    steps: Sequence[StepChainShape],
+) -> StepChainViolation | None:
     if not steps:
         return None
 
     sorted_steps = sorted(steps, key=lambda item: item.step_order)
     steps_by_order = {item.step_order: item for item in sorted_steps}
-    flow_input_steps = [step for step in sorted_steps if step.input_source == "flow_input"]
+    flow_input_steps = [
+        step for step in sorted_steps if step.input_source == "flow_input"
+    ]
 
     if len(flow_input_steps) > 1:
         extra_step = flow_input_steps[1]
@@ -67,11 +69,14 @@ def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChai
         )
 
     for step in sorted_steps:
-        if step.step_order == 1 and step.input_source in {"previous_step", "all_previous_steps"}:
+        if step.step_order == 1 and step.input_source in {
+            "previous_step",
+            "all_previous_steps",
+        }:
             return StepChainViolation(
                 step_order=step.step_order,
                 message="Step 1 cannot use previous_step/all_previous_steps input source. Use flow_input.",
-                code="typed_io_invalid_input_source_position",
+                code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_POSITION.value,
             )
         if step.input_type == "document" and step.input_source != "flow_input":
             return StepChainViolation(
@@ -80,7 +85,7 @@ def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChai
                     f"Step {step.step_order}: input_type 'document' is only supported with input_source "
                     f"'flow_input'."
                 ),
-                code="typed_io_document_source_unsupported",
+                code=FlowApiErrorCode.TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED.value,
             )
         if step.input_type == "audio" and step.input_source != "flow_input":
             return StepChainViolation(
@@ -89,7 +94,7 @@ def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChai
                     f"Step {step.step_order}: input_type 'audio' is only supported with input_source "
                     f"'flow_input'."
                 ),
-                code="typed_io_audio_source_unsupported",
+                code=FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED.value,
             )
         if step.input_type == "file" and step.input_source != "flow_input":
             return StepChainViolation(
@@ -98,7 +103,7 @@ def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChai
                     f"Step {step.step_order}: input_type 'file' is only supported with input_source "
                     f"'flow_input'."
                 ),
-                code="typed_io_file_source_unsupported",
+                code=FlowApiErrorCode.TYPED_IO_FILE_SOURCE_UNSUPPORTED.value,
             )
         if step.input_type == "json" and step.input_source == "all_previous_steps":
             return StepChainViolation(
@@ -107,7 +112,7 @@ def find_first_step_chain_violation(steps: Sequence[StepChainShape]) -> StepChai
                     f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
                     f"'all_previous_steps' (concatenated text is not valid JSON)."
                 ),
-                code="typed_io_invalid_input_source_combination",
+                code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
             )
         if step.input_source == "previous_step" and step.step_order > 1:
             previous = steps_by_order.get(step.step_order - 1)

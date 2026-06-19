@@ -7,7 +7,7 @@ from typing import cast
 
 from pydantic import BaseModel
 
-from intric.flow_packages.domain.flow_package_manifest import JsonObject, JsonValue
+from intric.json_types import JsonObject, JsonValue
 
 
 def canonical_json_bytes(value: JsonValue) -> bytes:

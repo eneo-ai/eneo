@@ -4,12 +4,16 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
+    FlowAssistantCreateRequest,
+    FlowCreateRequest,
+    FlowFinalOutputContractPublic,
     FlowOutputDelivery,
+    FlowReviewStepContractPublic,
     FlowRunContractPublic,
     FlowRunCreateRequest,
     FlowRunDebugAttempt,
@@ -18,18 +22,18 @@ from intric.flows.api.flow_models import (
     FlowRunRerunInvalidatedStepPublic,
     FlowRunRerunOperationPublic,
     FlowRunStepPublic,
+    FlowRuntimeInputContractPublic,
+    FlowRuntimeUploadPolicyPublic,
     FlowStepAttemptPublic,
     FlowStepCreateRequest,
     FlowStepUpdateRequest,
+    FlowTemplateReadinessPublic,
+    FlowUpdateRequest,
     FormFieldPublic,
-    GraphEdge,
-    GraphNode,
-    GraphResponse,
-    HttpTestRequest,
-    HttpTestResponse,
     StepRunInput,
 )
-from intric.flows.domain.flow import FlowRunReviewCheckpoint
+from intric.flows.domain.flow import Flow, FlowRunReviewCheckpoint, FlowSparse
+from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from intric.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -38,11 +42,79 @@ from intric.flows.enums import (
     FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
 )
+from intric.flows.flow_metadata import FlowFormFieldType
 from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_error import FlowRunError
 from intric.main.exceptions import BadRequestException
 
 _MISSING = object()
+
+
+def _flow_sparse_domain(flow_id=None) -> FlowSparse:
+    return FlowSparse(
+        id=flow_id,
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Flow",
+    )
+
+
+def _flow_domain(flow_id=None) -> Flow:
+    return Flow(
+        id=flow_id,
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Flow",
+        steps=[],
+    )
+
+
+@pytest.mark.parametrize("factory", [_flow_sparse_domain, _flow_domain])
+def test_require_persisted_id_returns_existing_flow_id(factory) -> None:
+    flow_id = uuid4()
+
+    assert factory(flow_id).require_persisted_id() == flow_id
+
+
+@pytest.mark.parametrize("factory", [_flow_sparse_domain, _flow_domain])
+def test_require_persisted_id_raises_for_unsaved_flow(factory) -> None:
+    with pytest.raises(FlowPersistedIdMissingError):
+        factory(None).require_persisted_id()
+
+
+def test_runtime_public_projection_requires_persisted_flow_id() -> None:
+    flow = _flow_domain(None)
+
+    with pytest.raises(FlowPersistedIdMissingError):
+        FlowAssembler().to_runtime_public(
+            flow,
+            published_version=1,
+            api_prefix="/api/v1",
+        )
+
+
+def test_runtime_public_projection_maps_published_runtime_fields() -> None:
+    flow_id = uuid4()
+    flow = _flow_domain(flow_id).model_copy(
+        update={
+            "name": "Published flow",
+            "description": "Runtime projection",
+            "published_version": 3,
+        }
+    )
+
+    public = FlowAssembler().to_runtime_public(
+        flow,
+        published_version=3,
+        api_prefix="/api/v1",
+    )
+
+    assert public.id == flow_id
+    assert public.space_id == flow.space_id
+    assert public.name == "Published flow"
+    assert public.description == "Runtime projection"
+    assert public.published_version == 3
+    assert public.runtime_paths.create_run == f"/api/v1/flows/{flow_id}/runs/"
 
 
 def _payload(**overrides: object) -> dict[str, object]:
@@ -57,6 +129,29 @@ def _payload(**overrides: object) -> dict[str, object]:
     }
     payload.update(overrides)
     return payload
+
+
+def _flow_create_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "space_id": str(uuid4()),
+        "name": "Flow",
+        "description": "Flow description",
+        "steps": [_payload()],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _assert_extra_forbidden(
+    model: type[BaseModel],
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        model.model_validate({**payload, "unexpected": True})
+
+    assert any(
+        error.get("type") == "extra_forbidden" for error in exc_info.value.errors()
+    )
 
 
 @pytest.mark.parametrize(
@@ -135,39 +230,96 @@ def test_flow_run_create_request_rejects_removed_top_level_file_ids() -> None:
     }
 
 
-def test_graph_response_parses_typed_nodes_and_edges() -> None:
-    response = GraphResponse.model_validate(
-        {
-            "nodes": [
-                {"id": "input", "label": "Input", "type": "input"},
-                {
-                    "id": "step-1",
-                    "label": "Step 1",
-                    "type": "llm",
-                    "step_order": 1,
-                    "input_source": "flow_input",
-                    "input_type": "text",
-                    "output_type": "json",
-                    "output_mode": "pass_through",
-                    "mcp_policy": "inherit",
-                    "run_status": "completed",
-                },
-            ],
-            "edges": [
-                {
-                    "source": "input",
-                    "target": "step-1",
-                    "kind": "flow_input",
-                    "source_step_order": 0,
-                    "target_step_order": 1,
-                }
-            ],
-        }
+def test_flow_request_shell_models_reject_unknown_top_level_fields() -> None:
+    cases: tuple[tuple[type[BaseModel], dict[str, object]], ...] = (
+        (FlowStepCreateRequest, _payload()),
+        (FlowStepUpdateRequest, _payload(id=str(uuid4()))),
+        (FlowCreateRequest, _flow_create_payload()),
+        (FlowUpdateRequest, {"name": "Updated flow"}),
+        (FlowAssistantCreateRequest, {"name": "Flow Step Assistant"}),
     )
 
-    assert isinstance(response.nodes[0], GraphNode)
-    assert isinstance(response.edges[0], GraphEdge)
-    assert response.nodes[1].run_status == "completed"
+    for model, payload in cases:
+        _assert_extra_forbidden(model, payload)
+
+
+def test_flow_update_request_partial_model_preserves_strict_request_config() -> None:
+    assert FlowUpdateRequest.__name__ == "PartialFlowUpdateRequest"
+    assert FlowUpdateRequest.model_config.get("extra") == "forbid"
+
+    _assert_extra_forbidden(FlowUpdateRequest, {"name": "Updated flow"})
+
+
+def test_flow_update_request_allows_partial_patch_without_steps() -> None:
+    request = FlowUpdateRequest.model_validate({"name": "Updated flow"})
+
+    assert request.name == "Updated flow"
+    assert request.steps is None
+
+
+@pytest.mark.parametrize("value", [None, 1, 30, 2555])
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (FlowCreateRequest, _flow_create_payload),
+        (FlowUpdateRequest, lambda **kwargs: kwargs),
+    ],
+)
+def test_flow_request_models_accept_valid_data_retention_days(
+    model: type[BaseModel],
+    payload,
+    value: int | None,
+) -> None:
+    request = model.model_validate(payload(data_retention_days=value))
+
+    assert request.data_retention_days == value
+
+
+@pytest.mark.parametrize("value", [0, -1, 2556, True, False, "30", 1.5])
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (FlowCreateRequest, _flow_create_payload),
+        (FlowUpdateRequest, lambda **kwargs: kwargs),
+    ],
+)
+def test_flow_request_models_reject_invalid_data_retention_days(
+    model: type[BaseModel],
+    payload,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        model.model_validate(payload(data_retention_days=value))
+
+
+def test_flow_request_shell_models_keep_nested_maps_open() -> None:
+    step_request = FlowStepCreateRequest.model_validate(
+        _payload(
+            input_contract={
+                "type": "object",
+                "x-workflow-contract": {"nested": True},
+            },
+            output_contract={"type": "object", "x-output": {"nested": True}},
+            input_bindings={"question": "{{flow.input.question}}", "custom": 1},
+            input_config={"runtime": {"custom": True}},
+            output_config={"delivery": {"custom": True}},
+        )
+    )
+    flow_request = FlowCreateRequest.model_validate(
+        _flow_create_payload(
+            metadata_json={"workflow": {"custom": True}},
+            steps=[step_request.model_dump(mode="json")],
+        )
+    )
+    update_request = FlowUpdateRequest.model_validate(
+        {"metadata_json": {"workflow": {"custom": True}}}
+    )
+    assert step_request.input_contract == {
+        "type": "object",
+        "x-workflow-contract": {"nested": True},
+    }
+    assert flow_request.metadata_json == {"workflow": {"custom": True}}
+    assert update_request.metadata_json == {"workflow": {"custom": True}}
 
 
 def test_flow_run_contract_public_parses_typed_form_fields() -> None:
@@ -198,11 +350,100 @@ def test_flow_run_contract_public_parses_typed_form_fields() -> None:
 
     assert isinstance(contract.form_fields[0], FormFieldPublic)
     assert contract.form_fields[0].name == "employee_name"
+    assert contract.form_fields[0].type is FlowFormFieldType.TEXT
     assert contract.final_output is not None
     assert contract.final_output.step_id == final_step_id
     assert contract.final_output.output_type == FlowOutputType.DOCX
     assert contract.final_output.output_mode == FlowOutputMode.PASS_THROUGH
     assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
+
+
+def test_flow_run_contract_public_rejects_unknown_response_fields() -> None:
+    payload = {
+        "flow_id": str(uuid4()),
+        "published_flow_version": 3,
+        "form_fields": [
+            {
+                "name": "employee_name",
+                "type": "text",
+                "label": "Employee name",
+                "required": True,
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        FlowRunContractPublic.model_validate({**payload, "unexpected": True})
+
+    with pytest.raises(ValidationError):
+        FlowRunContractPublic.model_validate(
+            {
+                **payload,
+                "form_fields": [
+                    {
+                        "name": "employee_name",
+                        "type": "text",
+                        "unexpected": True,
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "payload"),
+    [
+        (
+            FlowRuntimeUploadPolicyPublic,
+            {
+                "min_timeout_seconds": 120,
+                "seconds_per_mebibyte": 8,
+                "max_timeout_seconds": 600,
+                "idle_timeout_seconds": 120,
+            },
+        ),
+        (
+            FlowRuntimeInputContractPublic,
+            {
+                "step_id": str(uuid4()),
+                "step_order": 1,
+                "required": True,
+                "input_format": "document",
+            },
+        ),
+        (
+            FlowReviewStepContractPublic,
+            {
+                "step_id": str(uuid4()),
+                "step_order": 2,
+                "review_mode": "edit",
+                "output_type": "json",
+            },
+        ),
+        (
+            FlowFinalOutputContractPublic,
+            {
+                "step_id": str(uuid4()),
+                "step_order": 3,
+                "output_type": "docx",
+                "output_mode": "pass_through",
+                "delivery": "artifact",
+            },
+        ),
+        (
+            FlowTemplateReadinessPublic,
+            {
+                "step_id": str(uuid4()),
+                "status": "ready",
+            },
+        ),
+    ],
+)
+def test_run_contract_nested_public_models_reject_unknown_fields(
+    model_cls: type[BaseModel], payload: dict[str, object]
+) -> None:
+    with pytest.raises(ValidationError):
+        model_cls.model_validate({**payload, "unexpected": True})
 
 
 def test_review_checkpoint_public_exposes_render_contract() -> None:
@@ -382,7 +623,11 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "accepted_run_revision": 2,
                     "reason": "Reviewer corrected the step output.",
                     "input_payload_json": {"question": "Updated input"},
-                    "step_inputs_json": {str(step_id): {"file_ids": []}},
+                    "root_step_input_override": {
+                        "step_id": str(step_id),
+                        "file_ids": [],
+                    },
+                    "root_step_input_override_requested": True,
                     "requested_by_principal_type": "user",
                     "requested_by_user_id": str(uuid4()),
                     "failure_code": None,
@@ -566,6 +811,10 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert isinstance(response.rerun_operations[0], FlowRunRerunOperationPublic)
     assert response.rerun_operations[0].status == FlowRunRerunOperationStatus.COMPLETED
     assert response.rerun_operations[0].root_attempt_id == replacement_attempt_id
+    assert response.rerun_operations[0].input_payload == {"question": "Updated input"}
+    assert response.rerun_operations[0].root_step_input_override is not None
+    assert response.rerun_operations[0].root_step_input_override.step_id == step_id
+    assert response.rerun_operations[0].root_step_input_override.file_ids == []
     assert isinstance(
         response.rerun_invalidated_steps[0], FlowRunRerunInvalidatedStepPublic
     )
@@ -609,6 +858,7 @@ def _flow_run_step_public_payload() -> dict[str, object]:
         "step_id": str(uuid4()),
         "step_order": 1,
         "status": "completed",
+        "error_code": None,
         "created_at": "2026-03-20T12:00:01Z",
         "updated_at": "2026-03-20T12:00:05Z",
     }
@@ -660,42 +910,15 @@ def test_flow_step_attempt_public_requires_step_id(bad_value: object) -> None:
         FlowStepAttemptPublic.model_validate(payload)
 
 
-def test_http_test_request_accepts_current_payload_shape() -> None:
-    request = HttpTestRequest.model_validate(
-        {
-            "config": {
-                "url": "https://example.org/api",
-                "auth": {"mode": "none"},
-                "body": {"mode": "auto"},
-                "custom_headers": [],
-                "timeout_seconds": 30,
-            },
-            "direction": "output",
-            "method": "POST",
-            "test_variables": {"name": "Alex"},
-        }
-    )
+def test_flow_run_step_public_exposes_nullable_error_code() -> None:
+    payload = _flow_run_step_public_payload()
+    payload["status"] = "failed"
+    payload["error_code"] = "flow_step_execution_failed"
+    payload["error_message"] = "Flow step 1 execution failed."
 
-    assert request.direction == "output"
-    assert request.method == "POST"
-    assert request.test_variables == {"name": "Alex"}
+    step = FlowRunStepPublic.model_validate(payload)
 
-
-def test_http_test_response_parses_current_payload_shape() -> None:
-    response = HttpTestResponse.model_validate(
-        {
-            "success": False,
-            "status_code": None,
-            "duration_ms": 12.5,
-            "response_preview": None,
-            "request_preview": {"method": "POST"},
-            "error_code": "INVALID_CONFIG",
-            "error_message": "bad config",
-        }
-    )
-
-    assert response.success is False
-    assert response.error_code == "INVALID_CONFIG"
+    assert step.error_code == "flow_step_execution_failed"
 
 
 def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:

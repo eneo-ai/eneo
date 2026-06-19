@@ -6,8 +6,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.flow_tables import FlowVersions
-from intric.flows.domain.flow import FlowVersion, JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject, FlowVersion
 from intric.flows.flow_factory import FlowFactory
+from intric.flows.published_definition import published_definition_checksum
 from intric.main.exceptions import NotFoundException
 
 
@@ -22,10 +23,11 @@ class FlowVersionRepository:
         self,
         flow_id: UUID,
         version: int,
-        definition_checksum: str,
-        definition_json: JsonObject,
+        definition_json: FlowPersistedJsonObject,
         tenant_id: UUID,
     ) -> FlowVersion:
+        """Persist a snapshot with checksum derived from the exact inserted payload."""
+        definition_checksum = published_definition_checksum(definition_json)
         stmt = (
             sa.insert(FlowVersions)
             .values(

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.files.audio import AudioMimeTypes
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.transcription_config import (
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
@@ -168,7 +169,7 @@ async def resolve_transcription_model_for_step(
                 f"Step {step_order}: a transcription model must be configured "
                 "for audio input."
             ),
-            code="typed_io_transcription_model_missing",
+            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING.value,
         )
 
     for model in available_models:
@@ -182,7 +183,7 @@ async def resolve_transcription_model_for_step(
             f"Step {step_order}: selected transcription model is not available in this space. "
             "Choose another transcription model in the flow transcription settings."
         ),
-        code="typed_io_transcription_model_unavailable",
+        code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_UNAVAILABLE.value,
     )
 
 
@@ -200,12 +201,12 @@ async def transcribe_audio_input(
     if not files:
         raise TypedIOValidationException(
             f"Step {step_order}: audio input requires at least one audio file.",
-            code="typed_io_audio_missing_file",
+            code=FlowApiErrorCode.TYPED_IO_AUDIO_MISSING_FILE.value,
         )
     if len(files) > max_files:
         raise TypedIOValidationException(
             f"Step {step_order}: too many audio files ({len(files)}, max {max_files}).",
-            code="typed_io_audio_too_many_files",
+            code=FlowApiErrorCode.TYPED_IO_AUDIO_TOO_MANY_FILES.value,
         )
 
     for file in files:
@@ -216,7 +217,7 @@ async def transcribe_audio_input(
                     f"Step {step_order}: file '{getattr(file, 'name', 'unknown')}' "
                     f"is not an audio file (got {mimetype})."
                 ),
-                code="typed_io_audio_invalid_file_type",
+                code=FlowApiErrorCode.TYPED_IO_AUDIO_INVALID_FILE_TYPE.value,
             )
 
     transcription_started = time.monotonic()
@@ -240,7 +241,7 @@ async def transcribe_audio_input(
                     f"Step {step_order}: transcription failed for "
                     f"'{getattr(file, 'name', 'unknown')}'."
                 ),
-                code="typed_io_transcription_failed",
+                code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
             ) from exc
 
         if block_text.strip():
@@ -253,7 +254,7 @@ async def transcribe_audio_input(
     if not combined:
         raise TypedIOValidationException(
             f"Step {step_order}: transcription produced empty text.",
-            code="typed_io_transcription_empty",
+            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_EMPTY.value,
         )
 
     transcript_bytes = len(combined.encode("utf-8"))
@@ -263,7 +264,7 @@ async def transcribe_audio_input(
                 f"Step {step_order}: transcript exceeded max inline text bytes "
                 f"({transcript_bytes} > {max_inline_text_bytes})."
             ),
-            code="typed_io_transcript_too_large",
+            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPT_TOO_LARGE.value,
         )
 
     threshold = int(max_inline_text_bytes * near_limit_ratio)
@@ -303,7 +304,7 @@ async def resolve_and_transcribe_audio_for_step(
     except FlowTranscriptionConfigError as exc:
         raise TypedIOValidationException(
             f"Step {step_order}: invalid transcription configuration in published flow metadata.",
-            code="typed_io_transcription_config_invalid",
+            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_CONFIG_INVALID.value,
         ) from exc
 
     if not transcription_config.enabled:
@@ -312,7 +313,7 @@ async def resolve_and_transcribe_audio_for_step(
                 f"Step {step_order}: transcription must be enabled when using "
                 "audio input."
             ),
-            code="typed_io_transcription_not_enabled",
+            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_NOT_ENABLED.value,
         )
 
     if transcription_config.model_id is None:
@@ -321,7 +322,7 @@ async def resolve_and_transcribe_audio_for_step(
                 f"Step {step_order}: a transcription model must be configured "
                 "for audio input."
             ),
-            code="typed_io_transcription_model_missing",
+            code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING.value,
         )
 
     transcription_model = await resolve_transcription_model_for_step(

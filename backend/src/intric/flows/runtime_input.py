@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from intric.files.mime_support import supported_audio_mimes, supported_text_mimes
 from intric.flows.domain.flow import FlowRuntimeInputConfig
 from intric.main.exceptions import BadRequestException
@@ -16,7 +18,7 @@ def parse_runtime_input_config(
         return FlowRuntimeInputConfig()
 
     raw_runtime_input = input_config.get("runtime_input")
-    if raw_runtime_input in (None, False):
+    if raw_runtime_input is None or raw_runtime_input is False:
         return FlowRuntimeInputConfig()
     if raw_runtime_input is True:
         return FlowRuntimeInputConfig(enabled=True)
@@ -25,7 +27,7 @@ def parse_runtime_input_config(
 
     try:
         parsed = FlowRuntimeInputConfig.model_validate(raw_runtime_input)
-    except Exception as exc:
+    except ValidationError as exc:
         raise BadRequestException(
             "Step input_config.runtime_input is invalid."
         ) from exc

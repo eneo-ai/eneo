@@ -84,6 +84,9 @@ from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads imp
     self_correction_outline_with_step_assumptions_payload,
 )
 
+CREATE_OUTLINE_LOGGER = "intric.flows.ai_builder.ai_builder_create_outline"
+CREATE_COMPILER_LOGGER = "intric.flows.ai_builder.ai_builder_create_compiler"
+
 
 def _model_resource(
     local_id: str,
@@ -2097,7 +2100,7 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
 ) -> None:
     caplog.set_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_OUTLINE_LOGGER,
     )
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
@@ -3295,7 +3298,7 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(
             outline,
@@ -3468,7 +3471,7 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(
             outline,
@@ -3613,7 +3616,7 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(outline)
     compiled = compile_create_draft(draft)
@@ -4283,7 +4286,7 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(
             outline,
@@ -4346,7 +4349,7 @@ def test_compile_outline_flow_drops_task_only_audio_to_text_transcription_step(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(
             outline,
@@ -4424,7 +4427,7 @@ def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(
             outline,
@@ -5767,8 +5770,8 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
     None
 ):
     """A composer reading `previous_step` from exactly one JSON prior is a
-    valid linear extract→summarize pipeline. Auto-bind must NOT inflate it
-    with multi-source attachment (Codex's "no eager bind" risk).
+    valid linear extract→summarize pipeline. Auto-bind must not inflate it
+    with multi-source attachment.
     """
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
@@ -8396,7 +8399,7 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
 
     with caplog.at_level(
         logging.INFO,
-        logger="intric.flows.ai_builder.ai_builder_create_outline",
+        logger=CREATE_COMPILER_LOGGER,
     ):
         draft = compile_outline_to_create_draft(outline)
     drift_records = [

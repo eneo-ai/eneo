@@ -9,11 +9,14 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_INPUT_TYPE_VALUES,
     FLOW_STEP_OUTPUT_TYPE_VALUES,
 )
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.enums import FlowOutputMode
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_review_policy import parse_flow_step_review_policy
 from intric.flows.input_binding_contract_rules import (
+    FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     input_contract_conflicts_with_question_binding,
+    unsupported_input_binding_key,
 )
 from intric.flows.output_modes import ALLOWED_OUTPUT_MODES, transcribe_only_violation
 from intric.flows.runtime.models import RuntimeStep
@@ -55,17 +58,17 @@ class _StepIdentity:
 class _StepInputFields:
     input_source: str
     input_type: str
-    input_config: JsonObject | None
-    input_bindings: JsonObject | None
-    input_contract: JsonObject | None
+    input_config: FlowPersistedJsonObject | None
+    input_bindings: FlowPersistedJsonObject | None
+    input_contract: FlowPersistedJsonObject | None
 
 
 @dataclass(frozen=True)
 class _StepOutputFields:
     output_mode: str
     output_type: str
-    output_config: JsonObject | None
-    output_contract: JsonObject | None
+    output_config: FlowPersistedJsonObject | None
+    output_contract: FlowPersistedJsonObject | None
     output_classification_override: int | None
 
 
@@ -73,15 +76,15 @@ class _StepOutputFields:
 class _StepOptionalFields:
     plan_step_ref: str | None
     existing_step_ref: str | None
-    assistant_snapshot: JsonObject | None
+    assistant_snapshot: FlowPersistedJsonObject | None
     timeout_seconds: int | None
 
 
-def _is_json_object(value: object) -> TypeGuard[JsonObject]:
+def _is_json_object(value: object) -> TypeGuard[FlowPersistedJsonObject]:
     return isinstance(value, dict)
 
 
-def _optional_json_object(value: object) -> JsonObject | None:
+def _optional_json_object(value: object) -> FlowPersistedJsonObject | None:
     return value if _is_json_object(value) else None
 
 
@@ -322,7 +325,7 @@ def _validate_input_contract_binding_compatibility(
         "input_contract cannot validate input_bindings.question because the "
         "question binding supplies the complete rendered step input. Remove "
         "input_contract or remove input_bindings.question.",
-        code="flow_input_contract_inapplicable",
+        code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
         context={
             "field": "input_contract",
             "conflict": "input_bindings.question",
@@ -330,11 +333,23 @@ def _validate_input_contract_binding_compatibility(
     )
 
 
+def _validate_supported_input_binding_keys(input_fields: _StepInputFields) -> None:
+    unsupported_key = unsupported_input_binding_key(input_fields.input_bindings)
+    if unsupported_key is None:
+        return
+    raise BadRequestException(
+        f"Unsupported input_bindings key '{unsupported_key}'. "
+        "Only input_bindings.question is supported.",
+        code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        context={"field": "input_bindings", "key": unsupported_key},
+    )
+
+
 def _parse_input_config(
     *,
     raw_input_config: object,
     input_source: str,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     if input_source in {"http_get", "http_post"}:
         if not _is_json_object(raw_input_config):
             raise BadRequestException("HTTP input source requires input_config object.")
@@ -384,7 +399,7 @@ def _parse_output_config(
     raw_output_config: object,
     output_mode: str,
     output_type: str,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     if raw_output_config is None:
         return None
     if not _is_json_object(raw_output_config):
@@ -460,6 +475,7 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
                 user_description=user_description,
             )
             input_fields = _parse_input_fields(item_dict)
+            _validate_supported_input_binding_keys(input_fields)
             _validate_input_contract_binding_compatibility(input_fields)
             output_fields = _parse_output_fields(item_dict)
             transcribe_only_error = transcribe_only_violation(

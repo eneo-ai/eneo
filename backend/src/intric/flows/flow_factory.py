@@ -22,6 +22,7 @@ from intric.flows.domain.flow import (
     FlowStepAttempt,
     FlowStepResult,
     FlowVersion,
+    RerunStepInputOverride,
 )
 
 
@@ -55,8 +56,16 @@ class FlowFactory:
     def from_flow_run_rerun_operation_db(
         self,
         operation_in_db: FlowRunRerunOperations,
+        *,
+        root_step_input_override: RerunStepInputOverride | None,
     ) -> FlowRunRerunOperation:
-        return FlowRunRerunOperation.model_validate(operation_in_db)
+        payload = {
+            field_name: getattr(operation_in_db, field_name)
+            for field_name in FlowRunRerunOperation.model_fields
+            if field_name != "root_step_input_override"
+        }
+        payload["root_step_input_override"] = root_step_input_override
+        return FlowRunRerunOperation.model_validate(payload)
 
     def from_flow_run_rerun_invalidated_step_db(
         self,

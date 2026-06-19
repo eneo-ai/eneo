@@ -23,6 +23,7 @@ from intric.completion_models.domain.completion_model import (
 from intric.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
+from intric.tenants.tenant import TenantInDB
 
 
 def _completion_model_sparse(**overrides: object) -> CompletionModelSparse:
@@ -214,11 +215,16 @@ def test_invalid_stored_capability_metadata_falls_back(
         provider_type=None,
     )
 
-    with caplog.at_level(
-        logging.WARNING,
-        logger="intric.completion_models.domain.model_kwargs_capabilities",
-    ):
-        model = CompletionModelSparse.model_validate(source_model)
+    logger_name = "intric.completion_models.domain.model_kwargs_capabilities"
+    logger = logging.getLogger(logger_name)
+    was_disabled = logger.disabled
+    # Integration logging setup disables existing loggers; keep this assertion order-independent.
+    logger.disabled = False
+    try:
+        with caplog.at_level(logging.WARNING, logger=logger_name):
+            model = CompletionModelSparse.model_validate(source_model)
+    finally:
+        logger.disabled = was_disabled
 
     assert model.model_kwargs_capabilities is None
     assert model.supported_model_kwargs.temperature.supported is True
@@ -263,7 +269,7 @@ def test_domain_model_normalizes_invalid_capabilities_before_public_assembly():
     )
     domain_model = CompletionModelDomain.create_from_db(
         db_model,
-        user=SimpleNamespace(tenant=None),
+        tenant=TenantInDB.model_construct(id=uuid4(), name="Test Tenant"),
         provider_name=None,
         provider_type=None,
     )

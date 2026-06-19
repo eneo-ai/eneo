@@ -12,11 +12,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Table
+
 from intric.database.tables.flow_tables import (
     FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES,
     FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
+    FlowRunReviewCheckpoints,
+    FlowRunStepInputFiles,
+    FlowRunStepResultFiles,
     FlowRunWebhookDeliveries,
 )
 
@@ -31,6 +37,7 @@ DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
 PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
     r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
 )
+LOCAL_JSON_ALIAS_NAME_RE = re.compile(r"^Json[A-Z]")
 FILES_CONTENT_COLUMNS = frozenset({"blob", "text", "transcription"})
 FILES_CONTENT_LIFECYCLE_GUARD_MESSAGE = (
     "Data retention must not null principal-owned "
@@ -57,6 +64,19 @@ class _OutputAxisBranch:
     relative_path: str
     function: str
     expression: str
+
+
+@dataclass(frozen=True, order=True)
+class _LocalJsonAliasException:
+    relative_path: str
+    name: str
+
+
+@dataclass(frozen=True, order=True)
+class _LocalJsonAliasDefinition:
+    relative_path: str
+    name: str
+    line: int
 
 
 ALLOWED_OUTPUT_MODE_BRANCHES = frozenset(
@@ -123,6 +143,23 @@ ALLOWED_OUTPUT_TYPE_BRANCHES = frozenset(
 )
 MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 6
 MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE = 3
+ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS = frozenset(
+    {
+        _LocalJsonAliasException(
+            relative_path="ai_builder/ai_builder_conversation_metadata.py",
+            name="JsonScalar",
+        ),
+        _LocalJsonAliasException(
+            relative_path="ai_builder/ai_builder_error_contract.py",
+            name="JsonScalar",
+        ),
+        _LocalJsonAliasException(
+            relative_path="ai_builder/ai_builder_event_models.py",
+            name="JsonScalar",
+        ),
+    }
+)
+MAX_LOCAL_JSON_ALIAS_ALLOWLIST_SIZE = 3
 _REMOVED_TYPED_OUTPUT_HELPERS = frozenset(
     {
         "augment_prompt_for_typed_output",
@@ -138,6 +175,30 @@ _REMOVED_INLINE_WEBHOOK_EXECUTOR_FUNCTIONS = frozenset(
         "_deliver_webhook",
     }
 )
+FLOW_RUN_STEP_ATTEMPT_KEY_COLUMNS = ("flow_run_id", "step_id", "attempt_no")
+FLOW_RUN_STEP_ATTEMPT_CHILD_FK_POLICIES = {
+    FlowRunReviewCheckpoints.__table__.name: (
+        "fk_flow_run_review_checkpoints_step_attempt",
+        "RESTRICT",
+    ),
+    FlowRunStepResultFiles.__table__.name: (
+        "fk_flow_run_step_result_files_step_attempt",
+        "CASCADE",
+    ),
+    FlowRunWebhookDeliveries.__table__.name: (
+        "fk_flow_run_webhook_deliveries_step_attempt",
+        "RESTRICT",
+    ),
+}
+FLOW_RUN_PRE_ATTEMPT_INPUT_PROJECTION_TABLES = frozenset(
+    {FlowRunStepInputFiles.__table__.name}
+)
+FLOW_RUN_STEP_INPUT_FILES_POSITIVE_ATTEMPT_CONSTRAINT = (
+    "ck_flow_run_step_input_files_attempt_no_positive"
+)
+FLOW_RUN_STEP_INPUT_FILES_REMOVED_INITIAL_ATTEMPT_CONSTRAINT = (
+    "ck_flow_run_step_input_files_attempt_no_initial"
+)
 OUTBOX_DELIVERY_STATUS_SOURCE_FILES = (
     FLOW_SOURCE_ROOT,
     DATA_RETENTION_ROOT,
@@ -151,8 +212,15 @@ OUTBOX_DELIVERY_STATUS_OWNER_NAMES = frozenset(
 )
 FORBIDDEN_API_MANUAL_CONSTRUCTION_CLASS_NAMES = frozenset(
     {
-        "FlowFileUploadService",
+        "FlowRuntimeFileService",
         "FlowRunContractService",
+    }
+)
+FLOW_RUN_REPOSITORY_PLATFORM_EXCEPTION_IMPORT_BAN = frozenset(
+    {
+        "infrastructure/flow_run_repo.py",
+        "infrastructure/flow_run_rerun_repo.py",
+        "infrastructure/flow_run_review_checkpoint_repo.py",
     }
 )
 
@@ -200,6 +268,10 @@ def _relative_runtime_path(path: Path) -> str:
     return path.relative_to(FLOW_RUNTIME_ROOT).as_posix()
 
 
+def _relative_flow_path(path: Path) -> str:
+    return path.relative_to(FLOW_SOURCE_ROOT).as_posix()
+
+
 def _node_references_outbox_delivery_status_owner(node: ast.AST) -> bool:
     if isinstance(node, ast.Name):
         return node.id in OUTBOX_DELIVERY_STATUS_OWNER_NAMES
@@ -222,6 +294,55 @@ def _outbox_delivery_status_source_files() -> list[Path]:
             ):
                 files.append(path)
     return sorted(files)
+
+
+def _flow_run_tables_with_step_attempt_key() -> list[Table]:
+    metadata = FlowRunStepInputFiles.__table__.metadata
+    return sorted(
+        [
+            table
+            for table in metadata.tables.values()
+            if table.name.startswith("flow_run_")
+            and set(FLOW_RUN_STEP_ATTEMPT_KEY_COLUMNS).issubset(table.columns.keys())
+        ],
+        key=lambda table: table.name,
+    )
+
+
+def _foreign_key_constraints(table: Table) -> list[ForeignKeyConstraint]:
+    return [
+        constraint
+        for constraint in table.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    ]
+
+
+def _foreign_key_constraint_by_name(
+    table: Table,
+    name: str,
+) -> ForeignKeyConstraint | None:
+    for constraint in _foreign_key_constraints(table):
+        if constraint.name == name:
+            return constraint
+    return None
+
+
+def _check_constraint_sql_by_name(table: Table, name: str) -> str | None:
+    for constraint in table.constraints:
+        if isinstance(constraint, CheckConstraint) and constraint.name == name:
+            return str(constraint.sqltext)
+    return None
+
+
+def _targets_flow_step_attempt_natural_key(
+    constraint: ForeignKeyConstraint,
+) -> bool:
+    return (
+        tuple(element.column.table.name for element in constraint.elements)
+        == ("flow_step_attempts",) * len(FLOW_RUN_STEP_ATTEMPT_KEY_COLUMNS)
+        and tuple(element.column.name for element in constraint.elements)
+        == FLOW_RUN_STEP_ATTEMPT_KEY_COLUMNS
+    )
 
 
 def _call_chain_root(call: ast.Call) -> ast.Call:
@@ -586,6 +707,115 @@ def _format_branches(branches: Iterable[_OutputAxisBranch]) -> str:
     )
 
 
+def _module_level_name_target(node: ast.Assign | ast.AnnAssign) -> ast.Name | None:
+    if isinstance(node, ast.AnnAssign):
+        target = node.target
+    elif len(node.targets) == 1:
+        target = node.targets[0]
+    else:
+        return None
+    if isinstance(target, ast.Name):
+        return target
+    return None
+
+
+def _local_json_alias_definitions_in_tree(
+    tree: ast.AST,
+    *,
+    relative_path: str,
+) -> frozenset[_LocalJsonAliasDefinition]:
+    if not isinstance(tree, ast.Module):
+        return frozenset()
+    definitions: set[_LocalJsonAliasDefinition] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.Assign | ast.AnnAssign):
+            continue
+        target = _module_level_name_target(node)
+        if target is None or not LOCAL_JSON_ALIAS_NAME_RE.match(target.id):
+            continue
+        definitions.add(
+            _LocalJsonAliasDefinition(
+                relative_path=relative_path,
+                name=target.id,
+                line=node.lineno,
+            )
+        )
+    return frozenset(definitions)
+
+
+def _flow_local_json_alias_definitions() -> frozenset[_LocalJsonAliasDefinition]:
+    definitions: set[_LocalJsonAliasDefinition] = set()
+    for path in _flow_python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        definitions.update(
+            _local_json_alias_definitions_in_tree(
+                tree,
+                relative_path=_relative_flow_path(path),
+            )
+        )
+    return frozenset(definitions)
+
+
+def _format_local_json_alias_definitions(
+    definitions: Iterable[_LocalJsonAliasDefinition],
+) -> str:
+    return "\n".join(
+        f"- {definition.relative_path}:{definition.line}:{definition.name}"
+        for definition in sorted(definitions)
+    )
+
+
+def _format_local_json_alias_exceptions(
+    exceptions: Iterable[_LocalJsonAliasException],
+) -> str:
+    return "\n".join(
+        f"- {exception.relative_path}:{exception.name}"
+        for exception in sorted(exceptions)
+    )
+
+
+def _local_json_alias_exception(
+    definition: _LocalJsonAliasDefinition,
+) -> _LocalJsonAliasException:
+    return _LocalJsonAliasException(
+        relative_path=definition.relative_path,
+        name=definition.name,
+    )
+
+
+def _assert_local_json_alias_definitions_are_allowed(
+    found: frozenset[_LocalJsonAliasDefinition],
+    *,
+    allowed: frozenset[_LocalJsonAliasException] = ALLOWED_LOCAL_JSON_ALIAS_DEFINITIONS,
+) -> None:
+    found_exceptions = frozenset(
+        _local_json_alias_exception(definition) for definition in found
+    )
+    unexpected = frozenset(
+        definition
+        for definition in found
+        if _local_json_alias_exception(definition) not in allowed
+    )
+    stale = allowed - found_exceptions
+    guidance = (
+        "intric.json_types is the canonical owner for strict Json* aliases in "
+        "Flow code. Import the platform alias, rename domain-specific aliases "
+        "outside the Json* namespace, or add a narrow documented exception."
+    )
+    assert not unexpected, (
+        "Unexpected local Flow Json* alias definitions:\n"
+        f"{_format_local_json_alias_definitions(unexpected)}\n{guidance}"
+    )
+    assert not stale, (
+        "Stale local Flow Json* alias allowlist entries:\n"
+        f"{_format_local_json_alias_exceptions(stale)}\n"
+        "Remove stale entries instead of keeping compatibility exceptions."
+    )
+    assert len(allowed) <= MAX_LOCAL_JSON_ALIAS_ALLOWLIST_SIZE, (
+        "Prefer moving aliases to intric.json_types instead of growing the allowlist."
+    )
+
+
 def _first_branch(branches: frozenset[_OutputAxisBranch]) -> _OutputAxisBranch:
     return next(iter(sorted(branches)))
 
@@ -642,6 +872,27 @@ def _fastapi_http_exception_aliases(
     return imported_names, fastapi_modules, import_lines
 
 
+def _imports_platform_exception_module(
+    tree: ast.AST,
+) -> list[int]:
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(
+            alias.name == "intric.main.exceptions"
+            or alias.name.startswith("intric.main.exceptions.")
+            for alias in node.names
+        ):
+            lines.append(node.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "intric.main.exceptions":
+                lines.append(node.lineno)
+            elif node.module == "intric.main" and any(
+                alias.name == "exceptions" for alias in node.names
+            ):
+                lines.append(node.lineno)
+    return lines
+
+
 def _raises_http_exception(
     node: ast.Raise,
     *,
@@ -662,6 +913,59 @@ def _raises_http_exception(
     return False
 
 
+def test_flow_local_json_aliases_are_platform_owned_or_allowlisted():
+    _assert_local_json_alias_definitions_are_allowed(
+        _flow_local_json_alias_definitions()
+    )
+
+
+def test_local_json_alias_scanner_reports_module_aliases():
+    tree = ast.parse(
+        "JsonObject = dict[str, object]\n"
+        "JsonValue: TypeAlias = object\n"
+        "NOT_JSON = object\n"
+        "def nested():\n"
+        "    JsonScalar = str\n"
+    )
+
+    definitions = _local_json_alias_definitions_in_tree(
+        tree,
+        relative_path="sample.py",
+    )
+
+    assert definitions == frozenset(
+        {
+            _LocalJsonAliasDefinition(
+                relative_path="sample.py",
+                name="JsonObject",
+                line=1,
+            ),
+            _LocalJsonAliasDefinition(
+                relative_path="sample.py",
+                name="JsonValue",
+                line=2,
+            ),
+        }
+    )
+
+
+def test_local_json_alias_guard_rejects_stale_allowlist_entries():
+    allowed = frozenset(
+        {
+            _LocalJsonAliasException(
+                relative_path="sample.py",
+                name="JsonObject",
+            )
+        }
+    )
+
+    with pytest.raises(AssertionError, match="Stale local Flow Json"):
+        _assert_local_json_alias_definitions_are_allowed(
+            frozenset(),
+            allowed=allowed,
+        )
+
+
 def test_flow_non_api_modules_do_not_raise_fastapi_http_exception():
     """Flow application/runtime code should raise EXCEPTION_MAP-registered errors."""
     offenders: list[str] = []
@@ -679,6 +983,31 @@ def test_flow_non_api_modules_do_not_raise_fastapi_http_exception():
                 fastapi_modules=fastapi_modules,
             ):
                 offenders.append(f"{path.relative_to(FLOW_SOURCE_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_platform_exception_module_import_scanner_detects_banned_import_forms():
+    tree = ast.parse(
+        "import intric.main.exceptions\n"
+        "import intric.main.exceptions as platform_exceptions\n"
+        "from intric.main import exceptions\n"
+        "from intric.main import exceptions as exc\n"
+        "from intric.main.exceptions import NotFoundException\n"
+        "from intric.main.exceptions import BadRequestException as BadRequest\n"
+        "from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError\n"
+    )
+
+    assert _imports_platform_exception_module(tree) == [1, 2, 3, 4, 5, 6]
+
+
+def test_flow_run_repositories_do_not_import_platform_exception_module():
+    offenders: list[str] = []
+    for relative_path in sorted(FLOW_RUN_REPOSITORY_PLATFORM_EXCEPTION_IMPORT_BAN):
+        path = FLOW_SOURCE_ROOT / relative_path
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for lineno in _imports_platform_exception_module(tree):
+            offenders.append(f"{relative_path}:{lineno}")
 
     assert offenders == []
 
@@ -814,6 +1143,60 @@ def test_flow_outbox_delivery_status_sql_text_matches_vocabulary():
     sql_status_values = set(re.findall(r"'([^']+)'", "\n".join(sql_texts)))
 
     assert sql_status_values == expected
+
+
+def test_flow_run_step_attempt_key_tables_have_explicit_ownership_policy():
+    expected_tables = tuple(
+        sorted(
+            [
+                *FLOW_RUN_STEP_ATTEMPT_CHILD_FK_POLICIES,
+                *FLOW_RUN_PRE_ATTEMPT_INPUT_PROJECTION_TABLES,
+            ]
+        )
+    )
+    tables = _flow_run_tables_with_step_attempt_key()
+
+    assert tuple(table.name for table in tables) == expected_tables
+
+    for table in tables:
+        if table.name in FLOW_RUN_PRE_ATTEMPT_INPUT_PROJECTION_TABLES:
+            attempt_fks = [
+                constraint.name
+                for constraint in _foreign_key_constraints(table)
+                if _targets_flow_step_attempt_natural_key(constraint)
+            ]
+            assert attempt_fks == [], (
+                f"{table.name} stores initial and queued-rerun input projections "
+                "before step attempts exist; changing this requires moving "
+                "projection writes into attempt creation."
+            )
+            assert (
+                _check_constraint_sql_by_name(
+                    table,
+                    FLOW_RUN_STEP_INPUT_FILES_POSITIVE_ATTEMPT_CONSTRAINT,
+                )
+                == "attempt_no >= 1"
+            )
+            assert (
+                _check_constraint_sql_by_name(
+                    table,
+                    FLOW_RUN_STEP_INPUT_FILES_REMOVED_INITIAL_ATTEMPT_CONSTRAINT,
+                )
+                is None
+            )
+            continue
+
+        expected_policy = FLOW_RUN_STEP_ATTEMPT_CHILD_FK_POLICIES.get(table.name)
+        assert expected_policy is not None
+        expected_fk_name, expected_ondelete = expected_policy
+        constraint = _foreign_key_constraint_by_name(table, expected_fk_name)
+
+        assert constraint is not None
+        assert tuple(element.parent.name for element in constraint.elements) == (
+            FLOW_RUN_STEP_ATTEMPT_KEY_COLUMNS
+        )
+        assert _targets_flow_step_attempt_natural_key(constraint)
+        assert constraint.ondelete == expected_ondelete
 
 
 def test_container_provider_erasure_detector_catches_report_unknown_member_spacing(

@@ -20,31 +20,37 @@ from intric.database.tables.flow_tables import (
     FlowSteps,
 )
 from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.assistant_execution_snapshot import (
-    build_assistant_execution_snapshot,
-    stable_hash,
-)
+from intric.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from intric.flows.domain.flow import (
     Flow,
+    FlowPersistedJsonObject,
     FlowRunStatus,
     FlowStep,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    JsonObject,
+)
+from intric.flows.domain.review_checkpoint_exceptions import (
+    FlowReviewCheckpointStepResultIncompleteError,
+    FlowReviewMultipleActiveCheckpointsError,
+    FlowReviewOpenBlockedByActiveCheckpointError,
 )
 from intric.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import build_published_definition_json
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from intric.main.container.container import Container
 from intric.main.exceptions import TypedIOValidationException
@@ -151,7 +157,7 @@ def _build_review_pause_flow(
                     output_mode="pass_through",
                     output_type="text",
                     output_contract=None,
-                    input_bindings={"answer": "{{step_1.output.text}}"},
+                    input_bindings={"question": "{{step_1.output.text}}"},
                     output_classification_override=None,
                     mcp_policy="inherit",
                     input_config=None,
@@ -170,7 +176,7 @@ def _build_review_pause_flow(
                     output_mode="pass_through",
                     output_type="text",
                     output_contract=None,
-                    input_bindings={"answer": "{{step_2.output.text}}"},
+                    input_bindings={"question": "{{step_2.output.text}}"},
                     output_classification_override=None,
                     mcp_policy="inherit",
                     input_config=None,
@@ -236,7 +242,7 @@ async def _create_review_pause_runtime_context(
     first_step_output_contract: dict[str, object] | None = None,
 ) -> _ReviewPauseRuntimeContext:
     enable_autobegin_for_flow_task_session(session)
-    container = Container(
+    setup_container = Container(
         session=providers.Object(session),
         user=providers.Object(admin_user),
         tenant=providers.Object(test_tenant),
@@ -294,7 +300,6 @@ async def _create_review_pause_runtime_context(
     await version_repo.create(
         flow_id=flow.id,
         version=1,
-        definition_checksum=stable_hash(definition_json),
         definition_json=definition_json,
         tenant_id=admin_user.tenant_id,
     )
@@ -302,29 +307,37 @@ async def _create_review_pause_runtime_context(
         flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
-    run = await container.flow_run_service().create_run(
+    create_result = await setup_container.flow_run_service().create_run(
         flow_id=flow.id,
         input_payload_json={"question": "What needs review?"},
         expected_flow_version=1,
         step_inputs=None,
         idempotency_key=f"review-pause-{uuid4()}",
     )
+    assert create_result.created is True
+    run = create_result.run
     audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
+    worker_container = Container(
+        session=providers.Object(session),
+        tenant=providers.Object(test_tenant),
+    )
     executor = FlowRunExecutor(
-        user=admin_user,
+        runtime_actor=FlowRunActor.from_user(user=admin_user),
         session=session,
-        flow_repo=container.flow_repo(),
-        flow_run_repo=container.flow_run_repo(),
-        flow_run_terminalizer=container.flow_run_terminalizer(),
-        flow_version_repo=container.flow_version_repo(),
-        space_repo=container.space_repo(),
+        flow_repo=worker_container.flow_repo(),
+        flow_run_repo=worker_container.flow_run_repo(),
+        flow_run_rerun_repo=worker_container.flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=worker_container.flow_run_review_checkpoint_repo(),
+        flow_run_terminalizer=worker_container.flow_run_terminalizer(),
+        flow_version_repo=worker_container.flow_version_repo(),
+        space_repo=worker_container.tenant_scoped_space_repo(),
         completion_service=completion_service,
-        file_repo=container.file_repo(),
-        template_asset_service=container.flow_template_asset_service(),
-        encryption_service=container.encryption_service(),
+        file_repo=worker_container.file_repo(),
+        template_asset_repo=worker_container.flow_template_asset_repo(),
+        encryption_service=worker_container.encryption_service(),
         audit_service=audit_service,
-        references_service=container.references_service(),
-        transcriber=container.transcriber(),
+        references_service=worker_container.references_service(),
+        transcriber=worker_container.transcriber(),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,
@@ -334,7 +347,7 @@ async def _create_review_pause_runtime_context(
     )
     executor._load_assistant = AsyncMock(return_value=runtime_assistant)
     return _ReviewPauseRuntimeContext(
-        container=container,
+        container=setup_container,
         executor=executor,
         run_id=run.id,
         flow_id=flow.id,
@@ -457,14 +470,15 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
         )
         await session.commit()
 
-        original_open = FlowRunRepository.open_review_checkpoint_for_completed_step
+        original_open = (
+            FlowRunReviewCheckpointRepository.open_review_checkpoint_for_completed_step
+        )
 
         async def _terminalize_then_open(self, **kwargs):
             async with sessionmanager.session() as terminal_session:
                 enable_autobegin_for_flow_task_session(terminal_session)
                 terminal_container = Container(
                     session=providers.Object(terminal_session),
-                    user=providers.Object(admin_user),
                     tenant=providers.Object(test_tenant),
                 )
                 await terminal_container.flow_run_terminalizer().terminalize_run(
@@ -482,7 +496,11 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
                             if target_status == FlowRunStatus.CANCELLED
                             else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
                         ),
-                        code=f"terminalized_{target_status.value}",
+                        code=(
+                            FlowApiErrorCode.RUN_USER_CANCELLED
+                            if target_status == FlowRunStatus.CANCELLED
+                            else FlowApiErrorCode.RUN_WORKER_STALLED
+                        ),
                         message=f"Run was terminalized as {target_status.value}.",
                     ),
                 )
@@ -490,7 +508,7 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
             return await original_open(self, **kwargs)
 
         monkeypatch.setattr(
-            FlowRunRepository,
+            FlowRunReviewCheckpointRepository,
             "open_review_checkpoint_for_completed_step",
             _terminalize_then_open,
         )
@@ -540,6 +558,121 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
         row.action for row in outbox_rows
     }
     assert FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED.value not in {
+        row.source for row in outbox_rows
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("review_open_error", "expected_code", "expected_message"),
+    [
+        (
+            FlowReviewOpenBlockedByActiveCheckpointError(active_checkpoint_id=uuid4()),
+            "flow_review_open_active_conflict_invariant",
+            "Review checkpoint opening failed because another checkpoint is active.",
+        ),
+        (
+            FlowReviewCheckpointStepResultIncompleteError(
+                step_id=uuid4(), attempt_no=1
+            ),
+            "flow_review_open_step_result_incomplete_invariant",
+            "Review checkpoint opening failed because the completed step result was unavailable.",
+        ),
+        (
+            FlowReviewMultipleActiveCheckpointsError(),
+            "flow_review_open_multiple_active_checkpoints_invariant",
+            "Review checkpoint opening failed because multiple checkpoints are active.",
+        ),
+    ],
+)
+async def test_review_checkpoint_open_invariant_terminalizes_failed_run(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    review_open_error,
+    expected_code,
+    expected_message,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion="This answer needs review.",
+                total_token_count=17,
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        await session.commit()
+
+        async def _raise_review_open_invariant(self, **_kwargs):
+            raise review_open_error
+
+        monkeypatch.setattr(
+            FlowRunReviewCheckpointRepository,
+            "open_review_checkpoint_for_completed_step",
+            _raise_review_open_invariant,
+        )
+
+        worker_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            celery_task_id="review-open-invariant",
+            retry_count=0,
+        )
+
+    (
+        run_row,
+        checkpoint_rows,
+        step_result_rows,
+        attempt_rows,
+        outbox_rows,
+    ) = await _review_pause_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert worker_result == {"status": "failed", "error": expected_message}
+    completion_service.get_response.assert_awaited_once()
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert run_row.error_json is not None
+    assert run_row.error_json["code"] == expected_code
+    assert run_row.error_json["message"] == expected_message
+    assert checkpoint_rows == []
+    assert [row.status for row in step_result_rows] == [
+        FlowStepResultStatus.COMPLETED.value,
+        FlowStepResultStatus.FAILED.value,
+        FlowStepResultStatus.FAILED.value,
+    ]
+    assert step_result_rows[0].output_payload_json == {
+        "text": "This answer needs review.",
+        "webhook_delivered": False,
+    }
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
+    assert "flow_run_review_checkpoint_opened" not in {
+        row.action for row in outbox_rows
+    }
+    assert "flow_run_failed" in {row.action for row in outbox_rows}
+    assert FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED.value not in {
+        row.source for row in outbox_rows
+    }
+    assert FlowRunLifecycleSource.EXECUTOR_FAILED.value in {
         row.source for row in outbox_rows
     }
 
@@ -780,27 +913,27 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
     space_factory,
     assistant_factory,
 ):
-    output_contract: JsonObject = {
+    output_contract: FlowPersistedJsonObject = {
         "type": "object",
         "required": ["summary"],
         "properties": {"summary": {"type": "string"}},
         "additionalProperties": False,
     }
-    original_payload: JsonObject = {
+    original_payload: FlowPersistedJsonObject = {
         "text": '{"summary":"This answer needs review."}',
         "structured": {"summary": "This answer needs review."},
         "webhook_delivered": False,
     }
-    invalid_payload: JsonObject = {
+    invalid_payload: FlowPersistedJsonObject = {
         "text": '{"wrong":"shape"}',
         "structured": {"wrong": "shape"},
         "webhook_delivered": False,
     }
-    missing_structured_payload: JsonObject = {
+    missing_structured_payload: FlowPersistedJsonObject = {
         "text": '{"summary":"Missing structured slot."}',
         "webhook_delivered": False,
     }
-    valid_payload: JsonObject = {
+    valid_payload: FlowPersistedJsonObject = {
         "text": '{"summary":"Edited answer."}',
         "structured": {"summary": "Edited answer."},
         "webhook_delivered": False,

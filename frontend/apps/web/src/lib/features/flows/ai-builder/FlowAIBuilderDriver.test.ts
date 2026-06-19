@@ -303,8 +303,7 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.draftSessions).toEqual([draft]);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith("/api/v1/flows/ai-builder/sessions", {
-      method: "get",
-      params: {}
+      method: "get"
     });
   });
 
@@ -688,8 +687,11 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.session?.telemetry?.total_tokens_total).toBe(1100);
     expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
     expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/flows/ai-builder/sessions/session-1",
-      expect.objectContaining({ method: "get" })
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({
+        method: "get",
+        params: { path: { session_id: "session-1" } }
+      })
     );
   });
 
@@ -742,8 +744,11 @@ describe("FlowAIBuilderDriver", () => {
     await driver.sendMessage("Build a flow", undefined, ["file-1"]);
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/flows/ai-builder/sessions/session-1",
-      expect.objectContaining({ method: "get" })
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({
+        method: "get",
+        params: { path: { session_id: "session-1" } }
+      })
     );
     expect(stream).toHaveBeenCalledOnce();
   });
@@ -767,8 +772,11 @@ describe("FlowAIBuilderDriver", () => {
     await driver.removeAttachment("file-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/flows/ai-builder/sessions/session-1/attachments/file-1",
-      expect.objectContaining({ method: "delete" })
+      "/api/v1/flows/ai-builder/sessions/{session_id}/attachments/{file_id}",
+      expect.objectContaining({
+        method: "delete",
+        params: { path: { session_id: "session-1", file_id: "file-1" } }
+      })
     );
     expect(driver.state.session?.attachments).toEqual([]);
   });
@@ -919,15 +927,16 @@ describe("FlowAIBuilderDriver", () => {
     const result = await driver.unpublishAndApplyPlan(12);
 
     expect(result.flow_id).toBe("flow-1");
-    expect(fetch).toHaveBeenNthCalledWith(1, "/api/v1/flows/flow-1/unpublish/", {
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/v1/flows/{id}/unpublish/", {
       method: "post",
-      params: {}
+      params: { path: { id: "flow-1" } }
     });
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/flows/ai-builder/plans/plan-1/apply",
+      "/api/v1/flows/ai-builder/plans/{plan_id}/apply",
       expect.objectContaining({
         method: "post",
+        params: { path: { plan_id: "plan-1" } },
         requestBody: {
           "application/json": {
             expected_revision: 12
@@ -1012,10 +1021,14 @@ describe("FlowAIBuilderDriver", () => {
 
     await driver.revisePlan("keep_current_description");
 
-    expect(fetch).toHaveBeenCalledWith("/api/v1/flows/ai-builder/plans/plan-1/revise", {
+    expect(fetch).toHaveBeenCalledWith("/api/v1/flows/ai-builder/plans/{plan_id}/revise", {
       method: "post",
-      body: JSON.stringify({ type: "keep_current_description" }),
-      headers: { "Content-Type": "application/json" }
+      params: { path: { plan_id: "plan-1" } },
+      requestBody: {
+        "application/json": {
+          type: "keep_current_description"
+        }
+      }
     });
     expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
     expect(driver.state.currentPlan?.edit_result_json).toEqual(editResult);

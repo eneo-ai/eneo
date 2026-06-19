@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from uuid import UUID
 
 from intric.flows.application.flow_run_terminalization import (
@@ -9,11 +8,13 @@ from intric.flows.application.flow_run_terminalization import (
     FlowRunTerminalizer,
 )
 from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
-from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.enums import ACTIVE_FLOW_STEP_RESULT_STATUSES, FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.principal import FlowPrincipal
 
@@ -22,8 +23,9 @@ from intric.flows.principal import FlowPrincipal
 class RunOutcome:
     result_status: str
     flow_status: str | None = None
+    error_code: FlowApiErrorCode | None = None
     error_message: str | None = None
-    output_payload_json: dict[str, Any] | None = None
+    output_payload_json: FlowPersistedJsonObject | None = None
     reason: str | None = None
 
 
@@ -38,13 +40,11 @@ def determine_run_outcome(*, results: list[FlowStepResult]) -> RunOutcome:
         return RunOutcome(
             result_status="failed",
             flow_status="failed",
+            error_code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
             error_message="One or more flow steps failed.",
         )
 
-    if any(
-        item.status in (FlowStepResultStatus.PENDING, FlowStepResultStatus.RUNNING)
-        for item in results
-    ):
+    if any(item.status in ACTIVE_FLOW_STEP_RESULT_STATUSES for item in results):
         return RunOutcome(
             result_status="skipped",
             reason="run_in_progress",
@@ -54,6 +54,7 @@ def determine_run_outcome(*, results: list[FlowStepResult]) -> RunOutcome:
         return RunOutcome(
             result_status="cancelled",
             flow_status="cancelled",
+            error_code=FlowApiErrorCode.RUN_CANCELLED,
             error_message="One or more steps were cancelled.",
         )
 
@@ -102,7 +103,7 @@ async def finalize_run_from_current_results(
     run_error = (
         FlowRunError.from_source(
             failure_source,
-            code=outcome.reason or failure_source.value,
+            code=_terminal_run_error_code(outcome),
             message=(
                 outcome.error_message
                 or outcome.reason
@@ -130,3 +131,11 @@ async def finalize_run_from_current_results(
         payload={"status": terminalization.run.status.value},
         terminalization=terminalization,
     )
+
+
+def _terminal_run_error_code(outcome: RunOutcome) -> FlowApiErrorCode:
+    if outcome.error_code is None:
+        raise RuntimeError(
+            "Terminal failed/cancelled run outcome must include error_code."
+        )
+    return outcome.error_code

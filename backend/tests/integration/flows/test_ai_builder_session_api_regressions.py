@@ -49,7 +49,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -510,6 +510,61 @@ async def _create_proposed_ai_builder_plan(
             lease=turn.lease,
         )
         return session_id, tenant_id, stored_plan.plan.id, turn.lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_list_sessions_with_draft_titles_reads_title_and_nulls_in_recency_order(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    admin_user,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Session List Titles",
+    )
+    session_id, tenant_id, _, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+    empty_session_id = UUID(
+        await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+    )
+
+    async with db_container() as container:
+        now = datetime.now(timezone.utc)
+        await container.session().execute(
+            update(BuilderSessions)
+            .where(BuilderSessions.id == session_id)
+            .values(updated_at=now - timedelta(minutes=1))
+        )
+        await container.session().execute(
+            update(BuilderSessions)
+            .where(BuilderSessions.id == empty_session_id)
+            .values(updated_at=now)
+        )
+
+        repo = AIBuilderRepository(container.session())
+        sessions = await repo.list_sessions_with_draft_titles(
+            tenant_id=tenant_id,
+            actor_user_id=admin_user.id,
+        )
+
+    assert [(session.id, title) for session, title in sessions] == [
+        (empty_session_id, None),
+        (session_id, "Testplan"),
+    ]
 
 
 @pytest.mark.integration

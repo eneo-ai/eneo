@@ -16,14 +16,12 @@ from intric.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
 )
-from intric.flows import (
+from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from intric.flows.domain.flow import (
     Flow,
-    FlowFactory,
-    FlowRepository,
     FlowStep,
     FlowStepResult,
     FlowStepResultStatus,
-    FlowVersionRepository,
 )
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
@@ -490,7 +488,6 @@ async def test_save_step_result_upserts_on_run_and_step(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="checksum-v1",
             definition_json={"steps": [{"id": str(step_id), "step_order": 1}]},
             tenant_id=admin_user.tenant_id,
         )
@@ -531,6 +528,7 @@ async def test_save_step_result_upserts_on_run_and_step(
             flow_run_id=run_row.id,
             result=first_result,
             tenant_id=admin_user.tenant_id,
+            attempt_no=None,
         )
 
         updated_result = FlowStepResult(
@@ -557,6 +555,7 @@ async def test_save_step_result_upserts_on_run_and_step(
             flow_run_id=run_row.id,
             result=updated_result,
             tenant_id=admin_user.tenant_id,
+            attempt_no=1,
         )
 
         count = await session.scalar(
@@ -959,7 +958,6 @@ async def test_flow_delete_preserves_steps_and_flow_managed_assistant_when_runs_
         await version_repo.create(
             flow_id=created.id,
             version=1,
-            definition_checksum="checksum-preserve-history",
             definition_json={"steps": [{"id": str(step_id), "step_order": 1}]},
             tenant_id=admin_user.tenant_id,
         )

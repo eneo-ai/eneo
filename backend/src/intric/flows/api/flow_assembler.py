@@ -1,22 +1,28 @@
 from __future__ import annotations
 
-from typing import Any, Sequence
+import logging
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 from uuid import UUID
+
+from pydantic import ValidationError
 
 from intric.authentication.auth_models import FlowServicePrincipalActorPublic
 from intric.flows.api.flow_models import (
     FlowPublic,
-    FlowReviewCheckpointRuntimePathsPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStepPublic,
     FlowRunStepRerunResponse,
-    FlowRuntimePathsPublic,
-    FlowRuntimePublic,
     FlowRunTokenUsagePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
+    FlowStepDiagnosticPublic,
     FlowStepUpdateRequest,
+)
+from intric.flows.api.flow_runtime_paths import (
+    FlowRuntimePublic,
+    build_flow_runtime_paths,
 )
 from intric.flows.domain.flow import (
     Flow,
@@ -35,6 +41,12 @@ from intric.flows.http_transport import (
     is_authored_config,
     redact_authored_config,
 )
+
+logger = logging.getLogger(__name__)
+# Keep drift logs searchable without dumping arbitrary persisted payload keys.
+_MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES = 3
+_MAX_LOGGED_DIAGNOSTIC_EXTRA_KEYS = 3
+_PUBLIC_STEP_DIAGNOSTIC_FIELDS = frozenset(FlowStepDiagnosticPublic.model_fields)
 
 
 class FlowAssembler:
@@ -74,60 +86,18 @@ class FlowAssembler:
     def to_sparse_public(self, flow: FlowSparse) -> FlowSparsePublic:
         return FlowSparsePublic.model_validate(flow)
 
-    def to_runtime_public(self, flow: Flow) -> FlowRuntimePublic:
-        if flow.id is None:
-            raise ValueError("Flow id must be present for runtime projection.")
-        if flow.published_version is None:
-            raise ValueError(
-                "Published flow version must be present for runtime projection."
-            )
+    def to_runtime_public(
+        self, flow: Flow, *, published_version: int, api_prefix: str
+    ) -> FlowRuntimePublic:
+        flow_id = flow.require_persisted_id()
 
-        flow_id = str(flow.id)
-        runtime_paths = FlowRuntimePathsPublic(
-            run_contract=f"/api/v1/flows/{flow_id}/run-contract/",
-            graph=f"/api/v1/flows/{flow_id}/graph/",
-            upload_flow_file=f"/api/v1/flows/{flow_id}/files/",
-            upload_step_runtime_file_template=(
-                f"/api/v1/flows/{flow_id}/steps/{{step_id}}/runtime-files/"
-            ),
-            create_run=f"/api/v1/flows/{flow_id}/runs/",
-            list_runs=f"/api/v1/flows/{flow_id}/runs/",
-            review_checkpoints=FlowReviewCheckpointRuntimePathsPublic(
-                active_template=(
-                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
-                    "review-checkpoints/active/"
-                ),
-                edit_template=(
-                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
-                    "review-checkpoints/{checkpoint_id}/"
-                ),
-                approve_template=(
-                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
-                    "review-checkpoints/{checkpoint_id}/approve/"
-                ),
-                reject_template=(
-                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
-                    "review-checkpoints/{checkpoint_id}/reject/"
-                ),
-                resume_template=(
-                    f"/api/v1/flows/{flow_id}/runs/{{run_id}}/"
-                    "review-checkpoints/{checkpoint_id}/resume/"
-                ),
-            ),
-            get_graph_for_run_template=f"/api/v1/flows/{flow_id}/graph/?run_id={{run_id}}",
-            get_run_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/",
-            list_steps_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/steps/",
-            evidence_template=f"/api/v1/flows/{flow_id}/runs/{{run_id}}/evidence/",
-            artifact_signed_url_template=(
-                f"/api/v1/flows/{flow_id}/runs/{{run_id}}/artifacts/{{file_id}}/signed-url/"
-            ),
-        )
+        runtime_paths = build_flow_runtime_paths(flow_id, api_prefix=api_prefix)
         return FlowRuntimePublic(
-            id=flow.id,
+            id=flow_id,
             space_id=flow.space_id,
             name=flow.name,
             description=flow.description,
-            published_version=flow.published_version,
+            published_version=published_version,
             created_at=flow.created_at,
             updated_at=flow.updated_at,
             runtime_paths=runtime_paths,
@@ -156,12 +126,13 @@ class FlowAssembler:
         self,
         result: FlowStepResult,
         *,
-        diagnostics: Sequence[dict[str, Any]] = (),
+        runtime_input_file_ids: Sequence[UUID] = (),
         result_files: Sequence[FlowRunStepResultFile] = (),
     ) -> FlowRunStepPublic:
         return FlowRunStepPublic.model_validate(result).model_copy(
             update={
-                "diagnostics": list(diagnostics),
+                "diagnostics": _project_step_diagnostics(result),
+                "runtime_input_file_ids": list(runtime_input_file_ids),
                 "result_files": list(result_files),
             }
         )
@@ -225,3 +196,84 @@ def _redact_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
     authored = HttpAuthoredConfig.model_validate(config)
     redacted = redact_authored_config(authored)
     return redacted.model_dump(mode="json")
+
+
+def _project_step_diagnostics(
+    result: FlowStepResult,
+) -> list[FlowStepDiagnosticPublic]:
+    input_payload = result.input_payload_json
+    if not isinstance(input_payload, Mapping):
+        return []
+
+    raw_diagnostics_value = input_payload.get("diagnostics")
+    if not isinstance(raw_diagnostics_value, list):
+        return []
+    raw_diagnostics = cast(list[object], raw_diagnostics_value)
+
+    diagnostics: list[FlowStepDiagnosticPublic] = []
+    dropped_count = 0
+    trimmed_count = 0
+    error_types: list[str] = []
+    trimmed_keys: list[str] = []
+
+    for raw_item in raw_diagnostics:
+        if not isinstance(raw_item, Mapping):
+            dropped_count += 1
+            if len(error_types) < _MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES:
+                error_types.append("not_mapping")
+            continue
+        raw_mapping = cast(Mapping[Any, Any], raw_item)
+        public_payload, extra_keys = _split_public_step_diagnostic_payload(raw_mapping)
+        if extra_keys:
+            trimmed_count += 1
+            for key in extra_keys:
+                if len(trimmed_keys) >= _MAX_LOGGED_DIAGNOSTIC_EXTRA_KEYS:
+                    break
+                trimmed_keys.append(key)
+        try:
+            diagnostics.append(FlowStepDiagnosticPublic.model_validate(public_payload))
+        except ValidationError as exc:
+            dropped_count += 1
+            if len(error_types) < _MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES:
+                error_type = "validation_error"
+                errors = exc.errors()
+                if errors:
+                    error_type = errors[0].get("type", "validation_error")
+                error_types.append(error_type)
+
+    if trimmed_count:
+        logger.warning(
+            "flow_step_diagnostics_projection_trimmed",
+            extra={
+                "run_id": str(result.flow_run_id),
+                "step_id": str(result.step_id),
+                "trimmed_count": trimmed_count,
+                "trimmed_keys": trimmed_keys,
+            },
+        )
+
+    if dropped_count:
+        logger.warning(
+            "flow_step_diagnostics_projection_dropped",
+            extra={
+                "run_id": str(result.flow_run_id),
+                "step_id": str(result.step_id),
+                "dropped_count": dropped_count,
+                "error_types": error_types,
+            },
+        )
+
+    return diagnostics
+
+
+def _split_public_step_diagnostic_payload(
+    raw_item: Mapping[Any, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    public_payload: dict[str, Any] = {}
+    extra_keys: list[str] = []
+    for key, value in raw_item.items():
+        if isinstance(key, str) and key in _PUBLIC_STEP_DIAGNOSTIC_FIELDS:
+            public_payload[key] = value
+        else:
+            extra_keys.append(str(key))
+    return public_payload, extra_keys

@@ -1,9 +1,13 @@
 export const load = async (event) => {
   const { intric } = await event.parent();
 
-  const securityClassifications = await intric.securityClassifications.list();
+  const [securityClassifications, flowClassificationRetentionPolicies] = await Promise.all([
+    intric.securityClassifications.list(),
+    intric.settings.listFlowClassificationRetentionPolicies()
+  ]);
 
   return {
-    securityClassifications
+    securityClassifications,
+    flowClassificationRetentionPolicies
   };
 };

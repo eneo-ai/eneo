@@ -20,6 +20,7 @@ from intric.embedding_models.application.embedding_model_crud_service import (
 from intric.icons.icon_repo import IconRepository
 from intric.main.exceptions import (
     BadRequestException,
+    ConflictException,
     NotFoundException,
     UnauthorizedException,
     UniqueException,
@@ -505,14 +506,6 @@ class SpaceService:
             affected_mcp_servers=affected_mcp_servers,
         )
 
-    async def delete_personal_space(self, user: UserInDB):
-        space = await self.repo.get_personal_space(user.id)
-
-        if space is not None:
-            assert space.id is not None
-            await self._revoke_space_api_keys(space)
-            await self.repo.delete(space.id)
-
     async def delete_space(self, id: UUID):
         space = await self.get_space(id)
         actor = self._get_actor(space)
@@ -522,6 +515,15 @@ class SpaceService:
 
         icon_id = space.icon_id
         assert space.id is not None
+
+        if await self.repo.has_flow_delete_blockers(space.id):
+            raise ConflictException(
+                "Space contains Flow history or Flow-owned draft resources. "
+                "Remove draft Flows first; spaces with Flow run history or "
+                "package-import provenance require Flow data purge before deletion.",
+                code="space_contains_flow_delete_blockers",
+                context={"space_id": str(space.id)},
+            )
 
         await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)

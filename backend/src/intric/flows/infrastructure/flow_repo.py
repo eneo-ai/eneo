@@ -533,12 +533,11 @@ class FlowRepository:
         *,
         expected_revision: int | None = None,
     ) -> Flow:
-        if flow.id is None:
-            raise BadRequestException("Flow id is required for update.")
+        flow_id = flow.require_persisted_id()
 
         stmt = (
             sa.update(Flows)
-            .where(Flows.id == flow.id)
+            .where(Flows.id == flow_id)
             .where(Flows.tenant_id == tenant_id)
             .where(Flows.deleted_at.is_(None))
             .values(
@@ -559,7 +558,7 @@ class FlowRepository:
             if expected_revision is not None:
                 exists_stmt = (
                     sa.select(Flows.id)
-                    .where(Flows.id == flow.id)
+                    .where(Flows.id == flow_id)
                     .where(Flows.tenant_id == tenant_id)
                     .where(Flows.deleted_at.is_(None))
                 )
@@ -573,10 +572,10 @@ class FlowRepository:
             raise NotFoundException("Flow not found.")
 
         await self._sync_flow_steps(
-            flow_id=flow.id, tenant_id=tenant_id, steps=flow.steps
+            flow_id=flow_id, tenant_id=tenant_id, steps=flow.steps
         )
 
-        return await self.get(flow.id, tenant_id)
+        return await self.get(flow_id, tenant_id)
 
     async def delete(self, flow_id: UUID, tenant_id: UUID) -> None:
         stmt = (
@@ -637,8 +636,9 @@ class FlowRepository:
         flow_run_id: UUID,
         result: FlowStepResult,
         tenant_id: UUID,
+        *,
         session: AsyncSession | None = None,
-        attempt_no: int = 1,
+        attempt_no: int | None,
         result_file_references: Sequence[FlowStepResultFileReference] | None = None,
     ) -> FlowStepResult | None:
         """Persist a step result and optionally replace this attempt's file rows.
@@ -648,6 +648,14 @@ class FlowRepository:
         non-success updates; an empty sequence intentionally clears them.
         """
         db_session = session or self.session
+
+        if result.status == FlowStepResultStatus.COMPLETED and attempt_no is None:
+            raise ValueError("attempt_no is required for completed Flow step results.")
+        result_file_attempt_no: int | None = None
+        if result_file_references is not None and attempt_no is None:
+            raise ValueError("attempt_no is required for Flow step result files.")
+        if result_file_references is not None:
+            result_file_attempt_no = attempt_no
 
         payload: dict[str, Any] = {
             "flow_run_id": flow_run_id,
@@ -663,6 +671,7 @@ class FlowRepository:
             "num_tokens_input": result.num_tokens_input,
             "num_tokens_output": result.num_tokens_output,
             "status": result.status.value,
+            "error_code": result.error_code,
             "error_message": result.error_message,
             "flow_step_execution_hash": result.flow_step_execution_hash,
         }
@@ -698,12 +707,14 @@ class FlowRepository:
         saved = await db_session.scalar(stmt)
         if saved is None:
             return None
-        await self._replace_step_result_file_rows(
-            db_session=db_session,
-            result_row=saved,
-            result_file_references=result_file_references,
-            attempt_no=attempt_no,
-        )
+        if result_file_references is not None:
+            assert result_file_attempt_no is not None
+            await self._replace_step_result_file_rows(
+                db_session=db_session,
+                result_row=saved,
+                result_file_references=result_file_references,
+                attempt_no=result_file_attempt_no,
+            )
         return self.factory.from_flow_step_result_db(saved)
 
     async def _replace_step_result_file_rows(
@@ -711,11 +722,9 @@ class FlowRepository:
         *,
         db_session: AsyncSession,
         result_row: FlowStepResults,
-        result_file_references: Sequence[FlowStepResultFileReference] | None,
+        result_file_references: Sequence[FlowStepResultFileReference],
         attempt_no: int,
     ) -> None:
-        if result_file_references is None:
-            return
         await db_session.execute(
             sa.delete(FlowRunStepResultFiles)
             .where(FlowRunStepResultFiles.step_result_id == result_row.id)

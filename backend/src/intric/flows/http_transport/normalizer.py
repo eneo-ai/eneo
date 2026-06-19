@@ -4,5 +4,5 @@ from collections.abc import Mapping
 
 
 def is_authored_config(raw: Mapping[str, object] | None) -> bool:
-    """Check if config is in authored format (has ``auth`` key)."""
+    """Return whether the payload declares the authored HTTP config shape."""
     return isinstance(raw, Mapping) and "auth" in raw

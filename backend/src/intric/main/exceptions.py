@@ -60,6 +60,7 @@ class ErrorCodes(int, Enum):
     # referenced by an active resource (assistants, apps, services,
     # assistant/app templates). Space membership alone does not block.
     MODEL_IN_USE = 9040
+    CONFLICT = 9041
 
 
 class NotFoundException(Exception):
@@ -152,6 +153,19 @@ class BadRequestException(Exception):
 
 
 class ResourceGoneException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
+class ConflictException(Exception):
     def __init__(
         self,
         message: str = "",
@@ -456,6 +470,7 @@ EXCEPTION_MAP = {
     ),
     BadRequestException: (400, None, ErrorCodes.BAD_REQUEST),
     ResourceGoneException: (410, None, ErrorCodes.RESOURCE_GONE),
+    ConflictException: (409, None, ErrorCodes.CONFLICT),
     ModelInUseException: (
         400,
         "Model is currently in use and cannot be deleted.",

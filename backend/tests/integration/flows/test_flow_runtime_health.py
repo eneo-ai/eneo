@@ -113,7 +113,6 @@ async def _create_published_flow(
     await version_repo.create(
         flow_id=flow.id,
         version=1,
-        definition_checksum="runtime-health",
         definition_json={
             "steps": [
                 {
@@ -285,6 +284,15 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             sa.update(FlowRuns)
             .where(FlowRuns.id == awaiting_review.id)
             .values(status=FlowRunStatus.AWAITING_REVIEW.value)
+        )
+        await run_repo.create_or_get_attempt_started(
+            run_id=awaiting_review.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=flow.steps[0].id,
+            step_order=1,
+            attempt_no=1,
+            celery_task_id="runtime-health-review",
         )
         await session.execute(
             sa.insert(FlowRunReviewCheckpoints).values(

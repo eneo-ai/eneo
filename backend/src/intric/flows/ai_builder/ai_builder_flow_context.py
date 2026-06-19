@@ -11,7 +11,7 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshots,
 )
-from intric.flows.domain.flow import Flow, FlowStep, JsonObject
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
@@ -123,12 +123,12 @@ def _build_detailed_flow_context(
     if flow.metadata_json:
         form_schema = flow.metadata_json.get("form_schema")
         if isinstance(form_schema, dict):
-            fields = cast(JsonObject, form_schema).get("fields")
+            fields = cast(FlowPersistedJsonObject, form_schema).get("fields")
             if isinstance(fields, list) and fields:
                 lines.append("\nFormulärfält:")
                 for field in cast(list[object], fields):
                     if isinstance(field, dict):
-                        field_dict = cast(JsonObject, field)
+                        field_dict = cast(FlowPersistedJsonObject, field)
                         lines.append(
                             f"  - {field_dict.get('name', '?')} ({field_dict.get('type', '?')})"
                         )
@@ -319,14 +319,14 @@ def _form_field_names(flow: Flow) -> list[str]:
     form_schema = metadata_json.get("form_schema")
     if not isinstance(form_schema, dict):
         return []
-    fields = cast(JsonObject, form_schema).get("fields")
+    fields = cast(FlowPersistedJsonObject, form_schema).get("fields")
     if not isinstance(fields, list):
         return []
     return [
-        str(cast(JsonObject, field).get("name")).strip()
+        str(cast(FlowPersistedJsonObject, field).get("name")).strip()
         for field in cast(list[object], fields)
         if isinstance(field, dict)
-        and str(cast(JsonObject, field).get("name", "")).strip()
+        and str(cast(FlowPersistedJsonObject, field).get("name", "")).strip()
     ]
 
 

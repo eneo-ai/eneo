@@ -7,14 +7,21 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
+from intric.data_retention.constants import (
+    MIN_RETENTION_DAYS,
+    ORPHANED_SESSION_CLEANUP_DAYS,
+)
 from intric.database.tables.app_table import AppRuns, Apps
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from intric.database.tables.flow_classification_retention_policy_table import (
+    FlowClassificationRetentionPolicies,
+)
 from intric.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
+    FlowRunRerunOperations,
     FlowRuns,
     Flows,
     FlowStepAttempts,
@@ -24,10 +31,11 @@ from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.flow_retention_policy import (
-    FlowRetentionPolicy,
-    resolve_flow_retention_policy,
+from intric.flows.enums import (
+    TERMINAL_FLOW_RUN_STATUS_VALUES,
+    FlowRunRerunOperationStatus,
 )
+from intric.flows.flow_retention_policy import resolve_flow_retention_policy
 from intric.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
     FlowAttemptRetentionMarker,
@@ -41,10 +49,14 @@ from intric.flows.flow_retention_tombstone import (
     append_retention_tombstone,
     has_retention_tombstone,
 )
+from intric.flows.infrastructure.flow_run_history_purge_repo import (
+    FlowRunHistoryPurgeCounts,
+    FlowRunHistoryPurgeRepository,
+)
 
 logger = logging.getLogger(__name__)
 
-# Batch size for retention deletions to prevent transaction timeouts
+# Statement batch size for retention deletes; worker transaction loops decide commit scope.
 RETENTION_BATCH_SIZE = 5000
 
 
@@ -56,9 +68,27 @@ def _sqlalchemy_affected_row_count(result: object) -> int:
 class FlowRuntimeCleanupCounts(TypedDict):
     debug_step_results: int
     debug_step_attempts: int
-    generated_artifact_rows: int
-    generated_artifact_files: int
-    reconciled_artifact_references: int
+    flow_runs_purged: int
+    flow_generated_files_deleted: int
+    flow_webhook_deliveries_deleted: int
+    flow_audit_outbox_rows_deleted: int
+    flow_review_checkpoints_deleted: int
+    flow_runs_skipped_undelivered_audit: int
+    flow_runs_skipped_active_rerun: int
+
+
+def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
+    return {
+        "debug_step_results": 0,
+        "debug_step_attempts": 0,
+        "flow_runs_purged": 0,
+        "flow_generated_files_deleted": 0,
+        "flow_webhook_deliveries_deleted": 0,
+        "flow_audit_outbox_rows_deleted": 0,
+        "flow_review_checkpoints_deleted": 0,
+        "flow_runs_skipped_undelivered_audit": 0,
+        "flow_runs_skipped_active_rerun": 0,
+    }
 
 
 @dataclass(frozen=True)
@@ -71,6 +101,18 @@ class _FlowRuntimeRetentionAction:
     cleanup_timestamp: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class FlowRunHistoryPurgeBlockedCounts:
+    skipped_undelivered_audit: int = 0
+    skipped_active_rerun: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class FlowDebugRedactionCounts:
+    debug_step_results: int = 0
+    debug_step_attempts: int = 0
+
+
 class DataRetentionService:
     """Service for managing data retention and deletion based on hierarchical policies."""
 
@@ -80,58 +122,44 @@ class DataRetentionService:
 
     async def cleanup_old_flow_runtime_data(self) -> FlowRuntimeCleanupCounts:
         now = datetime.now(timezone.utc)
-        counts: FlowRuntimeCleanupCounts = {
-            "debug_step_results": 0,
-            "debug_step_attempts": 0,
-            # Reserved for the generated-artifact lifecycle owner; cleanup
-            # consumers depend on this stable result shape.
-            "generated_artifact_rows": 0,
-            "generated_artifact_files": 0,
-            "reconciled_artifact_references": 0,
-        }
-        async for terminal_runs in self._iter_flow_run_retention_rows(
-            older_than=now - timedelta(days=1)
+        counts = _empty_flow_runtime_cleanup_counts()
+
+        purge_counts = await self._purge_all_old_flow_run_history(now=now)
+        counts["flow_runs_purged"] += purge_counts.flow_runs_purged
+        counts["flow_generated_files_deleted"] += (
+            purge_counts.flow_generated_files_deleted
+        )
+        counts["flow_webhook_deliveries_deleted"] += (
+            purge_counts.flow_webhook_deliveries_deleted
+        )
+        counts["flow_audit_outbox_rows_deleted"] += (
+            purge_counts.flow_audit_outbox_rows_deleted
+        )
+        counts["flow_review_checkpoints_deleted"] += (
+            purge_counts.flow_review_checkpoints_deleted
+        )
+        blocked_counts = await self.count_blocked_flow_run_history_purge_candidates(
+            now=now
+        )
+        counts["flow_runs_skipped_undelivered_audit"] += (
+            blocked_counts.skipped_undelivered_audit
+        )
+        counts["flow_runs_skipped_active_rerun"] += blocked_counts.skipped_active_rerun
+
+        if (
+            blocked_counts.skipped_undelivered_audit > 0
+            or blocked_counts.skipped_active_rerun > 0
         ):
-            debug_actions: dict[UUID, _FlowRuntimeRetentionAction] = {}
+            logger.info(
+                "Skipped Flow run-history purge candidates "
+                "(undelivered_audit=%s, active_rerun=%s)",
+                blocked_counts.skipped_undelivered_audit,
+                blocked_counts.skipped_active_rerun,
+            )
 
-            for row in terminal_runs:
-                anchor = row["retention_anchor"]
-                if anchor is None:
-                    continue
-                run_id = cast(UUID, row["run_id"])
-                tenant_id = cast(UUID, row["tenant_id"])
-                trace_id = cast(UUID, row["trace_id"])
-                policy = resolve_flow_retention_policy(row["flow_settings"])
-                flow_override_days = row["flow_retention_days"]
-                space_default_days = row["space_retention_days"]
-
-                debug_retention_days = policy.retention_for_class(
-                    "run_debug_evidence",
-                    space_default_days=space_default_days,
-                    flow_override_days=flow_override_days,
-                )
-                if debug_retention_days is not None and anchor <= now - timedelta(
-                    days=debug_retention_days
-                ):
-                    debug_actions[run_id] = _FlowRuntimeRetentionAction(
-                        run_id=run_id,
-                        tenant_id=tenant_id,
-                        trace_id=trace_id,
-                        cutoff=now - timedelta(days=debug_retention_days),
-                        policy_source=_flow_runtime_policy_source(
-                            policy=policy,
-                            flow_override_days=flow_override_days,
-                            space_default_days=space_default_days,
-                        ),
-                        cleanup_timestamp=now,
-                    )
-
-            if debug_actions:
-                debug_counts = await self._cleanup_old_flow_debug_evidence(
-                    debug_actions
-                )
-                counts["debug_step_results"] += debug_counts["debug_step_results"]
-                counts["debug_step_attempts"] += debug_counts["debug_step_attempts"]
+        debug_counts = await self.redact_old_flow_debug_evidence(now=now)
+        counts["debug_step_results"] += debug_counts.debug_step_results
+        counts["debug_step_attempts"] += debug_counts.debug_step_attempts
         return counts
 
     async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
@@ -424,7 +452,192 @@ class DataRetentionService:
         result = await self.session.execute(query)
         return result.scalar() or 0
 
-    async def _iter_flow_run_retention_rows(self, *, older_than: datetime):
+    async def _purge_all_old_flow_run_history(
+        self, *, now: datetime
+    ) -> FlowRunHistoryPurgeCounts:
+        total_counts = FlowRunHistoryPurgeCounts()
+
+        while True:
+            batch_counts = await self.purge_old_flow_run_history_batch(
+                now=now,
+                limit=RETENTION_BATCH_SIZE,
+            )
+            total_counts = total_counts.add(batch_counts)
+            if batch_counts.flow_runs_purged == 0:
+                break
+
+        return total_counts
+
+    async def purge_old_flow_run_history_batch(
+        self, *, now: datetime, limit: int
+    ) -> FlowRunHistoryPurgeCounts:
+        run_ids = await self._select_flow_run_history_purge_batch(
+            now=now,
+            limit=limit,
+        )
+        return await FlowRunHistoryPurgeRepository(self.session).purge_run_history(
+            run_ids
+        )
+
+    async def count_blocked_flow_run_history_purge_candidates(
+        self, *, now: datetime
+    ) -> FlowRunHistoryPurgeBlockedCounts:
+        due_runs = self._build_due_flow_run_history_purge_query(now=now).subquery()
+        run_id_col = due_runs.c.run_id
+        undelivered_audit_exists = self._undelivered_flow_audit_exists(run_id_col)
+        active_rerun_exists = self._active_flow_rerun_exists(run_id_col)
+
+        undelivered_audit_count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(due_runs)
+            .where(undelivered_audit_exists)
+        )
+        active_rerun_count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(due_runs)
+            .where(sa.not_(undelivered_audit_exists))
+            .where(active_rerun_exists)
+        )
+
+        return FlowRunHistoryPurgeBlockedCounts(
+            skipped_undelivered_audit=undelivered_audit_count or 0,
+            skipped_active_rerun=active_rerun_count or 0,
+        )
+
+    async def _select_flow_run_history_purge_batch(
+        self, *, now: datetime, limit: int
+    ) -> list[UUID]:
+        retention_anchor = self._flow_run_history_retention_anchor()
+        stmt = (
+            self._build_due_flow_run_history_purge_query(now=now)
+            .where(sa.not_(self._undelivered_flow_audit_exists(FlowRuns.id)))
+            .where(sa.not_(self._active_flow_rerun_exists(FlowRuns.id)))
+            .order_by(retention_anchor, FlowRuns.id)
+            .limit(limit)
+        )
+        result = await self.session.scalars(stmt)
+        return list(result.all())
+
+    @staticmethod
+    def _flow_run_history_retention_anchor() -> Any:
+        return sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
+
+    def _build_due_flow_run_history_purge_query(
+        self, *, now: datetime
+    ) -> sa.Select[tuple[UUID]]:
+        anchor = self._flow_run_history_retention_anchor()
+        effective_retention_days = sa.func.coalesce(
+            Flows.data_retention_days, Spaces.data_retention_days
+        )
+        effective_retention_days = sa.func.least(
+            effective_retention_days,
+            FlowClassificationRetentionPolicies.data_retention_days,
+        )
+        return (
+            sa.select(FlowRuns.id.label("run_id"))
+            .join(Flows, FlowRuns.flow_id == Flows.id)
+            .join(Spaces, Flows.space_id == Spaces.id)
+            .outerjoin(
+                FlowClassificationRetentionPolicies,
+                sa.and_(
+                    FlowClassificationRetentionPolicies.security_classification_id
+                    == Spaces.security_classification_id,
+                    FlowClassificationRetentionPolicies.tenant_id == Spaces.tenant_id,
+                ),
+            )
+            .where(
+                sa.and_(
+                    FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
+                    effective_retention_days.isnot(None),
+                    # Constant lower bound for ix_flow_runs_terminal_retention_anchor;
+                    # safe because every retention source is >= MIN_RETENTION_DAYS.
+                    anchor
+                    <= sa.literal(now)
+                    - sa.func.make_interval(0, 0, 0, MIN_RETENTION_DAYS),
+                    anchor
+                    <= sa.literal(now)
+                    - sa.func.make_interval(0, 0, 0, effective_retention_days),
+                )
+            )
+        )
+
+    def _undelivered_flow_audit_exists(self, run_id_col: object) -> sa.Exists:
+        return (
+            sa.select(sa.literal(1))
+            .select_from(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.flow_run_id == run_id_col)
+            .where(
+                FlowRunAuditOutbox.delivery_status
+                != FlowOutboxDeliveryStatus.DELIVERED.value
+            )
+            .exists()
+        )
+
+    def _active_flow_rerun_exists(self, run_id_col: object) -> sa.Exists:
+        active_rerun_statuses = (
+            FlowRunRerunOperationStatus.QUEUED.value,
+            FlowRunRerunOperationStatus.RUNNING.value,
+        )
+        return (
+            sa.select(sa.literal(1))
+            .select_from(FlowRunRerunOperations)
+            .where(FlowRunRerunOperations.flow_run_id == run_id_col)
+            .where(FlowRunRerunOperations.status.in_(active_rerun_statuses))
+            .exists()
+        )
+
+    async def redact_old_flow_debug_evidence(
+        self, *, now: datetime
+    ) -> FlowDebugRedactionCounts:
+        total_counts = FlowDebugRedactionCounts()
+
+        async for terminal_runs in self._iter_flow_debug_retention_rows(
+            older_than=now - timedelta(days=1)
+        ):
+            debug_actions: dict[UUID, _FlowRuntimeRetentionAction] = {}
+
+            for row in terminal_runs:
+                anchor = row["retention_anchor"]
+                if anchor is None:
+                    continue
+                run_id = cast(UUID, row["run_id"])
+                tenant_id = cast(UUID, row["tenant_id"])
+                trace_id = cast(UUID, row["trace_id"])
+                policy = resolve_flow_retention_policy(row["flow_settings"])
+                debug_retention_days = policy.debug_evidence_days()
+                if debug_retention_days is not None and anchor <= now - timedelta(
+                    days=debug_retention_days
+                ):
+                    debug_actions[run_id] = _FlowRuntimeRetentionAction(
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        trace_id=trace_id,
+                        cutoff=now - timedelta(days=debug_retention_days),
+                        policy_source=(
+                            "tenant.flow_settings.retention_policy."
+                            "run_debug_evidence_days"
+                        ),
+                        cleanup_timestamp=now,
+                    )
+
+            if debug_actions:
+                debug_counts = await self._cleanup_old_flow_debug_evidence(
+                    debug_actions
+                )
+                total_counts = FlowDebugRedactionCounts(
+                    debug_step_results=(
+                        total_counts.debug_step_results
+                        + debug_counts["debug_step_results"]
+                    ),
+                    debug_step_attempts=(
+                        total_counts.debug_step_attempts
+                        + debug_counts["debug_step_attempts"]
+                    ),
+                )
+
+        return total_counts
+
+    async def _iter_flow_debug_retention_rows(self, *, older_than: datetime):
         anchor = sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
         last_run_id: UUID | None = None
         while True:
@@ -434,16 +647,12 @@ class DataRetentionService:
                     FlowRuns.tenant_id.label("tenant_id"),
                     FlowRuns.trace_id.label("trace_id"),
                     anchor.label("retention_anchor"),
-                    Flows.data_retention_days.label("flow_retention_days"),
-                    Spaces.data_retention_days.label("space_retention_days"),
                     Tenants.flow_settings.label("flow_settings"),
                 )
-                .join(Flows, FlowRuns.flow_id == Flows.id)
-                .join(Spaces, Flows.space_id == Spaces.id)
                 .join(Tenants, FlowRuns.tenant_id == Tenants.id)
                 .where(
                     sa.and_(
-                        FlowRuns.status.in_(("completed", "failed", "cancelled")),
+                        FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
                         anchor < older_than,
                         FlowRuns.id > last_run_id
                         if last_run_id is not None
@@ -464,13 +673,7 @@ class DataRetentionService:
         self, actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
     ) -> FlowRuntimeCleanupCounts:
         if not actions_by_run_id:
-            return {
-                "debug_step_results": 0,
-                "debug_step_attempts": 0,
-                "generated_artifact_rows": 0,
-                "generated_artifact_files": 0,
-                "reconciled_artifact_references": 0,
-            }
+            return _empty_flow_runtime_cleanup_counts()
 
         step_result_stmt = sa.select(
             FlowStepResults.id,
@@ -563,13 +766,10 @@ class DataRetentionService:
             )
             debug_step_attempts += _sqlalchemy_affected_row_count(attempt_result)
 
-        return {
-            "debug_step_results": debug_step_results,
-            "debug_step_attempts": debug_step_attempts,
-            "generated_artifact_rows": 0,
-            "generated_artifact_files": 0,
-            "reconciled_artifact_references": 0,
-        }
+        counts = _empty_flow_runtime_cleanup_counts()
+        counts["debug_step_results"] = debug_step_results
+        counts["debug_step_attempts"] = debug_step_attempts
+        return counts
 
     async def get_affected_questions_count_for_space(
         self, space_id: UUID, retention_days: int
@@ -754,19 +954,3 @@ def _is_current_attempt_retention_marker(payload: Any) -> bool:
     except ValueError:
         return False
     return True
-
-
-def _flow_runtime_policy_source(
-    *,
-    policy: FlowRetentionPolicy,
-    flow_override_days: int | None,
-    space_default_days: int | None,
-) -> str:
-    if flow_override_days is not None:
-        return "flow.data_retention_days"
-
-    if policy.run_debug_evidence_days is not None:
-        return "tenant.flow_settings.retention_policy.run_debug_evidence_days"
-    if space_default_days is not None:
-        return "space.data_retention_days"
-    raise ValueError("Flow runtime retention policy source is unset.")

@@ -66,6 +66,12 @@ export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"]
 export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
+export type FlowClassificationRetentionPolicies =
+  components["schemas"]["FlowClassificationRetentionPoliciesPublic"];
+export type FlowClassificationRetentionPolicy =
+  components["schemas"]["FlowClassificationRetentionPolicyPublic"];
+export type FlowClassificationRetentionPolicyUpdate =
+  components["schemas"]["FlowClassificationRetentionPolicyUpdate"];
 export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
 export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
 // SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.
@@ -178,6 +184,10 @@ export type FlowRunContractStepInput = components["schemas"]["FlowRuntimeInputCo
 export type FlowRunContractTemplateReadiness = components["schemas"]["FlowTemplateReadinessPublic"];
 export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];
 export type FlowRuntimeUploadPolicy = components["schemas"]["FlowRuntimeUploadPolicyPublic"];
+export type FlowHttpTestRequest = components["schemas"]["HttpTestRequest"];
+export type FlowHttpTestResponse = components["schemas"]["HttpTestResponse"];
+export type FlowHttpRequestPreview = components["schemas"]["HttpRequestPreview"];
+export type FlowHttpTransportError = components["schemas"]["HttpTransportError"];
 export type AIBuilderAttachmentFile = components["schemas"]["FilePublic"];
 export type AIBuilderConversationMessage = components["schemas"]["ConversationMessage"];
 export type AIBuilderSessionResponse = components["schemas"]["SessionResponse"];

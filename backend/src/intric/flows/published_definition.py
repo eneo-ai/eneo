@@ -5,7 +5,11 @@ from typing import Mapping, TypeGuard, cast
 from uuid import UUID
 
 from intric.flows.assistant_execution_snapshot import stable_hash
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
+from intric.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_metadata import (
     FlowMetadata,
     FlowMetadataParseMode,
@@ -22,16 +26,20 @@ from intric.main.exceptions import BadRequestException
 
 FLOW_DEFINITION_SCHEMA_VERSION = 1
 
-FLOW_DEFINITION_SCHEMA_VERSION_MISSING = "flow_definition_schema_version_missing"
-FLOW_DEFINITION_SCHEMA_VERSION_UNSUPPORTED = (
-    "flow_definition_schema_version_unsupported"
+FLOW_DEFINITION_SCHEMA_VERSION_MISSING = (
+    FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING.value
 )
-FLOW_DEFINITION_FLOW_ID_INVALID = "flow_definition_flow_id_invalid"
-FLOW_DEFINITION_STEPS_INVALID = "flow_definition_steps_invalid"
-FLOW_PUBLISHED_FORM_SCHEMA_INVALID = "flow_published_form_schema_invalid"
+FLOW_DEFINITION_SCHEMA_VERSION_UNSUPPORTED = (
+    FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_UNSUPPORTED.value
+)
+FLOW_DEFINITION_FLOW_ID_INVALID = FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID.value
+FLOW_DEFINITION_STEPS_INVALID = FlowApiErrorCode.DEFINITION_STEPS_INVALID.value
+FLOW_PUBLISHED_FORM_SCHEMA_INVALID = (
+    FlowApiErrorCode.PUBLISHED_FORM_SCHEMA_INVALID.value
+)
 
 
-def _step_order_sort_key(step: JsonObject) -> int:
+def _step_order_sort_key(step: FlowPersistedJsonObject) -> int:
     step_order = step.get("step_order")
     if isinstance(step_order, int) and not isinstance(step_order, bool):
         return step_order
@@ -48,9 +56,9 @@ class PublishedFlowDefinition:
     flow_id: UUID
     name: str
     description: str | None
-    steps: list[JsonObject]
+    steps: list[FlowPersistedJsonObject]
     step_identities: list[PublishedStepIdentity]
-    definition_json: JsonObject
+    definition_json: FlowPersistedJsonObject
 
     def metadata(self) -> FlowMetadata:
         raw_metadata: object = self.definition_json.get("metadata_json")
@@ -105,19 +113,18 @@ class PublishedFlowDefinition:
                 return True
         return False
 
-    def checksum(self) -> str:
-        return published_definition_checksum(self.definition_json)
-
 
 def build_published_definition_json(
     *,
     flow_id: UUID,
     name: str,
     description: str | None,
-    metadata_json: JsonObject | None,
-    steps: list[JsonObject],
-) -> JsonObject:
-    sorted_steps: list[JsonObject] = sorted(steps, key=_step_order_sort_key)
+    metadata_json: FlowPersistedJsonObject | None,
+    steps: list[FlowPersistedJsonObject],
+) -> FlowPersistedJsonObject:
+    sorted_steps: list[FlowPersistedJsonObject] = sorted(
+        steps, key=_step_order_sort_key
+    )
     return {
         "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
         "flow_id": str(flow_id),
@@ -130,11 +137,13 @@ def build_published_definition_json(
 
 def parse_published_definition(
     definition_json: Mapping[str, object],
+    *,
+    flow_version: int,
 ) -> PublishedFlowDefinition:
     """Parse and validate a published snapshot.
 
     A successful return guarantees that the envelope is well-formed and all step
-    identities are valid.
+    identities are valid and non-empty.
     """
     schema_version = definition_json.get("schema_version")
     if not isinstance(schema_version, int):
@@ -176,29 +185,41 @@ def parse_published_definition(
 
     name = definition_json.get("name")
     description = definition_json.get("description")
-    steps = [cast(JsonObject, step) for step in step_items]
+    steps = [cast(FlowPersistedJsonObject, step) for step in step_items]
+    step_identities = parse_published_step_identities(steps)
+    if not step_identities:
+        raise FlowPublishedDefinitionWithoutExecutableStepsError(
+            flow_id=flow_id,
+            flow_version=flow_version,
+        )
     return PublishedFlowDefinition(
         schema_version=schema_version,
         flow_id=flow_id,
         name=name if isinstance(name, str) else "",
         description=description if isinstance(description, str) else None,
         steps=steps,
-        step_identities=parse_published_step_identities(steps),
+        step_identities=step_identities,
         definition_json=dict(definition_json),
     )
 
 
 def parse_published_runtime_steps(
     definition_json: Mapping[str, object],
+    *,
+    flow_version: int,
 ) -> list[RuntimeStep]:
     """Return runtime steps in published execution order.
 
     Published definitions are written through `build_published_definition_json`,
     which sorts by `step_order`. The runtime parser also rejects snapshots whose
     stored step order is not contiguous and ascending, so callers can safely use
-    the final list item as the terminal step.
+    the final list item as the terminal step. The wrapped parser also guarantees
+    at least one executable step identity.
     """
-    return parse_published_definition(definition_json).runtime_steps()
+    return parse_published_definition(
+        definition_json,
+        flow_version=flow_version,
+    ).runtime_steps()
 
 
 def published_definition_checksum(definition_json: Mapping[str, object]) -> str:

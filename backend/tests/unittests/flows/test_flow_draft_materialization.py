@@ -7,7 +7,7 @@ from intric.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
     compile_flow_draft_changeset,
 )
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -171,7 +171,9 @@ def test_shared_compile_drops_output_config_when_output_mode_changes() -> None:
     assert changeset.compiled_steps[0].output_config is None
 
 
-def test_shared_compile_matches_ai_builder_compile_for_generic_changeset_shape() -> None:
+def test_shared_compile_matches_ai_builder_compile_for_generic_changeset_shape() -> (
+    None
+):
     existing_assistant_id = uuid4()
     removed_assistant_id = uuid4()
     current_flow = _flow(

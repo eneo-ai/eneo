@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Sequence, TypedDict, cast
+from datetime import datetime, timezone
+from typing import Any, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.actor_types import ActorType
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
-    FlowRunRerunInvalidatedSteps,
-    FlowRunRerunOperations,
-    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
@@ -29,43 +23,37 @@ from intric.database.tables.flow_tables import (
 from intric.database.tables.tenant_table import Tenants
 from intric.files.file_models import FileType
 from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
-    FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowRunTokenUsage,
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
-    JsonObject,
+)
+from intric.flows.domain.flow_run_exceptions import (
+    FlowRunNotFoundError,
+    FlowRunPersistenceInvariantError,
 )
 from intric.flows.enums import (
-    ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     ACTIVE_FLOW_RUN_STATUSES,
+    ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
     CANCELLABLE_FLOW_RUN_STATUSES,
-    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
+    OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     TERMINAL_FLOW_RUN_STATUSES,
-    FlowOutputType,
-    FlowRunLifecycleSource,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
-    FlowRunReviewCheckpointState,
 )
 from intric.flows.flow_factory import FlowFactory
-from intric.flows.flow_review_expiry_policy import (
-    FLOW_REVIEW_EXPIRED,
-    FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
-    FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
-)
-from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_error import FlowRunError, dump_flow_run_error
+from intric.flows.flow_run_input_envelope import (
+    FlowRunInputEnvelopePatch,
+)
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
     FlowAttemptProvenance,
 )
-from intric.flows.flow_run_rerun_graph import RerunInvalidatedStep
+from intric.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
+from intric.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
 from intric.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
     FlowRunStepResultFileAvailability,
@@ -74,8 +62,14 @@ from intric.flows.flow_run_step_result_file import (
 from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
-from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.flows.infrastructure.flow_run_step_input_file_rows import (
+    build_step_input_file_rows,
+    insert_step_input_file_rows,
+)
+from intric.flows.infrastructure.flow_step_attempt_numbering import (
+    next_step_attempt_no,
+)
+from intric.flows.principal import FlowPrincipal
 
 
 class PreseedStep(TypedDict):
@@ -84,121 +78,29 @@ class PreseedStep(TypedDict):
     step_order: int
 
 
-class StepInputFileProjection(TypedDict):
-    step_id: UUID
-    step_order: int
-    file_ids: Sequence[UUID]
+def _current_step_attempt_pairs_by_result_id(
+    step_results: Sequence[FlowStepResult],
+) -> tuple[dict[tuple[UUID, int], UUID], list[tuple[UUID, int]]]:
+    step_result_id_by_step_attempt: dict[tuple[UUID, int], UUID] = {}
+    current_attempt_pairs: list[tuple[UUID, int]] = []
+    for result in step_results:
+        if result.id is None or result.current_attempt_no is None:
+            continue
+        pair = (result.step_id, result.current_attempt_no)
+        step_result_id_by_step_attempt[pair] = result.id
+        current_attempt_pairs.append(pair)
+    return step_result_id_by_step_attempt, current_attempt_pairs
 
 
-@dataclass(frozen=True, slots=True)
-class FlowRunRerunCommandResult:
-    operation: FlowRunRerunOperation
-    run: FlowRun
-    invalidated_steps: tuple[FlowRunRerunInvalidatedStep, ...]
-    created: bool
-
-
-@dataclass(frozen=True, slots=True)
-class FlowRunActiveRerunOperation:
-    operation: FlowRunRerunOperation
-    invalidated_steps: tuple[FlowRunRerunInvalidatedStep, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class FlowRunReviewCheckpointOpenResult:
-    checkpoint: FlowRunReviewCheckpoint
-    run: FlowRun
-    created: bool
-    audit_outbox_id: UUID | None
-
-
-@dataclass(frozen=True, slots=True)
-class FlowRunReviewCheckpointResumeResult:
-    checkpoint: FlowRunReviewCheckpoint
-    run: FlowRun
-    accepted: bool
-
-
-class FlowReviewCheckpointRunNotRunningError(BadRequestException):
-    def __init__(
-        self,
-        message: str,
-        *,
-        context: dict[str, object] | None = None,
-    ):
-        super().__init__(
-            message,
-            code="flow_review_checkpoint_run_not_running",
-            context=context,
-        )
-
-
-_RERUN_ELIGIBLE_RUN_STATUSES = (
-    FlowRunStatus.COMPLETED.value,
-    FlowRunStatus.FAILED.value,
-)
-_ACTIVE_RERUN_OPERATION_STATUSES = (
-    FlowRunRerunOperationStatus.QUEUED.value,
-    FlowRunRerunOperationStatus.RUNNING.value,
-)
-_ACTIVE_REVIEW_CHECKPOINT_STATES = tuple(
-    state.value for state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
-)
-_RECONCILABLE_REVIEW_CHECKPOINT_STATES = tuple(
-    state.value for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
-)
 _CANCELLABLE_RUN_STATUSES = tuple(
     status.value for status in CANCELLABLE_FLOW_RUN_STATUSES
 )
-_ReviewCheckpointTimestampColumn = Literal[
-    "edited_at",
-    "approved_at",
-    "rejected_at",
-    "resumed_at",
-    "cancelled_at",
-    "expired_at",
-]
-_REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE: dict[
-    FlowRunReviewCheckpointState,
-    _ReviewCheckpointTimestampColumn,
-] = {
-    FlowRunReviewCheckpointState.EDITED: "edited_at",
-    FlowRunReviewCheckpointState.APPROVED: "approved_at",
-    FlowRunReviewCheckpointState.REJECTED: "rejected_at",
-    FlowRunReviewCheckpointState.RESUMED: "resumed_at",
-    FlowRunReviewCheckpointState.CANCELLED: "cancelled_at",
-    FlowRunReviewCheckpointState.EXPIRED: "expired_at",
-}
-
-
-_RERUN_STEP_RESULT_RESET_VALUES: dict[str, object] = {
-    "status": FlowStepResultStatus.PENDING.value,
-    "current_attempt_no": None,
-    "input_payload_json": None,
-    "output_payload_json": None,
-    "effective_prompt": None,
-    "model_parameters_json": None,
-    "num_tokens_input": None,
-    "num_tokens_output": None,
-    "error_message": None,
-    "flow_step_execution_hash": None,
-    "started_at": None,
-    "finished_at": None,
-}
 
 
 class FlowRunRepository:
     """Tenant-scoped repository for flow run lifecycle and run evidence."""
 
     _ACTIVE_STATUSES = tuple(status.value for status in ACTIVE_FLOW_RUN_STATUSES)
-    _OPEN_ATTEMPT_STATUSES = (
-        FlowStepAttemptStatus.STARTED.value,
-        FlowStepAttemptStatus.RETRIED.value,
-    )
-    _ACTIVE_STEP_RESULT_STATUSES = (
-        FlowStepResultStatus.PENDING.value,
-        FlowStepResultStatus.RUNNING.value,
-    )
 
     def __init__(
         self,
@@ -225,7 +127,7 @@ class FlowRunRepository:
         tenant_id: UUID,
         input_payload_json: dict[str, Any] | None,
         preseed_steps: Sequence["PreseedStep"],
-        step_input_files: Sequence["StepInputFileProjection"] | None = None,
+        step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
     ) -> FlowRun:
@@ -259,7 +161,11 @@ class FlowRunRepository:
             .returning(FlowRuns)
         )
         if run_row is None:
-            raise NotFoundException("Could not create flow run.")
+            raise FlowRunPersistenceInvariantError(
+                operation="create_flow_run",
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
 
         preseed_rows = [
             {
@@ -276,27 +182,17 @@ class FlowRunRepository:
         if preseed_rows:
             await self.session.execute(sa.insert(FlowStepResults).values(preseed_rows))
 
-        step_input_file_rows = [
-            {
-                "flow_run_id": run_row.id,
-                "flow_id": flow_id,
-                "tenant_id": tenant_id,
-                "step_id": projection["step_id"],
-                "step_order": projection["step_order"],
-                "attempt_no": 1,
-                "file_id": file_id,
-                "ordinal": ordinal,
-            }
-            for projection in sorted(
-                step_input_files or (),
-                key=lambda item: (int(item["step_order"]), str(item["step_id"])),
-            )
-            for ordinal, file_id in enumerate(projection["file_ids"])
-        ]
-        if step_input_file_rows:
-            await self.session.execute(
-                sa.insert(FlowRunStepInputFiles).values(step_input_file_rows)
-            )
+        step_input_file_rows = build_step_input_file_rows(
+            flow_run_id=run_row.id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            attempt_no=1,
+            projections=step_input_files,
+        )
+        await insert_step_input_file_rows(
+            session=self.session,
+            rows=step_input_file_rows,
+        )
 
         return self.factory.from_flow_run_db(run_row)
 
@@ -317,1202 +213,12 @@ class FlowRunRepository:
 
         run_row = await self.session.scalar(stmt)
         if run_row is None:
-            raise NotFoundException("Flow run not found.")
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
         return self.factory.from_flow_run_db(run_row)
-
-    async def create_or_get_review_checkpoint_for_attempt(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        step_id: UUID,
-        step_order: int,
-        attempt_no: int,
-        original_payload_json: JsonObject | None,
-        current_payload_json: JsonObject | None,
-        requester_principal_type: PrincipalType,
-        requester_user_id: UUID | None,
-        requester_service_id: UUID | None,
-        review_mode: FlowStepReviewMode,
-        output_type: FlowOutputType,
-        step_label: str | None = None,
-        output_contract_json: JsonObject | None = None,
-        next_step_ids: Sequence[UUID] | None = None,
-        review_expires_after_seconds: int | None = None,
-    ) -> FlowRunReviewCheckpoint:
-        effective_expires_after_seconds = (
-            review_expires_after_seconds
-            if review_expires_after_seconds is not None
-            else FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
-        )
-        expires_at = datetime.now(timezone.utc) + timedelta(
-            seconds=effective_expires_after_seconds
-        )
-        next_step_ids_json = (
-            [str(next_step_id) for next_step_id in next_step_ids]
-            if next_step_ids is not None
-            else None
-        )
-        checkpoint_row = await self.session.scalar(
-            pg_insert(FlowRunReviewCheckpoints)
-            .values(
-                tenant_id=tenant_id,
-                flow_id=flow_id,
-                flow_run_id=flow_run_id,
-                step_id=step_id,
-                step_order=step_order,
-                attempt_no=attempt_no,
-                state=FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
-                revision=1,
-                schema_version=1,
-                original_payload_json=original_payload_json,
-                current_payload_json=current_payload_json,
-                step_label=step_label,
-                review_mode=review_mode.value,
-                output_type=output_type.value,
-                output_contract_json=output_contract_json,
-                requester_principal_type=requester_principal_type.value,
-                requester_user_id=requester_user_id,
-                requester_service_id=requester_service_id,
-                next_step_ids_json=next_step_ids_json,
-                expires_at=expires_at,
-            )
-            .on_conflict_do_nothing(
-                constraint="uq_flow_run_review_checkpoints_run_step_attempt",
-            )
-            .returning(FlowRunReviewCheckpoints)
-        )
-        if checkpoint_row is None:
-            checkpoint_row = await self.session.scalar(
-                sa.select(FlowRunReviewCheckpoints)
-                .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
-                .where(FlowRunReviewCheckpoints.step_id == step_id)
-                .where(FlowRunReviewCheckpoints.attempt_no == attempt_no)
-                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-            )
-        if checkpoint_row is None:
-            raise NotFoundException("Could not create or fetch review checkpoint.")
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
-
-    async def open_review_checkpoint_for_completed_step(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        step_id: UUID,
-        step_order: int,
-        attempt_no: int,
-        requester_principal: FlowPrincipal,
-        next_step_ids: Sequence[UUID],
-        review_mode: FlowStepReviewMode,
-        output_type: FlowOutputType,
-        step_label: str | None = None,
-        output_contract_json: JsonObject | None = None,
-        review_expires_after_seconds: int | None = None,
-    ) -> FlowRunReviewCheckpointOpenResult:
-        """Open a checkpoint for a step the caller resolved from the published run graph.
-
-        The repository persists downstream step IDs for resume decisions, but it
-        does not infer graph topology while holding run locks.
-        """
-        run_row = await self.session.scalar(
-            sa.select(FlowRuns)
-            .where(FlowRuns.id == flow_run_id)
-            .where(FlowRuns.flow_id == flow_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .with_for_update()
-        )
-        if run_row is None:
-            raise NotFoundException("Flow run not found.")
-
-        existing_checkpoint_row = await self.session.scalar(
-            sa.select(FlowRunReviewCheckpoints)
-            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
-            .where(FlowRunReviewCheckpoints.step_id == step_id)
-            .where(FlowRunReviewCheckpoints.attempt_no == attempt_no)
-            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-        )
-        if existing_checkpoint_row is not None:
-            return FlowRunReviewCheckpointOpenResult(
-                checkpoint=self.factory.from_flow_run_review_checkpoint_db(
-                    existing_checkpoint_row
-                ),
-                run=self.factory.from_flow_run_db(run_row),
-                created=False,
-                audit_outbox_id=None,
-            )
-
-        if run_row.status != FlowRunStatus.RUNNING.value:
-            raise FlowReviewCheckpointRunNotRunningError(
-                "Flow run must be running before opening a review checkpoint.",
-                context={"status": run_row.status},
-            )
-
-        active_checkpoint = await self.get_active_review_checkpoint(
-            run_id=flow_run_id,
-            tenant_id=tenant_id,
-        )
-        if active_checkpoint is not None:
-            raise BadRequestException(
-                "Flow run already has an active review checkpoint.",
-                code="flow_review_checkpoint_active_conflict",
-                context={"checkpoint_id": str(active_checkpoint.id)},
-            )
-
-        step_result_row = await self.session.scalar(
-            sa.select(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == flow_run_id)
-            .where(FlowStepResults.step_id == step_id)
-            .where(FlowStepResults.tenant_id == tenant_id)
-            .with_for_update()
-        )
-        if (
-            step_result_row is None
-            or step_result_row.status != FlowStepResultStatus.COMPLETED.value
-            or step_result_row.current_attempt_no != attempt_no
-        ):
-            raise BadRequestException(
-                "Completed step result is required before opening a review checkpoint.",
-                code="flow_review_checkpoint_step_result_incomplete",
-            )
-
-        checkpoint = await self.create_or_get_review_checkpoint_for_attempt(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-            step_id=step_id,
-            step_order=step_order,
-            attempt_no=attempt_no,
-            original_payload_json=step_result_row.output_payload_json,
-            current_payload_json=step_result_row.output_payload_json,
-            step_label=step_label,
-            review_mode=review_mode,
-            output_type=output_type,
-            output_contract_json=output_contract_json,
-            requester_principal_type=requester_principal.principal_type,
-            requester_user_id=requester_principal.principal_user_id,
-            requester_service_id=requester_principal.principal_service_id,
-            next_step_ids=next_step_ids,
-            review_expires_after_seconds=review_expires_after_seconds,
-        )
-        updated_run_row = await self.session.scalar(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == flow_run_id)
-            .where(FlowRuns.flow_id == flow_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
-            .values(
-                status=FlowRunStatus.AWAITING_REVIEW.value,
-                revision=FlowRuns.revision + 1,
-            )
-            .returning(FlowRuns)
-        )
-        if updated_run_row is None:
-            raise FlowReviewCheckpointRunNotRunningError(
-                "Flow run changed state before review checkpoint opened.",
-            )
-
-        actor_fields = requester_principal.audit_actor_fields()
-        outbox_id = await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
-            checkpoint=checkpoint,
-            run_revision=updated_run_row.revision,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
-            actor_id=actor_fields["actor_id"],
-            actor_type=actor_fields["actor_type"],
-            actor_api_key_id=actor_fields["actor_api_key_id"],
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
-            target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
-        )
-        return FlowRunReviewCheckpointOpenResult(
-            checkpoint=checkpoint,
-            run=self.factory.from_flow_run_db(updated_run_row),
-            created=True,
-            audit_outbox_id=outbox_id,
-        )
-
-    async def get_active_review_checkpoint(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-    ) -> FlowRunReviewCheckpoint | None:
-        checkpoint_rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunReviewCheckpoints)
-                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
-                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-                    .where(
-                        FlowRunReviewCheckpoints.state.in_(
-                            _ACTIVE_REVIEW_CHECKPOINT_STATES
-                        )
-                    )
-                    .order_by(FlowRunReviewCheckpoints.created_at.desc())
-                    .limit(2)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not checkpoint_rows:
-            return None
-        if len(checkpoint_rows) > 1:
-            raise BadRequestException(
-                "Flow run has multiple active review checkpoints.",
-                code="flow_review_active_checkpoint_conflict",
-            )
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_rows[0])
-
-    async def get_review_checkpoint_for_edit(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        expected_revision: int,
-    ) -> FlowRunReviewCheckpoint:
-        (
-            checkpoint_row,
-            run_row,
-        ) = await self._load_review_checkpoint_and_run_rows_for_update(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-        )
-        self._require_review_checkpoint_not_expired(checkpoint_row)
-        self._require_review_run_waiting(run_row)
-        self._require_review_checkpoint_revision(
-            checkpoint_row=checkpoint_row,
-            expected_revision=expected_revision,
-        )
-        self._require_review_checkpoint_state(
-            checkpoint_row=checkpoint_row,
-            allowed_states=(
-                FlowRunReviewCheckpointState.AWAITING_REVIEW,
-                FlowRunReviewCheckpointState.EDITED,
-            ),
-        )
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
-
-    async def edit_review_checkpoint_payload(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        expected_revision: int,
-        current_payload_json: JsonObject,
-        principal: FlowPrincipal,
-    ) -> FlowRunReviewCheckpoint:
-        (
-            checkpoint_row,
-            run_row,
-        ) = await self._load_review_checkpoint_and_run_rows_for_update(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-        )
-        self._require_review_checkpoint_not_expired(checkpoint_row)
-        self._require_review_run_waiting(run_row)
-        self._require_review_checkpoint_revision(
-            checkpoint_row=checkpoint_row,
-            expected_revision=expected_revision,
-        )
-        self._require_review_checkpoint_state(
-            checkpoint_row=checkpoint_row,
-            allowed_states=(
-                FlowRunReviewCheckpointState.AWAITING_REVIEW,
-                FlowRunReviewCheckpointState.EDITED,
-            ),
-        )
-        updated_checkpoint = await self._update_review_checkpoint_state(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            target_state=FlowRunReviewCheckpointState.EDITED,
-            principal=principal,
-            values={"current_payload_json": current_payload_json},
-        )
-        step_result_id = await self.session.scalar(
-            sa.update(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == flow_run_id)
-            .where(FlowStepResults.flow_id == flow_id)
-            .where(FlowStepResults.tenant_id == tenant_id)
-            .where(FlowStepResults.step_id == checkpoint_row.step_id)
-            .where(FlowStepResults.current_attempt_no == checkpoint_row.attempt_no)
-            .values(output_payload_json=current_payload_json)
-            .returning(FlowStepResults.id)
-        )
-        if step_result_id is None:
-            raise BadRequestException(
-                "Current step result projection was not found for review edit.",
-                code="flow_review_step_result_not_found",
-            )
-        await self._insert_review_checkpoint_transition_outbox(
-            checkpoint=updated_checkpoint,
-            run_revision=run_row.revision,
-            principal=principal,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EDITED,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_EDITED,
-            target_state=FlowRunReviewCheckpointState.EDITED,
-        )
-        return updated_checkpoint
-
-    async def approve_review_checkpoint(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        expected_revision: int,
-        principal: FlowPrincipal,
-    ) -> FlowRunReviewCheckpoint:
-        (
-            checkpoint_row,
-            run_row,
-        ) = await self._load_review_checkpoint_and_run_rows_for_update(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-        )
-        self._require_review_checkpoint_not_expired(checkpoint_row)
-        self._require_review_run_waiting(run_row)
-        self._require_review_checkpoint_revision(
-            checkpoint_row=checkpoint_row,
-            expected_revision=expected_revision,
-        )
-        self._require_review_checkpoint_state(
-            checkpoint_row=checkpoint_row,
-            allowed_states=(
-                FlowRunReviewCheckpointState.AWAITING_REVIEW,
-                FlowRunReviewCheckpointState.EDITED,
-            ),
-        )
-        updated_checkpoint = await self._update_review_checkpoint_state(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            target_state=FlowRunReviewCheckpointState.APPROVED,
-            principal=principal,
-        )
-        await self._insert_review_checkpoint_transition_outbox(
-            checkpoint=updated_checkpoint,
-            run_revision=run_row.revision,
-            principal=principal,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_APPROVED,
-            target_state=FlowRunReviewCheckpointState.APPROVED,
-        )
-        return updated_checkpoint
-
-    async def reject_review_checkpoint(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        expected_revision: int,
-        reason: str,
-        principal: FlowPrincipal,
-    ) -> FlowRunReviewCheckpoint:
-        (
-            checkpoint_row,
-            run_row,
-        ) = await self._load_review_checkpoint_and_run_rows_for_update(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-        )
-        self._require_review_checkpoint_not_expired(checkpoint_row)
-        self._require_review_run_waiting(run_row)
-        self._require_review_checkpoint_revision(
-            checkpoint_row=checkpoint_row,
-            expected_revision=expected_revision,
-        )
-        self._require_review_checkpoint_state(
-            checkpoint_row=checkpoint_row,
-            allowed_states=(
-                FlowRunReviewCheckpointState.AWAITING_REVIEW,
-                FlowRunReviewCheckpointState.EDITED,
-            ),
-        )
-        updated_checkpoint = await self._update_review_checkpoint_state(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            target_state=FlowRunReviewCheckpointState.REJECTED,
-            principal=principal,
-        )
-        await self._insert_review_checkpoint_transition_outbox(
-            checkpoint=updated_checkpoint,
-            run_revision=run_row.revision,
-            principal=principal,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_REJECTED,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_REJECTED,
-            target_state=FlowRunReviewCheckpointState.REJECTED,
-            error_code="flow_review_rejected",
-            error_message=reason,
-        )
-        return updated_checkpoint
-
-    async def resume_review_checkpoint(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        expected_revision: int,
-        resume_idempotency_key: str,
-        principal: FlowPrincipal,
-    ) -> FlowRunReviewCheckpointResumeResult:
-        (
-            checkpoint_row,
-            run_row,
-        ) = await self._load_review_checkpoint_and_run_rows_for_update(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-        )
-        self._require_review_checkpoint_not_expired(checkpoint_row)
-        if checkpoint_row.state == FlowRunReviewCheckpointState.RESUMED.value:
-            if checkpoint_row.resume_idempotency_key == resume_idempotency_key:
-                return FlowRunReviewCheckpointResumeResult(
-                    checkpoint=self.factory.from_flow_run_review_checkpoint_db(
-                        checkpoint_row
-                    ),
-                    run=self.factory.from_flow_run_db(run_row),
-                    accepted=False,
-                )
-            raise BadRequestException(
-                "Review checkpoint has already been resumed.",
-                code="flow_review_already_resumed",
-            )
-        self._require_review_resume_source_state(checkpoint_row)
-        self._require_review_run_waiting(run_row)
-        self._require_review_checkpoint_revision(
-            checkpoint_row=checkpoint_row,
-            expected_revision=expected_revision,
-        )
-        updated_checkpoint = await self._update_review_checkpoint_state(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            target_state=FlowRunReviewCheckpointState.RESUMED,
-            principal=principal,
-            values={"resume_idempotency_key": resume_idempotency_key},
-        )
-        updated_run_row = await self.session.scalar(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == flow_run_id)
-            .where(FlowRuns.flow_id == flow_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
-            .values(
-                status=FlowRunStatus.QUEUED.value,
-                revision=FlowRuns.revision + 1,
-            )
-            .returning(FlowRuns)
-        )
-        if updated_run_row is None:
-            raise BadRequestException(
-                "Flow run is no longer awaiting review.",
-                code="flow_review_not_active",
-            )
-        run = self.factory.from_flow_run_db(updated_run_row)
-        await self._insert_review_checkpoint_transition_outbox(
-            checkpoint=updated_checkpoint,
-            run_revision=run.revision,
-            principal=principal,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_RESUMED,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_RESUMED,
-            target_state=FlowRunReviewCheckpointState.RESUMED,
-        )
-        return FlowRunReviewCheckpointResumeResult(
-            checkpoint=updated_checkpoint,
-            run=run,
-            accepted=True,
-        )
-
-    async def cancel_active_review_checkpoint_for_terminal_run(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_run_id: UUID,
-        run_revision: int,
-        principal: FlowPrincipal | None,
-        error_code: str | None = None,
-        error_message: str | None = None,
-    ) -> FlowRunReviewCheckpoint | None:
-        now_utc = datetime.now(timezone.utc)
-        values: dict[str, Any] = {
-            "state": FlowRunReviewCheckpointState.CANCELLED.value,
-            "revision": FlowRunReviewCheckpoints.revision + 1,
-            "cancelled_at": now_utc,
-        }
-        if principal is not None:
-            values["decided_by_principal_type"] = principal.principal_type.value
-            values["decided_by_user_id"] = principal.principal_user_id
-            values["decided_by_service_id"] = principal.principal_service_id
-        checkpoint_row = await self.session.scalar(
-            sa.update(FlowRunReviewCheckpoints)
-            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
-            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-            .where(FlowRunReviewCheckpoints.state.in_(_ACTIVE_REVIEW_CHECKPOINT_STATES))
-            .values(**values)
-            .returning(FlowRunReviewCheckpoints)
-        )
-        if checkpoint_row is None:
-            return None
-        checkpoint = self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
-        await self._insert_review_checkpoint_transition_outbox(
-            checkpoint=checkpoint,
-            run_revision=run_revision,
-            principal=principal,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_CANCELLED,
-            target_state=FlowRunReviewCheckpointState.CANCELLED,
-            error_code=error_code,
-            error_message=error_message,
-        )
-        return checkpoint
-
-    async def list_expired_review_checkpoints(
-        self,
-        *,
-        tenant_id: UUID,
-        expires_before: datetime,
-        limit: int = 100,
-    ) -> list[FlowRunReviewCheckpoint]:
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunReviewCheckpoints)
-                    .join(
-                        FlowRuns,
-                        sa.and_(
-                            FlowRuns.id == FlowRunReviewCheckpoints.flow_run_id,
-                            FlowRuns.tenant_id == FlowRunReviewCheckpoints.tenant_id,
-                        ),
-                    )
-                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-                    .where(FlowRunReviewCheckpoints.expires_at.is_not(None))
-                    .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
-                    .where(
-                        FlowRunReviewCheckpoints.state.in_(
-                            _RECONCILABLE_REVIEW_CHECKPOINT_STATES
-                        )
-                    )
-                    .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
-                    .order_by(
-                        FlowRunReviewCheckpoints.expires_at.asc(),
-                        FlowRunReviewCheckpoints.id.asc(),
-                    )
-                    .limit(limit)
-                    .with_for_update(skip_locked=True)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return [self.factory.from_flow_run_review_checkpoint_db(row) for row in rows]
-
-    async def expire_review_checkpoint_for_reconciliation(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        expires_before: datetime,
-    ) -> FlowRunReviewCheckpoint | None:
-        now_utc = datetime.now(timezone.utc)
-        checkpoint_row = await self.session.scalar(
-            sa.update(FlowRunReviewCheckpoints)
-            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
-            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-            .where(FlowRunReviewCheckpoints.expires_at.is_not(None))
-            .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
-            .where(
-                FlowRunReviewCheckpoints.state.in_(
-                    _RECONCILABLE_REVIEW_CHECKPOINT_STATES
-                )
-            )
-            .where(FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
-            .values(
-                state=FlowRunReviewCheckpointState.EXPIRED.value,
-                revision=FlowRunReviewCheckpoints.revision + 1,
-                expired_at=now_utc,
-            )
-            .returning(FlowRunReviewCheckpoints)
-        )
-        if checkpoint_row is None:
-            return None
-        run_revision = await self.session.scalar(
-            sa.select(FlowRuns.revision)
-            .where(FlowRuns.id == checkpoint_row.flow_run_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-        )
-        if run_revision is None:
-            raise NotFoundException("Flow run not found.")
-        checkpoint = self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
-        await self._insert_review_checkpoint_transition_outbox(
-            checkpoint=checkpoint,
-            run_revision=int(run_revision),
-            principal=None,
-            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED,
-            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_EXPIRED,
-            target_state=FlowRunReviewCheckpointState.EXPIRED,
-            error_code=FLOW_REVIEW_EXPIRED,
-            error_message=FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
-        )
-        return checkpoint
-
-    async def _load_review_checkpoint_and_run_rows_for_update(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-    ) -> tuple[FlowRunReviewCheckpoints, FlowRuns]:
-        run_row = await self.session.scalar(
-            sa.select(FlowRuns)
-            .where(FlowRuns.id == flow_run_id)
-            .where(FlowRuns.flow_id == flow_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .with_for_update()
-        )
-        if run_row is None:
-            raise NotFoundException("Flow run not found.")
-        checkpoint_row = await self.session.scalar(
-            sa.select(FlowRunReviewCheckpoints)
-            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
-            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-            .where(FlowRunReviewCheckpoints.flow_id == flow_id)
-            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
-            .with_for_update()
-        )
-        if checkpoint_row is None:
-            raise NotFoundException(
-                "Review checkpoint not found.",
-                code="flow_review_checkpoint_not_found",
-            )
-        return checkpoint_row, run_row
-
-    @staticmethod
-    def _require_review_run_waiting(run_row: FlowRuns) -> None:
-        if run_row.status == FlowRunStatus.AWAITING_REVIEW.value:
-            return
-        raise BadRequestException(
-            "Flow run is not awaiting review.",
-            code="flow_review_not_active",
-            context={"status": run_row.status},
-        )
-
-    @staticmethod
-    def _require_review_checkpoint_not_expired(
-        checkpoint_row: FlowRunReviewCheckpoints,
-    ) -> None:
-        if checkpoint_row.state == FlowRunReviewCheckpointState.EXPIRED.value:
-            raise BadRequestException(
-                "Review checkpoint has expired.",
-                code=FLOW_REVIEW_EXPIRED,
-                context=FlowRunRepository._review_checkpoint_expired_context(
-                    checkpoint_row=checkpoint_row,
-                ),
-            )
-        if checkpoint_row.state not in _RECONCILABLE_REVIEW_CHECKPOINT_STATES:
-            return
-        if checkpoint_row.expires_at is None:
-            return
-        expires_at = checkpoint_row.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at > datetime.now(timezone.utc):
-            return
-        raise BadRequestException(
-            "Review checkpoint has expired.",
-            code=FLOW_REVIEW_EXPIRED,
-            context=FlowRunRepository._review_checkpoint_expired_context(
-                checkpoint_row=checkpoint_row,
-                expires_at=expires_at,
-            ),
-        )
-
-    @staticmethod
-    def _review_checkpoint_expired_context(
-        *,
-        checkpoint_row: FlowRunReviewCheckpoints,
-        expires_at: datetime | None = None,
-    ) -> dict[str, object]:
-        context: dict[str, object] = {
-            "checkpoint_id": str(checkpoint_row.id),
-            "state": checkpoint_row.state,
-        }
-        expires_at_value = expires_at or checkpoint_row.expires_at
-        if expires_at_value is not None:
-            if expires_at_value.tzinfo is None:
-                expires_at_value = expires_at_value.replace(tzinfo=timezone.utc)
-            context["expires_at"] = expires_at_value.isoformat()
-        if checkpoint_row.expired_at is not None:
-            expired_at = checkpoint_row.expired_at
-            if expired_at.tzinfo is None:
-                expired_at = expired_at.replace(tzinfo=timezone.utc)
-            context["expired_at"] = expired_at.isoformat()
-        return context
-
-    @staticmethod
-    def _require_review_checkpoint_revision(
-        *,
-        checkpoint_row: FlowRunReviewCheckpoints,
-        expected_revision: int,
-    ) -> None:
-        if checkpoint_row.revision == expected_revision:
-            return
-        raise BadRequestException(
-            "Review checkpoint revision is stale.",
-            code="flow_review_stale_revision",
-            context={
-                "expected_checkpoint_revision": expected_revision,
-                "current_checkpoint_revision": checkpoint_row.revision,
-            },
-        )
-
-    @staticmethod
-    def _require_review_checkpoint_state(
-        *,
-        checkpoint_row: FlowRunReviewCheckpoints,
-        allowed_states: Sequence[FlowRunReviewCheckpointState],
-    ) -> None:
-        allowed_values = tuple(state.value for state in allowed_states)
-        if checkpoint_row.state in allowed_values:
-            return
-        raise BadRequestException(
-            "Review checkpoint is not active for this operation.",
-            code="flow_review_not_active",
-            context={"state": checkpoint_row.state},
-        )
-
-    @staticmethod
-    def _require_review_resume_source_state(
-        checkpoint_row: FlowRunReviewCheckpoints,
-    ) -> None:
-        state = checkpoint_row.state
-        if state == FlowRunReviewCheckpointState.APPROVED.value:
-            return
-        if state == FlowRunReviewCheckpointState.REJECTED.value:
-            raise BadRequestException(
-                "Review checkpoint was rejected.",
-                code="flow_review_rejected",
-            )
-        if state == FlowRunReviewCheckpointState.CANCELLED.value:
-            raise BadRequestException(
-                "Review checkpoint was cancelled.",
-                code="flow_review_cancelled",
-            )
-        if state == FlowRunReviewCheckpointState.EXPIRED.value:
-            raise BadRequestException(
-                "Review checkpoint has expired.",
-                code=FLOW_REVIEW_EXPIRED,
-                context=FlowRunRepository._review_checkpoint_expired_context(
-                    checkpoint_row=checkpoint_row,
-                ),
-            )
-        if state == FlowRunReviewCheckpointState.RESUMED.value:
-            raise BadRequestException(
-                "Review checkpoint has already been resumed.",
-                code="flow_review_already_resumed",
-            )
-        raise BadRequestException(
-            "Review checkpoint must be approved before resume.",
-            code="flow_review_not_approved",
-            context={"state": state},
-        )
-
-    async def _update_review_checkpoint_state(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        target_state: FlowRunReviewCheckpointState,
-        principal: FlowPrincipal,
-        values: dict[str, Any] | None = None,
-    ) -> FlowRunReviewCheckpoint:
-        update_values: dict[str, Any] = {
-            "state": target_state.value,
-            "revision": FlowRunReviewCheckpoints.revision + 1,
-            "decided_by_principal_type": principal.principal_type.value,
-            "decided_by_user_id": principal.principal_user_id,
-            "decided_by_service_id": principal.principal_service_id,
-        }
-        timestamp_field = _REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE.get(target_state)
-        if timestamp_field is not None:
-            update_values[timestamp_field] = datetime.now(timezone.utc)
-        if values is not None:
-            update_values.update(values)
-        checkpoint_row = await self.session.scalar(
-            sa.update(FlowRunReviewCheckpoints)
-            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
-            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-            .values(**update_values)
-            .returning(FlowRunReviewCheckpoints)
-        )
-        if checkpoint_row is None:
-            raise NotFoundException(
-                "Review checkpoint not found.",
-                code="flow_review_checkpoint_not_found",
-            )
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
-
-    async def _insert_review_checkpoint_transition_outbox(
-        self,
-        *,
-        checkpoint: FlowRunReviewCheckpoint,
-        run_revision: int,
-        principal: FlowPrincipal | None,
-        action: ActionType,
-        source: FlowRunLifecycleSource,
-        target_state: FlowRunReviewCheckpointState,
-        error_code: str | None = None,
-        error_message: str | None = None,
-    ) -> UUID:
-        actor_fields: FlowAuditActorFields = (
-            principal.audit_actor_fields()
-            if principal is not None
-            else {
-                "actor_id": None,
-                "actor_type": ActorType.SYSTEM,
-                "actor_api_key_id": None,
-            }
-        )
-        return await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
-            checkpoint=checkpoint,
-            run_revision=run_revision,
-            action=action,
-            actor_id=actor_fields["actor_id"],
-            actor_type=actor_fields["actor_type"],
-            actor_api_key_id=actor_fields["actor_api_key_id"],
-            source=source,
-            target_state=target_state,
-            error_code=error_code,
-            error_message=error_message,
-        )
-
-    async def transition_review_checkpoint_state(
-        self,
-        *,
-        checkpoint_id: UUID,
-        tenant_id: UUID,
-        expected_revision: int,
-        allowed_source_states: Sequence[FlowRunReviewCheckpointState],
-        target_state: FlowRunReviewCheckpointState,
-        decided_by_user_id: UUID | None = None,
-        decided_by_service_id: UUID | None = None,
-        decided_by_principal_type: PrincipalType | None = None,
-        resume_idempotency_key: str | None = None,
-    ) -> FlowRunReviewCheckpoint | None:
-        now_utc = datetime.now(timezone.utc)
-        values: dict[str, Any] = {
-            "state": target_state.value,
-            "revision": FlowRunReviewCheckpoints.revision + 1,
-        }
-        timestamp_field = _REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE.get(target_state)
-        if timestamp_field is not None:
-            values[timestamp_field] = now_utc
-        if decided_by_user_id is not None:
-            values["decided_by_user_id"] = decided_by_user_id
-        if decided_by_service_id is not None:
-            values["decided_by_service_id"] = decided_by_service_id
-        if decided_by_principal_type is not None:
-            values["decided_by_principal_type"] = decided_by_principal_type.value
-        if resume_idempotency_key is not None:
-            values["resume_idempotency_key"] = resume_idempotency_key
-
-        source_state_values = tuple(state.value for state in allowed_source_states)
-        checkpoint_row = await self.session.scalar(
-            sa.update(FlowRunReviewCheckpoints)
-            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
-            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-            .where(FlowRunReviewCheckpoints.revision == expected_revision)
-            .where(FlowRunReviewCheckpoints.state.in_(source_state_values))
-            .values(**values)
-            .returning(FlowRunReviewCheckpoints)
-        )
-        if checkpoint_row is None:
-            return None
-        return self.factory.from_flow_run_review_checkpoint_db(checkpoint_row)
-
-    async def get_latest_completed_attempt_id_for_step(
-        self,
-        *,
-        run_id: UUID,
-        flow_id: UUID,
-        tenant_id: UUID,
-        step_id: UUID,
-    ) -> UUID | None:
-        attempt_id = await self.session.scalar(
-            sa.select(FlowStepAttempts.id)
-            .where(FlowStepAttempts.flow_run_id == run_id)
-            .where(FlowStepAttempts.flow_id == flow_id)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.step_id == step_id)
-            .where(FlowStepAttempts.status == FlowStepAttemptStatus.COMPLETED.value)
-            .order_by(FlowStepAttempts.attempt_no.desc())
-            .limit(1)
-        )
-        return attempt_id
-
-    async def accept_or_replay_rerun_operation(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        rerun_step_id: UUID,
-        rerun_step_order: int,
-        request_fingerprint: str,
-        expected_run_revision: int,
-        reason: str,
-        input_payload_json: JsonObject | None,
-        step_inputs_json: JsonObject | None,
-        requested_by_principal: FlowPrincipal,
-        invalidated_steps: Sequence[RerunInvalidatedStep],
-    ) -> FlowRunRerunCommandResult:
-        existing_operation = await self._get_rerun_operation_row(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-            request_fingerprint=request_fingerprint,
-        )
-        if existing_operation is not None:
-            return await self._rerun_command_result_from_row(
-                operation_row=existing_operation,
-                created=False,
-            )
-
-        run_row = await self.session.scalar(
-            sa.select(FlowRuns)
-            .where(FlowRuns.id == flow_run_id)
-            .where(FlowRuns.flow_id == flow_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .with_for_update()
-        )
-        if run_row is None:
-            raise NotFoundException("Flow run not found.")
-
-        existing_operation = await self._get_rerun_operation_row(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-            request_fingerprint=request_fingerprint,
-        )
-        if existing_operation is not None:
-            return await self._rerun_command_result_from_row(
-                operation_row=existing_operation,
-                created=False,
-            )
-
-        if run_row.revision != expected_run_revision:
-            raise BadRequestException(
-                "Flow run revision is stale.",
-                code="flow_run_rerun_stale_revision",
-                context={
-                    "expected_run_revision": expected_run_revision,
-                    "current_run_revision": run_row.revision,
-                },
-            )
-        if run_row.status not in _RERUN_ELIGIBLE_RUN_STATUSES:
-            raise BadRequestException(
-                "Flow run is not eligible for rerun.",
-                code="flow_run_rerun_invalid_transition",
-                context={"status": run_row.status},
-            )
-
-        ordered_invalidated_steps = tuple(
-            sorted(invalidated_steps, key=lambda step: step.step_order)
-        )
-        root_invalidated_step = next(
-            (
-                step
-                for step in ordered_invalidated_steps
-                if step.step_id == rerun_step_id and step.step_order == rerun_step_order
-            ),
-            None,
-        )
-        if root_invalidated_step is None:
-            raise BadRequestException(
-                "Rerun step is not in the published flow snapshot.",
-                code="flow_run_rerun_step_not_found",
-            )
-
-        invalidated_step_ids = [step.step_id for step in ordered_invalidated_steps]
-        current_results = await self._current_step_results_by_step_id(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-            step_ids=invalidated_step_ids,
-        )
-        missing_current_result_step_ids = [
-            step.step_id
-            for step in ordered_invalidated_steps
-            if step.step_id not in current_results
-        ]
-        if missing_current_result_step_ids:
-            raise BadRequestException(
-                "Rerun graph has no current result for every invalidated step.",
-                code="flow_run_rerun_step_incomplete",
-                context={
-                    "step_ids": [
-                        str(step_id) for step_id in missing_current_result_step_ids
-                    ],
-                },
-            )
-        root_current_result = current_results.get(rerun_step_id)
-        if (
-            root_current_result is None
-            or root_current_result.status != FlowStepResultStatus.COMPLETED.value
-        ):
-            raise BadRequestException(
-                "Rerun step has no completed current result.",
-                code="flow_run_rerun_step_incomplete",
-            )
-
-        latest_completed_attempts = await self._latest_completed_attempts_by_step_id(
-            tenant_id=tenant_id,
-            flow_id=flow_id,
-            flow_run_id=flow_run_id,
-            step_ids=invalidated_step_ids,
-        )
-        root_attempt_no = await self._next_attempt_no(
-            tenant_id=tenant_id,
-            flow_run_id=flow_run_id,
-            step_id=rerun_step_id,
-        )
-        operation_row = await self.session.scalar(
-            pg_insert(FlowRunRerunOperations)
-            .values(
-                tenant_id=tenant_id,
-                flow_id=flow_id,
-                flow_run_id=flow_run_id,
-                rerun_step_id=rerun_step_id,
-                rerun_step_order=rerun_step_order,
-                root_attempt_no=root_attempt_no,
-                root_attempt_id=None,
-                status=FlowRunRerunOperationStatus.QUEUED.value,
-                request_fingerprint=request_fingerprint,
-                expected_run_revision=expected_run_revision,
-                accepted_run_revision=run_row.revision,
-                reason=reason,
-                input_payload_json=input_payload_json,
-                step_inputs_json=step_inputs_json,
-                requested_by_principal_type=requested_by_principal.principal_type.value,
-                requested_by_user_id=requested_by_principal.principal_user_id,
-                requested_by_service_id=requested_by_principal.principal_service_id,
-                failure_code=None,
-                failure_message=None,
-                started_at=None,
-                finished_at=None,
-            )
-            .on_conflict_do_nothing(
-                constraint="uq_flow_run_rerun_operations_request_fingerprint",
-            )
-            .returning(FlowRunRerunOperations)
-        )
-        if operation_row is None:
-            operation_row = await self._get_rerun_operation_row(
-                tenant_id=tenant_id,
-                flow_id=flow_id,
-                flow_run_id=flow_run_id,
-                request_fingerprint=request_fingerprint,
-            )
-            if operation_row is None:
-                raise NotFoundException("Could not create or fetch rerun operation.")
-            return await self._rerun_command_result_from_row(
-                operation_row=operation_row,
-                created=False,
-            )
-
-        invalidated_rows = [
-            {
-                "operation_id": operation_row.id,
-                "tenant_id": tenant_id,
-                "flow_id": flow_id,
-                "flow_run_id": flow_run_id,
-                "step_id": invalidated_step.step_id,
-                "step_order": invalidated_step.step_order,
-                "invalidation_order": invalidation_order,
-                "role": (
-                    FlowRunRerunInvalidationRole.ROOT.value
-                    if invalidated_step.step_id == rerun_step_id
-                    else FlowRunRerunInvalidationRole.DOWNSTREAM.value
-                ),
-                "dependency_sources_json": (
-                    []
-                    if invalidated_step.step_id == rerun_step_id
-                    else [
-                        dependency_kind.value
-                        for dependency_kind in invalidated_step.dependency_kinds
-                    ]
-                ),
-                "prior_step_result_id": current_results[invalidated_step.step_id].id,
-                "prior_attempt_id": (
-                    latest_completed_attempts[invalidated_step.step_id].id
-                    if invalidated_step.step_id in latest_completed_attempts
-                    else None
-                ),
-                "new_attempt_no": None,
-                "new_attempt_id": None,
-            }
-            for invalidation_order, invalidated_step in enumerate(
-                ordered_invalidated_steps,
-                start=1,
-            )
-        ]
-        if invalidated_rows:
-            await self.session.execute(
-                sa.insert(FlowRunRerunInvalidatedSteps).values(invalidated_rows)
-            )
-
-        await self.session.execute(
-            sa.update(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == flow_run_id)
-            .where(FlowStepResults.flow_id == flow_id)
-            .where(FlowStepResults.tenant_id == tenant_id)
-            .where(FlowStepResults.step_id.in_(invalidated_step_ids))
-            .values(**_RERUN_STEP_RESULT_RESET_VALUES)
-        )
-        updated_run_row = await self.session.scalar(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == flow_run_id)
-            .where(FlowRuns.flow_id == flow_id)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .values(
-                status=FlowRunStatus.QUEUED.value,
-                revision=run_row.revision + 1,
-                output_payload_json=None,
-                error_json=None,
-                started_at=None,
-                finished_at=None,
-                cancelled_at=None,
-            )
-            .returning(FlowRuns)
-        )
-        if updated_run_row is None:
-            raise NotFoundException("Flow run not found.")
-
-        return await self._rerun_command_result_from_row(
-            operation_row=operation_row,
-            run_row=updated_run_row,
-            created=True,
-        )
 
     async def get_idempotent_run(
         self,
@@ -1709,7 +415,7 @@ class FlowRunRepository:
         tenant_id: UUID,
         target_status: FlowRunStatus,
         error: FlowRunError | None = None,
-        output_payload_json: JsonObject | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
         stale_before: datetime | None = None,
     ) -> FlowRun | None:
@@ -1749,7 +455,7 @@ class FlowRunRepository:
             .select_from(FlowStepResults)
             .where(FlowStepResults.flow_run_id == run_id)
             .where(FlowStepResults.tenant_id == tenant_id)
-            .where(FlowStepResults.status.in_(self._ACTIVE_STEP_RESULT_STATUSES))
+            .where(FlowStepResults.status.in_(ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES))
         )
         return int(count or 0)
 
@@ -1759,7 +465,7 @@ class FlowRunRepository:
             .select_from(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)
             .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.status.in_(self._OPEN_ATTEMPT_STATUSES))
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
         )
         return int(count or 0)
 
@@ -1769,50 +475,20 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         target_status: FlowStepResultStatus,
+        error_code: str | None,
         error_message: str | None = None,
     ) -> int:
         result = await self.session.execute(
             sa.update(FlowStepResults)
             .where(FlowStepResults.flow_run_id == run_id)
             .where(FlowStepResults.tenant_id == tenant_id)
-            .where(FlowStepResults.status.in_(self._ACTIVE_STEP_RESULT_STATUSES))
+            .where(FlowStepResults.status.in_(ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES))
             .values(
                 status=target_status.value,
+                error_code=error_code,
                 error_message=error_message,
                 finished_at=datetime.now(timezone.utc),
             )
-        )
-        return int(getattr(result, "rowcount", 0) or 0)
-
-    async def close_active_rerun_operations_for_terminal_run(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        target_status: FlowRunStatus,
-        error_code: str | None = None,
-        error_message: str | None = None,
-    ) -> int:
-        if target_status not in TERMINAL_FLOW_RUN_STATUSES:
-            raise ValueError("target_status must be terminal")
-
-        values: dict[str, Any] = {
-            "status": FlowRunRerunOperationStatus(target_status.value).value,
-            "finished_at": datetime.now(timezone.utc),
-        }
-        if target_status == FlowRunStatus.COMPLETED:
-            values["failure_code"] = None
-            values["failure_message"] = None
-        else:
-            values["failure_code"] = error_code
-            values["failure_message"] = error_message
-
-        result = await self.session.execute(
-            sa.update(FlowRunRerunOperations)
-            .where(FlowRunRerunOperations.flow_run_id == run_id)
-            .where(FlowRunRerunOperations.tenant_id == tenant_id)
-            .where(FlowRunRerunOperations.status.in_(_ACTIVE_RERUN_OPERATION_STATUSES))
-            .values(**values)
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
@@ -1829,7 +505,7 @@ class FlowRunRepository:
             sa.update(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)
             .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.status.in_(self._OPEN_ATTEMPT_STATUSES))
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
             .values(
                 status=target_status.value,
                 error_code=error_code,
@@ -1844,23 +520,22 @@ class FlowRunRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
-        input_payload_json: dict[str, Any],
-    ) -> None:
-        # Merge-patch under row lock to avoid clobbering concurrent key updates.
+        input_payload_patch: FlowRunInputEnvelopePatch,
+    ) -> FlowPersistedJsonObject:
         current_payload = await self.session.scalar(
             sa.select(FlowRuns.input_payload_json)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
             .with_for_update()
         )
-        merged_payload = dict(current_payload or {})
-        merged_payload.update(dict(input_payload_json))
+        updated_payload = input_payload_patch.apply_to(current_payload)
         await self.session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .values(input_payload_json=merged_payload)
+            .values(input_payload_json=updated_payload)
         )
+        return updated_payload
 
     async def list_step_results(
         self,
@@ -1905,78 +580,155 @@ class FlowRunRepository:
         )
         return [self.factory.from_flow_step_attempt_db(row) for row in rows]
 
-    async def list_review_checkpoints_for_run(
+    async def list_step_input_file_ids(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-    ) -> list[FlowRunReviewCheckpoint]:
+        step_id: UUID,
+        attempt_no: int,
+    ) -> list[UUID]:
         rows = (
             (
                 await self.session.execute(
-                    sa.select(FlowRunReviewCheckpoints)
-                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
-                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
-                    .order_by(
-                        FlowRunReviewCheckpoints.step_order.asc(),
-                        FlowRunReviewCheckpoints.attempt_no.asc(),
-                        FlowRunReviewCheckpoints.id.asc(),
-                    )
+                    sa.select(FlowRunStepInputFiles.file_id)
+                    .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                    .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                    .where(FlowRunStepInputFiles.step_id == step_id)
+                    .where(FlowRunStepInputFiles.attempt_no == attempt_no)
+                    .order_by(FlowRunStepInputFiles.ordinal.asc())
                 )
             )
             .scalars()
             .all()
         )
-        return [self.factory.from_flow_run_review_checkpoint_db(row) for row in rows]
+        return list(rows)
 
-    async def list_rerun_operations_for_run(
+    async def list_current_step_input_file_ids_by_step_result_id(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-    ) -> list[FlowRunRerunOperation]:
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunRerunOperations)
-                    .where(FlowRunRerunOperations.flow_run_id == run_id)
-                    .where(FlowRunRerunOperations.tenant_id == tenant_id)
-                    .order_by(
-                        FlowRunRerunOperations.created_at.asc(),
-                        FlowRunRerunOperations.id.asc(),
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        step_results: Sequence[FlowStepResult],
+    ) -> dict[UUID, Sequence[UUID]]:
+        step_result_id_by_step_attempt, current_attempt_pairs = (
+            _current_step_attempt_pairs_by_result_id(step_results)
         )
-        return [self.factory.from_flow_run_rerun_operation_db(row) for row in rows]
+        if not current_attempt_pairs:
+            return {}
 
-    async def list_rerun_invalidated_steps_for_run(
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no,
+                    FlowRunStepInputFiles.file_id,
+                )
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    sa.tuple_(
+                        FlowRunStepInputFiles.step_id,
+                        FlowRunStepInputFiles.attempt_no,
+                    ).in_(current_attempt_pairs)
+                )
+                .order_by(
+                    FlowRunStepInputFiles.step_order.asc(),
+                    FlowRunStepInputFiles.attempt_no.asc(),
+                    FlowRunStepInputFiles.ordinal.asc(),
+                )
+            )
+        ).all()
+
+        file_ids_by_step_result_id: dict[UUID, list[UUID]] = {}
+        for step_id, attempt_no, file_id in rows:
+            step_result_id = step_result_id_by_step_attempt.get((step_id, attempt_no))
+            if step_result_id is None:
+                continue
+            file_ids_by_step_result_id.setdefault(step_result_id, []).append(file_id)
+
+        return {
+            step_result_id: tuple(file_ids)
+            for step_result_id, file_ids in file_ids_by_step_result_id.items()
+        }
+
+    async def list_current_step_input_file_metadata_by_step_result_id(
         self,
         *,
         run_id: UUID,
         tenant_id: UUID,
-    ) -> list[FlowRunRerunInvalidatedStep]:
+        step_results: Sequence[FlowStepResult],
+    ) -> dict[UUID, tuple[FlowRunStepInputFileMetadata, ...]]:
+        step_result_id_by_step_attempt, current_attempt_pairs = (
+            _current_step_attempt_pairs_by_result_id(step_results)
+        )
+        if not current_attempt_pairs:
+            return {}
+
+        text_length = sa.func.length(Files.text).label("text_length")
+        has_text = (
+            sa.func.length(sa.func.btrim(sa.func.coalesce(Files.text, ""))) > 0
+        ).label("has_text")
+        has_transcription = (
+            sa.func.length(sa.func.btrim(sa.func.coalesce(Files.transcription, ""))) > 0
+        ).label("has_transcription")
         rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunRerunInvalidatedSteps)
-                    .where(FlowRunRerunInvalidatedSteps.flow_run_id == run_id)
-                    .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
-                    .order_by(
-                        FlowRunRerunInvalidatedSteps.operation_id.asc(),
-                        FlowRunRerunInvalidatedSteps.invalidation_order.asc(),
-                        FlowRunRerunInvalidatedSteps.id.asc(),
-                    )
+            await self.session.execute(
+                sa.select(
+                    FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no,
+                    FlowRunStepInputFiles.file_id,
+                    Files.name,
+                    Files.checksum,
+                    Files.size,
+                    Files.mimetype,
+                    Files.file_type,
+                    text_length,
+                    has_text,
+                    has_transcription,
+                )
+                .join(Files, Files.id == FlowRunStepInputFiles.file_id)
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    sa.tuple_(
+                        FlowRunStepInputFiles.step_id,
+                        FlowRunStepInputFiles.attempt_no,
+                    ).in_(current_attempt_pairs)
+                )
+                .order_by(
+                    FlowRunStepInputFiles.step_order.asc(),
+                    FlowRunStepInputFiles.attempt_no.asc(),
+                    FlowRunStepInputFiles.ordinal.asc(),
                 )
             )
-            .scalars()
-            .all()
-        )
-        return [
-            self.factory.from_flow_run_rerun_invalidated_step_db(row) for row in rows
-        ]
+        ).all()
+
+        metadata_by_step_result_id: dict[UUID, list[FlowRunStepInputFileMetadata]] = {}
+        for row in rows:
+            step_result_id = step_result_id_by_step_attempt.get(
+                (row.step_id, row.attempt_no)
+            )
+            if step_result_id is None:
+                continue
+            metadata_by_step_result_id.setdefault(step_result_id, []).append(
+                FlowRunStepInputFileMetadata(
+                    file_id=row.file_id,
+                    name=row.name,
+                    checksum=row.checksum,
+                    size=row.size,
+                    mimetype=row.mimetype,
+                    file_type=FileType(row.file_type),
+                    text_length=row.text_length,
+                    has_text=bool(row.has_text),
+                    has_transcription=bool(row.has_transcription),
+                )
+            )
+
+        return {
+            step_result_id: tuple(metadata)
+            for step_result_id, metadata in metadata_by_step_result_id.items()
+        }
 
     async def list_result_files(
         self,
@@ -2085,62 +837,6 @@ class FlowRunRepository:
             return None
         return self.factory.from_flow_step_result_db(row)
 
-    async def get_active_rerun_operation(
-        self,
-        *,
-        run_id: UUID,
-        flow_id: UUID,
-        tenant_id: UUID,
-    ) -> FlowRunActiveRerunOperation | None:
-        operation_rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunRerunOperations)
-                    .where(FlowRunRerunOperations.flow_run_id == run_id)
-                    .where(FlowRunRerunOperations.flow_id == flow_id)
-                    .where(FlowRunRerunOperations.tenant_id == tenant_id)
-                    .where(
-                        FlowRunRerunOperations.status.in_(
-                            _ACTIVE_RERUN_OPERATION_STATUSES
-                        )
-                    )
-                    .order_by(FlowRunRerunOperations.created_at.desc())
-                    .limit(2)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not operation_rows:
-            return None
-        if len(operation_rows) > 1:
-            raise BadRequestException(
-                "Flow run has multiple active rerun operations.",
-                code="flow_run_rerun_active_operation_conflict",
-            )
-        operation_row = operation_rows[0]
-        invalidated_rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunRerunInvalidatedSteps)
-                    .where(
-                        FlowRunRerunInvalidatedSteps.operation_id == operation_row.id
-                    )
-                    .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
-                    .order_by(FlowRunRerunInvalidatedSteps.invalidation_order.asc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return FlowRunActiveRerunOperation(
-            operation=self.factory.from_flow_run_rerun_operation_db(operation_row),
-            invalidated_steps=tuple(
-                self.factory.from_flow_run_rerun_invalidated_step_db(row)
-                for row in invalidated_rows
-            ),
-        )
-
     async def claim_step_result(
         self,
         *,
@@ -2164,6 +860,7 @@ class FlowRunRepository:
             )
             .values(
                 status=FlowStepResultStatus.RUNNING.value,
+                error_code=None,
                 error_message=None,
                 started_at=sa.func.coalesce(FlowStepResults.started_at, now_utc),
                 finished_at=None,
@@ -2181,7 +878,8 @@ class FlowRunRepository:
         flow_run_id: UUID,
         step_id: UUID,
     ) -> int:
-        return await self._next_attempt_no(
+        return await next_step_attempt_no(
+            self.session,
             tenant_id=tenant_id,
             flow_run_id=flow_run_id,
             step_id=step_id,
@@ -2231,8 +929,89 @@ class FlowRunRepository:
                 .where(FlowStepAttempts.tenant_id == tenant_id)
             )
         if row is None:
-            raise NotFoundException("Could not create or fetch flow step attempt.")
+            raise FlowRunPersistenceInvariantError(
+                operation="create_flow_step_attempt",
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
         return self.factory.from_flow_step_attempt_db(row)
+
+    async def copy_step_input_files_from_predecessor_attempt(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        step_id: UUID,
+        step_order: int,
+        predecessor_attempt_id: UUID | None,
+        target_attempt_no: int,
+    ) -> None:
+        if predecessor_attempt_id is None:
+            return
+        target_exists = await self.session.scalar(
+            sa.select(sa.literal(True))
+            .select_from(FlowRunStepInputFiles)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .where(FlowRunStepInputFiles.step_id == step_id)
+            .where(FlowRunStepInputFiles.attempt_no == target_attempt_no)
+            .limit(1)
+        )
+        if target_exists:
+            return
+
+        source_attempt_no = await self.session.scalar(
+            sa.select(FlowStepAttempts.attempt_no)
+            .where(FlowStepAttempts.id == predecessor_attempt_id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.flow_id == flow_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.step_id == step_id)
+        )
+        if source_attempt_no is None:
+            return
+
+        file_ids = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunStepInputFiles.file_id)
+                    .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                    .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                    .where(FlowRunStepInputFiles.step_id == step_id)
+                    .where(FlowRunStepInputFiles.attempt_no == source_attempt_no)
+                    .order_by(FlowRunStepInputFiles.ordinal.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not file_ids:
+            return
+
+        rows = build_step_input_file_rows(
+            flow_run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            attempt_no=target_attempt_no,
+            projections=[
+                {
+                    "step_id": step_id,
+                    "step_order": step_order,
+                    "file_ids": list(file_ids),
+                }
+            ],
+        )
+        # The source attempt row already holds the runtime-upload FK, so the
+        # referenced upload cannot disappear while this copy is inserted.
+        await self.session.execute(
+            pg_insert(FlowRunStepInputFiles)
+            .values(rows)
+            .on_conflict_do_nothing(
+                constraint="uq_flow_run_step_input_files_run_step_attempt_file"
+            )
+        )
 
     async def record_attempt_start_provenance(
         self,
@@ -2254,14 +1033,7 @@ class FlowRunRepository:
             .where(FlowStepAttempts.step_id == step_id)
             .where(FlowStepAttempts.attempt_no == attempt_no)
             .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(
-                FlowStepAttempts.status.in_(
-                    (
-                        FlowStepAttemptStatus.STARTED.value,
-                        FlowStepAttemptStatus.RETRIED.value,
-                    )
-                )
-            )
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
             .values(
                 requested_model=requested_model,
                 provider=provider,
@@ -2298,14 +1070,7 @@ class FlowRunRepository:
             .where(FlowStepAttempts.step_id == step_id)
             .where(FlowStepAttempts.attempt_no == attempt_no)
             .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(
-                FlowStepAttempts.status.in_(
-                    (
-                        FlowStepAttemptStatus.STARTED.value,
-                        FlowStepAttemptStatus.RETRIED.value,
-                    )
-                )
-            )
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
             .values(
                 status=status.value,
                 error_code=error_code,
@@ -2330,201 +1095,6 @@ class FlowRunRepository:
                 tenant_id=tenant_id,
             )
         return self.factory.from_flow_step_attempt_db(row)
-
-    async def mark_rerun_operation_running(
-        self,
-        *,
-        operation_id: UUID,
-        tenant_id: UUID,
-        root_attempt_id: UUID | None = None,
-    ) -> None:
-        now_utc = datetime.now(timezone.utc)
-        values: dict[str, Any] = {
-            "status": FlowRunRerunOperationStatus.RUNNING.value,
-            "started_at": sa.func.coalesce(
-                FlowRunRerunOperations.started_at,
-                now_utc,
-            ),
-        }
-        if root_attempt_id is not None:
-            values["root_attempt_id"] = root_attempt_id
-        await self.session.execute(
-            sa.update(FlowRunRerunOperations)
-            .where(FlowRunRerunOperations.id == operation_id)
-            .where(FlowRunRerunOperations.tenant_id == tenant_id)
-            .where(
-                FlowRunRerunOperations.status
-                == FlowRunRerunOperationStatus.QUEUED.value
-            )
-            .values(**values)
-        )
-
-    async def link_rerun_invalidated_step_attempt(
-        self,
-        *,
-        operation_id: UUID,
-        tenant_id: UUID,
-        step_id: UUID,
-        new_attempt_no: int,
-        new_attempt_id: UUID,
-    ) -> None:
-        result = await self.session.execute(
-            sa.update(FlowRunRerunInvalidatedSteps)
-            .where(FlowRunRerunInvalidatedSteps.operation_id == operation_id)
-            .where(FlowRunRerunInvalidatedSteps.tenant_id == tenant_id)
-            .where(FlowRunRerunInvalidatedSteps.step_id == step_id)
-            .where(
-                sa.or_(
-                    FlowRunRerunInvalidatedSteps.new_attempt_id.is_(None),
-                    FlowRunRerunInvalidatedSteps.new_attempt_id == new_attempt_id,
-                )
-            )
-            .values(new_attempt_no=new_attempt_no, new_attempt_id=new_attempt_id)
-        )
-        if int(getattr(result, "rowcount", 0) or 0) == 0:
-            raise BadRequestException(
-                "Rerun invalidated step is already linked to another attempt.",
-                code="flow_run_rerun_attempt_lineage_conflict",
-            )
-
-    async def _get_rerun_operation_row(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        request_fingerprint: str,
-    ) -> FlowRunRerunOperations | None:
-        return await self.session.scalar(
-            sa.select(FlowRunRerunOperations)
-            .where(FlowRunRerunOperations.tenant_id == tenant_id)
-            .where(FlowRunRerunOperations.flow_id == flow_id)
-            .where(FlowRunRerunOperations.flow_run_id == flow_run_id)
-            .where(FlowRunRerunOperations.request_fingerprint == request_fingerprint)
-        )
-
-    async def _rerun_command_result_from_row(
-        self,
-        *,
-        operation_row: FlowRunRerunOperations,
-        created: bool,
-        run_row: FlowRuns | None = None,
-    ) -> FlowRunRerunCommandResult:
-        resolved_run_row = run_row
-        if resolved_run_row is None:
-            resolved_run_row = await self.session.scalar(
-                sa.select(FlowRuns)
-                .where(FlowRuns.id == operation_row.flow_run_id)
-                .where(FlowRuns.flow_id == operation_row.flow_id)
-                .where(FlowRuns.tenant_id == operation_row.tenant_id)
-            )
-        if resolved_run_row is None:
-            raise NotFoundException("Flow run not found.")
-
-        invalidated_rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunRerunInvalidatedSteps)
-                    .where(
-                        FlowRunRerunInvalidatedSteps.operation_id == operation_row.id
-                    )
-                    .where(
-                        FlowRunRerunInvalidatedSteps.tenant_id
-                        == operation_row.tenant_id
-                    )
-                    .order_by(FlowRunRerunInvalidatedSteps.invalidation_order.asc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return FlowRunRerunCommandResult(
-            operation=self.factory.from_flow_run_rerun_operation_db(operation_row),
-            run=self.factory.from_flow_run_db(resolved_run_row),
-            invalidated_steps=tuple(
-                self.factory.from_flow_run_rerun_invalidated_step_db(row)
-                for row in invalidated_rows
-            ),
-            created=created,
-        )
-
-    async def _current_step_results_by_step_id(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        step_ids: Sequence[UUID],
-    ) -> dict[UUID, FlowStepResults]:
-        if not step_ids:
-            return {}
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowStepResults)
-                    .where(FlowStepResults.flow_run_id == flow_run_id)
-                    .where(FlowStepResults.flow_id == flow_id)
-                    .where(FlowStepResults.tenant_id == tenant_id)
-                    .where(FlowStepResults.step_id.in_(step_ids))
-                    .with_for_update()
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return {row.step_id: row for row in rows}
-
-    async def _latest_completed_attempts_by_step_id(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_id: UUID,
-        flow_run_id: UUID,
-        step_ids: Sequence[UUID],
-    ) -> dict[UUID, FlowStepAttempts]:
-        if not step_ids:
-            return {}
-        rows = (
-            (
-                await self.session.execute(
-                    sa.select(FlowStepAttempts)
-                    .where(FlowStepAttempts.flow_run_id == flow_run_id)
-                    .where(FlowStepAttempts.flow_id == flow_id)
-                    .where(FlowStepAttempts.tenant_id == tenant_id)
-                    .where(FlowStepAttempts.step_id.in_(step_ids))
-                    .where(
-                        FlowStepAttempts.status == FlowStepAttemptStatus.COMPLETED.value
-                    )
-                    .order_by(
-                        FlowStepAttempts.step_id.asc(),
-                        FlowStepAttempts.attempt_no.desc(),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        latest_attempts: dict[UUID, FlowStepAttempts] = {}
-        for row in rows:
-            if row.step_id in latest_attempts:
-                continue
-            latest_attempts[row.step_id] = row
-        return latest_attempts
-
-    async def _next_attempt_no(
-        self,
-        *,
-        tenant_id: UUID,
-        flow_run_id: UUID,
-        step_id: UUID,
-    ) -> int:
-        max_attempt_no = await self.session.scalar(
-            sa.select(sa.func.coalesce(sa.func.max(FlowStepAttempts.attempt_no), 0))
-            .where(FlowStepAttempts.flow_run_id == flow_run_id)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.step_id == step_id)
-        )
-        return int(max_attempt_no or 0) + 1
 
     async def _mark_predecessor_superseded_by_attempt(
         self,

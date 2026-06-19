@@ -1,6 +1,11 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import {
+    hasAccessibleCompletionModel,
+    hasAccessibleTranscriptionModel,
+    spaceCanCreateApps
+  } from "$lib/features/spaces/spaceModelAvailability";
   import TemplateSelector from "$lib/features/templates/components/TemplateSelector.svelte";
   import TemplateWizard from "$lib/features/templates/components/wizard/TemplateWizard.svelte";
   import { getTemplateController } from "$lib/features/templates/TemplateController";
@@ -28,9 +33,12 @@
   let openAppAfterCreation = $state(false);
   let userTouchedToggle = $state(false);
 
-  // Disable creation if required models are missing
-  const canCreateApp = $derived(
-    $currentSpace.completion_models.length > 0 && $currentSpace.transcription_models.length > 0
+  const canCreateApp = $derived(spaceCanCreateApps($currentSpace));
+  const hasCompletionModel = $derived(
+    hasAccessibleCompletionModel($currentSpace.completion_models)
+  );
+  const hasTranscriptionModel = $derived(
+    hasAccessibleTranscriptionModel($currentSpace.transcription_models)
   );
 
   function disableEditorOnTemplate(creationMode: "blank" | "template") {
@@ -53,7 +61,7 @@
   </Dialog.Trigger>
 
   <Dialog.Content width="dynamic" form>
-    {#if $currentSpace.completion_models.length < 1}
+    {#if !hasCompletionModel}
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
       >
@@ -62,7 +70,7 @@
       </p>
       <div class="border-dimmer border-b"></div>
     {/if}
-    {#if $currentSpace.transcription_models.length < 1}
+    {#if !hasTranscriptionModel}
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
       >

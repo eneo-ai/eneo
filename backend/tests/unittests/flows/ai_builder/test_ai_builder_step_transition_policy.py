@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_material_metrics import (
-    compute_step_material_metrics,
-    material_metric_steps_from_draft,
-)
 from intric.flows.ai_builder.ai_builder_source_material import (
     question_binding,
 )
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
+from intric.flows.ai_builder.ai_builder_underlag_policy import is_source_surfacing_text
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -19,6 +16,10 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+)
+from intric.flows.template_reference_analyzer import (
+    TemplateReferenceKind,
+    analyze_template,
 )
 
 
@@ -101,16 +102,59 @@ def _question_metrics(
     *,
     spec: FlowDraftSpecCore,
 ) -> dict[str, int]:
-    steps = material_metric_steps_from_draft(spec)
-    step_order = next(step.step_order for step in steps if step.question == question)
-    metrics = compute_step_material_metrics(steps, step_order=step_order)
+    step_refs = {
+        step.plan_step_ref: step_order
+        for step_order, step in enumerate(spec.steps, start=1)
+    }
+    references = analyze_template(
+        question,
+        step_refs=step_refs,
+        form_field_names=set(),
+    )
+    step_references = [
+        reference
+        for reference in references
+        if reference.kind is TemplateReferenceKind.STEP
+        and reference.path_error_code is None
+    ]
+    source_step_refs = {
+        step.plan_step_ref
+        for step in spec.steps
+        if is_source_surfacing_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_type=step.output_type,
+        )
+    }
+    question_step = next(
+        step
+        for step in spec.steps
+        if question_binding(step.input_bindings) == question
+    )
     return {
-        "binding_byte_size": metrics.binding_bytes,
-        "fan_in_width": metrics.fan_in_width,
-        "structured_field_count": metrics.structured_field_count,
-        "whole_output_reference_count": metrics.whole_output_reference_count,
-        "source_duplication_count": metrics.source_duplication_count,
-        "all_previous_steps_count": metrics.all_previous_steps_count,
+        "binding_byte_size": len(question.encode("utf-8")),
+        "fan_in_width": len(
+            {reference.step_ref or reference.head for reference in step_references}
+        ),
+        "structured_field_count": sum(
+            1
+            for reference in step_references
+            if reference.tail.startswith("output.structured.")
+        ),
+        "whole_output_reference_count": sum(
+            1
+            for reference in step_references
+            if reference.tail in {"output.text", "output.structured"}
+        ),
+        "source_duplication_count": sum(
+            1
+            for reference in step_references
+            if (reference.step_ref or reference.head) in source_step_refs
+            and reference.tail == "output.text"
+        ),
+        "all_previous_steps_count": (
+            1 if question_step.input_source is InputSource.ALL_PREVIOUS_STEPS else 0
+        ),
     }
 
 
@@ -554,9 +598,7 @@ def test_normalize_ai_builder_spec_promotes_trailing_text_after_requested_json()
         for _step_spec, change in changes
         if change.code == "terminal_artifact_helper_folded"
     ] == ["terminal_artifact_helper_folded"]
-    assert len(material_metric_steps_from_draft(normalized)) == (
-        len(material_metric_steps_from_draft(spec)) - 1
-    )
+    assert len(normalized.steps) == len(spec.steps) - 1
 
 
 def test_normalize_ai_builder_spec_promotes_json_tail_without_terminal_bindings() -> (

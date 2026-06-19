@@ -17,14 +17,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from intric.database.database import AsyncSession
-    from intric.users.user import UserInDB
+    from intric.tenants.tenant import TenantInDB
 
 
 class TranscriptionModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+    def __init__(self, *, session: "AsyncSession", tenant: "TenantInDB") -> None:
         super().__init__()
         self.session = session
-        self.user = user
+        self.tenant = tenant
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
@@ -46,7 +46,7 @@ class TranscriptionModelRepository:
                 # UI filtering happens at the presentation layer
                 sa.or_(
                     TranscriptionModels.tenant_id.is_(None),
-                    TranscriptionModels.tenant_id == self.user.tenant_id,
+                    TranscriptionModels.tenant_id == self.tenant.id,
                 )
             )
             .order_by(
@@ -65,7 +65,7 @@ class TranscriptionModelRepository:
         return [
             TranscriptionModel.create_from_db(
                 transcription_model_db=transcription_model,
-                user=self.user,
+                tenant=self.tenant,
                 provider_name=provider_name,
                 provider_type=provider_type,
             )
@@ -89,10 +89,10 @@ class TranscriptionModelRepository:
             )
             .where(
                 TranscriptionModels.id == model_id,
-                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
+                # Allow both global models and models owned by the requesting tenant.
                 sa.or_(
                     TranscriptionModels.tenant_id.is_(None),
-                    TranscriptionModels.tenant_id == self.user.tenant_id,
+                    TranscriptionModels.tenant_id == self.tenant.id,
                 ),
             )
         )
@@ -106,7 +106,7 @@ class TranscriptionModelRepository:
         transcription_model, provider_name, provider_type = row
         return TranscriptionModel.create_from_db(
             transcription_model_db=transcription_model,
-            user=self.user,
+            tenant=self.tenant,
             provider_name=provider_name,
             provider_type=provider_type,
         )
@@ -134,7 +134,7 @@ class TranscriptionModelRepository:
             )
             .where(
                 TranscriptionModels.id == transcription_model.id,
-                TranscriptionModels.tenant_id == self.user.tenant_id,
+                TranscriptionModels.tenant_id == self.tenant.id,
             )
         )
         await self.session.execute(stmt)
@@ -146,7 +146,7 @@ class TranscriptionModelRepository:
                 .values(is_default=False)
                 .where(
                     TranscriptionModels.id != transcription_model.id,
-                    TranscriptionModels.tenant_id == self.user.tenant_id,
+                    TranscriptionModels.tenant_id == self.tenant.id,
                 )
             )
             await self.session.execute(stmt)

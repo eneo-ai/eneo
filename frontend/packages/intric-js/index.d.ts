@@ -16,7 +16,21 @@ export {
   type FlowRunStatusCapabilities,
   type FlowRunStatusCapability
 } from "./src/flows/flow-run-status-capabilities";
-export { JSONRequestBody, type IntricBinaryResponse } from "./src/types/fetch";
+export {
+  FLOW_API_ERROR_CODE,
+  FLOW_API_ERROR_CODES,
+  type FlowApiErrorCode
+} from "./src/flows/flow-api-error-codes";
+export {
+  FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
+  type FlowRunReservedInputPayloadKey
+} from "./src/flows/flow-run-reserved-input-payload-keys";
+export {
+  JSONRequestBody,
+  type IntricBinaryResponse,
+  type IntricFetchFunction,
+  type IntricStreamFunction
+} from "./src/types/fetch";
 export * from "./src/types/resources";
 export * from "./src/socket/types";
 export type { components, operations } from "./src/types/schema";

@@ -8,6 +8,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import SecurityClassificationEnabledSetting from "$lib/features/security-classifications/components/SecurityClassificationEnabledSetting.svelte";
   import SecurityClassificationListSetting from "$lib/features/security-classifications/components/SecurityClassificationListSetting.svelte";
+  import SecurityClassificationRetentionSetting from "$lib/features/security-classifications/components/SecurityClassificationRetentionSetting.svelte";
   import { initSecurityClassificationService } from "$lib/features/security-classifications/SecurityClassificationsService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
@@ -32,6 +33,11 @@
       </Settings.Group>
       <Settings.Group title={m.configuration()}>
         <SecurityClassificationListSetting></SecurityClassificationListSetting>
+      </Settings.Group>
+      <Settings.Group title={m.flow_classification_retention_title()}>
+        <SecurityClassificationRetentionSetting
+          initialPolicies={data.flowClassificationRetentionPolicies}
+        ></SecurityClassificationRetentionSetting>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>

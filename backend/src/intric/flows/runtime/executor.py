@@ -4,7 +4,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Sequence, assert_never, cast
 from uuid import UUID
 
 import httpx
@@ -24,9 +24,9 @@ from intric.flows.application.flow_run_terminalization import (
 from intric.flows.assistant_execution_snapshot import (
     assistant_execution_surface_hash,
     build_assistant_execution_snapshot,
-    stable_hash,
 )
 from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
     FlowRun,
     FlowRunRerunInvalidatedStep,
     FlowRunStatus,
@@ -34,14 +34,30 @@ from intric.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowVersion,
-    JsonObject,
 )
+from intric.flows.domain.rerun_exceptions import (
+    FlowRunRerunAttemptLineageConflictError,
+    FlowRunRerunMultipleActiveOperationsError,
+)
+from intric.flows.domain.review_checkpoint_exceptions import (
+    FLOW_REVIEW_CHECKPOINT_OPEN_TERMINAL_INVARIANT_CLASSES,
+    FlowReviewCheckpointOpenTerminalInvariantFailure,
+    FlowReviewCheckpointRunNotRunningError,
+    FlowReviewCheckpointStepResultIncompleteError,
+    FlowReviewMultipleActiveCheckpointsError,
+    FlowReviewOpenBlockedByActiveCheckpointError,
+)
+from intric.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from intric.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
     is_terminal_flow_run_status,
+)
+from intric.flows.flow_api_error_code import (
+    FLOW_TYPED_IO_ERROR_CODES,
+    FlowApiErrorCode,
 )
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
 from intric.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
@@ -62,19 +78,25 @@ from intric.flows.flow_runtime_policy import (
 from intric.flows.flow_security_classification import (
     evaluate_step_security_classification,
 )
-from intric.flows.flow_template_asset_service import FlowTemplateAssetService
+from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import (
-    FlowReviewCheckpointRunNotRunningError,
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunActiveRerunOperation,
-    FlowRunRepository,
+    FlowRunRerunRepository,
+)
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
 )
 from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
-from intric.flows.published_definition import parse_published_runtime_steps
+from intric.flows.published_definition import (
+    parse_published_runtime_steps,
+    published_definition_checksum,
+)
 from intric.flows.runtime.claim_resolution import resolve_step_claim
 from intric.flows.runtime.document_rendering import DocumentRenderService
 from intric.flows.runtime.document_rendering.limits import (
@@ -86,6 +108,7 @@ from intric.flows.runtime.document_rendering.service import (
 )
 from intric.flows.runtime.execution_state_builder import build_run_execution_state
 from intric.flows.runtime.flow_run_actor import FlowRunActor
+from intric.flows.runtime.flow_runtime_trace import trace_flow_step
 from intric.flows.runtime.http_audit import (
     HttpAuditDeps,
 )
@@ -156,18 +179,89 @@ from intric.flows.runtime.step_result_builder import (
 from intric.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
 )
+from intric.flows.runtime_input import build_runtime_input_config
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_repo import SpaceRepository
-from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
     from intric.assistants.references import ReferencesService
     from intric.audit.application.audit_service import AuditService
     from intric.files.transcriber import Transcriber
+
+
+_RERUN_MULTIPLE_ACTIVE_OPERATIONS_RUN_ERROR_MESSAGE = (
+    "Rerun failed because multiple active rerun operations exist."
+)
+_RERUN_ATTEMPT_LINEAGE_CONFLICT_RUN_ERROR_MESSAGE = (
+    "Rerun failed because the invalidated step is already linked to another attempt."
+)
+
+
+def _typed_io_failure_code(raw_code: str | None) -> FlowApiErrorCode:
+    if raw_code is None:
+        return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
+    try:
+        code = FlowApiErrorCode(raw_code)
+    except ValueError:
+        return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
+    if code in FLOW_TYPED_IO_ERROR_CODES:
+        return code
+    return FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED
+
+
+def _flow_api_error_code_or_default(
+    raw_code: str | None,
+    *,
+    default_code: FlowApiErrorCode,
+) -> FlowApiErrorCode:
+    if raw_code is None:
+        return default_code
+    try:
+        return FlowApiErrorCode(raw_code)
+    except ValueError:
+        logger.warning(
+            "flow_executor.bad_request_uncataloged_code code=%s default_code=%s",
+            raw_code,
+            default_code.value,
+        )
+        return default_code
+
+
+def _review_open_terminal_invariant_error_code(
+    exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
+) -> FlowApiErrorCode:
+    match exc:
+        case FlowReviewOpenBlockedByActiveCheckpointError():
+            return FlowApiErrorCode.REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT
+        case FlowReviewMultipleActiveCheckpointsError():
+            return FlowApiErrorCode.REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT
+        case FlowReviewCheckpointStepResultIncompleteError():
+            return FlowApiErrorCode.REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT
+        case _:
+            assert_never(exc)
+
+
+def _review_open_terminal_invariant_message(
+    exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
+) -> str:
+    match exc:
+        case FlowReviewOpenBlockedByActiveCheckpointError():
+            return (
+                "Review checkpoint opening failed because another checkpoint is active."
+            )
+        case FlowReviewMultipleActiveCheckpointsError():
+            return "Review checkpoint opening failed because multiple checkpoints are active."
+        case FlowReviewCheckpointStepResultIncompleteError():
+            return (
+                "Review checkpoint opening failed because the completed step result was "
+                "unavailable."
+            )
+        case _:
+            assert_never(exc)
 
 
 @dataclass(frozen=True)
@@ -377,21 +471,21 @@ class FlowRunExecutor:
     def __init__(
         self,
         *,
-        user: UserInDB,
-        principal: FlowPrincipal | None = None,
-        runtime_actor: FlowRunActor | None = None,
+        runtime_actor: FlowRunActor,
         session: AsyncSession,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
+        flow_run_rerun_repo: FlowRunRerunRepository,
+        flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
         space_repo: SpaceRepository,
         completion_service: CompletionService,
         file_repo: FileRepository,
-        template_asset_service: FlowTemplateAssetService,
+        template_asset_repo: FlowTemplateAssetRepository,
         encryption_service: EncryptionService,
+        flow_run_terminalizer: FlowRunTerminalizer,
         max_inline_text_bytes: int | None = None,
         audit_service: AuditService | None = None,
-        flow_run_terminalizer: FlowRunTerminalizer | None = None,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
         transcriber: Transcriber | None = None,
@@ -411,16 +505,14 @@ class FlowRunExecutor:
                 max_generic_files=max_generic_files,
             )
 
-        self.user = user
-        self.principal = principal or FlowPrincipal.from_user(user)
-        self.runtime_actor = runtime_actor or FlowRunActor.from_user(user=user)
+        self.runtime_actor = runtime_actor
+        self.principal = runtime_actor.principal
         self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
-        self.flow_run_terminalizer = flow_run_terminalizer or FlowRunTerminalizer(
-            flow_run_repo,
-            flow_run_repo.audit_outbox_repo,
-        )
+        self.flow_run_rerun_repo = flow_run_rerun_repo
+        self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
+        self.flow_run_terminalizer = flow_run_terminalizer
         self.webhook_delivery_repo = (
             webhook_delivery_repo
             if webhook_delivery_repo is not None
@@ -430,7 +522,7 @@ class FlowRunExecutor:
         self.space_repo = space_repo
         self.completion_service = completion_service
         self.file_repo = file_repo
-        self.template_asset_service = template_asset_service
+        self.template_asset_repo = template_asset_repo
         self.encryption_service = encryption_service
         self.max_inline_text_bytes = resolved_config.max_inline_text_bytes
         self.audit_service = audit_service
@@ -508,12 +600,15 @@ class FlowRunExecutor:
                 source=FlowRunLifecycleSource.FLOW_DELETED,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.FLOW_DELETED,
-                    code="flow_deleted",
+                    code=FlowApiErrorCode.FLOW_DELETED,
                     message=reason,
                 ),
             )
             await self._commit()
-            return {"status": "cancelled", "reason": "flow_deleted"}
+            return {
+                "status": "cancelled",
+                "reason": FlowApiErrorCode.FLOW_DELETED.value,
+            }
 
         version = await self.flow_version_repo.get(
             flow_id=run.flow_id,
@@ -530,14 +625,20 @@ class FlowRunExecutor:
                 source=FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.DEFINITION_CHECKSUM_MISMATCH,
-                    code="definition_checksum_mismatch",
+                    code=FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
                     message=str(exc),
                 ),
             )
             await self._commit()
-            return {"status": "failed", "error": "definition_checksum_mismatch"}
+            return {
+                "status": "failed",
+                "error": FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value,
+            }
         try:
-            steps = parse_published_runtime_steps(version.definition_json)
+            steps = parse_published_runtime_steps(
+                version.definition_json,
+                flow_version=version.version,
+            )
         except BadRequestException as exc:
             source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
             await self._terminalize_run(
@@ -545,14 +646,54 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
                 source=source,
-                error=self._run_error_from_bad_request(
-                    exc,
-                    source=source,
-                    default_code="invalid_flow_definition",
+                error=(
+                    run_error := self._run_error_from_bad_request(
+                        exc,
+                        source=source,
+                        default_code=FlowApiErrorCode.DEFINITION_INVALID,
+                    )
                 ),
             )
             await self._commit()
-            return {"status": "failed", "error": exc.code or "invalid_flow_definition"}
+            return {
+                "status": "failed",
+                "error": run_error.code,
+            }
+        except FlowRuntimeInvariantError as exc:
+            source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+            await self._terminalize_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=source,
+                error=FlowRunError.from_source(
+                    source,
+                    code=FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS,
+                    message=str(exc),
+                ),
+            )
+            await self._commit()
+            return {
+                "status": "failed",
+                "error": FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS.value,
+            }
+        if not steps:
+            await self._terminalize_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                    code=FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS,
+                    message="Published flow definition has no executable steps.",
+                ),
+            )
+            await self._commit()
+            return {
+                "status": "failed",
+                "error": FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS.value,
+            }
         version_metadata = version.definition_json.get("metadata_json")
 
         persisted_results = await self.flow_run_repo.list_step_results(
@@ -571,25 +712,39 @@ class FlowRunExecutor:
                 ),
             )
         except BadRequestException as exc:
+            source = FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT
+            run_error = self._run_error_from_bad_request(
+                exc,
+                source=source,
+                default_code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT,
+            )
             await self._terminalize_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowRunStatus.FAILED,
-                source=FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT,
-                    code="assistant_snapshot_drift",
-                    message=str(exc),
-                ),
+                source=source,
+                error=run_error,
             )
             await self._commit()
-            return {"status": "failed", "error": "assistant_snapshot_drift"}
+            return {
+                "status": "failed",
+                "error": run_error.code,
+            }
 
-        active_rerun_operation = await self.flow_run_repo.get_active_rerun_operation(
-            run_id=run_id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-        )
+        try:
+            active_rerun_operation = (
+                await self.flow_run_rerun_repo.get_active_rerun_operation(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                )
+            )
+        except FlowRunRerunMultipleActiveOperationsError:
+            return await self._handle_multiple_active_rerun_operations(
+                run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+            )
         active_rerun_steps_by_id = self._active_rerun_steps_by_id(
             active_rerun_operation
         )
@@ -631,7 +786,7 @@ class FlowRunExecutor:
                     source=FlowRunLifecycleSource.FLOW_DELETED,
                     error=FlowRunError.from_source(
                         FlowRunLifecycleSource.FLOW_DELETED,
-                        code="flow_deleted",
+                        code=FlowApiErrorCode.FLOW_DELETED,
                         message=preclaim_decision.run_error_message
                         or "Flow was deleted during execution.",
                     ),
@@ -639,7 +794,7 @@ class FlowRunExecutor:
                 await self._commit()
                 return preclaim_decision.result or {
                     "status": "cancelled",
-                    "reason": "flow_deleted",
+                    "reason": FlowApiErrorCode.FLOW_DELETED.value,
                 }
 
             claimed = await self.flow_run_repo.claim_step_result(
@@ -678,7 +833,7 @@ class FlowRunExecutor:
                         source=FlowRunLifecycleSource.STEP_MISSING,
                         error=FlowRunError.from_source(
                             FlowRunLifecycleSource.STEP_MISSING,
-                            code="step_missing",
+                            code=FlowApiErrorCode.STEP_MISSING,
                             message=postclaim_decision.run_error_message
                             or f"Missing step result for step {step.step_id}",
                         ),
@@ -686,7 +841,7 @@ class FlowRunExecutor:
                     await self._commit()
                     return postclaim_decision.result or {
                         "status": "failed",
-                        "error": "step_missing",
+                        "error": FlowApiErrorCode.STEP_MISSING.value,
                     }
                 if (
                     postclaim_decision.action == "append_completed"
@@ -711,6 +866,15 @@ class FlowRunExecutor:
                     ),
                 )
                 await self._commit()
+            except FlowRunRerunAttemptLineageConflictError:
+                return await self._handle_attempt_start_failure(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    step=step,
+                    claimed=claimed_result,
+                    error_code=FlowApiErrorCode.RUN_RERUN_ATTEMPT_LINEAGE_CONFLICT_INVARIANT,
+                    error_message=_RERUN_ATTEMPT_LINEAGE_CONFLICT_RUN_ERROR_MESSAGE,
+                )
             except Exception:
                 return await self._handle_attempt_start_failure(
                     run_id=run_id,
@@ -944,7 +1108,22 @@ class FlowRunExecutor:
         if active_rerun_invalidated_step is not None:
             if active_rerun_operation is None:
                 raise RuntimeError("Rerun step context requires an active operation.")
-            await self.flow_run_repo.link_rerun_invalidated_step_attempt(
+            if not (
+                active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT
+                and active_rerun_operation.operation.root_step_input_override_requested
+            ):
+                await self.flow_run_repo.copy_step_input_files_from_predecessor_attempt(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    step_id=step.step_id,
+                    step_order=step.step_order,
+                    predecessor_attempt_id=(
+                        active_rerun_invalidated_step.prior_attempt_id
+                    ),
+                    target_attempt_no=started_attempt.attempt_no,
+                )
+            await self.flow_run_rerun_repo.link_rerun_invalidated_step_attempt(
                 operation_id=active_rerun_operation.operation.id,
                 tenant_id=tenant_id,
                 step_id=step.step_id,
@@ -952,7 +1131,7 @@ class FlowRunExecutor:
                 new_attempt_id=started_attempt.id,
             )
             if active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT:
-                await self.flow_run_repo.mark_rerun_operation_running(
+                await self.flow_run_rerun_repo.mark_rerun_operation_running(
                     operation_id=active_rerun_operation.operation.id,
                     tenant_id=tenant_id,
                     root_attempt_id=started_attempt.id,
@@ -987,7 +1166,7 @@ class FlowRunExecutor:
         run: FlowRun,
         state: RunExecutionState | None = None,
         version_metadata: dict[str, Any] | None = None,
-        attempt_no: int | None = None,
+        attempt_no: int,
     ) -> StepExecutionResult:
         if state is None:
             state = RunExecutionState(
@@ -1012,13 +1191,27 @@ class FlowRunExecutor:
         )
 
         handler = self._build_step_handler(resolve_handler_mode(step.output_mode))
-        return await handler.execute(
-            step=step,
-            run=run,
-            state=state,
-            version_metadata=version_metadata,
+        with trace_flow_step(
+            run_id=run.id,
+            run_trace_id=run.trace_id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_id=step.step_id,
+            step_order=step.step_order,
             attempt_no=attempt_no,
-        )
+            input_type=step.input_type,
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+        ) as step_span:
+            result = await handler.execute(
+                step=step,
+                run=run,
+                state=state,
+                version_metadata=version_metadata,
+                attempt_no=attempt_no,
+            )
+            step_span.set_result(status="completed")
+            return result
 
     def _build_step_handler(self, mode: FlowOutputMode) -> StepHandler:
         handler_class = STEP_HANDLER_REGISTRY[mode]
@@ -1045,14 +1238,14 @@ class FlowRunExecutor:
                 return TemplateFillStepHandler(deps=self._template_fill_runtime_deps())
         raise TypedIOValidationException(
             f"Unsupported output mode '{mode.value}'.",
-            code="flow_unsupported_output_mode",
+            code=FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE,
         )
 
     def _template_fill_runtime_deps(self) -> TemplateFillRuntimeDeps:
         return TemplateFillRuntimeDeps(
             variable_resolver=self.variable_resolver,
             file_repo=self.file_repo,
-            template_asset_service=self.template_asset_service,
+            template_asset_repo=self.template_asset_repo,
             apply_output_cap=self._apply_output_cap_positional,
             principal=self.principal,
             logger=logger,
@@ -1095,15 +1288,21 @@ class FlowRunExecutor:
         step: RuntimeStep,
         run: FlowRun,
         state: RunExecutionState,
-        version_metadata: JsonObject | None,
-        attempt_no: int | None,
+        version_metadata: FlowPersistedJsonObject | None,
+        attempt_no: int,
     ) -> PreparedAssistantStep:
         execution_deps = self._build_step_execution_runtime_deps(step=step)
+        requested_file_ids = await self._list_step_input_file_ids(
+            step=step,
+            run=run,
+            attempt_no=attempt_no,
+        )
         prepared = await prepare_step_execution(
             step=step,
             run=run,
             state=state,
             version_metadata=version_metadata,
+            requested_file_ids=requested_file_ids,
             deps=execution_deps,
         )
         requested_model = _requested_model_from_assistant(prepared.assistant)
@@ -1142,18 +1341,33 @@ class FlowRunExecutor:
             contract_validation.get("parse_attempted"),
             contract_validation.get("parse_succeeded"),
         )
-        if attempt_no is not None:
-            await self.flow_run_repo.record_attempt_start_provenance(
-                run_id=run.id,
-                step_id=step.step_id,
-                attempt_no=attempt_no,
-                tenant_id=run.tenant_id,
-                requested_model=requested_model,
-                provider=provider,
-                attempt_start=attempt_start,
-            )
+        await self.flow_run_repo.record_attempt_start_provenance(
+            run_id=run.id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+            tenant_id=run.tenant_id,
+            requested_model=requested_model,
+            provider=provider,
+            attempt_start=attempt_start,
+        )
         await self._commit()
         return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
+
+    async def _list_step_input_file_ids(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        attempt_no: int,
+    ) -> list[UUID]:
+        if not build_runtime_input_config(step.input_config).enabled:
+            return []
+        return await self.flow_run_repo.list_step_input_file_ids(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            step_id=step.step_id,
+            attempt_no=attempt_no,
+        )
 
     async def _retrieve_rag_chunks(
         self,
@@ -1195,6 +1409,39 @@ class FlowRunExecutor:
         )
         return run.status == FlowRunStatus.CANCELLED
 
+    async def _handle_multiple_active_rerun_operations(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> dict[str, Any]:
+        await self._rollback()
+        logger.critical(
+            "flow_executor.rerun_multiple_active_operations_terminalized_failed "
+            "run_id=%s code=%s",
+            run_id,
+            FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT.value,
+            exc_info=True,
+        )
+        await self._terminalize_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT,
+                message=_RERUN_MULTIPLE_ACTIVE_OPERATIONS_RUN_ERROR_MESSAGE,
+            ),
+        )
+        await self._commit()
+        return await self._return_after_terminalized_step_write(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+
     async def _return_after_terminalized_step_write(
         self,
         *,
@@ -1225,20 +1472,28 @@ class FlowRunExecutor:
         tenant_id: UUID,
         step: RuntimeStep,
         claimed: FlowStepResult,
+        error_code: FlowApiErrorCode | None = None,
+        error_message: str | None = None,
     ) -> dict[str, Any]:
+        run_error_code = error_code or FlowApiErrorCode.STEP_ATTEMPT_START_FAILED
         logger.exception(
-            "flow_executor.step_attempt_start_failed run_id=%s step_order=%d step_id=%s",
+            "flow_executor.step_attempt_start_failed run_id=%s step_order=%d step_id=%s code=%s",
             run_id,
             step.step_order,
             step.step_id,
+            run_error_code.value,
         )
         failure_plan = build_generic_failure_plan(
             claimed=claimed,
             public_error=f"Flow step {step.step_order} execution failed.",
         )
+        run_error_message = error_message or failure_plan.run_error_message
         await self._rollback()
         await self.flow_repo.save_step_result(
-            run_id, failure_plan.failed_result, tenant_id=tenant_id
+            run_id,
+            failure_plan.failed_result,
+            tenant_id=tenant_id,
+            attempt_no=None,
         )
         await self._terminalize_run(
             run_id=run_id,
@@ -1247,8 +1502,8 @@ class FlowRunExecutor:
             source=FlowRunLifecycleSource.EXECUTOR_FAILED,
             error=FlowRunError.from_source(
                 FlowRunLifecycleSource.EXECUTOR_FAILED,
-                code="step_attempt_start_failed",
-                message=failure_plan.run_error_message,
+                code=run_error_code,
+                message=run_error_message,
                 step_order=step.step_order,
             ),
         )
@@ -1280,7 +1535,7 @@ class FlowRunExecutor:
             attempt_no=attempt_no,
             tenant_id=tenant_id,
             status=FlowStepAttemptStatus.CANCELLED,
-            error_code="run_cancelled",
+            error_code=FlowApiErrorCode.RUN_CANCELLED.value,
             error_message="Run was cancelled during step execution.",
             requested_model=requested_model,
             provider=provider,
@@ -1305,7 +1560,7 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
         failed_prompt = getattr(typed_exc, "effective_prompt", None)
-        error_code = typed_exc.code or "typed_io_validation_failed"
+        error_code = _typed_io_failure_code(typed_exc.code)
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
             error_code=error_code,
@@ -1341,7 +1596,7 @@ class FlowRunExecutor:
             attempt_no=attempt_no,
             tenant_id=tenant_id,
             status=failure_plan.attempt_status,
-            error_code=failure_plan.error_code,
+            error_code=failure_plan.error_code.value,
             error_message=failure_plan.error_message,
             requested_model=requested_model
             if isinstance(requested_model, str)
@@ -1353,7 +1608,10 @@ class FlowRunExecutor:
             ),
         )
         await self.flow_repo.save_step_result(
-            run_id, failure_plan.failed_result, tenant_id=tenant_id
+            run_id,
+            failure_plan.failed_result,
+            tenant_id=tenant_id,
+            attempt_no=attempt_no,
         )
         await self._terminalize_run(
             run_id=run_id,
@@ -1400,7 +1658,7 @@ class FlowRunExecutor:
             attempt_no=attempt_no,
             tenant_id=tenant_id,
             status=failure_plan.attempt_status,
-            error_code=failure_plan.error_code,
+            error_code=failure_plan.error_code.value,
             error_message=failure_plan.error_message,
             requested_model=requested_model,
             provider=provider,
@@ -1410,7 +1668,10 @@ class FlowRunExecutor:
             ),
         )
         await self.flow_repo.save_step_result(
-            run_id, failure_plan.failed_result, tenant_id=tenant_id
+            run_id,
+            failure_plan.failed_result,
+            tenant_id=tenant_id,
+            attempt_no=attempt_no,
         )
         await self._terminalize_run(
             run_id=run_id,
@@ -1493,7 +1754,7 @@ class FlowRunExecutor:
         attempt_no: int,
     ) -> dict[str, Any]:
         try:
-            opened = await self.flow_run_repo.open_review_checkpoint_for_completed_step(
+            opened = await self.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step(
                 tenant_id=tenant_id,
                 flow_id=flow_id,
                 flow_run_id=run_id,
@@ -1525,6 +1786,14 @@ class FlowRunExecutor:
                 flow_id=flow_id,
                 tenant_id=tenant_id,
             )
+        except FLOW_REVIEW_CHECKPOINT_OPEN_TERMINAL_INVARIANT_CLASSES as exc:
+            return await self._handle_review_checkpoint_open_terminal_invariant(
+                run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                step=step,
+                exc=exc,
+            )
         await self._commit()
         logger.info(
             "flow_executor.awaiting_review run_id=%s step_order=%d checkpoint_id=%s",
@@ -1533,6 +1802,57 @@ class FlowRunExecutor:
             opened.checkpoint.id,
         )
         return {"status": opened.run.status.value}
+
+    async def _handle_review_checkpoint_open_terminal_invariant(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        step: RuntimeStep,
+        exc: FlowReviewCheckpointOpenTerminalInvariantFailure,
+    ) -> dict[str, Any]:
+        error_code = _review_open_terminal_invariant_error_code(exc)
+        error_message = _review_open_terminal_invariant_message(exc)
+        await self._rollback()
+        if isinstance(exc, FlowReviewMultipleActiveCheckpointsError):
+            logger.critical(
+                "flow_executor.review_open_multiple_active_terminalized_failed "
+                "run_id=%s step_order=%d step_id=%s code=%s",
+                run_id,
+                step.step_order,
+                step.step_id,
+                error_code.value,
+                exc_info=True,
+            )
+        else:
+            logger.exception(
+                "flow_executor.review_open_terminalized_failed "
+                "run_id=%s step_order=%d step_id=%s code=%s",
+                run_id,
+                step.step_order,
+                step.step_id,
+                error_code,
+            )
+        await self._terminalize_run(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=error_code,
+                message=error_message,
+                step_id=step.step_id,
+                step_order=step.step_order,
+            ),
+        )
+        await self._commit()
+        return await self._return_after_terminalized_step_write(
+            run_id=run_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
 
     @staticmethod
     def _next_step_ids_after_reviewed_step(
@@ -1553,9 +1873,9 @@ class FlowRunExecutor:
         context: dict[str, Any],
         run: FlowRun,
         prior_results: list[FlowStepResult],
-        assistant_prompt_text: str | None = None,
         state: RunExecutionState | None = None,
         version_metadata: dict[str, Any] | None = None,
+        requested_file_ids: Sequence[UUID] = (),
     ) -> StepInputValue:
         deps = StepInputResolutionDeps(
             variable_resolver=self.variable_resolver,
@@ -1577,9 +1897,9 @@ class FlowRunExecutor:
             context=context,
             run=run,
             prior_results=prior_results,
-            assistant_prompt_text=assistant_prompt_text,
             state=state,
             version_metadata=version_metadata,
+            requested_file_ids=requested_file_ids,
             deps=deps,
         )
 
@@ -1594,8 +1914,6 @@ class FlowRunExecutor:
             encryption_service=self.encryption_service,
             variable_resolver=self.variable_resolver,
             resolve_timeout_seconds=self.http_runtime.resolve_timeout_seconds,
-            build_headers=self.http_runtime.build_headers,
-            resolve_request_body=self.http_runtime.resolve_request_body,
             read_response_text=self.http_runtime.read_response_text,
             send_http_request=self._send_http_request,
             audit_http_outbound=self._audit_http_outbound,
@@ -1828,7 +2146,7 @@ class FlowRunExecutor:
 
     @staticmethod
     def _validate_definition_checksum(*, version: FlowVersion, run_id: UUID) -> None:
-        current_checksum = stable_hash(version.definition_json)
+        current_checksum = published_definition_checksum(version.definition_json)
         if version.definition_checksum == current_checksum:
             return
 
@@ -1854,7 +2172,7 @@ class FlowRunExecutor:
         exc: BadRequestException,
         *,
         source: FlowRunLifecycleSource,
-        default_code: str,
+        default_code: FlowApiErrorCode,
     ) -> FlowRunError:
         context = exc.context
         step_order_value = context.get("step_order") if context is not None else None
@@ -1866,7 +2184,10 @@ class FlowRunExecutor:
         )
         return FlowRunError.from_source(
             source,
-            code=exc.code or default_code,
+            code=_flow_api_error_code_or_default(
+                exc.code,
+                default_code=default_code,
+            ),
             message=str(exc),
             step_order=step_order,
             details=FlowRunErrorDetails.from_bad_request_context(context),
@@ -1880,7 +2201,7 @@ class FlowRunExecutor:
         target_status: FlowRunStatus,
         source: FlowRunLifecycleSource,
         error: FlowRunError | None = None,
-        output_payload_json: JsonObject | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
     ) -> FlowRunTerminalizationResult:
         return await self.flow_run_terminalizer.terminalize_run(

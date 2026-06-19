@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.enums import FlowOutputType
-from intric.flows.output_processing import JsonStructuredValue
+from intric.flows.output_processing import StructuredOutputValue
 from intric.flows.runtime.output_formats.base import (
     EnsureSourceWithinLimitsFn,
     OutputFormatProcessingContext,
@@ -29,12 +29,12 @@ def _context(
     ensure_source_within_limits: EnsureSourceWithinLimitsFn | None = None,
     json_contract_validation_enabled: bool = False,
 ) -> OutputFormatProcessingContext:
-    def _parse_not_expected(raw_text: str) -> JsonStructuredValue:
+    def _parse_not_expected(raw_text: str) -> StructuredOutputValue:
         raise AssertionError(f"parse_json_output was not expected: {raw_text}")
 
     def _validate_not_expected(
         data: object,
-        schema: JsonObject,
+        schema: FlowPersistedJsonObject,
         *,
         label: str,
     ) -> None:
@@ -49,11 +49,11 @@ def _context(
         raise AssertionError(f"render_document was not expected: {output_type}")
 
     def _render_structured_not_expected(
-        data: JsonStructuredValue,
+        data: StructuredOutputValue,
         output_type: str,
         *,
         step_order: int,
-        schema: JsonObject | None = None,
+        schema: FlowPersistedJsonObject | None = None,
     ) -> tuple[bytes, str, str]:
         raise AssertionError(
             f"render_structured_document was not expected: {output_type}"
@@ -92,13 +92,13 @@ def test_text_output_format_processing_is_noop() -> None:
 def test_json_output_format_skips_contract_validation_without_compiled_validator() -> (
     None
 ):
-    parsed: JsonStructuredValue = {"ok": True, "extra": "kept"}
+    parsed: StructuredOutputValue = {"ok": True, "extra": "kept"}
     validate_calls: list[str] = []
 
-    def _parse(raw_text: str) -> JsonStructuredValue:
+    def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: JsonObject, *, label: str) -> None:
+    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
         validate_calls.append(label)
 
     result = JsonOutputFormatSpec().process_model_output(
@@ -124,13 +124,13 @@ def test_json_output_format_skips_contract_validation_without_compiled_validator
 def test_json_output_format_prunes_and_validates_when_compiled_validator_exists() -> (
     None
 ):
-    parsed: JsonStructuredValue = {"ok": True, "extra": "dropped"}
+    parsed: StructuredOutputValue = {"ok": True, "extra": "dropped"}
     validate_payloads: list[object] = []
 
-    def _parse(raw_text: str) -> JsonStructuredValue:
+    def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: JsonObject, *, label: str) -> None:
+    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
         validate_payloads.append(data)
 
     result = JsonOutputFormatSpec().process_model_output(
@@ -187,27 +187,29 @@ def test_document_output_formats_share_structured_contract_pipeline(
     spec: OutputFormatSpec,
     output_type: str,
 ) -> None:
-    parsed: JsonStructuredValue = {"title": "Report", "extra": "dropped"}
+    parsed: StructuredOutputValue = {"title": "Report", "extra": "dropped"}
     validate_payloads: list[object] = []
-    render_calls: list[tuple[JsonStructuredValue, str, int, JsonObject | None]] = []
-    contract: JsonObject = {
+    render_calls: list[
+        tuple[StructuredOutputValue, str, int, FlowPersistedJsonObject | None]
+    ] = []
+    contract: FlowPersistedJsonObject = {
         "type": "object",
         "properties": {"title": {"type": "string"}},
         "additionalProperties": False,
     }
 
-    def _parse(raw_text: str) -> JsonStructuredValue:
+    def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: JsonObject, *, label: str) -> None:
+    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
         validate_payloads.append(data)
 
     def _render_structured(
-        data: JsonStructuredValue,
+        data: StructuredOutputValue,
         rendered_output_type: str,
         *,
         step_order: int,
-        schema: JsonObject | None = None,
+        schema: FlowPersistedJsonObject | None = None,
     ) -> tuple[bytes, str, str]:
         render_calls.append((data, rendered_output_type, step_order, schema))
         return b"rendered", "application/test", f"step-{step_order}"

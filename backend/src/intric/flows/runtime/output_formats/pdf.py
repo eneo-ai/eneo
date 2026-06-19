@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.enums import FlowOutputType
 from intric.flows.runtime.output_formats.base import (
     OutputFormatProcessingContext,
@@ -15,14 +15,14 @@ from intric.flows.runtime.output_formats.base import (
 
 class PdfOutputFormatSpec:
     def prompt_instructions(
-        self, output_contract: JsonObject | None
+        self, output_contract: FlowPersistedJsonObject | None
     ) -> tuple[str, ...]:
         return document_prompt_instructions(
             artifact_name="PDF", output_contract=output_contract
         )
 
     def should_request_native_json_object_mode(
-        self, output_contract: JsonObject | None
+        self, output_contract: FlowPersistedJsonObject | None
     ) -> bool:
         return document_prefers_native_json_object_mode(output_contract)
 
@@ -31,7 +31,7 @@ class PdfOutputFormatSpec:
         full_text: str,
         *,
         step_order: int,
-        output_contract: JsonObject | None,
+        output_contract: FlowPersistedJsonObject | None,
         context: OutputFormatProcessingContext,
     ) -> OutputFormatProcessingResult:
         if output_contract is not None:

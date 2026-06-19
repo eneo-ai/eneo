@@ -115,6 +115,8 @@ describe("flowFormSchema", () => {
     expect(getFlowFormFieldNameIssue("step_input")).toBe("namespace_head");
     expect(getFlowFormFieldNameIssue("text")).toBe("primary_input_key");
     expect(getFlowFormFieldNameIssue("file_ids")).toBe("primary_input_key");
+    expect(getFlowFormFieldNameIssue("expected_flow_version")).toBe("primary_input_key");
+    expect(getFlowFormFieldNameIssue("step_inputs")).toBe("primary_input_key");
     expect(getFlowFormFieldNameIssue("step_1")).toBe("step_alias");
     expect(getFlowFormFieldNameIssue("step_2.output.text")).toBe("step_alias");
     expect(getFlowFormFieldNameIssue("titel.sv")).toBe("dot");

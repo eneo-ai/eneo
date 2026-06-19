@@ -248,6 +248,20 @@ describe("flows templates endpoint", () => {
     expect(xhr.mock.calls[0][3]).toBe(abortController);
   });
 
+  it("deletes orphan runtime files through the flow-scoped route", async () => {
+    const fetch = vi.fn(async () => undefined);
+    const flows = initFlows({ fetch });
+
+    await flows.steps.runtimeFiles.delete({ id: "flow-1", fileId: "file-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/runtime-files/{file_id}/");
+    expect(fetch.mock.calls[0][1].method).toBe("delete");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", file_id: "file-1" }
+    });
+  });
+
   it("generates artifact signed url from flow run route", async () => {
     const fetch = vi.fn(async () => ({ url: "https://example.com/download", expires_at: 9999 }));
     const flows = initFlows({ fetch });
@@ -263,7 +277,7 @@ describe("flows templates endpoint", () => {
 
   it("exports evidence from the canonical flow run route", async () => {
     const fetch = vi.fn(async () => ({
-      schema_version: "flow-evidence-export.v2",
+      schema_version: "flow-evidence-export.v6",
       content_hash: "abc123"
     }));
     const flows = initFlows({ fetch });
@@ -363,14 +377,14 @@ describe("flows templates endpoint", () => {
     });
   });
 
-  it("normalizes step input file id ordering before creating flow runs", async () => {
+  it("forwards step input file ids in caller order for API-side normalization", async () => {
     const fetch = vi.fn(async () => ({ id: "run-1" }));
     const flows = initFlows({ fetch });
 
     await flows.runs.create({
       flow: { id: "flow-1" },
       step_inputs: {
-        "step-b": { file_ids: ["file-5", "file-4"] },
+        "step-b": { file_ids: ["file-5", "file-4", "file-5"] },
         "step-a": { file_ids: ["file-9"] }
       }
     });
@@ -378,7 +392,7 @@ describe("flows templates endpoint", () => {
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       step_inputs: {
         "step-a": { file_ids: ["file-9"] },
-        "step-b": { file_ids: ["file-4", "file-5"] }
+        "step-b": { file_ids: ["file-5", "file-4", "file-5"] }
       }
     });
   });
@@ -409,7 +423,7 @@ describe("flows templates endpoint", () => {
       expectedFlowVersion: 7,
       input_payload_json: { b: 2, a: 1, nested: { y: 2, x: 1 } },
       step_inputs: {
-        "step-b": { file_ids: ["file-3", "file-2"] },
+        "step-b": { file_ids: ["file-2", "file-3"] },
         "step-a": { file_ids: ["file-1"] }
       }
     });
@@ -425,6 +439,21 @@ describe("flows templates endpoint", () => {
 
     expect(keyA).toBe(keyB);
     expect(keyA).toMatch(/^flow-run:[a-f0-9]{64}$/);
+  });
+
+  it("derives different upload-intent keys for different step file ordering", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+
+    const keyA = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-1",
+      step_inputs: { "step-1": { file_ids: ["file-1", "file-2"] } }
+    });
+    const keyB = await flows.runs.deriveUploadIntentIdempotencyKey({
+      flowId: "flow-1",
+      step_inputs: { "step-1": { file_ids: ["file-2", "file-1"] } }
+    });
+
+    expect(keyA).not.toBe(keyB);
   });
 
   it("derives different upload-intent idempotency keys when the run intent changes", async () => {
@@ -495,6 +524,23 @@ describe("flows templates endpoint", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("rejects backend-reserved transcription key before creating a flow run", async () => {
+    const fetch = vi.fn(async () => ({ id: "run-1" }));
+    const flows = initFlows({ fetch });
+
+    await expect(
+      flows.runs.create({
+        flow: { id: "flow-1" },
+        input_payload_json: { transkribering: "spoofed transcript" }
+      })
+    ).rejects.toMatchObject({
+      code: "flow_run_reserved_input_payload_key",
+      status: 400,
+      keys: ["transkribering"]
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects reserved orchestration keys before deriving upload-intent idempotency keys", async () => {
     const flows = initFlows({ fetch: vi.fn() });
 
@@ -507,6 +553,21 @@ describe("flows templates endpoint", () => {
       code: "flow_run_reserved_input_payload_key",
       status: 400,
       keys: ["file_ids"]
+    });
+  });
+
+  it("rejects backend-reserved transcription key before deriving upload-intent idempotency keys", async () => {
+    const flows = initFlows({ fetch: vi.fn() });
+
+    await expect(
+      flows.runs.deriveUploadIntentIdempotencyKey({
+        flowId: "flow-1",
+        input_payload_json: { transkribering: "spoofed transcript" }
+      })
+    ).rejects.toMatchObject({
+      code: "flow_run_reserved_input_payload_key",
+      status: 400,
+      keys: ["transkribering"]
     });
   });
 });

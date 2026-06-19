@@ -3,16 +3,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable, Sequence
+from uuid import UUID
 
 from intric.flows.domain.flow import FlowRun, FlowStepResult
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
-from intric.flows.flow_run_step_inputs import FLOW_RUN_ORCHESTRATION_INPUT_KEYS
+from intric.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from intric.flows.principal import FlowPrincipal
-from intric.flows.runtime.input_files import (
-    load_files_by_requested_ids,
-    parse_requested_file_ids,
-)
+from intric.flows.runtime.input_files import load_files_by_requested_ids
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
@@ -57,9 +56,9 @@ async def resolve_step_input(
     context: dict[str, Any],
     run: FlowRun,
     prior_results: list[FlowStepResult],
-    assistant_prompt_text: str | None = None,
     state: RunExecutionState | None = None,
     version_metadata: dict[str, Any] | None = None,
+    requested_file_ids: Sequence[UUID] = (),
     deps: StepInputResolutionDeps,
 ) -> StepInputValue:
     if step.step_order == 1 and step.input_source in {
@@ -68,18 +67,18 @@ async def resolve_step_input(
     }:
         raise TypedIOValidationException(
             "Step 1 cannot use previous_step/all_previous_steps input source. Use flow_input.",
-            code="typed_io_invalid_input_source_position",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_POSITION.value,
         )
     if step.input_type == "json" and step.input_source == "all_previous_steps":
         raise TypedIOValidationException(
             f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
             f"'all_previous_steps' (concatenated text is not valid JSON).",
-            code="typed_io_invalid_input_source_combination",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
     if step.input_type == "audio" and step.input_source != "flow_input":
         raise TypedIOValidationException(
             f"Step {step.step_order}: input_type 'audio' is only supported with input_source 'flow_input'.",
-            code="typed_io_audio_source_unsupported",
+            code=FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED.value,
         )
     structured: dict[str, Any] | list[Any] | None = None
     if step.input_source in ("http_get", "http_post"):
@@ -100,16 +99,15 @@ async def resolve_step_input(
     input_text = source_text
     raw_extracted_text = ""
     used_question_binding = False
-    legacy_prompt_binding_used = False
     diagnostics: list[StepDiagnostic] = []
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
     files = None
     runtime_input_config = build_runtime_input_config(step.input_config)
     runtime_input_text = ""
-    requested_ids = _resolve_runtime_requested_ids(run=run, step=step)
+    requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
 
-    if requested_ids and runtime_input_config.enabled:
+    if requested_ids:
         files = await _load_runtime_files(
             requested_ids=requested_ids,
             step_order=step.step_order,
@@ -122,7 +120,7 @@ async def resolve_step_input(
             if deps.transcriber is None:
                 raise TypedIOValidationException(
                     "Transcriber service is not available for audio input execution.",
-                    code="typed_io_transcription_failed",
+                    code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
                 )
             audio_request = AudioRuntimeRequest(
                 run=run,
@@ -182,41 +180,30 @@ async def resolve_step_input(
                 question_template,
                 interpolation_context,
             )
-            if is_legacy_mirrored_question_binding(
-                question_template=question_template,
-                interpolated_question=interpolated_question,
-                assistant_prompt_text=assistant_prompt_text,
+            input_text = interpolated_question
+            used_question_binding = True
+            references = analyze_template(
+                question_template,
+                step_refs=state.step_ref_mapping if state is not None else {},
+                form_field_names=set(),
+            )
+            diagnostics.append(
+                StepDiagnostic(
+                    code="flow_underlag_summary",
+                    message=(
+                        f"Resolved underlag from {len(references)} template sources "
+                        f"({len(interpolated_question.encode('utf-8'))} bytes)."
+                    ),
+                    severity="info",
+                )
+            )
+            if runtime_input_metadata is not None and not consumes_runtime_input(
+                references
             ):
-                legacy_prompt_binding_used = True
-            else:
-                input_text = interpolated_question
-                used_question_binding = True
-                references = analyze_template(
-                    question_template,
-                    step_refs=state.step_ref_mapping if state is not None else {},
-                    form_field_names=set(),
+                raise TypedIOValidationException(
+                    f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
+                    code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
                 )
-                diagnostics.append(
-                    StepDiagnostic(
-                        code="flow_underlag_summary",
-                        message=(
-                            f"Resolved underlag from {len(references)} template sources "
-                            f"({len(interpolated_question.encode('utf-8'))} bytes)."
-                        ),
-                        severity="info",
-                    )
-                )
-                if runtime_input_metadata is not None and not consumes_runtime_input(
-                    references
-                ):
-                    raise TypedIOValidationException(
-                        f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
-                        code="flow_runtime_input_not_consumed",
-                    )
-
-        legacy_text_template = bindings.get("text")
-        if isinstance(legacy_text_template, str):
-            legacy_prompt_binding_used = True
 
     if (
         runtime_input_config.enabled
@@ -298,31 +285,15 @@ async def resolve_step_input(
         raw_extracted_text=raw_extracted_text,
         input_source=step.input_source,
         used_question_binding=used_question_binding,
-        legacy_prompt_binding_used=legacy_prompt_binding_used,
         diagnostics=diagnostics,
         transcription_metadata=transcription_metadata,
         runtime_input_metadata=runtime_input_metadata,
     )
 
 
-def _resolve_runtime_requested_ids(*, run: FlowRun, step: RuntimeStep) -> list[Any]:
-    payload = run.input_payload_json or {}
-    raw_step_inputs = payload.get("step_inputs")
-    if isinstance(raw_step_inputs, dict):
-        raw_step_inputs_dict = cast(dict[str, Any], raw_step_inputs)
-        raw_step_input = raw_step_inputs_dict.get(str(step.step_id))
-        if isinstance(raw_step_input, dict):
-            return parse_requested_file_ids(
-                raw_file_ids=cast(dict[str, Any], raw_step_input).get("file_ids")
-            )
-    if step.step_order == 1 and step.input_source == "flow_input":
-        return parse_requested_file_ids(raw_file_ids=payload.get("file_ids"))
-    return []
-
-
 async def _load_runtime_files(
     *,
-    requested_ids: list[Any],
+    requested_ids: list[UUID],
     step_order: int,
     tenant_id: Any,
     state: RunExecutionState | None,
@@ -341,7 +312,7 @@ async def _load_runtime_files(
     if missing:
         raise TypedIOValidationException(
             f"File(s) not found or not accessible: {missing}",
-            code="typed_io_file_not_found",
+            code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
         )
     return files
 
@@ -358,7 +329,7 @@ def _extract_text_from_files(files: list[Any]) -> str:
 def _build_runtime_input_metadata(
     *,
     text: str,
-    requested_ids: list[Any],
+    requested_ids: list[UUID],
     input_format: str,
     files: list[Any],
     capture_mode: str,
@@ -432,29 +403,7 @@ def enforce_inline_input_cap(
         return
     raise TypedIOValidationException(
         f"Step {step_order}: resolved input for '{input_source}' exceeded max inline text bytes.",
-        code="typed_io_input_too_large",
-    )
-
-
-def normalize_binding_text(value: str) -> str:
-    return " ".join(value.split())
-
-
-def is_legacy_mirrored_question_binding(
-    *,
-    question_template: str,
-    interpolated_question: str,
-    assistant_prompt_text: str | None,
-) -> bool:
-    if (
-        not isinstance(assistant_prompt_text, str)
-        or assistant_prompt_text.strip() == ""
-    ):
-        return False
-    prompt_normalized = normalize_binding_text(assistant_prompt_text)
-    return (
-        normalize_binding_text(question_template) == prompt_normalized
-        or normalize_binding_text(interpolated_question) == prompt_normalized
+        code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
     )
 
 
@@ -471,7 +420,7 @@ def resolve_input_source_text(
         payload = run.input_payload_json or {}
         if isinstance(payload.get("text"), str):
             return payload["text"]
-        semantic_payload = _strip_runtime_orchestration_metadata(payload)
+        semantic_payload = read_semantic_flow_input_payload(run.input_payload_json)
         if not semantic_payload:
             return ""
         return json.dumps(semantic_payload, ensure_ascii=False)
@@ -518,13 +467,3 @@ def resolve_input_source_text(
             f"Input source '{input_source}' is not yet supported in runtime execution."
         )
     raise BadRequestException(f"Unsupported input source '{input_source}'.")
-
-
-def _strip_runtime_orchestration_metadata(
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in payload.items()
-        if key not in FLOW_RUN_ORCHESTRATION_INPUT_KEYS
-    }

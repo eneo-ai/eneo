@@ -4,11 +4,17 @@ import re
 from enum import Enum
 from typing import TypedDict
 
+from intric.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
+)
+
 
 class FlowVariableDefinitionManifest(TypedDict):
     reservedRuntimeVariables: list[str]
     formFieldNamespaceHeads: list[str]
     primaryFlowInputKeys: list[str]
+    reservedFormFieldInputKeys: list[str]
 
 
 class VariableShape(str, Enum):
@@ -23,11 +29,10 @@ RESERVED_RUNTIME_VARIABLES: frozenset[str] = frozenset(
         "flow",
         "flow_input",
         "step_input",
-        "transkribering",
+        FLOW_INPUT_TRANSCRIPTION_KEY,
         "föregående_steg",
         "indata_text",
         "indata_json",
-        "indata_filer",
     }
 )
 
@@ -53,11 +58,14 @@ PRIMARY_FLOW_INPUT_KEYS: frozenset[str] = frozenset(
         "transcribed_text",
         "transcription",
         "transcript",
-        "transkribering",
+        FLOW_INPUT_TRANSCRIPTION_KEY,
     }
 )
-PRIMARY_FLOW_INPUT_KEYS_NORMALIZED: frozenset[str] = frozenset(
-    name.casefold() for name in PRIMARY_FLOW_INPUT_KEYS
+RESERVED_FORM_FIELD_INPUT_KEYS: frozenset[str] = (
+    PRIMARY_FLOW_INPUT_KEYS | FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
+)
+RESERVED_FORM_FIELD_INPUT_KEYS_NORMALIZED: frozenset[str] = frozenset(
+    name.casefold() for name in RESERVED_FORM_FIELD_INPUT_KEYS
 )
 STEP_ALIAS_VARIABLE_PATTERN = re.compile(r"^step_\d+($|[._])")
 
@@ -65,11 +73,10 @@ RUNTIME_VARIABLE_SHAPES: dict[str, VariableShape] = {
     "datum": VariableShape.SCALAR,
     "flow": VariableShape.MAPPING,
     "flow_input": VariableShape.MAPPING,
-    "transkribering": VariableShape.SCALAR,
+    FLOW_INPUT_TRANSCRIPTION_KEY: VariableShape.SCALAR,
     "föregående_steg": VariableShape.SCALAR,
     "indata_text": VariableShape.SCALAR,
     "indata_json": VariableShape.MAPPING,
-    "indata_filer": VariableShape.SEQUENCE,
 }
 
 STEP_INPUT_KEY_SHAPES: dict[str, VariableShape] = {
@@ -102,8 +109,8 @@ def is_form_field_namespace_head(name: str) -> bool:
     return name.strip().casefold() in FORM_FIELD_NAMESPACE_HEADS_NORMALIZED
 
 
-def is_primary_flow_input_key(name: str) -> bool:
-    return name.strip().casefold() in PRIMARY_FLOW_INPUT_KEYS_NORMALIZED
+def is_reserved_form_field_input_key(name: str) -> bool:
+    return name.strip().casefold() in RESERVED_FORM_FIELD_INPUT_KEYS_NORMALIZED
 
 
 def can_expose_form_field_bare_alias(name: str) -> bool:
@@ -114,7 +121,7 @@ def can_expose_form_field_bare_alias(name: str) -> bool:
         return False
     if is_form_field_namespace_head(field_name):
         return False
-    if is_primary_flow_input_key(field_name):
+    if is_reserved_form_field_input_key(field_name):
         return False
     if is_reserved_runtime_variable(field_name):
         return False
@@ -132,4 +139,5 @@ def flow_variable_definition_manifest() -> FlowVariableDefinitionManifest:
         "reservedRuntimeVariables": sorted(RESERVED_RUNTIME_VARIABLES),
         "formFieldNamespaceHeads": sorted(FORM_FIELD_NAMESPACE_HEADS),
         "primaryFlowInputKeys": sorted(PRIMARY_FLOW_INPUT_KEYS),
+        "reservedFormFieldInputKeys": sorted(RESERVED_FORM_FIELD_INPUT_KEYS),
     }

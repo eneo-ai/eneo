@@ -9,7 +9,13 @@ from uuid import uuid4
 import pytest
 
 from intric.authentication.auth_models import (
+    ApiKeyHashVersion,
+    ApiKeyOwnership,
     ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
+    ApiKeyV2InDB,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
@@ -18,8 +24,9 @@ from intric.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
 )
-from intric.flows.flow import FlowRun, FlowRunStatus
-from intric.main.exceptions import UnauthorizedException
+from intric.flows.domain.flow import FlowRun, FlowRunStatus
+from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.roles.permissions import Permission
 
 
@@ -43,16 +50,54 @@ def _run(user, flow_id) -> FlowRun:
     )
 
 
-def _service_key_user(user):
+def _service_key_user(
+    user,
+    *,
+    resource_permissions: ResourcePermissions | None = None,
+):
+    service_key = ApiKeyV2InDB(
+        id=uuid4(),
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        key_prefix=ApiKeyType.SK.value,
+        key_suffix="test",
+        name="Flow service key",
+        description=None,
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.WRITE,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        allowed_origins=None,
+        allowed_ips=None,
+        resource_permissions=resource_permissions,
+        state=ApiKeyState.ACTIVE,
+        expires_at=None,
+        last_used_at=None,
+        revoked_at=None,
+        revoked_reason_code=None,
+        revoked_reason_text=None,
+        suspended_at=None,
+        suspended_reason_code=None,
+        suspended_reason_text=None,
+        rotation_grace_until=None,
+        rate_limit=None,
+        created_at=None,
+        updated_at=None,
+        rotated_from_key_id=None,
+        created_by_user_id=None,
+        owner_user=None,
+        created_by_user=None,
+        search_match_reasons=None,
+        tenant_id=user.tenant_id,
+        service_principal_id=uuid4(),
+        created_by_key_id=None,
+        delegation_depth=0,
+        key_hash="hash",
+        hash_version=ApiKeyHashVersion.HMAC_SHA256,
+    )
     return user.model_copy(
         update={
-            "active_api_key": SimpleNamespace(
-                id=uuid4(),
-                ownership="service",
-                service_principal_id=uuid4(),
-                permission=ApiKeyPermission.WRITE,
-                resource_permissions=None,
-            ),
+            "active_api_key": service_key,
         }
     )
 
@@ -136,6 +181,33 @@ async def test_load_run_allows_owner_rerun_access(user):
     )
 
     assert result == run
+
+
+@pytest.mark.asyncio
+async def test_load_run_translates_repository_missing_run_to_public_not_found(user):
+    flow_id = uuid4()
+    run_id = uuid4()
+    flow_run_repo = AsyncMock()
+    flow_run_repo.get.side_effect = FlowRunNotFoundError(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        flow_id=flow_id,
+    )
+    policy = _policy(user, flow_run_repo=flow_run_repo)
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await policy.load_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
+        )
+
+    assert exc_info.value.code is None
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        flow_id=flow_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -227,9 +299,11 @@ async def test_service_key_access_requires_matching_run_principal(user):
 
 @pytest.mark.asyncio
 async def test_service_key_evidence_view_uses_key_capability(user):
-    service_user = _service_key_user(user)
-    service_user.active_api_key.resource_permissions = ResourcePermissions(
-        flow_evidence=ResourcePermissionLevel.READ
+    service_user = _service_key_user(
+        user,
+        resource_permissions=ResourcePermissions(
+            flow_evidence=ResourcePermissionLevel.READ
+        ),
     )
     flow_id = uuid4()
     run = _run(user, flow_id).model_copy(
@@ -253,6 +327,35 @@ async def test_service_key_evidence_view_uses_key_capability(user):
     )
 
     assert result == run
+
+
+@pytest.mark.asyncio
+async def test_service_key_evidence_view_denies_missing_resource_permissions(user):
+    service_user = _service_key_user(user)
+    flow_id = uuid4()
+    run = _run(user, flow_id).model_copy(
+        update={
+            "user_id": None,
+            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_user_id": None,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
+        }
+    )
+    flow_run_repo = AsyncMock()
+    flow_run_repo.get.return_value = run
+    policy = _policy(service_user, flow_run_repo=flow_run_repo)
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await policy.load_run(
+            run_id=run.id,
+            flow_id=flow_id,
+            access_kind="evidence_view",
+        )
+
+    assert exc_info.value.code == "flow_run_evidence_forbidden"
+    assert exc_info.value.context == {"auth_layer": "flow_run_principal"}
 
 
 @pytest.mark.asyncio

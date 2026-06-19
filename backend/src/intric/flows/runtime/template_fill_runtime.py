@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
-from intric.files.file_models import FileCreate, FileType
+from intric.files.file_models import File, FileCreate, FileType
 from intric.files.file_repo import FileRepository
 from intric.flows.domain.flow import FlowRun, FlowStepResultStatus
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_text,
@@ -24,7 +26,11 @@ from intric.flows.runtime.models import (
     StepExecutionOutput,
 )
 from intric.flows.variable_resolver import FlowVariableResolver
-from intric.main.exceptions import BadRequestException, TypedIOValidationException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    TypedIOValidationException,
+)
 
 _STEP_REFERENCE_PATTERN = re.compile(r"step_(\d+)")
 _FULL_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
@@ -39,10 +45,10 @@ ApplyOutputCap = Callable[
 class TemplateFillRuntimeDeps:
     variable_resolver: FlowVariableResolver
     file_repo: FileRepository
+    template_asset_repo: FlowTemplateAssetRepository
     apply_output_cap: ApplyOutputCap
     principal: FlowPrincipal
     logger: logging.Logger
-    template_asset_service: Any | None = None
 
 
 async def execute_template_fill_step(
@@ -73,7 +79,7 @@ async def execute_template_fill_step(
 
         current_stage = "loading the published DOCX template"
         template_file = await _load_template_file(
-            template_asset_service=deps.template_asset_service,
+            template_asset_repo=deps.template_asset_repo,
             file_repo=deps.file_repo,
             tenant_id=run.tenant_id,
             template_asset_id=template_asset_id,
@@ -86,7 +92,7 @@ async def execute_template_fill_step(
         ):  # defensive narrowing; _load_template_file already rejects this
             raise TypedIOValidationException(
                 "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",
-                code="typed_io_template_render_failed",
+                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
             )
         deps.logger.debug(
             "flow_executor.template_fill.template_loaded run_id=%s step_order=%d template_file_id=%s size=%d checksum=%s",
@@ -202,7 +208,7 @@ async def execute_template_fill_step(
         len(rendered_text),
     )
 
-    template_name_value = template_name or getattr(template_file, "name", None)
+    template_name_value = template_name or template_file.name
     output_payload_extensions: dict[str, Any] = {
         "template_fill_debug": {
             "rendered_docx_text_raw": rendered_text,
@@ -210,23 +216,21 @@ async def execute_template_fill_step(
             "placeholder_count": len(placeholders),
         }
     }
-    if template_name_value is not None or template_asset_id is not None:
-        output_payload_extensions["template_provenance"] = {
-            "template_name": template_name_value,
-            "template_asset_id": str(template_asset_id)
-            if template_asset_id is not None
-            else None,
-            "template_file_id": str(template_file_id),
-            "template_checksum": template_checksum,
-            "published_flow_version": run.flow_version,
-        }
+    output_payload_extensions["template_provenance"] = {
+        "template_name": template_name_value,
+        "template_asset_id": str(template_asset_id)
+        if template_asset_id is not None
+        else None,
+        "template_file_id": str(template_file_id),
+        "template_checksum": template_checksum,
+        "published_flow_version": run.flow_version,
+    }
 
     return StepExecutionOutput(
         input_text=bindings_text,
         source_text=bindings_text,
         input_source=step.input_source,
         used_question_binding=False,
-        legacy_prompt_binding_used=False,
         full_text=rendered_text,
         persisted_text=persisted_text,
         generated_file_ids=[],
@@ -272,7 +276,7 @@ def _parse_template_output_config(
     if not isinstance(step.output_config, dict):
         raise TypedIOValidationException(
             "Template fill requires output_config.",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         )
 
     template_asset_id_raw = step.output_config.get("template_asset_id")
@@ -283,7 +287,7 @@ def _parse_template_output_config(
         except Exception as exc:
             raise TypedIOValidationException(
                 "Template fill requires a valid template_asset_id.",
-                code="typed_io_template_render_failed",
+                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
             ) from exc
 
     template_file_id_raw = step.output_config.get("template_file_id")
@@ -292,7 +296,7 @@ def _parse_template_output_config(
     except Exception as exc:
         raise TypedIOValidationException(
             "Template fill requires a valid template_file_id.",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         ) from exc
 
     bindings_raw = cast(dict[Any, Any] | None, step.output_config.get("bindings"))
@@ -300,7 +304,7 @@ def _parse_template_output_config(
     if not isinstance(bindings_raw, dict):
         raise TypedIOValidationException(
             "Template fill requires output_config.bindings.",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         )
 
     bindings: dict[str, str] = {}
@@ -310,7 +314,7 @@ def _parse_template_output_config(
         if not isinstance(expression, str):
             raise TypedIOValidationException(
                 f"Template binding '{placeholder}' must be a string expression.",
-                code="typed_io_template_render_failed",
+                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
             )
         bindings[placeholder] = expression
     placeholders: list[str] = []
@@ -336,39 +340,30 @@ def _parse_template_output_config(
 
 async def _load_template_file(
     *,
-    template_asset_service: Any,
+    template_asset_repo: FlowTemplateAssetRepository,
     file_repo: FileRepository,
     tenant_id: UUID,
     template_asset_id: UUID | None,
     template_file_id: UUID,
     template_checksum: str | None,
-):
+) -> File:
     if template_asset_id is not None:
-        if template_asset_service is None:
-            raise TypedIOValidationException(
-                "The published DOCX template asset could not be loaded because template asset services are unavailable. Re-publish the flow with a current template.",
-                code="flow_template_not_accessible",
-            )
         try:
-            (
-                asset,
-                template_file,
-            ) = await template_asset_service.get_published_template_file(
-                tenant_id=tenant_id,
+            asset = await template_asset_repo.get(
                 asset_id=template_asset_id,
-                expected_checksum=template_checksum,
+                tenant_id=tenant_id,
             )
-        except Exception as exc:
+        except NotFoundException as exc:
             raise TypedIOValidationException(
                 "The published DOCX template asset is no longer available. Re-publish the flow with a current template.",
-                code="flow_template_not_accessible",
+                code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
             ) from exc
+
         if asset.file_id != template_file_id:
             raise TypedIOValidationException(
                 "The published DOCX template asset no longer matches the pinned template file. Re-publish the flow.",
-                code="flow_template_not_accessible",
+                code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
             )
-        return template_file
 
     files = await file_repo.get_list_by_id_and_tenant(
         ids=[template_file_id],
@@ -376,20 +371,30 @@ async def _load_template_file(
         include_transcription=False,
     )
     if not files:
+        if template_asset_id is not None:
+            raise TypedIOValidationException(
+                "The published DOCX template asset file is no longer available. Re-publish the flow with a current template.",
+                code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
+            )
         raise TypedIOValidationException(
             "Published DOCX template file was not found.",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         )
     template_file = files[0]
     if template_file.blob is None:
+        if template_asset_id is not None:
+            raise TypedIOValidationException(
+                "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
+            )
         raise TypedIOValidationException(
             "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",
-            code="typed_io_template_render_failed",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         )
     if template_checksum and template_file.checksum != template_checksum:
         raise TypedIOValidationException(
             "Published DOCX template checksum no longer matches the saved flow version.",
-            code="typed_io_template_checksum_mismatch",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH.value,
         )
     return template_file
 
@@ -432,11 +437,11 @@ def _resolve_template_bindings(
             if failed_step_order is not None:
                 raise TypedIOValidationException(
                     f"Template binding '{placeholder}' could not be resolved because step {failed_step_order} failed earlier in the run.",
-                    code="typed_io_template_render_failed",
+                    code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
                 ) from exc
             raise TypedIOValidationException(
                 f"Template binding '{placeholder}' could not be resolved: {exc}",
-                code="typed_io_template_render_failed",
+                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
             ) from exc
     return resolved
 
@@ -524,5 +529,5 @@ def _template_fill_runtime_error(
 ) -> TypedIOValidationException:
     return TypedIOValidationException(
         f"DOCX template assembly failed while {stage}. Check the published template asset and try again.",
-        code="typed_io_template_render_failed",
+        code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
     )

@@ -8,7 +8,7 @@ from typing import Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.enums import (
     AIBuilderInputSource as InputSource,
 )
@@ -92,11 +92,11 @@ class StepSpec(BaseModel):
     input_type: InputType = InputType.TEXT
     output_mode: OutputMode = OutputMode.PASS_THROUGH
     output_type: OutputType = OutputType.TEXT
-    input_bindings: JsonObject | None = None
-    input_contract: JsonObject | None = None
-    output_contract: JsonObject | None = None
-    input_config: JsonObject | None = None
-    output_config: JsonObject | None = None
+    input_bindings: FlowPersistedJsonObject | None = None
+    input_contract: FlowPersistedJsonObject | None = None
+    output_contract: FlowPersistedJsonObject | None = None
+    input_config: FlowPersistedJsonObject | None = None
+    output_config: FlowPersistedJsonObject | None = None
     review_policy: FlowStepReviewPolicy | None = None
 
     @model_validator(mode="after")
@@ -105,7 +105,9 @@ class StepSpec(BaseModel):
 
     @field_validator("input_bindings")
     @classmethod
-    def normalize_input_bindings(cls, value: JsonObject | None) -> JsonObject | None:
+    def normalize_input_bindings(
+        cls, value: FlowPersistedJsonObject | None
+    ) -> FlowPersistedJsonObject | None:
         if value is None:
             return None
         question = value.get("question")
@@ -254,7 +256,6 @@ __all__ = [
     "FormFieldSpec",
     "InputSource",
     "InputType",
-    "JsonObject",
     "MCPPolicy",
     "OutputMode",
     "OutputType",

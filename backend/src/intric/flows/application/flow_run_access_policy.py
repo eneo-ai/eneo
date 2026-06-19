@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Protocol, TypeGuard, get_args
+from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, TypeGuard, get_args
 from uuid import UUID
 
 from intric.flows.domain.flow import FlowRun
+from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from intric.flows.flow_access_policy import (
+    FlowApiAction,
+    user_can_perform_flow_action,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
     FlowEvidencePolicy,
@@ -12,11 +18,10 @@ from intric.flows.flow_evidence_policy import (
     resolve_flow_evidence_policy,
     resolve_service_key_evidence_capability,
 )
-from intric.flows.flow_permissions import user_can_view_flow_trace
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
 from intric.flows.principal import FlowPrincipal
-from intric.main.exceptions import UnauthorizedException
+from intric.main.exceptions import NotFoundException, UnauthorizedException
 from intric.roles.permissions import Permission
 from intric.users.user import UserInDB
 
@@ -76,11 +81,14 @@ class FlowRunAccessPolicy:
         flow_id: UUID | None = None,
         access_kind: FlowRunAccessKind = "status",
     ) -> FlowRun:
-        run = await self.flow_run_repo.get(
-            run_id=run_id,
-            tenant_id=self.user.tenant_id,
-            flow_id=flow_id,
-        )
+        try:
+            run = await self.flow_run_repo.get(
+                run_id=run_id,
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+            )
+        except FlowRunNotFoundError as exc:
+            raise NotFoundException("Flow run not found.") from exc
         await self.ensure_can_access_run(run, access_kind=access_kind)
         return run
 
@@ -129,7 +137,12 @@ class FlowRunAccessPolicy:
         if principal.is_service_key:
             if not principal.matches_run(run):
                 self.deny_run_access(auth_layer="flow_run_principal")
-            capability = resolve_service_key_evidence_capability(self.user)
+            active_api_key = self.user.active_api_key
+            if active_api_key is None:
+                self.deny_run_access(auth_layer="flow_run_principal")
+            capability = resolve_service_key_evidence_capability(
+                active_api_key.resource_permissions
+            )
             policy = self._evidence_policy()
             _actor, classification_level = await self.load_space_access(
                 flow_id=run.flow_id
@@ -199,7 +212,7 @@ class FlowRunAccessPolicy:
             if access_kind in {"status", "cancel", "content", "rerun", "artifact"}:
                 return
             if access_kind in {"evidence_view", "evidence_export_redacted"}:
-                if user_can_view_flow_trace(self.user):
+                if user_can_perform_flow_action(self.user, FlowApiAction.TRACE_VIEW):
                     return
                 raise UnauthorizedException(
                     "You do not have permission to view flow trace.",
@@ -207,7 +220,9 @@ class FlowRunAccessPolicy:
                     context={"auth_layer": "tenant_role"},
                 )
             if access_kind == "evidence_export_raw":
-                if not user_can_view_flow_trace(self.user):
+                if not user_can_perform_flow_action(
+                    self.user, FlowApiAction.TRACE_VIEW
+                ):
                     raise UnauthorizedException(
                         "You do not have permission to view flow trace.",
                         code="insufficient_tenant_permission",
@@ -243,25 +258,25 @@ class FlowRunAccessPolicy:
         return isinstance(access_kind, str) and access_kind in _FLOW_RUN_ACCESS_KINDS
 
     @staticmethod
-    def deny_run_access(*, auth_layer: str) -> None:
+    def deny_run_access(*, auth_layer: str) -> NoReturn:
         raise UnauthorizedException(
             "You do not have access to this flow run.",
-            code="flow_run_access_denied",
+            code=FlowApiErrorCode.RUN_ACCESS_DENIED.value,
             context={"auth_layer": auth_layer},
         )
 
     @staticmethod
-    def deny_evidence_access(*, auth_layer: str, message: str) -> None:
+    def deny_evidence_access(*, auth_layer: str, message: str) -> NoReturn:
         raise UnauthorizedException(
             message,
-            code="flow_run_evidence_forbidden",
+            code=FlowApiErrorCode.RUN_EVIDENCE_FORBIDDEN.value,
             context={"auth_layer": auth_layer},
         )
 
     @staticmethod
-    def deny_raw_export_access(*, auth_layer: str, message: str) -> None:
+    def deny_raw_export_access(*, auth_layer: str, message: str) -> NoReturn:
         raise UnauthorizedException(
             message,
-            code="flow_run_evidence_raw_export_forbidden",
+            code=FlowApiErrorCode.RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN.value,
             context={"auth_layer": auth_layer},
         )

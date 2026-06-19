@@ -58,7 +58,6 @@ from intric.flow_packages.domain.flow_package_manifest import (
     FLOW_PACKAGE_PAYLOAD_SCHEMA,
     EneoPackageKind,
     FlowPackageManifest,
-    JsonObject,
 )
 from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from intric.flow_packages.domain.flow_package_requirements import (
@@ -75,7 +74,10 @@ from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
 )
-from intric.flows.api.flow_api_common import FlowAccessContext, FlowSpaceAccessContext
+from intric.flows.api.flow_access_context import (
+    FlowAccessContext,
+    FlowSpaceAccessContext,
+)
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -89,6 +91,7 @@ from intric.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from intric.json_types import JsonObject
 from intric.main.container.container import Container
 from intric.main.models import ModelId
 from intric.roles.permissions import Permission
@@ -366,7 +369,7 @@ def _patch_import_access(
     target_space_id: UUID,
     candidates: FlowPackageImportPlannerCandidates | None = None,
 ) -> None:
-    async def fake_get_space_access_context_for_request(
+    async def fake_resolve_space_access_context(
         request: Request,
         container: Container,
         *,
@@ -387,9 +390,9 @@ def _patch_import_access(
         return candidates or FlowPackageImportPlannerCandidates()
 
     monkeypatch.setattr(
-        flow_package_router.common,
-        "get_space_access_context_for_request",
-        fake_get_space_access_context_for_request,
+        flow_package_router.flow_access_context,
+        "resolve_space_access_context",
+        fake_resolve_space_access_context,
     )
     monkeypatch.setattr(
         flow_package_router,
@@ -694,7 +697,6 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
             container: Container,
             *,
             flow_id: UUID,
-            require_flow_lookup_without_scope: bool = False,
             allow_service_key_principals: bool = False,
         ) -> FlowAccessContext:
             assert flow_id == ai_builder_apply.flow_id

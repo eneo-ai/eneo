@@ -43,23 +43,21 @@ if TYPE_CHECKING:
     from intric.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge as DomainIntegrationKnowledge,
     )
-    from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
 
 
 class AssistantRepository:
     def __init__(
         self,
+        *,
         session: AsyncSession,
         factory: AssistantFactory,
         completion_model_repo: "CompletionModelRepository",
-        user: "UserInDB",
     ):
         super().__init__()
         self.session = session
         self.factory = factory
         self.completion_model_repo = completion_model_repo
-        self.user = user
 
     @staticmethod
     def _options():

@@ -39,7 +39,7 @@ from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.flow_authoring_spec import (
     OutputType,
 )

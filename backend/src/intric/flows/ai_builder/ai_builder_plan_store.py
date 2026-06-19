@@ -32,7 +32,7 @@ from intric.flows.flow_authoring_spec import (
 from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
-    from intric.flows.flow import Flow
+    from intric.flows.domain.flow import Flow
 
 
 @dataclass(frozen=True, slots=True)

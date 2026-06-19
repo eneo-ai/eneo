@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from intric.flows.enums import FlowOutputType
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.runtime.output_formats.base import OutputFormatSpec
 from intric.flows.runtime.output_formats.docx import DocxOutputFormatSpec
 from intric.flows.runtime.output_formats.json import JsonOutputFormatSpec
@@ -32,7 +33,7 @@ def resolve_format_spec(raw_output_type: str) -> OutputFormatSpec:
     except ValueError as exc:
         raise TypedIOValidationException(
             f"Unsupported flow output type: {raw_output_type}",
-            code="flow_unsupported_output_type",
+            code=FlowApiErrorCode.UNSUPPORTED_OUTPUT_TYPE.value,
             context={"output_type": raw_output_type},
         ) from exc
     return OUTPUT_FORMAT_SPECS[output_type]

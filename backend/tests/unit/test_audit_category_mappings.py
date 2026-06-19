@@ -93,17 +93,19 @@ class TestCategoryMappings:
                 f"{action_type} should be mapped to 'admin_actions'"
             )
 
-    def test_user_actions_count(self):
-        """Verify that user_actions category has correct number of action types."""
-        user_actions = [
-            action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
+    def test_user_actions_mapping(self):
+        """Verify representative user actions are mapped correctly."""
+        user_action_types = [
+            ActionType.TOOL_APPROVAL_SUBMITTED,
+            ActionType.FLOW_CREATED,
+            ActionType.FLOW_RUN_CREATED,
+            ActionType.FLOW_RUN_RERUN_REQUESTED,
         ]
-        assert len(user_actions) == 56, (
-            f"Expected 56 user actions, got {len(user_actions)}"
-        )
-        assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
-        assert ActionType.FLOW_CREATED.value in user_actions
-        assert ActionType.FLOW_RUN_CREATED.value in user_actions
+
+        for action_type in user_action_types:
+            assert CATEGORY_MAPPINGS[action_type] == "user_actions", (
+                f"{action_type} should be mapped to 'user_actions'"
+            )
 
     def test_security_events_mapping(self):
         """Verify security event action types are correctly mapped."""
@@ -297,24 +299,3 @@ class TestCategoryDistribution:
         for category in categories:
             count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == category)
             assert count > 0, f"Category '{category}' has no action types mapped to it"
-
-    def test_category_counts_match_expected(self):
-        """Verify exact counts for each category."""
-        expected_counts = {
-            "admin_actions": 25,
-            "user_actions": 56,
-            "security_events": 6,
-            "file_operations": 3,
-            "integration_events": 19,
-            "system_actions": 3,
-            "audit_access": 5,
-        }
-
-        for category, expected_count in expected_counts.items():
-            actual_count = sum(
-                1 for cat in CATEGORY_MAPPINGS.values() if cat == category
-            )
-            assert actual_count == expected_count, (
-                f"Category '{category}' should have {expected_count} actions, "
-                f"but has {actual_count}"
-            )

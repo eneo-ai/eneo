@@ -4,7 +4,6 @@
     "flow",
     "flow_input",
     "föregående_steg",
-    "indata_filer",
     "indata_json",
     "indata_text",
     "step_input",
@@ -14,6 +13,18 @@
   "primaryFlowInputKeys": [
     "file_ids",
     "json",
+    "structured",
+    "text",
+    "transcribed_text",
+    "transcript",
+    "transcription",
+    "transkribering"
+  ],
+  "reservedFormFieldInputKeys": [
+    "expected_flow_version",
+    "file_ids",
+    "json",
+    "step_inputs",
     "structured",
     "text",
     "transcribed_text",

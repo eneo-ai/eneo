@@ -13,6 +13,7 @@
   import HttpHeadersEditor from "./HttpHeadersEditor.svelte";
   import HttpBodyEditor from "./HttpBodyEditor.svelte";
   import HttpTestConnection from "./HttpTestConnection.svelte";
+  import { getAuthoredHttpUrlError } from "./httpConfigDefaults";
 
   let {
     config,
@@ -34,16 +35,7 @@
     onConfigChange?.({ config: { ...config, ...patch } });
   }
 
-  const urlInvalid = $derived.by(() => {
-    const val = config.url.trim();
-    if (!val) return false;
-    try {
-      const parsed = new URL(val);
-      return !["http:", "https:"].includes(parsed.protocol);
-    } catch {
-      return true;
-    }
-  });
+  const urlInvalid = $derived(getAuthoredHttpUrlError(config.url) === "HTTP_INVALID_URL");
 </script>
 
 <Settings.Group title={m.http_config_title()}>

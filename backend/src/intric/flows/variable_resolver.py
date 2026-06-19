@@ -6,7 +6,8 @@ from datetime import datetime
 from difflib import get_close_matches
 from typing import Any, cast
 
-from intric.flows.domain.flow import FlowStepResult, JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStepResult
+from intric.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from intric.flows.flow_variable_definitions import can_expose_form_field_bare_alias
 from intric.main.exceptions import BadRequestException
 
@@ -53,7 +54,7 @@ class FlowVariableResolver:
         # System aliases from available runtime input payload
         transcript_value = self._extract_transcript_value(normalized_flow_input)
         if transcript_value is not None:
-            context["transkribering"] = transcript_value
+            context[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript_value
 
         text_value = normalized_flow_input.get("text")
         if isinstance(text_value, str) and text_value.strip():
@@ -64,10 +65,6 @@ class FlowVariableResolver:
             json_value = normalized_flow_input.get("structured")
         if isinstance(json_value, (dict, list)):
             context["indata_json"] = json_value
-
-        file_ids_value = normalized_flow_input.get("file_ids")
-        if isinstance(file_ids_value, list):
-            context["indata_filer"] = file_ids_value
 
         for result in prior_results:
             runtime_input = self._extract_runtime_input(result)
@@ -134,7 +131,7 @@ class FlowVariableResolver:
                     f"Unknown variable reference: '{path}'. Empty path segment is not allowed."
                 )
             if isinstance(current, dict):
-                current_dict = cast(JsonObject, current)
+                current_dict = cast(FlowPersistedJsonObject, current)
                 if token not in current_dict:
                     available_keys = [str(key) for key in current_dict.keys()]
                     suggestion = _format_missing_key_suggestion(
@@ -181,7 +178,7 @@ class FlowVariableResolver:
             ):
                 return ", ".join(_scalar_to_prompt_string(item) for item in value_list)
         if isinstance(value, dict):
-            value_dict = cast(JsonObject, value)
+            value_dict = cast(FlowPersistedJsonObject, value)
             if value_dict and all(
                 _is_prompt_scalar(item) for item in value_dict.values()
             ):
@@ -213,7 +210,7 @@ class FlowVariableResolver:
     @staticmethod
     def _extract_transcript_value(flow_input: dict[str, Any]) -> str | None:
         for key in (
-            "transkribering",
+            FLOW_INPUT_TRANSCRIPTION_KEY,
             "transcription",
             "transcript",
             "transcribed_text",
@@ -228,7 +225,7 @@ class FlowVariableResolver:
         payload = result.input_payload_json or {}
         runtime_input = payload.get("runtime_input")
         if isinstance(runtime_input, dict):
-            return dict(cast(JsonObject, runtime_input))
+            return dict(cast(FlowPersistedJsonObject, runtime_input))
         return {}
 
 

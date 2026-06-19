@@ -1,9 +1,10 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from intric.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from intric.database.tables.ai_models_table import (
     CompletionModels,
     EmbeddingModels,
@@ -26,6 +27,13 @@ if TYPE_CHECKING:
     from intric.database.tables.websites_table import Websites
 
 
+SPACE_DATA_RETENTION_DAYS_RANGE_CHECK = (
+    "data_retention_days IS NULL OR "
+    f"(data_retention_days >= {MIN_RETENTION_DAYS} "
+    f"AND data_retention_days <= {MAX_RETENTION_DAYS})"
+)
+
+
 class Spaces(BasePublic):
     name: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
@@ -45,6 +53,13 @@ class Spaces(BasePublic):
 
     tenant_space_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            SPACE_DATA_RETENTION_DAYS_RANGE_CHECK,
+            name="ck_spaces_data_retention_days_range",
+        ),
     )
 
     tenant_space: Mapped[Optional["Spaces"]] = relationship(

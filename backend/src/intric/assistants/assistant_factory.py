@@ -179,7 +179,7 @@ class AssistantFactory:
     def create_space_assistant_from_db(
         self,
         assistant_in_db: Assistants,
-        user: UserInDB,
+        user: UserInDB | None,
         completion_models: Sequence[CompletionModel] | None = None,
         collections: Sequence["Collection"] | None = None,
         websites: Sequence["Website"] | None = None,
@@ -189,7 +189,7 @@ class AssistantFactory:
         collections = list(collections or [])
         websites = list(websites or [])
         integration_knowledge_list = list(integration_knowledge_list or [])
-        user_sparse = UserSparse.model_validate(user)
+        user_sparse = UserSparse.model_validate(user) if user is not None else None
         collection_ids = [
             assistant_collection.group_id
             for assistant_collection in assistant_in_db.assistant_groups

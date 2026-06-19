@@ -6,6 +6,8 @@ This guide is for developers building applications on top of published Eneo Flow
 
 It focuses on the **runtime** API. For the mental model behind drafts, steps, ownership, and evidence, start with <a href="/docs/flows">Flows</a>.
 
+Reference owners: `FlowRuntimePathsPublic` defines runtime links, `FlowRunContractPublic` defines input/output fields, and `FlowApiErrorCode` defines machine-readable failures.
+
 ## Before you start
 
 A few rules matter up front:
@@ -63,24 +65,26 @@ That distinction matters because service keys and ordinary human members are int
 
 ### Service-key runtime endpoint families
 
-| Endpoint family                               | Current service-key rule                                            |
-| --------------------------------------------- | ------------------------------------------------------------------- |
-| `GET /api/v1/flows/?space_id=...`             | Allowed for published-flow discovery in the key's scoped space      |
-| `GET /api/v1/flows/{id}/published/`           | Allowed for a runtime-safe single-flow published projection         |
-| `GET /run-contract/`                          | Allowed for published-flow runtime discovery                        |
-| `GET /graph/`                                 | Allowed for published/runtime-safe topology and own-run snapshots   |
-| Runtime uploads                               | Allowed for published flows                                         |
-| Run creation                                  | Allowed for published flows                                         |
-| List / get / cancel / redispatch runs         | Own runs only                                                       |
-| Step outputs                                  | Own runs only                                                       |
-| Artifact downloads                            | Own runs only                                                       |
-| Evidence                                      | Own runs only, and only when explicit evidence capability allows it |
+| Endpoint family                           | Current service-key rule                                            |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| `GET /api/v1/flows/?space_id=...`         | Allowed for published-flow discovery in the key's scoped space      |
+| `GET /api/v1/flows/{id}/published/`       | Allowed for a runtime-safe single-flow published projection         |
+| `GET /run-contract/`                      | Allowed for published-flow runtime discovery                        |
+| `GET /graph/`                             | Allowed for published/runtime-safe topology and own-run snapshots   |
+| Runtime uploads and orphan upload cleanup | Allowed for published flows                                         |
+| Run creation                              | Allowed for published flows                                         |
+| List / get / cancel / redispatch runs     | Own runs only                                                       |
+| Step outputs                              | Own runs only                                                       |
+| Artifact downloads                        | Own runs only                                                       |
+| Evidence                                  | Own runs only, and only when explicit evidence capability allows it |
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
 
 _Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence._
 
 ## Common application patterns
+
+For endpoint-and-capability-first design walkthroughs, start with [Designing Flows](/guides/flows/designing-flows). This reference section keeps the deeper API field context.
 
 ### Transcription service
 
@@ -99,6 +103,8 @@ This is where the run contract, runtime uploads, graph, artifacts, and evidence 
 
 ## Integration sequence
 
+For a numbered consumer journey with errors to handle at each step, use [Integrating Flows](/guides/flows/integrating-flows). The sequence below is the compact reference checklist.
+
 For most consumer apps, the safest order is:
 
 1. list published flows in the scoped space
@@ -107,7 +113,10 @@ For most consumer apps, the safest order is:
 4. upload files if the flow requires them
 5. create a run with an optional `Idempotency-Key`
 6. poll the run and step endpoints
-7. fetch artifacts or evidence if your principal is allowed to
+7. if the run reaches `awaiting_review`, load the active review checkpoint
+8. edit, approve, reject, or resume the checkpoint
+9. optionally rerun a completed step when a reviewer accepts a correction
+10. fetch artifacts or evidence if your principal is allowed to
 
 ## Tenant flow settings for runtime operators
 
@@ -115,12 +124,17 @@ Eneo also exposes **tenant-level Flow runtime settings** for operators and platf
 
 These are admin surfaces, not end-user runtime endpoints:
 
-| Setting area          | Endpoint                                           | Purpose                                                                                                                                     |
-| --------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Flow input limits     | `GET/PATCH /api/v1/settings/flow-input-limits`     | Control maximum file/audio sizes and file-count limits                                                                                      |
-| Flow evidence policy  | `GET/PATCH /api/v1/settings/flow-evidence-policy`  | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces                    |
-| Flow retention policy | `GET/PATCH /api/v1/settings/flow-retention-policy` | Configure runtime debug-evidence retention for completed Flow runs                                                                           |
-| AI Builder budget     | `GET/PATCH /api/v1/settings/ai-builder-budget`     | Tune planner token-budget behavior for AI Builder sessions                                                                                  |
+| Setting area                | Endpoint                                                                 | Purpose                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                           | Control maximum file/audio sizes and file-count limits                                                                   |
+| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                 | Control generated PDF/DOCX rendering limits                                                                              |
+| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                         | Control runtime step execution timeouts                                                                                  |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                        | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
+| Flow retention policy       | `GET/PATCH /api/v1/settings/flow-retention-policy`                       | Configure tenant debug-evidence redaction for completed Flow runs                                                        |
+| Classification retention    | `GET/PUT/DELETE /api/v1/settings/flow-classification-retention-policies` | Tighten full run-history and step-history purge windows for spaces assigned to a security classification                 |
+
+AI Builder budget settings live at `GET/PATCH /api/v1/settings/ai-builder-budget`.
+They are authoring/admin settings for AI Builder sessions, not Flow runtime controls.
 
 ### Flow retention policy shape
 
@@ -128,7 +142,30 @@ These are admin surfaces, not end-user runtime endpoints:
 
 - `run_debug_evidence_days`
 
-Send an integer day count to set the tenant override, or `null` in a PATCH request to fall back to Flow or space retention defaults. Runtime uploaded/generated blob retention is intentionally not part of this endpoint until the Flow file lifecycle owner exists.
+Send an integer day count to set the tenant debug-evidence override, or `null` in a PATCH request to remove that override.
+
+This endpoint does **not** configure full run-history deletion. Flow and space `data_retention_days` settings are the default full run-history purge controls. Set a Flow override to `1..2555` days, or set it to `null` to inherit from the space. After a run is terminal and older than the effective window, Eneo deletes the Flow run, step results, step attempts, runtime file bindings, review checkpoints, webhook delivery history, audit outbox rows, and unreferenced generated result files. Delivered audit logs remain under audit retention so operators can still prove the Flow ran without retaining step content.
+
+`/api/v1/settings/flow-classification-retention-policies` configures classification-aware full history purge:
+
+- `GET /api/v1/settings/flow-classification-retention-policies` lists policy rows.
+- `PUT /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` creates or replaces a policy.
+- `DELETE /api/v1/settings/flow-classification-retention-policies/{security_classification_id}` removes a policy. Delete is idempotent when the classification exists but has no policy row.
+
+Each policy stores:
+
+- `security_classification_id`
+- `data_retention_days`
+
+Classification policies tighten the Flow/space full run-history window. If a Flow has `data_retention_days = 30` and the classification policy is `2555`, the run is still eligible at 30 days. If a Flow and its space have no full-history retention window and the classification policy is `7`, terminal runs in spaces carrying that classification are eligible at 7 days.
+
+Policies remain enforced even when tenant `security_enabled` display is disabled while spaces still retain `security_classification_id`. Deleting the security classification removes its policy and clears the space classification reference, which can loosen future dynamic retention back to the Flow/space policy. Use this deliberately when retiring a classification.
+
+Purge is deferred while a run still has undelivered audit events or a queued/running rerun operation. Deferred runs are reported in cleanup-job counters so operators can resolve the blocker instead of silently losing audit or rerun state.
+
+Current retention deletes the full run and step history. There is no API for raw per-step deletion intervals yet. For classification-3 or other sensitive workflows, use a stricter Flow/space `data_retention_days` window or a classification retention policy for full run-history purge, and use tenant evidence policy for export controls.
+
+Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
 
 This is the intended operator-facing seam for sensitive care-data workflows. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
 
@@ -189,22 +226,50 @@ Example response:
   "name": "Employee Review Summary",
   "description": "Transcribe a review conversation and return a PDF summary.",
   "published_version": 3,
+  "created_at": "2026-03-17T09:30:00Z",
+  "updated_at": "2026-03-17T10:00:00Z",
   "runtime_paths": {
     "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
+    "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
+    "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/",
+    "delete_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runtime-files/{file_id}/",
     "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
     "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
-    "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/"
+    "cancel_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/cancel/",
+    "rerun_step_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/{step_id}/rerun/",
+    "redispatch_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/redispatch/",
+    "review_checkpoints": {
+      "active_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/active/",
+      "edit_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+      "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+      "reject_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+      "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/"
+    },
+    "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
+    "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
+    "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
+    "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
+    "export_evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/export",
+    "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/"
   }
 }
 ```
 
 <Callout type="info">
-  The example above shows a representative subset of <code>runtime_paths</code>{" "}
-  for readability. In the real response, the server returns the full runtime
-  path set. These paths are <strong>server-relative</strong> (for example{" "}
+  Runtime paths are <strong>server-relative</strong> (for example{" "}
   <code>/api/v1/...</code>), so callers should prepend their API base URL when
   needed.
 </Callout>
+
+The full `runtime_paths` object includes `run_contract`, `graph`,
+`upload_step_runtime_file_template`, `delete_runtime_file_template`,
+`create_run`, `list_runs`, `cancel_run_template`, `rerun_step_template`,
+`redispatch_run_template`, `review_checkpoints`,
+`get_graph_for_run_template`, `get_run_template`, `list_steps_template`,
+`evidence_template`, `export_evidence_template`, and
+`artifact_signed_url_template`. The nested `review_checkpoints` object contains
+`active_template`, `edit_template`, `approve_template`, `reject_template`, and
+`resume_template`.
 
 #### Get the run contract
 
@@ -216,15 +281,18 @@ GET /api/v1/flows/{flow_id}/run-contract/
   If you are integrating with a service key, the recommended discovery path is:
   list published flows in the scoped space, fetch{" "}
   <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
-  <code>run-contract</code>. Do not build
-  service-key discovery around <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
+  <code>run-contract</code>. Do not build service-key discovery around{" "}
+  <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
 </Callout>
 
 This endpoint is the canonical published runtime contract. It includes:
 
 - `published_flow_version` for version mismatch detection
+- `final_output` so clients know whether the terminal result is a payload or generated artifact
 - `form_fields` for structured input fields
 - `steps_requiring_input` for runtime step uploads
+- `runtime_upload_policy` for upload timeout behavior
+- `steps_requiring_review` for human-review UI preparation
 - `aggregate_max_files`, which is the combined runtime-step file limit when the published flow can calculate one
 - `template_readiness` for document-assembly readiness, such as whether a DOCX template is fully configured
 
@@ -241,6 +309,15 @@ Response shape:
 {
   "flow_id": "00000000-0000-0000-0000-000000000001",
   "published_flow_version": 3,
+  "final_output": {
+    "step_id": "00000000-0000-0000-0000-000000000104",
+    "step_order": 3,
+    "label": "Create Word report",
+    "output_type": "docx",
+    "output_mode": "pass_through",
+    "delivery": "artifact",
+    "output_contract": null
+  },
   "form_fields": [
     {
       "name": "employee_name",
@@ -254,6 +331,7 @@ Response shape:
       "step_id": "00000000-0000-0000-0000-000000000101",
       "step_order": 1,
       "label": "Upload audio",
+      "description": "Provide the recorded review conversation.",
       "required": true,
       "input_format": "audio",
       "max_files": 1,
@@ -261,8 +339,43 @@ Response shape:
       "accepted_mimetypes": ["audio/wav", "audio/mpeg"]
     }
   ],
+  "runtime_upload_policy": {
+    "min_timeout_seconds": 120,
+    "seconds_per_mebibyte": 8,
+    "max_timeout_seconds": 600,
+    "idle_timeout_seconds": 120
+  },
+  "steps_requiring_review": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000103",
+      "step_order": 2,
+      "label": "Review transcription",
+      "review_mode": "edit",
+      "output_type": "json",
+      "expires_after_seconds": 1209600,
+      "output_contract": {
+        "type": "object",
+        "properties": {
+          "transcription": { "type": "string" }
+        }
+      }
+    }
+  ],
   "aggregate_max_files": 1,
-  "template_readiness": []
+  "template_readiness": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "template_asset_id": null,
+      "template_file_id": null,
+      "template_name": null,
+      "checksum": null,
+      "published_flow_version": 3,
+      "status": "unavailable",
+      "can_edit": false,
+      "can_download": false,
+      "message_code": null
+    }
+  ]
 }
 ```
 
@@ -273,40 +386,14 @@ Response shape:
 
 ### 2) Upload files
 
-There are two different upload paths.
-
-#### Flow-level input upload
-
-```http
-POST /api/v1/flows/{flow_id}/files/
-Content-Type: multipart/form-data
-```
-
-Use this when the published flow expects files from the main `flow_input` surface.
-
-The multipart field name is:
-
-- `upload_file`
-
-Example:
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "upload_file=@meeting.wav" \
-  https://your-domain.example/api/v1/flows/$FLOW_ID/files/
-```
-
-The response returns a stored file id. Include that id in `file_ids` when you create the run.
-
-#### Runtime step upload
-
 ```http
 POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/
 Content-Type: multipart/form-data
 ```
 
-Use this when a specific published step has `runtime_input.enabled=true` and expects its own uploaded files.
+Use the step-specific runtime upload path from `runtime_paths.upload_step_runtime_file_template`.
+Replace `{step_id}` with a step id from `steps_requiring_input` in the run contract.
+Upload files before `create_run`; `runtime` means runtime input, not an already-started run mutation.
 
 Example:
 
@@ -318,6 +405,32 @@ curl -X POST \
 ```
 
 The returned file id belongs under `step_inputs[step_id].file_ids` when starting the run.
+You may reuse the same file id under multiple compatible step ids when several steps should
+process the same uploaded binary.
+
+Upload response shape:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000701",
+  "name": "review-audio.mp3",
+  "mimetype": "audio/mpeg",
+  "size": 1843200,
+  "created_at": "2026-03-17T10:04:00Z",
+  "updated_at": "2026-03-17T10:04:00Z"
+}
+```
+
+To abandon an upload before creating a run, call the cleanup path from
+`runtime_paths.delete_runtime_file_template`:
+
+```http
+DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/
+```
+
+Cleanup is only for orphan runtime uploads. After a file id is attached through
+`step_inputs`, the run owns that mapping and deletion returns
+`flow_runtime_file_attached` with HTTP 409.
 
 ### 3) Create the run
 
@@ -330,25 +443,31 @@ Minimal request shape:
 
 ```json
 {
-  "expected_flow_version": 7,
+  "expected_flow_version": 3,
   "input_payload_json": {
-    "case_id": "MUN-2026-1042",
-    "language": "sv"
+    "employee_name": "Alex Example"
   },
-  "file_ids": ["uploaded-flow-input-file-id"],
   "step_inputs": {
-    "runtime-step-id": {
-      "file_ids": ["uploaded-runtime-step-file-id"]
+    "00000000-0000-0000-0000-000000000101": {
+      "file_ids": ["00000000-0000-0000-0000-000000000701"]
     }
   }
 }
 ```
+
+Within each step input, `file_ids` are parsed as UUIDs and duplicate ids are
+collapsed by first occurrence when the run is created. The remaining order is
+preserved in the run input and contributes to SDK-derived idempotency keys. If a
+prompt or document needs semantic ordering, model that ordering explicitly in the
+flow rather than relying on file attachment order alone.
 
 If the flow is still a draft, the API will return `flow_not_published`.
 
 #### How `input_payload_json` maps to form fields
 
 If the run contract exposes `form_fields`, send those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field type and required/optional settings.
+
+Reserved `input_payload_json` keys: `expected_flow_version`, `file_ids`, `step_inputs`, `transkribering`. These keys are owned by Flow run orchestration, so use different form field names and keep runtime file bindings in top-level `step_inputs`.
 
 #### Why `Idempotency-Key` matters
 
@@ -359,34 +478,34 @@ Run creation supports caller-supplied idempotency. Reusing the same key with the
 
 This is especially useful for browser retries, webhook retries, and unreliable networks.
 
-If you use `frontend/packages/intric-js`, the Flow client now accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus uploaded file ids and step input attachments.
+If you use `@intric/intric-js` (`frontend/packages/intric-js`), the Flow client accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus the uploaded runtime file bindings you submit in `step_inputs`. It also exports `FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS` and `FlowRunReservedInputPayloadKey` for custom form validation. Use the same per-step file order for the key and the run creation request.
 
 Example:
 
 ```js
+const stepInputs = {
+  [stepId]: { file_ids: [runtimeUpload.id] },
+};
+
 const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey(
   {
     flowId,
     expectedFlowVersion: runContract.published_flow_version,
-    file_ids: [uploadedFile.id],
-    step_inputs: {
-      [stepId]: { file_ids: [runtimeUpload.id] },
-    },
+    step_inputs: stepInputs,
   },
 );
 
 await client.flows.runs.create({
   flow: { id: flowId },
   expected_flow_version: runContract.published_flow_version,
-  file_ids: [uploadedFile.id],
-  step_inputs: {
-    [stepId]: { file_ids: [runtimeUpload.id] },
-  },
+  step_inputs: stepInputs,
   idempotencyKey,
 });
 ```
 
 ### Audio-to-document runtime pattern
+
+For the full speech-to-structured-report shape, see [Designing Flows](/guides/flows/designing-flows#speech-to-structured-report). The notes here keep the runtime reference constraints.
 
 For an audio workflow that generates structured output or a DOCX artifact, the recommended runtime shape is:
 
@@ -414,28 +533,41 @@ This keeps the published Flow runtime aligned with the same enterprise seams use
 
 Key endpoints:
 
-| Purpose              | Endpoint                                                 |
-| -------------------- | -------------------------------------------------------- |
-| List runs for a flow | `GET /api/v1/flows/{flow_id}/runs/`                      |
-| Get one run          | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`             |
-| Cancel a run         | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/`     |
-| Redispatch a run     | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/` |
+| Purpose                 | Endpoint                                                            |
+| ----------------------- | ------------------------------------------------------------------- |
+| Get status capabilities | `GET /api/v1/flows/runs/status-capabilities/`                       |
+| List runs for a flow    | `GET /api/v1/flows/{flow_id}/runs/`                                 |
+| Get one run             | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`                        |
+| Cancel a run            | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/`                |
+| Redispatch a run        | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/`            |
+| Rerun a completed step  | `POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/` |
 
 Typical polling loop:
 
 - create the run
 - poll `GET /runs/{run_id}/`
+- if the run reaches `awaiting_review`, load the active checkpoint and resolve it
 - once the run becomes terminal, fetch step outputs, artifacts, and any evidence you need
 
 The runtime API is asynchronous: create the run first, then poll for completion.
 
-Current run statuses:
+Use `GET /api/v1/flows/runs/status-capabilities/` when building run-history,
+polling, cancellation, redispatch, and review UI logic. It returns canonical
+booleans such as `should_poll`, `is_terminal`, `is_cancellable`,
+`is_awaiting_review`, and `can_request_redispatch`, so your client does not need
+to hard-code lifecycle groups.
+
+Current run status values:
 
 - `queued`
 - `running`
+- `awaiting_review`
 - `completed`
 - `failed`
 - `cancelled`
+
+`awaiting_review` is non-terminal. Keep polling and call the active checkpoint
+endpoint before deciding whether to edit, approve, reject, or resume the run.
 
 Example run response:
 
@@ -445,13 +577,18 @@ Example run response:
   "flow_id": "00000000-0000-0000-0000-000000000001",
   "flow_version": 3,
   "principal_type": null,
-  "user_id": "00000000-0000-0000-0000-000000000030",
   "tenant_id": "00000000-0000-0000-0000-000000000010",
   "trace_id": "00000000-0000-0000-0000-000000000302",
+  "revision": 1,
   "status": "queued",
+  "cancelled_at": null,
+  "started_at": null,
+  "finished_at": null,
   "input_payload_json": { "employee_name": "Alex Example" },
   "output_payload_json": null,
-  "error_message": null,
+  "result_files": [],
+  "token_usage": null,
+  "error": null,
   "job_id": "00000000-0000-0000-0000-000000000401",
   "created_at": "2026-03-17T10:05:00Z",
   "updated_at": "2026-03-17T10:05:00Z"
@@ -464,6 +601,130 @@ Example run response:
 
 If no stale queued work is found, the endpoint can still return `200` with `redispatched_count: 0`. Treat that as a no-op rather than as a new execution.
 
+#### Human review checkpoints
+
+The run contract's `steps_requiring_review` array tells you before run creation
+whether the published flow can pause for review. When a run reaches
+`awaiting_review`, use the path templates under `runtime_paths.review_checkpoints`.
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/active/
+PATCH /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/
+```
+
+Active checkpoint response shape:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000901",
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_run_id": "00000000-0000-0000-0000-000000000301",
+  "step_id": "00000000-0000-0000-0000-000000000101",
+  "step_order": 1,
+  "attempt_no": 1,
+  "state": "awaiting_review",
+  "revision": 1,
+  "schema_version": 1,
+  "original_payload_json": {
+    "text": "Draft answer."
+  },
+  "current_payload_json": {
+    "text": "Draft answer."
+  },
+  "step_label": "Review draft answer",
+  "review_mode": "edit",
+  "output_type": "json",
+  "output_contract": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      }
+    }
+  },
+  "next_step_ids": ["00000000-0000-0000-0000-000000000102"],
+  "requester_user_id": "00000000-0000-0000-0000-000000000030",
+  "requester_service_principal": null,
+  "requester_principal_type": "user",
+  "decided_by_user_id": null,
+  "decided_by_service_principal": null,
+  "decided_by_principal_type": null,
+  "edited_at": null,
+  "approved_at": null,
+  "rejected_at": null,
+  "resumed_at": null,
+  "cancelled_at": null,
+  "expires_at": "2026-03-31T10:05:30Z",
+  "expired_at": null,
+  "created_at": "2026-03-17T10:05:30Z",
+  "updated_at": "2026-03-17T10:05:30Z"
+}
+```
+
+Edit request body:
+
+```json
+{
+  "expected_checkpoint_revision": 1,
+  "current_payload_json": {
+    "text": "Edited answer."
+  }
+}
+```
+
+Consumer sequence:
+
+1. Poll the run until `status` is `awaiting_review`.
+2. Call `active_template` and render `current_payload_json`.
+3. Use `step_label`, `review_mode`, `output_type`, and `output_contract` to choose the review UI.
+4. For edits, send `expected_checkpoint_revision` and the full corrected `current_payload_json`; this is not a JSON Patch document.
+5. Approve or reject with the latest checkpoint `revision`.
+6. Resume an approved checkpoint with the latest `revision` and a new `Idempotency-Key` header.
+
+The revision is a compare token. If another reviewer changes the checkpoint
+first, the API returns `flow_review_stale_revision`; reload the active
+checkpoint and resubmit. Edits after `expires_at` return `flow_review_expired`.
+Structured edit payloads are validated against the checkpoint `output_contract`
+and can return `typed_io_contract_violation`.
+
+Resume returns `202 Accepted`. Reusing the same resume idempotency key returns
+the current checkpoint and run without dispatching duplicate work.
+
+#### Rerun a completed step
+
+Initial execution creates one run for the whole published flow. A rerun is
+different: it re-executes one completed step in an existing completed or failed
+run, invalidating that step and its downstream results.
+
+Use `runtime_paths.rerun_step_template`:
+
+```http
+POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/
+```
+
+Minimal request:
+
+```json
+{
+  "expected_run_revision": 7,
+  "reason": "The reviewer corrected the transcription for step 1."
+}
+```
+
+`expected_run_revision` comes from the latest run response. `reason` is required
+and stored with the rerun operation. You may also send `input_payload_json` and
+`step_inputs`, but file overrides must be keyed by the rerun root step id. Upload
+replacement files through the normal runtime upload path before requesting the
+rerun.
+
+Rerun returns `202 Accepted` with the rerun operation and current run. Redispatch
+is only for stale queued runs that have not started; rerun is for deliberate
+post-result correction.
+
 ### 5) Read results
 
 #### Step outputs
@@ -474,7 +735,56 @@ GET /api/v1/flows/{flow_id}/runs/{run_id}/steps/
 
 This is the main endpoint for consumer UIs that want intermediate outputs, diagnostics, token counts, prompts, and structured payloads without depending on the heavier debug export.
 
-Important runtime rule: **the public API runs a flow as a whole, not one step at a time**. If your UI wants per-step progress or completed-step results, create one run and then read the individual step states from this endpoint while the run is queued, running, completed, or failed.
+Important runtime rule: initial execution creates one run for the whole published flow. If your UI wants per-step progress or completed-step results, create one run and then read the individual step states from this endpoint while the run is queued, running, awaiting review, completed, or failed.
+
+Example step-list response:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000501",
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "step_order": 1,
+    "assistant_id": "00000000-0000-0000-0000-000000000201",
+    "status": "completed",
+    "input_payload_json": {
+      "diagnostics": [
+        {
+          "code": "runtime_input_consumed",
+          "message": "Uploaded audio file was used.",
+          "severity": "info"
+        }
+      ]
+    },
+    "runtime_input_file_ids": ["00000000-0000-0000-0000-000000000701"],
+    "output_payload_json": {
+      "text": "Hello and welcome to the annual review..."
+    },
+    "result_files": [],
+    "current_attempt_no": 1,
+    "num_tokens_input": 0,
+    "num_tokens_output": 0,
+    "error_code": null,
+    "error_message": null,
+    "diagnostics": [
+      {
+        "code": "runtime_input_consumed",
+        "message": "Uploaded audio file was used.",
+        "severity": "info"
+      }
+    ],
+    "started_at": "2026-03-17T10:05:05Z",
+    "finished_at": "2026-03-17T10:05:30Z",
+    "created_at": "2026-03-17T10:05:05Z",
+    "updated_at": "2026-03-17T10:05:30Z"
+  }
+]
+```
+
+Current step status values are `pending`, `running`, `completed`, `failed`, and `cancelled`.
 
 #### Flow graph
 
@@ -495,12 +805,25 @@ POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/
 
 This returns a time-limited signed download URL for an artifact produced by that run. The client chooses the requested lifetime through the signed-URL request payload.
 
+Request body:
+
+```json
+{
+  "expires_in": 3600,
+  "content_disposition": "attachment"
+}
+```
+
+`expires_in` defaults to `3600` seconds when omitted. The current request model
+does not enforce a minimum or maximum; choose short lifetimes that match your
+product's security policy.
+
 Typical response shape:
 
 ```json
 {
-  "url": "https://your-domain.example/api/v1/files/<file-id>/download/?token=...",
-  "expires_at": 1776028235
+  "url": "https://api.example.com/api/v1/files/00000000-0000-0000-0000-000000000701/download/?token=signed-token",
+  "expires_at": 1773742500
 }
 ```
 
@@ -555,20 +878,20 @@ In the web UI, that same trace can open the source document and highlight the ma
 
 Use this table as the canonical quick-reference for runtime access decisions.
 
-| Endpoint family                                  | Service key                                                 | Editor                              | Viewer                               | Space owner / admin         | Tenant admin              |
-| ------------------------------------------------ | ----------------------------------------------------------- | ----------------------------------- | ------------------------------------ | --------------------------- | ------------------------- |
-| Draft CRUD                                       | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
-| Publish / unpublish                              | No                                                          | No                                  | No                                   | Yes                         | Yes                       |
-| Template management / flow-assistant authoring   | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
-| AI Builder                                       | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
-| List published flows in a space                  | Yes, published only in scoped space                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
-| `GET /api/v1/flows/{id}/published/`              | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
-| `GET /api/v1/flows/{id}/`                        | No                                                          | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
-| Run contract / runtime-safe graph                | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
-| Create run                                       | Yes                                                         | Yes                                 | No                                   | Yes                         | Yes                       |
-| List / get / cancel / redispatch runs            | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
-| Step outputs / artifacts                         | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
-| Evidence view / export                           | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
+| Endpoint family                                | Service key                                                 | Editor                              | Viewer                               | Space owner / admin         | Tenant admin              |
+| ---------------------------------------------- | ----------------------------------------------------------- | ----------------------------------- | ------------------------------------ | --------------------------- | ------------------------- |
+| Draft CRUD                                     | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| Publish / unpublish                            | No                                                          | No                                  | No                                   | Yes                         | Yes                       |
+| Template management / flow-assistant authoring | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| AI Builder                                     | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| List published flows in a space                | Yes, published only in scoped space                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/published/`            | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/`                      | No                                                          | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
+| Run contract / runtime-safe graph              | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| Create run                                     | Yes                                                         | Yes                                 | No                                   | Yes                         | Yes                       |
+| List / get / cancel / redispatch runs          | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Step outputs / artifacts                       | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Evidence view / export                         | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
 
 ### Principal visibility rules
 
@@ -598,17 +921,57 @@ Flow endpoints use the platform's standard JSON error shape:
 
 The exact `intric_error_code` depends on the endpoint, but the envelope shape stays the same.
 
+### Service-key authorization errors
+
+Service-key clients can read published runtime projections and run published flows. Draft authoring, AI Builder, and user-principal actions remain user-token surfaces.
+
+| Code                                       | When it appears                                                      | Client action                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `flow_service_key_admin_required`          | A non-admin service key reads `GET /api/v1/flows/{id}/`              | Use an admin/owner service key or call the published endpoint |
+| `flow_service_key_principal_not_supported` | A service key calls a Flow endpoint that still requires a user token | Use a user token, or switch to a published runtime endpoint   |
+
+`flow_service_key_admin_required` includes an API-adapter hint with an endpoint template:
+
+```json
+{
+  "runtime_endpoint_hint": {
+    "key": "published_flow_runtime",
+    "description": "Use the published runtime projection for service-key Flow clients.",
+    "endpoint_template": "/api/v1/flows/{id}/published/"
+  }
+}
+```
+
+Policy-layer denials such as `flow_service_key_principal_not_supported` may include only the runtime alternative key and description. Treat `endpoint_template` as optional and fall back to `GET /api/v1/flows/{id}/published/` when the hint is absent:
+
+```json
+{
+  "runtime_endpoint_hint": {
+    "key": "published_flow_runtime",
+    "description": "Use the published runtime projection for service-key Flow clients."
+  }
+}
+```
+
+### Flow error catalog
+
+The canonical consumer catalog for `FlowApiErrorCode` now lives in [Flow error reference](/guides/flows/reference/errors). Use that page for handling phase, recovery action, and exhaustive code coverage.
+
 ### Minimal end-to-end runtime example
 
 A typical runtime-only integration looks like this:
 
 ```text
+GET  /api/v1/flows/runs/status-capabilities/                 (cache status behavior)
 GET  /api/v1/flows/{flow_id}/run-contract/
-POST /api/v1/flows/{flow_id}/files/                          (optional)
 POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/ (optional)
+DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/      (optional abandoned upload cleanup)
 POST /api/v1/flows/{flow_id}/runs/                           with Idempotency-Key
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/active/ (when awaiting_review)
+PATCH/POST review checkpoint edit/approve/reject/resume endpoints     (when awaiting_review)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/steps/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/      (optional correction)
 POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/ (optional)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/evidence/        (optional)
 ```
@@ -632,18 +995,7 @@ If your application also needs to create or maintain flows, there are two user-p
 
 #### AI Builder
 
-AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It is useful when a user-principal operator should draft or revise a flow conversationally.
-
-Important current behavior:
-
-- AI Builder requires flow-edit permission
-- access is session-creator-scoped for session and plan details
-- service keys are not supported on this surface
-- planner interaction happens over SSE on `POST /api/v1/flows/ai-builder/sessions/{session_id}/messages`
-- AI Builder can read MCP server and tool metadata during planning, but it does not execute MCP tools while drafting
-- MCP tool execution happens only when a published Flow run reaches a step configured with MCP access
-
-For the product mental model behind the authoring conversation, see <a href="/docs/ai-builder">AI Builder</a>.
+AI Builder lives under `/api/v1/flows/ai-builder/` and is a user-principal authoring surface. Service keys can run published flows, but they cannot draft or revise flows through AI Builder. For the product mental model and authoring details, see <a href="/docs/ai-builder">AI Builder</a>.
 
 For template-fill document output, treat the DOCX template asset path as an **accessibility-reviewed template path**. This is especially important for sensitive document workflows:
 
@@ -653,14 +1005,14 @@ For template-fill document output, treat the DOCX template asset path as an **ac
 
 ## Troubleshooting
 
-| Status | Scenario                                        | Typical machine-readable code            | What to do                                                         |
-| ------ | ----------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------ |
-| `400`  | Caller tries to run a draft flow                | `flow_not_published`                     | Publish the draft first                                            |
-| `400`  | Reused idempotency key with a different payload | `flow_run_idempotency_conflict`          | Generate a new idempotency key for the new payload                 |
-| `403`  | Wrong space scope on API key                    | `insufficient_scope`                     | Use a key scoped to the flow's space or a broader valid scope      |
-| `403`  | Caller tries to inspect someone else's run      | `flow_run_access_denied`                 | Fetch only runs visible to the current principal                   |
-| `403`  | Service key lacks evidence capability           | `flow_run_evidence_forbidden`            | Add the right `flow_evidence` resource permission                  |
-| `403`  | Raw export blocked by policy                    | `flow_run_evidence_raw_export_forbidden` | Fall back to redacted export or adjust tenant policy intentionally |
+For short capability answers and operational choices, see [Flows FAQ](/guides/flows/flows-faq). For Flow-specific codes, use [Flow error reference](/guides/flows/reference/errors) and branch on `code`, not message text.
+
+| Status    | What it usually means                                                           | What to do                                                                                  |
+| --------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `400`     | The request shape, state precondition, or Flow contract is invalid.             | Read the Flow error `code`, fix the request, and retry with idempotency.                    |
+| `401/403` | Authentication, space scope, ownership, or evidence policy blocked the request. | Fix the principal or policy before retrying; platform auth may return `insufficient_scope`. |
+| `409`     | The run, checkpoint, file, or idempotency key changed before this request.      | Reload the run or checkpoint and retry with the current revision.                           |
+| `429`     | The tenant or flow has too many active runs.                                    | Back off and poll existing runs before creating more work.                                  |
 
 ## Practical takeaway
 

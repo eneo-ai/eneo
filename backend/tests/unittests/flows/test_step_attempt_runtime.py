@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import get_type_hints
 from uuid import uuid4
 
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenance,
@@ -18,10 +20,12 @@ from intric.flows.runtime.claim_resolution import StepClaimResolution
 from intric.flows.runtime.executor import _build_attempt_provenance
 from intric.flows.runtime.models import RuntimeStep, StepDiagnostic, StepExecutionOutput
 from intric.flows.runtime.step_attempt_runtime import (
+    StepFailurePlan,
     build_generic_failure_plan,
     build_step_gate_decision,
     build_step_success_plan,
     build_typed_failure_plan,
+    build_typed_failure_run_error_message,
 )
 from intric.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -80,7 +84,6 @@ def _step_output() -> StepExecutionOutput:
         source_text="hello",
         input_source="flow_input",
         used_question_binding=False,
-        legacy_prompt_binding_used=False,
         full_text="done",
         persisted_text="done",
         generated_file_ids=[],
@@ -127,7 +130,10 @@ def test_build_step_gate_decision_returns_failure_for_missing_step_result():
     )
 
     assert decision.action == "fail_step_missing"
-    assert decision.result == {"status": "failed", "error": "step_missing"}
+    assert decision.result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_MISSING.value,
+    }
     assert decision.run_error_message == f"Missing step result for step {step_id}"
 
 
@@ -161,21 +167,87 @@ def test_build_typed_failure_plan_preserves_input_payload_and_prompt():
     claimed = _claimed_result()
     plan = build_typed_failure_plan(
         claimed=claimed,
-        error_code="typed_io_contract_violation",
+        error_code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
         error_message="Step 1 input invalid",
         input_payload_json={"text": "bad", "input_source": "flow_input"},
         effective_prompt="Prompt",
     )
 
     assert plan.attempt_status == FlowStepAttemptStatus.FAILED
-    assert plan.error_code == "typed_io_contract_violation"
+    assert plan.error_code is FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
     assert plan.failed_result.status == FlowStepResultStatus.FAILED
+    assert plan.failed_result.error_code == "typed_io_contract_violation"
     assert plan.failed_result.input_payload_json == {
         "text": "bad",
         "input_source": "flow_input",
     }
     assert plan.failed_result.effective_prompt == "Prompt"
     assert plan.return_result == {"status": "failed", "error": "Step 1 input invalid"}
+
+
+def test_step_failure_plan_error_code_is_typed_to_public_catalog():
+    hints = get_type_hints(StepFailurePlan)
+
+    assert hints["error_code"] is FlowApiErrorCode
+
+
+def test_typed_failure_run_error_uses_public_taxonomy_summary() -> None:
+    message = build_typed_failure_run_error_message(
+        step_order=1,
+        error_code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED,
+        contract_validation=None,
+    )
+
+    assert message == (
+        "Step 1: The transcription provider failed while processing audio "
+        "(typed_io_transcription_failed)."
+    )
+    assert ". (" not in message
+
+
+def test_typed_failure_run_error_preserves_contract_validation_summary() -> None:
+    message = build_typed_failure_run_error_message(
+        step_order=2,
+        error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        contract_validation={
+            "parse_attempted": True,
+            "parse_succeeded": False,
+            "schema_type_hint": "object",
+        },
+    )
+
+    assert message == (
+        "Step 2: expected valid JSON text for structured object input "
+        "(typed_io_output_parse_failed)."
+    )
+
+
+def test_typed_failure_plan_keeps_raw_detail_out_of_run_error() -> None:
+    claimed = _claimed_result()
+    raw_detail = (
+        "Step 1: HTTP GET input request failed for "
+        "https://internal.example.test/token=secret."
+    )
+    run_error_message = build_typed_failure_run_error_message(
+        step_order=1,
+        error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR,
+        contract_validation=None,
+    )
+
+    plan = build_typed_failure_plan(
+        claimed=claimed,
+        error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR,
+        error_message=raw_detail,
+        run_error_message=run_error_message,
+    )
+
+    assert plan.failed_result.error_message == raw_detail
+    assert plan.run_error_message == (
+        "Step 1: The HTTP step could not connect to the target service "
+        "(typed_io_http_connection_error)."
+    )
+    assert "secret" not in plan.run_error_message
+    assert "internal.example.test" not in plan.run_error_message
 
 
 def test_build_generic_failure_plan_uses_public_error_contract():
@@ -187,10 +259,14 @@ def test_build_generic_failure_plan_uses_public_error_contract():
     )
 
     assert plan.attempt_status == FlowStepAttemptStatus.FAILED
-    assert plan.error_code == "step_execution_failed"
+    assert plan.error_code is FlowApiErrorCode.STEP_EXECUTION_FAILED
     assert plan.error_message == "Flow step 1 execution failed."
+    assert plan.failed_result.error_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
     assert plan.failed_result.error_message == "Flow step 1 execution failed."
-    assert plan.return_result == {"status": "failed", "error": "step_execution_failed"}
+    assert plan.return_result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
 
 
 def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
@@ -214,6 +290,7 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
 
     assert plan.delivery_intents == ()
     assert plan.step_result.status == FlowStepResultStatus.COMPLETED
+    assert plan.step_result.error_code is None
     assert plan.step_result.output_payload_json == {
         "text": "done",
         "webhook_delivered": False,

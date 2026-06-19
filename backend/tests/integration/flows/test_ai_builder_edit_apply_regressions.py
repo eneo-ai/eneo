@@ -19,17 +19,17 @@ from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,
     OutputType,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
-)
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
-from intric.flows.flow import FlowStep
 from intric.prompts.api.prompt_models import PromptCreate
 
 
@@ -270,9 +270,7 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             flow_id=flow.id,
             assistant_id=assistant.id,
             update=FlowAssistantUpdateCommand(
-                prompt=PromptCreate(
-                    text="Skriv ett kort beslutsunderlag i textformat."
-                )
+                prompt=PromptCreate(text="Skriv ett kort beslutsunderlag i textformat.")
             ),
         )
         flow = await flow_service.update_flow(

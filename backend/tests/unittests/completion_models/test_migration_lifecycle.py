@@ -12,25 +12,20 @@ Core invariants:
 from datetime import datetime
 from uuid import uuid4
 
-
 from intric.completion_models.constants import (
     ENTITY_TABLE_MAP,
     MIGRATABLE_ENTITY_TYPES,
 )
 from intric.completion_models.domain.completion_model import CompletionModel
-
+from intric.tenants.tenant import TenantInDB
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-class _MockUser:
-    def __init__(self):
-        self.id = uuid4()
-        self.tenant_id = uuid4()
-        self.tenant = None
-        self.modules = []
+def _tenant() -> TenantInDB:
+    return TenantInDB.model_construct(id=uuid4(), name="Test Tenant")
 
 
 def _make_model(
@@ -40,9 +35,8 @@ def _make_model(
     migrated_to_model_id=None,
     deleted_at=None,
 ) -> CompletionModel:
-    user = _MockUser()
     return CompletionModel(
-        user=user,
+        tenant=_tenant(),
         id=uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -206,6 +200,7 @@ class TestAIModelsServiceCanAccess:
 
     def test_can_access_excludes_migrated(self):
         from unittest.mock import MagicMock
+
         from intric.ai_models.ai_models_service import AIModelsService
 
         service = AIModelsService.__new__(AIModelsService)
@@ -219,6 +214,7 @@ class TestAIModelsServiceCanAccess:
 
     def test_can_access_allows_normal_model(self):
         from unittest.mock import MagicMock
+
         from intric.ai_models.ai_models_service import AIModelsService
 
         service = AIModelsService.__new__(AIModelsService)

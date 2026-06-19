@@ -626,16 +626,13 @@
                                 id="flow-retention-input"
                                 type="number"
                                 min="1"
-                                max="365"
+                                max="2555"
                                 class="h-10 w-24"
                                 value={$update.data_retention_days ?? ""}
                                 disabled={$isPublished}
                                 placeholder="—"
                                 oninput={(e) => {
-                                  const val = e.currentTarget.value
-                                    ? parseInt(e.currentTarget.value, 10)
-                                    : null;
-                                  flowEditor.setDataRetentionDays(val);
+                                  flowEditor.setDataRetentionDaysFromInput(e.currentTarget.value);
                                 }}
                               />
                               <span class="text-secondary text-sm"

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Sequence, cast
+from uuid import UUID
 
 from intric.flows.domain.flow import (
     FlowRun,
@@ -21,7 +23,9 @@ from intric.flows.flow_run_provenance import (
     parse_attempt_provenance,
 )
 from intric.flows.flow_run_redaction import MaskedField, redact_payload_with_manifest
+from intric.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
+from intric.json_types import JsonObject, JsonValue
 
 _REVIEW_CHECKPOINT_FIELDS_EXCLUDED_FROM_EXPORT = {
     "next_step_ids_json",
@@ -53,6 +57,10 @@ class EvidenceBundle:
     rerun_operations: Sequence[FlowRunRerunOperation]
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep]
     review_checkpoints: Sequence[FlowRunReviewCheckpoint]
+    runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
+    runtime_input_file_metadata_by_step_result_id: Mapping[
+        UUID, Sequence[FlowRunStepInputFileMetadata]
+    ]
     debug_export: dict[str, Any]
 
     def to_export_payload(self) -> EvidenceBundlePayload:
@@ -67,7 +75,20 @@ class EvidenceBundle:
                 "run": self.run.model_dump(mode="json"),
                 "definition_snapshot": self.version.definition_json,
                 "step_results": [
-                    _dump_result_record(item) for item in self.step_results
+                    _dump_result_record(
+                        item,
+                        runtime_input_file_ids=_runtime_input_file_ids_for_result(
+                            item,
+                            self.runtime_input_file_ids_by_step_result_id,
+                        ),
+                        runtime_input_file_metadata=(
+                            _runtime_input_file_metadata_for_result(
+                                item,
+                                self.runtime_input_file_metadata_by_step_result_id,
+                            )
+                        ),
+                    )
+                    for item in self.step_results
                 ],
                 "step_attempts": step_attempts,
                 "result_files": [
@@ -140,7 +161,25 @@ def build_evidence_bundle(
     rerun_operations: Sequence[FlowRunRerunOperation] = (),
     rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
+    runtime_input_file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]]
+    | None = None,
+    runtime_input_file_metadata_by_step_result_id: Mapping[
+        UUID, Sequence[FlowRunStepInputFileMetadata]
+    ]
+    | None = None,
 ) -> EvidenceBundle:
+    resolved_runtime_input_file_metadata_by_step_result_id = (
+        runtime_input_file_metadata_by_step_result_id or {}
+    )
+    resolved_runtime_input_file_ids_by_step_result_id = (
+        runtime_input_file_ids_by_step_result_id
+        or {
+            step_result_id: tuple(file_metadata.file_id for file_metadata in files)
+            for step_result_id, files in (
+                resolved_runtime_input_file_metadata_by_step_result_id.items()
+            )
+        }
+    )
     return EvidenceBundle(
         run=run,
         version=version,
@@ -150,6 +189,12 @@ def build_evidence_bundle(
         rerun_operations=tuple(rerun_operations),
         rerun_invalidated_steps=tuple(rerun_invalidated_steps),
         review_checkpoints=tuple(review_checkpoints),
+        runtime_input_file_ids_by_step_result_id=(
+            resolved_runtime_input_file_ids_by_step_result_id
+        ),
+        runtime_input_file_metadata_by_step_result_id=(
+            resolved_runtime_input_file_metadata_by_step_result_id
+        ),
         debug_export=build_debug_export(
             run=run,
             version=version,
@@ -175,7 +220,20 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     )
     step_result_section = _redact_record_payloads(
         section_path="bundle.step_results",
-        payloads=[_dump_result_record(result) for result in bundle.step_results],
+        payloads=[
+            _dump_result_record(
+                result,
+                runtime_input_file_ids=_runtime_input_file_ids_for_result(
+                    result,
+                    bundle.runtime_input_file_ids_by_step_result_id,
+                ),
+                runtime_input_file_metadata=_runtime_input_file_metadata_for_result(
+                    result,
+                    bundle.runtime_input_file_metadata_by_step_result_id,
+                ),
+            )
+            for result in bundle.step_results
+        ],
     )
     masked_paths.extend(step_result_section.masked_paths)
     masked_fields.extend(step_result_section.masked_fields)
@@ -298,8 +356,72 @@ def _redact_record_payloads(
     )
 
 
-def _dump_result_record(item: FlowStepResult) -> dict[str, Any]:
-    return item.model_dump(mode="json")
+def _runtime_input_file_ids_for_result(
+    item: FlowStepResult,
+    file_ids_by_step_result_id: Mapping[UUID, Sequence[UUID]],
+) -> Sequence[UUID]:
+    result_id = item.id
+    if result_id is None:
+        return ()
+    return file_ids_by_step_result_id.get(result_id, ())
+
+
+def _runtime_input_file_metadata_for_result(
+    item: FlowStepResult,
+    metadata_by_step_result_id: Mapping[UUID, Sequence[FlowRunStepInputFileMetadata]],
+) -> Sequence[FlowRunStepInputFileMetadata]:
+    result_id = item.id
+    if result_id is None:
+        return ()
+    return metadata_by_step_result_id.get(result_id, ())
+
+
+def _dump_result_record(
+    item: FlowStepResult,
+    *,
+    runtime_input_file_ids: Sequence[UUID] = (),
+    runtime_input_file_metadata: Sequence[FlowRunStepInputFileMetadata] = (),
+) -> dict[str, Any]:
+    dumped = item.model_dump(mode="json")
+    runtime_input_file_id_strings = [str(file_id) for file_id in runtime_input_file_ids]
+    dumped["runtime_input_file_ids"] = runtime_input_file_id_strings
+    _normalize_dumped_runtime_input_files(
+        dumped,
+        runtime_input_file_ids=runtime_input_file_id_strings,
+        runtime_input_file_metadata=runtime_input_file_metadata,
+    )
+    return dumped
+
+
+def _normalize_dumped_runtime_input_files(
+    dumped: dict[str, Any],
+    *,
+    runtime_input_file_ids: Sequence[str],
+    runtime_input_file_metadata: Sequence[FlowRunStepInputFileMetadata],
+) -> None:
+    raw_input_payload = dumped.get("input_payload_json")
+    if not isinstance(raw_input_payload, dict):
+        return
+    input_payload = cast(JsonObject, raw_input_payload)
+    raw_runtime_input = input_payload.get("runtime_input")
+    if not isinstance(raw_runtime_input, dict):
+        return
+
+    runtime_files: list[JsonValue] = [
+        file_metadata.to_runtime_input_file_payload()
+        for file_metadata in runtime_input_file_metadata
+    ]
+    normalized_runtime_input: JsonObject = dict(raw_runtime_input)
+    normalized_runtime_input["file_ids"] = list(runtime_input_file_ids)
+    normalized_runtime_input["files"] = runtime_files
+    normalized_runtime_input["files_count"] = len(runtime_input_file_ids)
+    if "total_file_size" in normalized_runtime_input:
+        normalized_runtime_input["total_file_size"] = sum(
+            file_metadata.size for file_metadata in runtime_input_file_metadata
+        )
+    normalized_payload: JsonObject = dict(input_payload)
+    normalized_payload["runtime_input"] = normalized_runtime_input
+    dumped["input_payload_json"] = normalized_payload
 
 
 def _dump_review_checkpoint_record(item: FlowRunReviewCheckpoint) -> dict[str, Any]:

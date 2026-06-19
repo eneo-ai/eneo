@@ -262,9 +262,17 @@ FILES_READ_OVERRIDES: frozenset[str] = frozenset(
     }
 )
 
+# Keys are FastAPI endpoint function names. Renaming a handler without updating
+# this map restores the global METHOD_PERMISSION_MAP default for that endpoint.
+FLOW_METHOD_PERMISSION_OVERRIDES: dict[str, str] = {
+    "delete_flow_runtime_file": "write",
+}
+
 
 def require_resource_permission_for_method(
-    resource_type: str, read_override_endpoints: frozenset[str] | None = None
+    resource_type: str,
+    read_override_endpoints: frozenset[str] | None = None,
+    method_permission_overrides: dict[str, str] | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Dependency: stores method→permission config for post-auth check.
 
@@ -278,6 +286,7 @@ def require_resource_permission_for_method(
         config = {
             "resource_type": resource_type,
             "read_override_endpoints": read_override_endpoints,
+            "method_permission_overrides": method_permission_overrides,
         }
         configs = list(getattr(request.state, "_resource_perm_configs", []))
         configs.append(config)

@@ -35,7 +35,7 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )

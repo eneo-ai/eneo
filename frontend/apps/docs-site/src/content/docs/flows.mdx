@@ -7,9 +7,8 @@ A Flow is a multi-step AI pipeline you build inside a space. You design it as a 
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}
-  <a href="/guides/flows-api-guide">Flows API Guide</a>.{" "}
-  If you want to draft a Flow conversationally, read{" "}
-  <a href="/docs/ai-builder">AI Builder</a>.
+  <a href="/guides/flows-api-guide">Flows API Guide</a>. If you want to draft a
+  Flow conversationally, read <a href="/docs/ai-builder">AI Builder</a>.
 </Callout>
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
@@ -122,7 +121,7 @@ The flow graph endpoint and the web editor both expose this structure directly.
 Published flows can expose two runtime input shapes to API consumers:
 
 1. **structured form fields** that become variables in steps
-2. **file inputs** either at the flow level or for specific runtime-input-enabled steps
+2. **file inputs** for specific runtime-input-enabled steps
 
 The runtime API exposes this through:
 
@@ -130,7 +129,13 @@ The runtime API exposes this through:
 
 That endpoint is the canonical way for a client to discover what a published flow expects before starting a run.
 
-For API consumers using `frontend/packages/intric-js`, the Flow SDK also supports caller-supplied run idempotency headers and a helper for deriving stable upload-intent idempotency keys after runtime files have been uploaded but before the published run is created.
+SDK-specific idempotency helpers are covered in the <a href="/guides/flows-api-guide">Flows API Guide</a>.
+
+Runtime files are uploaded through step-scoped paths and passed to run creation in `step_inputs[step_id].file_ids`. A file id can be reused for multiple compatible steps in the same run. Orphan uploads can be deleted before run creation through `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; after a file is attached to run input or output state, deletion returns HTTP 409 instead of mutating persisted execution history.
+
+The same run contract also tells clients whether the flow can pause for human review through `steps_requiring_review`, what final output shape to expect through `final_output`, and which runtime upload timeout policy to apply through `runtime_upload_policy`.
+
+A run can pause at `awaiting_review`. The runtime then exposes an active review checkpoint that a consumer app can edit, approve, reject, and resume. Initial execution still creates one run for the whole published flow; a later rerun can target one completed step in an existing completed or failed run.
 
 For audio-first workflows such as meeting transcript summaries or employee review notes, the intended runtime path is **completed upload first, then one published Flow run**:
 
@@ -153,6 +158,29 @@ If a published flow exposes form fields, the client sends those values inside `i
 | `http_post`       | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config                                                  |
 | `transcribe_only` | Audio transcription                               | Requires `input_type=audio` and `output_type=text`                                   |
 | `template_fill`   | DOCX document assembly                            | Requires `output_type=docx`                                                          |
+
+### `http_post`
+
+`http_post` sends a step output to an external HTTP endpoint using an authored HTTP configuration.
+
+The authored config is a typed object with:
+
+- `url`
+- `auth`
+- `timeout_seconds`
+- `body`
+- `custom_headers`
+- `response_format`
+
+Secret auth fields and secret custom headers are redacted in API responses as:
+
+```json
+{ "$secret": "stored" }
+```
+
+Send that sentinel back only when you want Eneo to keep the stored secret for an existing draft step. If the saved secret cannot be resolved during the draft HTTP test, the test response uses `HTTP_UNRESOLVED_STORED_SECRET`; re-enter and save the secret before testing again.
+
+The draft HTTP test endpoint returns a typed `request_preview` containing `method`, `url`, `headers`, and `body_preview` when Eneo can compile the request. Template interpolation failures return `HTTP_VARIABLE_RESOLUTION_FAILED` without a preview because there is no safe effective request to show.
 
 ### `transcribe_only`
 
@@ -361,15 +389,17 @@ For a sensitive workflow where final approval happens outside the Flow, typical 
 
 When `care_data_policy.sensitive = true`, JSON evidence export remains blocked by default for all principals until tenant flow settings explicitly enable `evidence_policy.allow_sensitive_flow_exports`.
 
-Tenant flow settings can also configure a **layered retention policy** for Flow runtime data classes:
+Flow retention has two separate controls:
 
-- shared default retention
-- source audio overrides
-- transcript text overrides
-- generated artifact overrides
-- run/debug evidence overrides
+- Flow or space `data_retention_days` is the full run-history purge window. Flow overrides accept `1..2555` days, or `null` to inherit from the space. Once a run is terminal and older than that window, Eneo deletes the Flow run row, step results, step attempts, runtime file bindings, review checkpoints, webhook delivery history, audit outbox rows, and unreferenced generated result files. Delivered audit logs remain under the audit retention owner so operators can verify that the Flow ran without keeping step history.
+- Classification retention policies at `/api/v1/settings/flow-classification-retention-policies` tighten the full run-history and step-history purge window for spaces assigned to a security classification. Policies are keyed by stable `security_classification_id`, stay enforced even when `security_enabled` is false while spaces still store that classification id, and never loosen a shorter Flow or space retention window.
+- Tenant `flow_settings.retention_policy.run_debug_evidence_days` is an earlier debug-evidence redaction window. It removes retained debug payloads while the run may still remain available until the later Flow/space run-history purge.
 
-That operator-facing settings seam is the preferred place for runtime retention policy when a workflow needs configurable governance, rather than hardcoding retention behavior into one specific Flow consumer.
+Purge is deferred while a run still has undelivered audit events or a queued/running rerun operation. Deferred runs are reported in cleanup-job counters so operators can resolve the blocker instead of silently losing audit or rerun state.
+
+Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
+
+The operator-facing tenant settings seam is the preferred place for evidence export and debug-evidence governance, rather than hardcoding retention behavior into one specific Flow consumer.
 
 The purpose is not to disable all evidence support. It is to keep normal inspection and redacted export practical while treating full raw export as the most sensitive surface.
 
@@ -406,4 +436,4 @@ Flows are best understood as a user-principal-owned draft workflow on top of a v
 - user principals own drafts
 - published versions define the runtime contract
 - users and service keys can own runs
-- evidence, RAG provenance, and classification rules govern how runs are inspected afterward
+- review checkpoints, reruns, evidence, RAG provenance, and classification rules govern how runs are inspected or corrected afterward

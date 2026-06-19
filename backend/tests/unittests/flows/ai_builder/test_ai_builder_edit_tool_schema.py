@@ -20,7 +20,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 
 
 def _make_step(step_order: int) -> FlowStep:

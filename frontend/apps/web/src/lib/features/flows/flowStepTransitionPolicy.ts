@@ -33,14 +33,6 @@ export type InputTypeChangeResult = {
   inputSourceAdjusted: boolean;
 };
 
-export function sanitizeBindingsForSource(
-  bindings: Record<string, unknown> | null | undefined
-): Record<string, unknown> | null {
-  const nextBindings: Record<string, unknown> = { ...(bindings ?? {}) };
-  delete nextBindings.text;
-  return Object.keys(nextBindings).length > 0 ? nextBindings : null;
-}
-
 export function applyInputSourceChange({
   step,
   nextSource,
@@ -120,9 +112,7 @@ export function applyInputSourceChange({
       input_source: nextSource,
       input_type: nextInputType,
       input_config: finalInputConfig,
-      input_bindings: sanitizeBindingsForSource(
-        finalBindings as Record<string, unknown> | null | undefined
-      )
+      input_bindings: finalBindings ?? null
     },
     inputTypeAdjusted: nextInputType !== step.input_type
   };

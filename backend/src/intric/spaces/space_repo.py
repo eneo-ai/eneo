@@ -76,6 +76,7 @@ from intric.main.logging import get_logger
 from intric.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from intric.spaces.space import Space
 from intric.spaces.space_factory import SpaceFactory
+from intric.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
 
 logger = get_logger(__name__)
 
@@ -99,6 +100,7 @@ if TYPE_CHECKING:
     )
     from intric.group_chat.domain.entities.group_chat import GroupChat
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+    from intric.tenants.tenant import TenantInDB
     from intric.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
@@ -113,11 +115,20 @@ if TYPE_CHECKING:
     )
 
 
+class SpaceRepositoryTenantMismatchError(ValueError):
+    pass
+
+
+class SpaceRepositoryUserRequiredError(RuntimeError):
+    pass
+
+
 class SpaceRepository:
     def __init__(
         self,
+        *,
         session: AsyncSession,
-        user: "UserInDB",
+        tenant: "TenantInDB",
         factory: SpaceFactory,
         app_repo: Optional["AppRepository"],
         assistant_repo: "AssistantRepository",
@@ -125,9 +136,16 @@ class SpaceRepository:
         transcription_model_repo: "TranscriptionModelRepository",
         embedding_model_repo: "EmbeddingModelRepository",
         http_auth_encryption: "HttpAuthEncryptionService",
+        user: "UserInDB | None" = None,
     ):
         super().__init__()
+        if user is not None and user.tenant_id != tenant.id:
+            raise SpaceRepositoryTenantMismatchError(
+                "SpaceRepository user tenant does not match repository tenant."
+            )
         self.session = session
+        self.tenant = tenant
+        self.tenant_id = tenant.id
         self.user = user
         self.factory = factory
         self.app_repo = app_repo
@@ -136,6 +154,13 @@ class SpaceRepository:
         self.embedding_model_repo = embedding_model_repo
         self.assistant_repo = assistant_repo
         self.http_auth_encryption = http_auth_encryption
+
+    def _require_user(self) -> "UserInDB":
+        if self.user is None:
+            raise SpaceRepositoryUserRequiredError(
+                "SpaceRepository operation requires a user-scoped repository."
+            )
+        return self.user
 
     def _options(self) -> list[Any]:
         return [
@@ -823,7 +848,7 @@ class SpaceRepository:
 
         # Load tenant-level tool settings
         tenant_tool_settings_query = sa.select(MCPServerToolSettingsTable).where(
-            MCPServerToolSettingsTable.tenant_id == self.user.tenant_id
+            MCPServerToolSettingsTable.tenant_id == self.tenant_id
         )
         tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
         tenant_settings_db: list[MCPServerToolSettingsTable] = list(
@@ -1134,7 +1159,7 @@ class SpaceRepository:
 
         # Load tenant-level tool settings
         tenant_tool_settings_query = sa.select(MCPServerToolSettingsTable).where(
-            MCPServerToolSettingsTable.tenant_id == self.user.tenant_id
+            MCPServerToolSettingsTable.tenant_id == self.tenant_id
         )
         tenant_settings_result = await self.session.execute(tenant_tool_settings_query)
         tenant_settings_db: list[MCPServerToolSettingsTable] = list(
@@ -1280,7 +1305,7 @@ class SpaceRepository:
 
         mcp_servers_query = (
             sa.select(MCPServersTable)
-            .where(MCPServersTable.tenant_id == self.user.tenant_id)
+            .where(MCPServersTable.tenant_id == self.tenant_id)
             .where(MCPServersTable.is_enabled == True)  # noqa: E712
             .options(
                 _selectinload(MCPServersTable.security_classification).selectinload(
@@ -1478,16 +1503,18 @@ class SpaceRepository:
         query = sa.delete(Spaces).where(Spaces.id == id)
         await self.session.execute(query)
 
+    async def has_flow_delete_blockers(self, space_id: UUID) -> bool:
+        return await space_has_flow_delete_blockers(self.session, space_id)
+
     async def query(self, **filters: object) -> None:
         raise NotImplementedError()
 
     async def get_spaces_for_member(
         self, include_applications: bool = False
     ) -> list[Space]:
-        user_id = self.user.id
-        user_group_ids = (
-            list(self.user.user_groups_ids) if self.user.user_groups_ids else []
-        )
+        user = self._require_user()
+        user_id = user.id
+        user_group_ids = list(user.user_groups_ids) if user.user_groups_ids else []
 
         direct_member_query = (
             sa.select(Spaces.id)
@@ -1532,7 +1559,7 @@ class SpaceRepository:
             spaces.append(
                 self.factory.create_space_from_db(
                     record,
-                    user=self.user,
+                    user=user,
                     assistants_in_db=assistants,
                     apps_in_db=apps,
                     group_chats_in_db=group_chats,
@@ -1551,7 +1578,7 @@ class SpaceRepository:
             sa.select(Spaces)
             .join(Assistants)
             .where(Assistants.id == assistant_id)
-            .where(Spaces.tenant_id == self.user.tenant_id)
+            .where(Spaces.tenant_id == self.tenant_id)
         )
 
         space = await self._get_from_query(query, include_hidden_assistants=True)

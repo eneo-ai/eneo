@@ -409,7 +409,7 @@ def _completion_model(
     is_org_enabled: bool = True,
 ) -> CompletionModel:
     model = CompletionModel(
-        user=_user(),
+        tenant=_user().tenant,
         id=cast(UUID, id),
         created_at=_NOW,
         updated_at=_NOW,
@@ -456,7 +456,7 @@ def _transcription_model(
     is_org_enabled: bool = True,
 ) -> TranscriptionModel:
     model = TranscriptionModel(
-        user=_user(),
+        tenant=_user().tenant,
         id=cast(UUID, id),
         created_at=_NOW,
         updated_at=_NOW,

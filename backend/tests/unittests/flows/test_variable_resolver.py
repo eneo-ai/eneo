@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.flow import FlowStepResult, FlowStepResultStatus
+from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from intric.flows.variable_resolver import (
     FlowVariableResolver,
     iter_template_expressions,
@@ -153,7 +153,6 @@ def test_build_context_exposes_context_aware_system_aliases():
             "transkribering": "Detta är en transkribering.",
             "text": "Direkt text in",
             "json": {"key": "value"},
-            "file_ids": ["f1", "f2"],
         },
         prior_results=[],
     )
@@ -161,7 +160,6 @@ def test_build_context_exposes_context_aware_system_aliases():
     assert context["transkribering"] == "Detta är en transkribering."
     assert context["indata_text"] == "Direkt text in"
     assert context["indata_json"] == {"key": "value"}
-    assert context["indata_filer"] == ["f1", "f2"]
     assert context["datum"].count("-") == 2
 
 
@@ -241,15 +239,16 @@ def test_interpolate_serializes_non_ascii_json_values_without_ascii_escaping():
     assert rendered == "Payload: namn: Åke\nstad: Örebro"
 
 
-def test_interpolate_renders_short_scalar_lists_as_comma_separated_values():
+def test_interpolate_renders_short_step_input_file_id_lists_as_comma_separated_values():
     resolver = FlowVariableResolver()
     context = resolver.build_context(
-        flow_input={"file_ids": ["miljo", "buller", "trafik"]},
+        flow_input={},
         prior_results=[],
+        current_step_input={"file_ids": ["miljo", "buller", "trafik"]},
     )
 
     rendered = resolver.interpolate(
-        template="Tags: {{ indata_filer }}",
+        template="Tags: {{ step_input.file_ids }}",
         context=context,
     )
 
@@ -273,13 +272,14 @@ def test_interpolate_error_includes_available_keys_for_small_dicts():
 def test_interpolate_raises_for_non_numeric_list_index():
     resolver = FlowVariableResolver()
     context = resolver.build_context(
-        flow_input={"file_ids": ["f1", "f2"]},
+        flow_input={},
         prior_results=[],
+        current_step_input={"file_ids": ["f1", "f2"]},
     )
 
     with pytest.raises(BadRequestException, match="Expected numeric index"):
         resolver.interpolate(
-            template="{{ indata_filer.first }}",
+            template="{{ step_input.file_ids.first }}",
             context=context,
         )
 
@@ -339,13 +339,14 @@ def test_resolve_path_requires_numeric_index_to_read_list_item_field():
 def test_interpolate_raises_for_list_index_out_of_range():
     resolver = FlowVariableResolver()
     context = resolver.build_context(
-        flow_input={"file_ids": ["f1"]},
+        flow_input={},
         prior_results=[],
+        current_step_input={"file_ids": ["f1"]},
     )
 
     with pytest.raises(BadRequestException, match="out of range"):
         resolver.interpolate(
-            template="{{ indata_filer.3 }}",
+            template="{{ step_input.file_ids.3 }}",
             context=context,
         )
 

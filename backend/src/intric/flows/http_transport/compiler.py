@@ -12,6 +12,8 @@ from intric.flows.http_transport.authored_config import (
     HttpAuthNone,
     HttpAuthoredConfig,
     HttpBodyMode,
+    HttpMethod,
+    SecretValue,
 )
 
 
@@ -19,7 +21,7 @@ from intric.flows.http_transport.authored_config import (
 class EffectiveHttpRequest:
     """Compiled request ready for httpx."""
 
-    method: str
+    method: HttpMethod
     url: str
     headers: dict[str, str]
     body: bytes | None
@@ -31,7 +33,7 @@ def compile_http_config(
     authored: HttpAuthoredConfig,
     *,
     direction: str,
-    method: str,
+    method: HttpMethod,
     variables: dict[str, Any] | None = None,
     interpolate: Callable[[str, dict[str, Any]], str] | None = None,
 ) -> EffectiveHttpRequest:
@@ -58,12 +60,12 @@ def compile_http_config(
     # Auth -> headers
     match authored.auth:
         case HttpAuthBearer(token=token):
-            headers["Authorization"] = f"Bearer {_interpolate(token)}"
+            headers["Authorization"] = f"Bearer {_interpolate(_secret_text(token))}"
         case HttpAuthApiKey(header_name=name, key=key):
-            headers[_interpolate(name)] = _interpolate(key)
+            headers[_interpolate(name)] = _interpolate(_secret_text(key))
         case HttpAuthBasicAuth(username=user, password=pwd):
             encoded = base64.b64encode(
-                f"{_interpolate(user)}:{_interpolate(pwd)}".encode()
+                f"{_interpolate(user)}:{_interpolate(_secret_text(pwd))}".encode()
             ).decode()
             headers["Authorization"] = f"Basic {encoded}"
         case HttpAuthNone():
@@ -71,8 +73,7 @@ def compile_http_config(
 
     # Custom headers
     for h in authored.custom_headers:
-        value = h.value if isinstance(h.value, str) else ""
-        headers[h.name] = _interpolate(value)
+        headers[h.name] = _interpolate(_secret_text(h.value))
 
     # URL interpolation
     url = _interpolate(authored.url)
@@ -90,6 +91,12 @@ def compile_http_config(
     )
 
 
+def _secret_text(value: SecretValue) -> str:
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _compile_body(
     authored: HttpAuthoredConfig,
     direction: str,
@@ -103,7 +110,7 @@ def _compile_body(
         return None, None
 
     if mode == HttpBodyMode.AUTO:
-        # AUTO: no explicit body — let the caller decide (same as legacy behavior)
+        # AUTO leaves fallback body selection to the runtime caller.
         return None, None
 
     if mode == HttpBodyMode.JSON_TEMPLATE:

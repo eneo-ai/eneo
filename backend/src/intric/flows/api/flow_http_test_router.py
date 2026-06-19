@@ -9,15 +9,20 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.flows.api import flow_http_test_models
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_definition_access import require_flow_edit_access
-from intric.flows.api.flow_models import HttpTestRequest, HttpTestResponse
-from intric.flows.http_transport import HttpAuthoredConfig, is_authored_config
+from intric.flows.http_transport import (
+    HttpAuthoredConfig,
+    HttpTemplateInterpolationError,
+    is_authored_config,
+)
 from intric.flows.http_transport.test_action import execute_http_test
 from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from intric.flows.variable_resolver import FlowVariableResolver
 from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes
+from intric.main.exceptions import BadRequestException, ErrorCodes
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -26,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @router.post(
     "/{id}/http-test",
-    response_model=HttpTestResponse,
+    response_model=flow_http_test_models.HttpTestResponse,
     status_code=status.HTTP_200_OK,
     operation_id="test_flow_http",
     summary="Test HTTP Connection",
@@ -35,14 +40,18 @@ logger = logging.getLogger(__name__)
         "return a typed preview of the attempted request and response. This endpoint "
         "does not persist the config or publish the flow; it is for authoring UIs that "
         "need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior "
-        "before saving an HTTP input or output step."
+        "before saving an HTTP input or output step. `test_variables` is the raw "
+        "template context used for URL, header, auth, and body interpolation; callers "
+        "can send flat keys such as `name` or runtime-shaped keys such as `flow_input` "
+        "and `step_1`."
     ),
     responses={
         200: {
             "description": (
                 "HTTP test result. `success=false` is still returned with 200 when "
                 "the submitted config is syntactically valid but the target request "
-                "fails, times out, or returns an error status."
+                "fails, times out, returns an error status, or references a stored "
+                "secret that cannot be resolved."
             ),
         },
         403: error_response(
@@ -57,7 +66,7 @@ logger = logging.getLogger(__name__)
 async def test_flow_http(
     id: Annotated[UUID, Path(description="Flow ID")],
     request: Request,
-    body: HttpTestRequest,
+    body: flow_http_test_models.HttpTestRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
     import httpx as _httpx
@@ -65,15 +74,7 @@ async def test_flow_http(
     await require_flow_edit_access(request, container, flow_id=id)
     settings = get_settings()
 
-    try:
-        config = HttpAuthoredConfig.model_validate(body.config)
-    except Exception as exc:
-        return HttpTestResponse(
-            success=False,
-            error_code="INVALID_CONFIG",
-            error_message=str(exc),
-        )
-
+    config = body.config
     flow_service = container.flow_service()
     flow = await flow_service.get_flow(id)
     stored_config = find_stored_http_config(flow, body.direction)
@@ -82,12 +83,19 @@ async def test_flow_http(
         if hasattr(container, "encryption_service")
         else None
     )
+    variable_resolver = FlowVariableResolver()
     http_runtime = FlowHttpRuntimeHelper(
-        variable_resolver=cast(Any, None),
+        variable_resolver=variable_resolver,
         request_timeout_seconds=float(settings.flow_http_request_timeout_seconds),
         max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
         allow_private_networks=bool(settings.flow_http_allow_private_networks),
     )
+
+    def _interpolate_http_test_template(template: str, context: dict[str, Any]) -> str:
+        try:
+            return variable_resolver.interpolate(template, context)
+        except BadRequestException as exc:
+            raise HttpTemplateInterpolationError(str(exc)) from exc
 
     async def _send(
         *,
@@ -122,6 +130,7 @@ async def test_flow_http(
         test_variables=body.test_variables,
         stored_config=stored_config,
         encryption_service=encryption_service,
+        interpolate=_interpolate_http_test_template,
         send_http_request=_send,
         max_timeout=float(settings.flow_http_max_timeout_seconds),
     )
@@ -141,7 +150,7 @@ async def test_flow_http(
         ),
     )
 
-    return HttpTestResponse(
+    return flow_http_test_models.HttpTestResponse(
         success=result.success,
         status_code=result.status_code,
         duration_ms=result.duration_ms,
@@ -182,11 +191,4 @@ def find_stored_http_config(flow: Any, direction: str) -> HttpAuthoredConfig | N
     return None
 
 
-__all__ = [
-    "HttpTestRequest",
-    "HttpTestResponse",
-    "find_stored_http_config",
-    "execute_http_test",
-    "router",
-    "test_flow_http",
-]
+__all__ = ["router"]

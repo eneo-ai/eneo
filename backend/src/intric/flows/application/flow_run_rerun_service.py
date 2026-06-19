@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+from typing import assert_never
 from uuid import UUID
 
 from intric.files.file_repo import FileRepository
 from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject, RerunStepInputOverride
+from intric.flows.domain.flow_run_exceptions import FlowRunNotFoundError
+from intric.flows.domain.rerun_exceptions import (
+    FLOW_RUN_RERUN_LIFECYCLE_FAILURE_CLASSES,
+    FlowRunRerunInvalidTransitionError,
+    FlowRunRerunLifecycleFailure,
+    FlowRunRerunMissingCurrentResultsError,
+    FlowRunRerunRootStepIncompleteError,
+    FlowRunRerunStaleRevisionError,
+    FlowRunRerunStepInputsInvalidError,
+    FlowRunRerunStepNotFoundError,
+)
+from intric.flows.domain.run_step_input_exceptions import (
+    FlowRunRuntimeUploadBindingRaceError,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_api_exceptions import FlowBadRequestException
 from intric.flows.flow_input_limits import (
     FlowInputLimits,
     resolve_flow_input_limits_from_source,
 )
+from intric.flows.flow_run_input_envelope import RerunInputOverride
 from intric.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from intric.flows.flow_run_payload_validation import (
     ensure_inline_payload_size_allowed,
@@ -27,13 +45,14 @@ from intric.flows.flow_run_step_inputs import (
     FlowRunStepInputs,
     build_runtime_step_input_specs,
     normalize_step_inputs_payload,
-    serialize_step_inputs_payload,
+    runtime_file_not_bound_to_flow_error,
     validate_submitted_step_inputs,
 )
-from intric.flows.infrastructure.flow_repo import FlowRepository
-from intric.flows.infrastructure.flow_run_repo import (
-    FlowRunRepository,
+from intric.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import (
     FlowRunRerunCommandResult,
+    FlowRunRerunRepository,
 )
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
@@ -42,11 +61,61 @@ from intric.flows.published_definition import (
     parse_published_definition,
 )
 from intric.flows.runtime.models import RuntimeStep
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import NotFoundException
 from intric.settings.setting_service import SettingService
 from intric.users.user import UserInDB
 
 _RERUN_REASON_MAX_LENGTH = 1024
+
+
+def _step_ids_context(step_ids: tuple[UUID, ...]) -> dict[str, object]:
+    return {"step_ids": [str(step_id) for step_id in step_ids]}
+
+
+def _rerun_lifecycle_failure_to_bad_request(
+    exc: FlowRunRerunLifecycleFailure,
+) -> FlowBadRequestException:
+    match exc:
+        case FlowRunRerunStaleRevisionError():
+            return FlowBadRequestException(
+                "Flow run revision is stale.",
+                code=FlowApiErrorCode.RUN_RERUN_STALE_REVISION,
+                context={
+                    "expected_run_revision": exc.expected_run_revision,
+                    "current_run_revision": exc.current_run_revision,
+                },
+            )
+        case FlowRunRerunInvalidTransitionError():
+            return FlowBadRequestException(
+                "Flow run is not eligible for rerun.",
+                code=FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION,
+                context={"status": exc.status},
+            )
+        case FlowRunRerunStepNotFoundError():
+            return FlowBadRequestException(
+                "Rerun step is not in the published flow snapshot.",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND,
+            )
+        case FlowRunRerunMissingCurrentResultsError():
+            return FlowBadRequestException(
+                "Rerun graph has no current result for every invalidated step.",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_INCOMPLETE,
+                context=_step_ids_context(exc.step_ids),
+            )
+        case FlowRunRerunRootStepIncompleteError():
+            return FlowBadRequestException(
+                "Rerun step has no completed current result.",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_INCOMPLETE,
+                context=_step_ids_context(exc.step_ids),
+            )
+        case FlowRunRerunStepInputsInvalidError():
+            return FlowBadRequestException(
+                "Rerun step_inputs may only target the rerun root step.",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID,
+                context=_step_ids_context(exc.step_ids),
+            )
+        case _:
+            assert_never(exc)
 
 
 class FlowRunRerunService:
@@ -56,28 +125,21 @@ class FlowRunRerunService:
         self,
         *,
         user: UserInDB,
-        flow_repo: FlowRepository | None = None,
         flow_run_repo: FlowRunRepository,
+        flow_run_rerun_repo: FlowRunRerunRepository,
         flow_version_repo: FlowVersionRepository,
-        file_repo: FileRepository | None = None,
+        runtime_upload_repo: FlowRuntimeUploadRepository,
+        file_repo: FileRepository,
         settings_service: SettingService | None = None,
-        access_policy: FlowRunAccessPolicy | None = None,
+        access_policy: FlowRunAccessPolicy,
     ):
         self.user = user
         self.flow_run_repo = flow_run_repo
+        self.flow_run_rerun_repo = flow_run_rerun_repo
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
+        self.runtime_upload_repo = runtime_upload_repo
         self.settings_service = settings_service
-        if access_policy is None:
-            if flow_repo is None:
-                raise ValueError(
-                    "FlowRunRerunService requires flow_repo when access_policy is not provided."
-                )
-            access_policy = FlowRunAccessPolicy(
-                user=user,
-                flow_repo=flow_repo,
-                flow_run_repo=flow_run_repo,
-            )
         self.access_policy = access_policy
 
     def _principal(self) -> FlowPrincipal:
@@ -91,7 +153,7 @@ class FlowRunRerunService:
         rerun_step_id: UUID,
         expected_run_revision: int,
         reason: str,
-        input_payload_json: JsonObject | None = None,
+        input_payload_json: FlowPersistedJsonObject | None = None,
         step_inputs: FlowRunStepInputs | None = None,
     ) -> FlowRunRerunCommandResult:
         normalized_reason = self._normalize_rerun_reason(reason)
@@ -105,7 +167,10 @@ class FlowRunRerunService:
             version=run.flow_version,
             tenant_id=self.user.tenant_id,
         )
-        published_definition = parse_published_definition(version.definition_json)
+        published_definition = parse_published_definition(
+            version.definition_json,
+            flow_version=version.version,
+        )
         runtime_steps = published_definition.runtime_steps()
         invalidation_graph, root_runtime_step = self._resolve_rerun_graph(
             runtime_steps=runtime_steps,
@@ -118,18 +183,25 @@ class FlowRunRerunService:
             input_payload_json=input_payload_json,
         )
         normalized_step_inputs = await self._normalize_and_validate_rerun_step_inputs(
+            flow_id=run.flow_id,
             runtime_steps=runtime_steps,
             root_runtime_step=root_runtime_step,
             rerun_step_id=rerun_step_id,
             step_inputs=step_inputs,
         )
-        serialized_step_inputs = (
-            serialize_step_inputs_payload(normalized_step_inputs)
-            if normalized_step_inputs
-            else None
+        rerun_input_override = RerunInputOverride(
+            inline_payload_json=normalized_inline_payload,
+            root_step_input=(
+                RerunStepInputOverride(
+                    step_id=rerun_step_id,
+                    file_ids=tuple(normalized_step_inputs[rerun_step_id]),
+                )
+                if rerun_step_id in normalized_step_inputs
+                else None
+            ),
         )
         prior_root_attempt_id = (
-            await self.flow_run_repo.get_latest_completed_attempt_id_for_step(
+            await self.flow_run_rerun_repo.get_latest_completed_attempt_id_for_step(
                 run_id=run.id,
                 flow_id=run.flow_id,
                 tenant_id=self.user.tenant_id,
@@ -152,20 +224,29 @@ class FlowRunRerunService:
                 root_step_inputs=normalized_step_inputs or None,
             )
         )
-        return await self.flow_run_repo.accept_or_replay_rerun_operation(
-            tenant_id=self.user.tenant_id,
-            flow_id=run.flow_id,
-            flow_run_id=run.id,
-            rerun_step_id=rerun_step_id,
-            rerun_step_order=root_runtime_step.step_order,
-            request_fingerprint=request_fingerprint,
-            expected_run_revision=expected_run_revision,
-            reason=normalized_reason,
-            input_payload_json=normalized_inline_payload,
-            step_inputs_json=serialized_step_inputs,
-            requested_by_principal=principal,
-            invalidated_steps=invalidation_graph.invalidated_steps,
-        )
+        try:
+            return await self.flow_run_rerun_repo.accept_or_replay_rerun_operation(
+                tenant_id=self.user.tenant_id,
+                flow_id=run.flow_id,
+                flow_run_id=run.id,
+                rerun_step_id=rerun_step_id,
+                rerun_step_order=root_runtime_step.step_order,
+                request_fingerprint=request_fingerprint,
+                expected_run_revision=expected_run_revision,
+                reason=normalized_reason,
+                rerun_input_override=rerun_input_override,
+                requested_by_principal=principal,
+                invalidated_steps=invalidation_graph.invalidated_steps,
+            )
+        except FLOW_RUN_RERUN_LIFECYCLE_FAILURE_CLASSES as exc:
+            raise _rerun_lifecycle_failure_to_bad_request(exc) from exc
+        except FlowRunNotFoundError as exc:
+            raise NotFoundException("Flow run not found.") from exc
+        except FlowRunRuntimeUploadBindingRaceError as exc:
+            raise runtime_file_not_bound_to_flow_error(
+                step_id=exc.step_id,
+                file_ids=exc.file_ids,
+            ) from exc
 
     async def _resolve_flow_input_limits(self) -> FlowInputLimits:
         return await resolve_flow_input_limits_from_source(self.settings_service)
@@ -174,14 +255,14 @@ class FlowRunRerunService:
     def _normalize_rerun_reason(reason: str) -> str:
         normalized_reason = reason.strip()
         if not normalized_reason:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Rerun reason is required.",
-                code="flow_run_rerun_reason_required",
+                code=FlowApiErrorCode.RUN_RERUN_REASON_REQUIRED,
             )
         if len(normalized_reason) > _RERUN_REASON_MAX_LENGTH:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 f"Rerun reason must be at most {_RERUN_REASON_MAX_LENGTH} characters.",
-                code="flow_run_rerun_reason_too_long",
+                code=FlowApiErrorCode.RUN_RERUN_REASON_TOO_LONG,
                 context={"max_length": _RERUN_REASON_MAX_LENGTH},
             )
         return normalized_reason
@@ -197,9 +278,9 @@ class FlowRunRerunService:
             None,
         )
         if root_runtime_step is None:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Rerun step is not in the published flow snapshot.",
-                code="flow_run_rerun_step_not_found",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND,
             )
         try:
             invalidation_graph = build_rerun_invalidation_graph(
@@ -207,9 +288,9 @@ class FlowRunRerunService:
                 root_step_id=rerun_step_id,
             )
         except RerunGraphStepNotFound as exc:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Rerun step is not in the published flow snapshot.",
-                code="flow_run_rerun_step_not_found",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND,
             ) from exc
         return invalidation_graph, root_runtime_step
 
@@ -218,8 +299,8 @@ class FlowRunRerunService:
         *,
         flow_id: UUID,
         published_definition: PublishedFlowDefinition,
-        input_payload_json: JsonObject | None,
-    ) -> JsonObject | None:
+        input_payload_json: FlowPersistedJsonObject | None,
+    ) -> FlowPersistedJsonObject | None:
         if input_payload_json is None:
             return None
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
@@ -236,6 +317,7 @@ class FlowRunRerunService:
     async def _normalize_and_validate_rerun_step_inputs(
         self,
         *,
+        flow_id: UUID,
         runtime_steps: list[RuntimeStep],
         root_runtime_step: RuntimeStep,
         rerun_step_id: UUID,
@@ -248,9 +330,9 @@ class FlowRunRerunService:
             if step_id != rerun_step_id
         ]
         if downstream_step_input_ids:
-            raise BadRequestException(
+            raise FlowBadRequestException(
                 "Rerun step_inputs may only target the rerun root step.",
-                code="flow_run_rerun_step_inputs_invalid",
+                code=FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID,
                 context={"step_ids": downstream_step_input_ids},
             )
         if not normalized_step_inputs:
@@ -267,10 +349,12 @@ class FlowRunRerunService:
             else {}
         )
         await validate_submitted_step_inputs(
+            flow_id=flow_id,
             steps=[root_runtime_step],
             specs=root_specs,
             normalized_step_inputs=normalized_step_inputs,
             file_repo=self.file_repo,
+            runtime_upload_repo=self.runtime_upload_repo,
             principal=self._principal(),
             tenant_id=self.user.tenant_id,
         )

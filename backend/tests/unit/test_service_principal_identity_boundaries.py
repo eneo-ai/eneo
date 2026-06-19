@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from sqlalchemy import CheckConstraint
@@ -51,6 +52,61 @@ def test_flow_and_file_runtime_ownership_does_not_use_exact_key_owner_columns():
                     hits.append(f"{path.relative_to(REPO_ROOT)}:{forbidden}")
 
     assert hits == []
+
+
+def test_flow_and_file_runtime_does_not_synthesize_user_identities():
+    # Why: Flow/File runtime identity is service-principal based; runtime must
+    # not rebuild a UserInDB shape after actor resolution.
+    pattern = re.compile(r"\bUserInDB\(")
+    scanned_roots = (
+        REPO_ROOT / "src" / "intric" / "flows",
+        REPO_ROOT / "src" / "intric" / "files",
+    )
+    hits: list[str] = []
+
+    for root in scanned_roots:
+        for path in sorted(root.rglob("*.py")):
+            relative_path = path.relative_to(REPO_ROOT).as_posix()
+            if pattern.search(path.read_text(encoding="utf-8")):
+                hits.append(relative_path)
+
+    assert hits == []
+
+
+def test_flow_runtime_does_not_use_user_container_overrides():
+    runtime_root = REPO_ROOT / "src" / "intric" / "flows" / "runtime"
+    pattern = re.compile(r"\boverride_user\b|\bcontainer_overrides\b")
+    hits: list[str] = []
+
+    for path in sorted(runtime_root.rglob("*.py")):
+        if pattern.search(path.read_text(encoding="utf-8")):
+            hits.append(path.relative_to(REPO_ROOT).as_posix())
+
+    assert hits == []
+
+
+def test_flow_run_actor_stays_free_of_container_user_bridge_imports():
+    actor_source = (
+        REPO_ROOT / "src" / "intric" / "flows" / "runtime" / "flow_run_actor.py"
+    ).read_text(encoding="utf-8")
+
+    assert "TenantInDB" not in actor_source
+    assert "UserState" not in actor_source
+
+
+def test_flow_runtime_does_not_use_user_wired_template_asset_service():
+    runtime_root = REPO_ROOT / "src" / "intric" / "flows" / "runtime"
+    offenders: list[str] = []
+
+    for path in sorted(runtime_root.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if (
+            "FlowTemplateAssetService" in source
+            or "flow_template_asset_service" in source
+        ):
+            offenders.append(path.relative_to(REPO_ROOT).as_posix())
+
+    assert offenders == []
 
 
 def test_flow_and_file_runtime_ownership_uses_stable_service_principal_columns():

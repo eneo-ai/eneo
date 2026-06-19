@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, Optional, cast
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.networks import HttpUrl
 
 from intric.main.config import (
@@ -244,120 +244,26 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         cls,
         v: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        if v is None:
-            return {}
-        from intric.flows.flow_retention_policy import (
-            normalize_flow_retention_policy_settings,
-        )
+        from intric.flows.flow_settings import normalize_flow_settings_object
 
-        return normalize_flow_retention_policy_settings(v)
+        return normalize_flow_settings_object(v)
 
     @field_validator("flow_settings")
     @classmethod
     def validate_flow_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Validate JSONB structure for flow settings.
+        from intric.flows.flow_settings import validate_flow_settings_object
+        from intric.main.exceptions import BadRequestException
 
-        flow_settings currently supports:
-        - input_limits.file_max_size_bytes
-        - input_limits.audio_max_size_bytes
-        - input_limits.max_files_per_run
-        - input_limits.audio_max_files_per_run
-        - document_render_limits.*
-        - ai_builder.conversation_safety_buffer_tokens
-        - ai_builder.minimum_conversation_budget_tokens
-        - ai_builder.unknown_model_context_window_tokens
-        - runtime_policy.default_step_timeout_seconds
-        - runtime_policy.max_step_timeout_seconds
-        - retention_policy.run_debug_evidence_days
-        - evidence_policy.classification_3.*
-        """
-        if not v:
-            return {}
-
-        input_limits = v.get("input_limits")
-        if input_limits is not None:
-            from intric.flows.flow_input_limits import validate_flow_input_limits_object
-            from intric.main.exceptions import BadRequestException
-
-            try:
-                validate_flow_input_limits_object(input_limits)
-            except BadRequestException as error:
-                raise ValueError(str(error)) from error
-
-        document_render_limits = v.get("document_render_limits")
-        if document_render_limits is not None:
-            from intric.flows.flow_document_limits import (
-                validate_flow_document_render_limits_object,
-            )
-            from intric.main.exceptions import BadRequestException
-
-            try:
-                validate_flow_document_render_limits_object(document_render_limits)
-            except BadRequestException as error:
-                raise ValueError(str(error)) from error
-
-        ai_builder = v.get("ai_builder")
-        if ai_builder is not None:
-            from intric.flows.flow_ai_builder_budget_settings import (
-                validate_ai_builder_budget_settings_object,
-            )
-
-            try:
-                validate_ai_builder_budget_settings_object(ai_builder)
-            except Exception as error:
-                raise ValueError(str(error))
-
-        retention_policy = v.get("retention_policy")
-        if retention_policy is not None:
-            from intric.flows.flow_retention_policy import (
-                validate_flow_retention_policy_object,
-            )
-
-            try:
-                validate_flow_retention_policy_object(retention_policy)
-            except Exception as error:
-                raise ValueError(str(error))
-
-        evidence_policy = v.get("evidence_policy")
-        if evidence_policy is not None:
-            if not isinstance(evidence_policy, dict):
-                raise ValueError("flow_settings.evidence_policy must be an object")
-            class3 = cast(dict[str, Any], evidence_policy).get("classification_3")
-            if class3 is not None:
-                if not isinstance(class3, dict):
-                    raise ValueError(
-                        "flow_settings.evidence_policy.classification_3 must be an object"
-                    )
-                for key in (
-                    "allow_sensitive_flow_exports",
-                    "allow_space_admin_raw_export",
-                    "allow_run_owner_raw_export",
-                    "allow_service_key_raw_export",
-                ):
-                    if key not in class3:
-                        continue
-                    value = cast(dict[str, Any], class3)[key]
-                    if not isinstance(value, bool):
-                        raise ValueError(
-                            f"flow_settings.evidence_policy.classification_3.{key} must be a boolean"
-                        )
-
-        runtime_policy = v.get("runtime_policy")
-        if runtime_policy is not None:
-            from intric.flows.flow_runtime_policy import (
-                validate_flow_runtime_policy_object,
-            )
-            from intric.main.exceptions import BadRequestException
-
-            try:
-                validate_flow_runtime_policy_object(runtime_policy)
-            except BadRequestException as error:
-                raise ValueError(str(error)) from error
-
-        return v
+        try:
+            return validate_flow_settings_object(v)
+        except BadRequestException as error:
+            # Pydantic field validation reports model errors as ValueError.
+            raise ValueError(str(error)) from error
 
 
 class TenantUpdatePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     display_name: Optional[str] = None
     quota_limit: Optional[int] = None
     domain: Optional[str] = None
@@ -365,12 +271,21 @@ class TenantUpdatePublic(BaseModel):
     provisioning: Optional[bool] = None
     state: Optional[TenantState] = None
     security_enabled: Optional[bool] = None
-    flow_settings: Optional[dict[str, Any]] = None
     default_role_id: Optional[UUID] = None
 
 
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
+    flow_settings: Optional[dict[str, Any]] = None
+
+    @field_validator("flow_settings", mode="before")
+    @classmethod
+    def validate_flow_settings_write(cls, v: object) -> object:
+        if v is None:
+            return None
+        from intric.flows.flow_settings import validate_flow_settings_write
+
+        return validate_flow_settings_write(v)
 
 
 class TenantWithMaskedCredentials(TenantInDB):

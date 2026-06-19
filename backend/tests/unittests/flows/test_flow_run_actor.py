@@ -15,7 +15,6 @@ from intric.authentication.auth_models import (
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.runtime.flow_run_actor import (
     FlowRunActor,
-    FlowRunActorError,
     FlowRunServicePrincipalInactiveError,
 )
 
@@ -144,31 +143,3 @@ def test_service_principal_actor_rejects_disabled_principal(user):
             run=run,
             service_principal=service_principal,
         )
-
-
-def test_service_principal_container_bridge_does_not_inherit_user_roles_or_key(user):
-    service_principal = _service_principal(user)
-    actor = FlowRunActor.from_service_principal_run(
-        run=_service_run(user, service_principal, actor_api_key_id=uuid4()),
-        service_principal=service_principal,
-    )
-
-    bridge_user = actor.container_user_bridge(tenant=user.tenant)
-
-    assert bridge_user.id == service_principal.id
-    assert bridge_user.tenant_id == user.tenant_id
-    assert bridge_user.active_api_key is None
-    assert bridge_user.roles == []
-    assert bridge_user.permissions == set()
-
-
-def test_service_principal_container_bridge_rejects_tenant_mismatch(user):
-    service_principal = _service_principal(user)
-    actor = FlowRunActor.from_service_principal_run(
-        run=_service_run(user, service_principal, actor_api_key_id=uuid4()),
-        service_principal=service_principal,
-    )
-    other_tenant = user.tenant.model_copy(update={"id": uuid4()})
-
-    with pytest.raises(FlowRunActorError):
-        actor.container_user_bridge(tenant=other_tenant)

@@ -135,7 +135,7 @@
     <div id={panelId} transition:slide={{ duration: 180, easing: cubicOut }}>
       <Card.Content class="border-default flex min-w-0 flex-col gap-3 border-t px-4 py-3">
         {#if step.errorMessage}
-          <FlowRunErrorAlert message={step.errorMessage} />
+          <FlowRunErrorAlert errorCode={step.errorCode} message={step.errorMessage} />
         {/if}
 
         {#if hasOutput}

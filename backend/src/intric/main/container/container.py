@@ -104,6 +104,9 @@ from intric.flows import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_service import AIBuilderService
+from intric.flows.application.flow_classification_retention_policy_service import (
+    FlowClassificationRetentionPolicyService,
+)
 from intric.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
@@ -117,12 +120,20 @@ from intric.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
 )
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
-from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_run_contract_service import FlowRunContractService
+from intric.flows.flow_runtime_file_service import FlowRuntimeFileService
+from intric.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from intric.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from intric.flows.flow_template_asset_service import FlowTemplateAssetService
+from intric.flows.infrastructure.flow_classification_retention_policy_repo import (
+    FlowClassificationRetentionPolicyRepository,
+)
 from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
+)
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
 )
 from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
@@ -644,13 +655,13 @@ class Container(containers.DeclarativeContainer):
     )
     # TODO: rename when the first repo is not used anymore
     completion_model_repo2 = providers.Factory(
-        CompletionModelRepository, session=session, user=user
+        CompletionModelRepository, session=session, tenant=tenant
     )
     embedding_model_repo2 = providers.Factory(
-        EmbeddingModelRepository, session=session, user=user
+        EmbeddingModelRepository, session=session, tenant=tenant
     )
     transcription_model_repo = providers.Factory(
-        TranscriptionModelRepository, session=session, user=user
+        TranscriptionModelRepository, session=session, tenant=tenant
     )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
@@ -705,7 +716,6 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=assistant_factory,
         completion_model_repo=completion_model_repo2,
-        user=user,
     )
 
     info_blob_chunk_repo = providers.Factory(InfoBlobChunkRepo, session=session)
@@ -739,8 +749,27 @@ class Container(containers.DeclarativeContainer):
         FlowRunWebhookDeliveryRepository,
         session=session,
     )
+    flow_runtime_upload_repo = providers.Factory(
+        FlowRuntimeUploadRepository,
+        session=session,
+    )
+    flow_classification_retention_policy_repo = providers.Factory(
+        FlowClassificationRetentionPolicyRepository,
+        session=session,
+    )
     flow_run_repo = providers.Factory(
         FlowRunRepository,
+        session=session,
+        factory=flow_factory,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
+    )
+    flow_run_rerun_repo = providers.Factory(
+        FlowRunRerunRepository,
+        session=session,
+        factory=flow_factory,
+    )
+    flow_run_review_checkpoint_repo = providers.Factory(
+        FlowRunReviewCheckpointRepository,
         session=session,
         factory=flow_factory,
         audit_outbox_repo=flow_run_audit_outbox_repo,
@@ -748,11 +777,13 @@ class Container(containers.DeclarativeContainer):
     flow_run_terminalizer = providers.Factory(
         FlowRunTerminalizer,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
         audit_outbox_repo=flow_run_audit_outbox_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
     )
     flow_review_expiry_reconciler = providers.Factory(
         FlowReviewExpiryReconciler,
-        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_run_terminalizer=flow_run_terminalizer,
     )
     flow_celery_app = providers.Object(flow_celery_app)
@@ -782,7 +813,20 @@ class Container(containers.DeclarativeContainer):
     )
     space_repo = providers.Factory(
         SpaceRepository,
+        tenant=tenant,
         user=user,
+        factory=space_factory,
+        session=session,
+        app_repo=app_repo,
+        assistant_repo=assistant_repo,
+        completion_model_repo=completion_model_repo2,
+        transcription_model_repo=transcription_model_repo,
+        embedding_model_repo=embedding_model_repo2,
+        http_auth_encryption=http_auth_encryption_service,
+    )
+    tenant_scoped_space_repo = providers.Factory(
+        SpaceRepository,
+        tenant=tenant,
         factory=space_factory,
         session=session,
         app_repo=app_repo,
@@ -847,7 +891,7 @@ class Container(containers.DeclarativeContainer):
     )
     datastore = providers.Factory(
         Datastore,
-        user=user,
+        tenant_id=tenant.provided.id,
         create_embeddings_service=create_embeddings_service,
         info_blob_chunk_repo=info_blob_chunk_repo,
     )
@@ -923,6 +967,12 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    flow_classification_retention_policy_service = providers.Factory(
+        FlowClassificationRetentionPolicyService,
+        user=user,
+        repo=flow_classification_retention_policy_repo,
+        audit_service=audit_service,
     )
     flow_run_audit_outbox_delivery_service = providers.Factory(
         FlowRunAuditOutboxDeliveryService,
@@ -1212,9 +1262,11 @@ class Container(containers.DeclarativeContainer):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_run_terminalizer=flow_run_terminalizer,
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
+        runtime_upload_repo=flow_runtime_upload_repo,
         settings_service=settings_service,
         execution_backend=flow_execution_backend,
         access_policy=flow_run_access_policy,
@@ -1224,6 +1276,8 @@ class Container(containers.DeclarativeContainer):
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
         access_policy=flow_run_access_policy,
@@ -1231,17 +1285,18 @@ class Container(containers.DeclarativeContainer):
     flow_run_rerun_service = providers.Factory(
         FlowRunRerunService,
         user=user,
-        flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
+        runtime_upload_repo=flow_runtime_upload_repo,
         settings_service=settings_service,
         access_policy=flow_run_access_policy,
     )
     flow_run_review_checkpoint_service = providers.Factory(
         FlowRunReviewCheckpointService,
         user=user,
-        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         access_policy=flow_run_access_policy,
         flow_run_terminalizer=flow_run_terminalizer,
     )
@@ -1253,10 +1308,13 @@ class Container(containers.DeclarativeContainer):
         file_service=file_service,
         template_asset_repo=flow_template_asset_repo,
     )
-    flow_file_upload_service = providers.Factory(
-        FlowFileUploadService,
+    flow_runtime_file_service = providers.Factory(
+        FlowRuntimeFileService,
+        user=user,
+        session=session,
         flow_service=flow_service,
         file_service=file_service,
+        runtime_upload_repo=flow_runtime_upload_repo,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
     )

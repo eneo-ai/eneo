@@ -7,6 +7,7 @@ from dependency_injector import providers
 from intric.database.database import sessionmanager
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_dispatch_request import FlowRunDispatchRequest
 from intric.flows.flow_run_error import FlowRunError
 from intric.main.container.container import Container
@@ -40,7 +41,7 @@ async def dispatch_flow_run_after_commit(
                     source=FlowRunLifecycleSource.DISPATCH_FAILURE,
                     error=FlowRunError.from_source(
                         FlowRunLifecycleSource.DISPATCH_FAILURE,
-                        code="flow_dispatch_failed",
+                        code=FlowApiErrorCode.RUN_DISPATCH_FAILED,
                         message=(
                             "flow_dispatch_failed: "
                             "Flow dispatch failed before execution started. "

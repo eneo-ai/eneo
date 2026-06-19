@@ -9,7 +9,8 @@ from typing import Any, cast
 
 import jsonschema
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.json_types import JsonObject, JsonValue
 from intric.main.exceptions import TypedIOValidationException
 
 _FENCED_JSON_PATTERN = re.compile(
@@ -18,7 +19,7 @@ _FENCED_JSON_PATTERN = re.compile(
 )
 _SCHEMA_TRAVERSAL_STOP_KEYS = frozenset({"$ref", "oneOf", "anyOf", "allOf"})
 
-JsonStructuredValue = JsonObject | list[Any]
+StructuredOutputValue = JsonObject | list[JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,17 +27,17 @@ class StrictSchemaPruneResult:
     dropped_paths: tuple[str, ...]
 
 
-def _parse_json_candidate(raw_text: str) -> JsonObject | list[Any]:
+def _parse_json_candidate(raw_text: str) -> StructuredOutputValue:
     parsed = json.loads(raw_text)
     if not isinstance(parsed, (dict, list)):
         raise TypedIOValidationException(
             f"Expected JSON object or array, got {type(parsed).__name__}",
-            code="typed_io_output_parse_failed",
+            code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED.value,
         )
-    return cast(JsonObject | list[Any], parsed)
+    return cast(StructuredOutputValue, parsed)
 
 
-def _extract_embedded_json(raw_text: str) -> JsonObject | list[Any] | None:
+def _extract_embedded_json(raw_text: str) -> StructuredOutputValue | None:
     decoder = json.JSONDecoder()
     for start_index, char in enumerate(raw_text):
         if char not in "{[":
@@ -46,17 +47,17 @@ def _extract_embedded_json(raw_text: str) -> JsonObject | list[Any] | None:
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, (dict, list)):
-            return cast(JsonObject | list[Any], parsed)
+            return cast(StructuredOutputValue, parsed)
     return None
 
 
-def parse_json_output(raw_text: str) -> JsonObject | list[Any]:
+def parse_json_output(raw_text: str) -> StructuredOutputValue:
     """Parse LLM text as JSON. Raises TypedIOValidationException."""
     normalized = raw_text.strip()
     if normalized == "":
         raise TypedIOValidationException(
             "LLM response was empty; expected a JSON object or array.",
-            code="typed_io_output_parse_failed",
+            code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED.value,
         )
 
     fenced_match = _FENCED_JSON_PATTERN.match(normalized)
@@ -71,7 +72,7 @@ def parse_json_output(raw_text: str) -> JsonObject | list[Any]:
             return embedded
         raise TypedIOValidationException(
             f"LLM response is not valid JSON: {exc}",
-            code="typed_io_output_parse_failed",
+            code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED.value,
         ) from exc
 
 
@@ -82,12 +83,12 @@ def validate_against_contract(data: Any, schema: dict[str, Any], *, label: str) 
     except jsonschema.ValidationError as exc:
         raise TypedIOValidationException(
             f"{label}: {exc.message}",
-            code="typed_io_contract_violation",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         ) from exc
 
 
 def prune_extras_to_strict_schema(
-    data: JsonStructuredValue,
+    data: StructuredOutputValue,
     schema: JsonObject,
 ) -> StrictSchemaPruneResult:
     """Drop only undeclared model-output keys under explicit additionalProperties:false."""
@@ -174,7 +175,7 @@ def validate_schema_syntax(schema: dict[str, Any], *, label: str) -> None:
     except jsonschema.SchemaError as exc:
         raise TypedIOValidationException(
             f"{label} is not a valid JSON Schema: {exc.message}",
-            code="typed_io_invalid_schema",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_SCHEMA.value,
         ) from exc
 
 

@@ -8,8 +8,7 @@ import pytest
 
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.api.flow_service_principal_actor_read_model import (
-    enrich_evidence_service_principal_summaries,
-    enrich_review_checkpoint_service_principal_summaries,
+    FlowServicePrincipalActorPresenter,
 )
 from intric.flows.domain.flow import FlowRunReviewCheckpoint
 from intric.flows.enums import FlowOutputType, FlowRunReviewCheckpointState
@@ -17,7 +16,7 @@ from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
 @pytest.mark.asyncio
-async def test_enrich_review_checkpoint_actor_summaries_batches_by_service_id():
+async def test_present_review_checkpoint_batches_service_principal_summaries():
     tenant_id = uuid4()
     service_id = uuid4()
     repo = AsyncMock()
@@ -47,11 +46,11 @@ async def test_enrich_review_checkpoint_actor_summaries_batches_by_service_id():
         updated_at="2026-03-20T12:00:00Z",
     )
 
-    enriched = await enrich_review_checkpoint_service_principal_summaries(
+    presenter = FlowServicePrincipalActorPresenter(
         api_key_repo=repo,
         tenant_id=tenant_id,
-        checkpoint=checkpoint,
     )
+    enriched = await presenter.present_review_checkpoint(checkpoint)
 
     assert enriched.requester_service_principal is not None
     assert enriched.requester_service_principal.id == service_id
@@ -63,7 +62,7 @@ async def test_enrich_review_checkpoint_actor_summaries_batches_by_service_id():
 
 
 @pytest.mark.asyncio
-async def test_enrich_evidence_actor_summaries_uses_one_lookup_for_all_sections():
+async def test_present_evidence_actor_summaries_uses_one_lookup_for_all_sections():
     tenant_id = uuid4()
     requester_service_id = uuid4()
     decider_service_id = uuid4()
@@ -97,11 +96,11 @@ async def test_enrich_evidence_actor_summaries_uses_one_lookup_for_all_sections(
         ],
     }
 
-    enriched = await enrich_evidence_service_principal_summaries(
+    presenter = FlowServicePrincipalActorPresenter(
         api_key_repo=repo,
         tenant_id=tenant_id,
-        payload=payload,
     )
+    enriched = await presenter.present_evidence(payload)
 
     checkpoint = enriched["review_checkpoints"][0]
     assert checkpoint["requester_service_principal"]["display_name"] == (

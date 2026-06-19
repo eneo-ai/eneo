@@ -48,6 +48,8 @@ const OPTION_FIELD_TYPES = new Set<NormalizedFlowFormFieldType>(["select", "mult
 const RESERVED_RUNTIME_VARIABLE_NAMES = new Set(flowVariableDefinitions.reservedRuntimeVariables);
 const FORM_FIELD_NAMESPACE_HEADS = new Set(flowVariableDefinitions.formFieldNamespaceHeads);
 export const PRIMARY_FLOW_INPUT_KEYS = new Set(flowVariableDefinitions.primaryFlowInputKeys);
+const RESERVED_FORM_FIELD_INPUT_KEYS = new Set(flowVariableDefinitions.reservedFormFieldInputKeys);
+export const RESERVED_RUNTIME_VARIABLES = new Set(flowVariableDefinitions.reservedRuntimeVariables);
 const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 
 export type FlowFormFieldNameIssue = "namespace_head" | "primary_input_key" | "step_alias" | "dot";
@@ -206,7 +208,7 @@ export function getFlowFormFieldNameIssue(name: string): FlowFormFieldNameIssue 
   if (!normalized) return null;
   const key = normalized.toLowerCase();
   if (FORM_FIELD_NAMESPACE_HEADS.has(key)) return "namespace_head";
-  if (PRIMARY_FLOW_INPUT_KEYS.has(key)) return "primary_input_key";
+  if (RESERVED_FORM_FIELD_INPUT_KEYS.has(key)) return "primary_input_key";
   if (FLOW_FORM_STEP_ALIAS_PATTERN.test(normalized)) return "step_alias";
   if (normalized.includes(".")) return "dot";
   return null;

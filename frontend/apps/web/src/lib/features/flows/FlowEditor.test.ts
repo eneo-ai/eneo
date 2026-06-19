@@ -63,6 +63,11 @@ function makeIntric(
   } as unknown as Intric;
 }
 
+async function settleEditorInitialization(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe("FlowEditor metadata commands", () => {
   it("replaces form schema fields with persisted field shape", () => {
     const { metadataJson, hasUnsavedChanges } = renderEditorMetadata({
@@ -229,14 +234,23 @@ describe("FlowEditor basic settings commands", () => {
     }
   });
 
-  it("sets data retention while preserving zero, null, and neighboring fields", () => {
-    const flow = makeFlow({ owner: "metadata" }, { name: "Flow", description: "Description" });
+  it("sets data retention only for the public range while preserving neighboring fields", () => {
+    const flow = makeFlow(
+      { owner: "metadata" },
+      { name: "Flow", description: "Description", data_retention_days: 30 }
+    );
     const editor = createFlowEditor({ flow, intric: makeIntric() });
     try {
       const originalSteps = get(editor.state.update).steps;
 
       editor.setDataRetentionDays(0);
-      expect(get(editor.state.update).data_retention_days).toBe(0);
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+
+      editor.setDataRetentionDays(2556);
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+
+      editor.setDataRetentionDays(Number.NaN);
+      expect(get(editor.state.update).data_retention_days).toBe(30);
 
       editor.setDataRetentionDays(7);
       let update = get(editor.state.update);
@@ -247,14 +261,46 @@ describe("FlowEditor basic settings commands", () => {
       expect(update.steps).toBe(originalSteps);
       expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
 
-      editor.setDataRetentionDays(Number.NaN);
+      editor.setDataRetentionDays(2555);
       update = get(editor.state.update);
-      expect(update.data_retention_days).toBeNull();
+      expect(update.data_retention_days).toBe(2555);
 
       editor.setDataRetentionDays(null);
       const { update: finalUpdate, hasUnsavedChanges } = readEditorState(editor);
       expect(finalUpdate.data_retention_days).toBeNull();
-      expect(hasUnsavedChanges).toBe(false);
+      expect(hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("sets data retention from raw input without lossy numeric coercion", () => {
+    const flow = makeFlow(
+      { owner: "metadata" },
+      { name: "Flow", description: "Description", data_retention_days: 30 }
+    );
+    const editor = createFlowEditor({ flow, intric: makeIntric() });
+    try {
+      editor.setDataRetentionDaysFromInput("2.9");
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+
+      editor.setDataRetentionDaysFromInput("1e2");
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+
+      editor.setDataRetentionDaysFromInput("0");
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+
+      editor.setDataRetentionDaysFromInput("2556");
+      expect(get(editor.state.update).data_retention_days).toBe(30);
+
+      editor.setDataRetentionDaysFromInput("7");
+      expect(get(editor.state.update).data_retention_days).toBe(7);
+
+      editor.setDataRetentionDaysFromInput("2555");
+      expect(get(editor.state.update).data_retention_days).toBe(2555);
+
+      editor.setDataRetentionDaysFromInput("");
+      expect(get(editor.state.update).data_retention_days).toBeNull();
     } finally {
       editor.destroy();
     }
@@ -331,6 +377,33 @@ describe("FlowEditor form field reference rewrites", () => {
 });
 
 describe("FlowEditor step mutation commands", () => {
+  it("keeps question binding that matches assistant prompt during editor initialization", async () => {
+    const prompt = "Use the uploaded case material";
+    const flow = makeFlow(null, {
+      steps: [
+        makeStep(1, {
+          input_bindings: { question: prompt } as never
+        })
+      ]
+    });
+    const assistantGet = vi.fn(async () => ({
+      prompt: { text: prompt, description: "" }
+    }));
+    const editor = createFlowEditor({
+      flow,
+      intric: makeIntric({ assistantGet })
+    });
+    try {
+      await settleEditorInitialization();
+
+      const [step] = get(editor.state.update).steps ?? [];
+      expect(step.input_bindings).toEqual({ question: prompt });
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+
   it("replaces one step while preserving neighbors and step order", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),

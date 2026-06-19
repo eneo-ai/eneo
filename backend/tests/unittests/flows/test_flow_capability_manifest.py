@@ -2,9 +2,9 @@
 
 Covers: version constant, dataclass shape (engine-truth fields only),
 registry seeding from `INPUT_TYPE_POLICIES`, `not_exposed_reason`
-invariant, chain validation, tuple-matrix coverage guard, FCM_VERSION
-bump-discipline, and the public API (`resolve_capability_for_tuple`,
-`validate_step_chain`, `render_critic_invariants`, `coverage_report`).
+invariant, tuple-matrix coverage guard, FCM_VERSION bump-discipline, and
+the public API (`resolve_capability_for_tuple`, `render_critic_invariants`,
+`coverage_report`).
 """
 
 from __future__ import annotations
@@ -46,8 +46,6 @@ from intric.flows.flow_capability_manifest import (
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
-    ChainStep,
-    ChainViolation,
     ConfigRequirement,
     CoverageReport,
     FlowCapability,
@@ -60,12 +58,8 @@ from intric.flows.flow_capability_manifest import (
     resolve_capability_for_tuple,
     resolve_document_generation_mode,
     supports_step_io_tuple,
-    validate_step_chain,
 )
-from intric.flows.step_chain_rules import (
-    COMPATIBLE_TYPE_COERCIONS,
-    find_first_step_chain_violation,
-)
+from intric.flows.step_chain_rules import COMPATIBLE_TYPE_COERCIONS
 from intric.flows.type_policies import INPUT_TYPE_POLICIES
 
 
@@ -79,8 +73,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_one() -> None:
-    assert FCM_VERSION == 1
+def test_fcm_version_is_two() -> None:
+    assert FCM_VERSION == 2
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -1049,7 +1043,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V1: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V2: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1236,10 +1230,9 @@ _FCM_SURFACE_FINGERPRINT_V1: tuple[object, ...] = (
                     "requires_http_output_config",
                     "Steps using `http_post` output mode must declare an "
                     "`output_config` object that passes `validate_http_output_config`; "
-                    "both the authored (`http_transport.validator`) and legacy "
-                    "(`flow_validators_http.validate_http_config_common`) shapes are "
-                    "acceptable. The capability does not pin per-field rules — see "
-                    "the transport validators for URL scheme, body-mode, and timeout "
+                    "the authored HTTP transport config is the only accepted shape. "
+                    "The capability does not pin per-field rules — see the transport "
+                    "validators for URL scheme, body-mode, auth, and timeout "
                     "constraints.",
                 ),
             ),
@@ -1336,11 +1329,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V1, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V2, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V1}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V2}\n\n"
         f"Actual:   {actual}"
     )
 
@@ -1348,38 +1341,9 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
 # ---------------------------------------------------------------------
 # FCM public API tests.
 #
-# Four public fns: resolve_capability_for_tuple, validate_step_chain,
-# render_critic_invariants, coverage_report. Three public shapes:
-# ChainViolation, CoverageReport, ChainStep (Protocol).
+# Public fns: resolve_capability_for_tuple, render_critic_invariants,
+# coverage_report. Public shape: CoverageReport.
 # ---------------------------------------------------------------------
-
-
-def _chain_step(
-    *,
-    step_order: int,
-    input_source: FlowInputSource,
-    input_type: FlowInputType,
-    output_type: FlowOutputType,
-    output_mode: FlowOutputMode = FlowOutputMode.PASS_THROUGH,
-) -> ChainStep:
-    """Lightweight ChainStep fixture for validate_step_chain tests."""
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class _Step:
-        step_order: int
-        input_source: FlowInputSource
-        input_type: FlowInputType
-        output_type: FlowOutputType
-        output_mode: FlowOutputMode
-
-    return _Step(
-        step_order=step_order,
-        input_source=input_source,
-        input_type=input_type,
-        output_type=output_type,
-        output_mode=output_mode,
-    )
 
 
 class TestResolveCapabilityForTuple:
@@ -1478,284 +1442,6 @@ class TestResolveCapabilityForTuple:
         assert caps is not None
         ids = [cap.id for cap in caps]
         assert ids == ["input_text", "output_mode_template_fill"]
-
-
-class TestValidateStepChain:
-    """Multi-step chain validator — returns typed ChainViolation(s); empty
-    tuple on a valid chain. Mirrors every legacy rule in
-    `step_chain_rules.find_first_step_chain_violation` with enum types."""
-
-    def test_empty_chain_returns_no_violations(self) -> None:
-        assert validate_step_chain([]) == ()
-
-    def test_valid_single_flow_input_step(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        assert validate_step_chain(steps) == ()
-
-    def test_valid_two_step_chain(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.JSON,
-            ),
-        ]
-        assert validate_step_chain(steps) == ()
-
-    def test_multiple_flow_input_steps_violation(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(v.code == "typed_io_multiple_flow_input_steps" for v in violations)
-
-    def test_three_flow_input_steps_report_every_extra(self) -> None:
-        """Three steps using `flow_input` — the rule reports step 2 AND
-        step 3, not just the first extra. Guards against whack-a-mole UX
-        where only one offender surfaces at a time."""
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=3,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        multi_extras = [
-            v for v in violations if v.code == "typed_io_multiple_flow_input_steps"
-        ]
-        assert {v.step_order for v in multi_extras} == {2, 3}
-
-    def test_flow_input_not_first_position_violation(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(v.code == "typed_io_flow_input_position_invalid" for v in violations)
-
-    def test_step_one_previous_step_source_violation(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(
-            v.code == "typed_io_invalid_input_source_position" for v in violations
-        )
-
-    def test_document_input_requires_flow_input_source(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.DOCUMENT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(v.code == "typed_io_document_source_unsupported" for v in violations)
-
-    def test_json_incompatible_with_all_previous_steps(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.JSON,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.ALL_PREVIOUS_STEPS,
-                input_type=FlowInputType.JSON,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(
-            v.code == "typed_io_invalid_input_source_combination" for v in violations
-        )
-
-    def test_incompatible_type_chain_violation(self) -> None:
-        # PDF → JSON is not in CHAIN_COMPATIBILITY.
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.DOCUMENT,
-                output_type=FlowOutputType.PDF,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.JSON,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(v.code == "typed_io_incompatible_type_chain" for v in violations)
-
-    def test_missing_previous_step_violation(self) -> None:
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=3,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        assert any(v.code == "typed_io_missing_previous_step" for v in violations)
-
-    def test_returns_all_violations_not_first_only(self) -> None:
-        """Two independent violations — validate_step_chain surfaces both
-        (diverges from legacy's first-violation-only return)."""
-        steps = [
-            _chain_step(
-                step_order=1,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=2,
-                input_source=FlowInputSource.FLOW_INPUT,
-                input_type=FlowInputType.TEXT,
-                output_type=FlowOutputType.TEXT,
-            ),
-            _chain_step(
-                step_order=3,
-                input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=FlowInputType.DOCUMENT,
-                output_type=FlowOutputType.TEXT,
-            ),
-        ]
-        violations = validate_step_chain(steps)
-        codes = {v.code for v in violations}
-        assert "typed_io_multiple_flow_input_steps" in codes
-        assert "typed_io_document_source_unsupported" in codes
-
-    def test_parity_with_legacy_first_violation(self) -> None:
-        """Every cell that legacy flags must also appear in FCM's violations
-        (converted to enum types). FCM may surface extra violations after the
-        first; legacy only returns one."""
-        scenarios = [
-            [
-                _chain_step(
-                    step_order=1,
-                    input_source=FlowInputSource.FLOW_INPUT,
-                    input_type=FlowInputType.TEXT,
-                    output_type=FlowOutputType.TEXT,
-                ),
-                _chain_step(
-                    step_order=2,
-                    input_source=FlowInputSource.PREVIOUS_STEP,
-                    input_type=FlowInputType.DOCUMENT,
-                    output_type=FlowOutputType.TEXT,
-                ),
-            ],
-            [
-                _chain_step(
-                    step_order=1,
-                    input_source=FlowInputSource.PREVIOUS_STEP,
-                    input_type=FlowInputType.TEXT,
-                    output_type=FlowOutputType.TEXT,
-                ),
-            ],
-        ]
-        for steps in scenarios:
-            legacy_shapes = [
-                type(
-                    "LegacyShape",
-                    (),
-                    {
-                        "step_order": step.step_order,
-                        "input_source": step.input_source.value,
-                        "input_type": step.input_type.value,
-                        "output_type": step.output_type.value,
-                    },
-                )()
-                for step in steps
-            ]
-            legacy_violation = find_first_step_chain_violation(legacy_shapes)
-            fcm_violations = validate_step_chain(steps)
-            if legacy_violation is None:
-                assert fcm_violations == ()
-            else:
-                fcm_codes = {v.code for v in fcm_violations}
-                assert legacy_violation.code in fcm_codes, (
-                    f"legacy code {legacy_violation.code} missing from FCM "
-                    f"violations {fcm_codes}"
-                )
-
-    def test_chain_violation_is_frozen_dataclass(self) -> None:
-        violation = ChainViolation(step_order=1, message="x", code="typed_io_test")
-        with pytest.raises(FrozenInstanceError):
-            violation.step_order = 2  # type: ignore[misc]
 
 
 class TestRenderCriticInvariants:

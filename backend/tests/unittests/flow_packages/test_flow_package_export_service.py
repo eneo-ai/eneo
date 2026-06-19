@@ -33,7 +33,7 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
     AssistantAuthoringSnapshots,
 )
-from intric.flows.domain.flow import Flow, FlowStep, JsonObject
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,
@@ -266,7 +266,7 @@ def _mcp_snapshot(case: str) -> AssistantAuthoringSnapshot:
     ],
 )
 def test_export_rejects_invalid_template_references_in_step_payloads(
-    step_kwargs: dict[str, JsonObject],
+    step_kwargs: dict[str, FlowPersistedJsonObject],
 ) -> None:
     assistant_id = uuid4()
 
@@ -816,7 +816,7 @@ def _build_envelope(
 def _flow(
     *,
     steps: list[FlowStep],
-    metadata_json: JsonObject | None = None,
+    metadata_json: FlowPersistedJsonObject | None = None,
 ) -> Flow:
     user_id = uuid4()
     return Flow(
@@ -872,11 +872,11 @@ def _step(
     input_type: str = "text",
     output_mode: str = "pass_through",
     output_type: str = "text",
-    input_bindings: JsonObject | None = None,
-    input_contract: JsonObject | None = None,
-    output_contract: JsonObject | None = None,
-    input_config: JsonObject | None = None,
-    output_config: JsonObject | None = None,
+    input_bindings: FlowPersistedJsonObject | None = None,
+    input_contract: FlowPersistedJsonObject | None = None,
+    output_contract: FlowPersistedJsonObject | None = None,
+    input_config: FlowPersistedJsonObject | None = None,
+    output_config: FlowPersistedJsonObject | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),

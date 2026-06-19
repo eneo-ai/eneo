@@ -66,7 +66,7 @@ from intric.flow_packages.infrastructure.flow_package_zip_reader import (
 from intric.flow_packages.infrastructure.flow_package_zip_writer import (
     write_flow_package,
 )
-from intric.flows.api import flow_router_common as common
+from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_definition_access import require_flow_edit_access
 from intric.flows.domain.flow import Flow
@@ -197,7 +197,7 @@ async def create_flow_package_import_plan(
     request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowPackageImportPlan:
-    access_context = await common.get_space_access_context_for_request(
+    access_context = await flow_access_context.resolve_space_access_context(
         request,
         container,
         space_id=id,
@@ -268,7 +268,7 @@ async def import_flow_package_as_draft(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> FlowPackageImportPublic | JSONResponse:
     """Return install failures as responses so the failed import record commits."""
-    access_context = await common.get_space_access_context_for_request(
+    access_context = await flow_access_context.resolve_space_access_context(
         request,
         container,
         space_id=id,

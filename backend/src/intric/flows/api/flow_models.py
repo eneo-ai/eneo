@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Literal, Self, cast
+from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic.config import JsonDict
 
-from intric.authentication.auth_models import FlowServicePrincipalActorPublic
+from intric.authentication.auth_models import (
+    FlowServicePrincipalActorPublic,
+)
 from intric.authentication.principal_types import PrincipalType
+from intric.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from intric.flows.enums import (
-    FLOW_RUN_STATUS_CAPABILITIES,
-    FLOW_RUN_STATUS_FILTER_ORDER,
     FlowInputSource,
     FlowInputType,
     FlowMcpPolicy,
@@ -24,9 +24,9 @@ from intric.flows.enums import (
     FlowRunStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    FlowTemplateAssetStatus,
     RerunDependencyKind,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
     FlowStepReviewMode,
@@ -65,6 +65,16 @@ from intric.flows.flow_run_evidence_export_summary import EvidenceExportSummary
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
+
+FLOW_DATA_RETENTION_DAYS_DESCRIPTION = (
+    "Number of days to retain full Flow run and step history. "
+    "Set to null to inherit the space retention policy. "
+    f"Valid range: {MIN_RETENTION_DAYS}-{MAX_RETENTION_DAYS} days."
+)
+FlowDataRetentionDays: TypeAlias = Annotated[
+    int,
+    Field(strict=True, ge=MIN_RETENTION_DAYS, le=MAX_RETENTION_DAYS),
+]
 
 
 def _validate_public_principal_actor_shape(
@@ -146,63 +156,12 @@ FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
     ],
 }
 
-FLOW_RUNTIME_PUBLIC_EXAMPLE: dict[str, Any] = {
-    "id": "00000000-0000-0000-0000-000000000001",
-    "space_id": "00000000-0000-0000-0000-000000000020",
-    "name": "Employee Review Summary",
-    "description": "Transcribe a review conversation and return a PDF summary.",
-    "published_version": 3,
-    "created_at": "2026-03-17T09:30:00Z",
-    "updated_at": "2026-03-17T10:00:00Z",
-    "runtime_paths": {
-        "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
-        "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
-        "upload_flow_file": "/api/v1/flows/00000000-0000-0000-0000-000000000001/files/",
-        "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/",
-        "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
-        "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
-        "review_checkpoints": {
-            "active_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/active/",
-            "edit_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
-            "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
-            "reject_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
-            "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
-        },
-        "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
-        "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
-        "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
-        "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
-        "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/",
-    },
-}
-
-
-def _flow_run_status_capabilities_public_example() -> JsonDict:
-    return {
-        "statuses": [
-            {
-                "status": capability.status.value,
-                "is_active": capability.is_active,
-                "should_poll": capability.should_poll,
-                "is_terminal": capability.is_terminal,
-                "is_cancellable": capability.is_cancellable,
-                "is_awaiting_review": capability.is_awaiting_review,
-                "can_request_redispatch": capability.can_request_redispatch,
-            }
-            for capability in FLOW_RUN_STATUS_CAPABILITIES.values()
-        ],
-        "filter_order": [status.value for status in FLOW_RUN_STATUS_FILTER_ORDER],
-    }
-
-
-FLOW_RUN_STATUS_CAPABILITIES_PUBLIC_EXAMPLE = (
-    _flow_run_status_capabilities_public_example()
-)
 
 FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_version": 3,
+    "principal_type": None,
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -234,52 +193,29 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
             {
                 "code": "runtime_input_consumed",
                 "message": "Uploaded audio file was used.",
+                "severity": "info",
             }
         ]
     },
+    "runtime_input_file_ids": ["00000000-0000-0000-0000-000000000701"],
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
     "result_files": [],
     "current_attempt_no": 1,
     "num_tokens_input": 0,
     "num_tokens_output": 0,
+    "error_code": None,
     "error_message": None,
     "diagnostics": [
-        {"code": "runtime_input_consumed", "message": "Uploaded audio file was used."}
+        {
+            "code": "runtime_input_consumed",
+            "message": "Uploaded audio file was used.",
+            "severity": "info",
+        }
     ],
     "started_at": "2026-03-17T10:05:05Z",
     "finished_at": "2026-03-17T10:05:30Z",
     "created_at": "2026-03-17T10:05:05Z",
     "updated_at": "2026-03-17T10:05:30Z",
-}
-
-FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE: dict[str, Any] = {
-    "asset_id": "00000000-0000-0000-0000-000000000601",
-    "file_id": "00000000-0000-0000-0000-000000000602",
-    "file_name": "ibic-template.docx",
-    "placeholders": [
-        {"name": "brukare_namn", "location": "body", "preview": "{{ brukare_namn }}"},
-        {"name": "handlaggare", "location": "header", "preview": "{{ handlaggare }}"},
-    ],
-    "extracted_text_preview": "IBIC plan template with placeholders.",
-    "status": "ready",
-}
-
-FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE: dict[str, Any] = {
-    "id": "00000000-0000-0000-0000-000000000601",
-    "flow_id": "00000000-0000-0000-0000-000000000001",
-    "file_id": "00000000-0000-0000-0000-000000000602",
-    "name": "ibic-template.docx",
-    "checksum": "sha256:abc123",
-    "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "placeholders": ["brukare_namn", "handlaggare"],
-    "status": "ready",
-    "last_updated_by_name": "Case Worker Admin",
-    "can_edit": True,
-    "can_download": True,
-    "can_select": True,
-    "can_inspect": True,
-    "created_at": "2026-03-17T09:40:00Z",
-    "updated_at": "2026-03-17T09:45:00Z",
 }
 
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
@@ -422,16 +358,6 @@ FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE: dict[str, Any] = {
     },
 }
 
-GRAPH_RESPONSE_EXAMPLE: dict[str, Any] = {
-    "nodes": [
-        {"id": "step-1", "label": "Transcribe uploaded audio", "type": "step"},
-        {"id": "step-2", "label": "Create PDF summary", "type": "step"},
-    ],
-    "edges": [
-        {"source": "step-1", "target": "step-2"},
-    ],
-}
-
 PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE: dict[str, Any] = {
     "items": [FLOW_SPARSE_PUBLIC_EXAMPLE],
     "has_more": False,
@@ -444,41 +370,10 @@ PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE: dict[str, Any] = {
     "count": 1,
 }
 
-HTTP_TEST_REQUEST_EXAMPLE: dict[str, Any] = {
-    "direction": "output",
-    "method": "POST",
-    "config": {
-        "url": "https://webhook.example.com/eneo/flow-output",
-        "auth": {"mode": "none"},
-        "timeout_seconds": 10,
-        "body": {
-            "mode": "json_template",
-            "template": '{"event":"flow.test","status":"ok"}',
-        },
-        "custom_headers": [{"name": "X-Eneo-Test", "value": "true", "secret": False}],
-        "response_format": "json",
-    },
-    "test_variables": {},
-}
-
-HTTP_TEST_RESPONSE_EXAMPLE: dict[str, Any] = {
-    "success": True,
-    "status_code": 200,
-    "duration_ms": 128.4,
-    "response_preview": '{"ok":true}',
-    "request_preview": {
-        "method": "POST",
-        "url": "https://webhook.example.com/eneo/flow-output",
-        "headers": {"X-Eneo-Test": "true"},
-        "body_preview": '{"event":"flow.test","status":"ok"}',
-    },
-    "error_code": None,
-    "error_message": None,
-}
-
 
 class FlowStepCreateRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "assistant_id": "00000000-0000-0000-0000-000000000001",
@@ -490,7 +385,7 @@ class FlowStepCreateRequest(BaseModel):
                 "output_type": "text",
                 "mcp_policy": "inherit",
             }
-        }
+        },
     )
 
     assistant_id: UUID
@@ -541,6 +436,7 @@ class FlowStepUpdateRequest(FlowStepCreateRequest):
 
 class FlowCreateRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "space_id": "00000000-0000-0000-0000-000000000001",
@@ -558,7 +454,7 @@ class FlowCreateRequest(BaseModel):
                     }
                 ],
             }
-        }
+        },
     )
 
     space_id: UUID
@@ -566,12 +462,16 @@ class FlowCreateRequest(BaseModel):
     description: str | None = None
     steps: list[FlowStepCreateRequest]
     metadata_json: dict[str, Any] | None = None
-    data_retention_days: int | None = None
+    data_retention_days: FlowDataRetentionDays | None = Field(
+        default=None,
+        description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
+    )
 
 
 @partial_model
 class FlowUpdateRequest(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "name": "Municipality Intake Transcription v2",
@@ -592,14 +492,17 @@ class FlowUpdateRequest(BaseModel):
                 "metadata_json": {"category": "municipality-intake"},
                 "data_retention_days": 30,
             }
-        }
+        },
     )
 
     name: str
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
-    data_retention_days: int | None | NotProvided = Field(default=NOT_PROVIDED)
+    data_retention_days: FlowDataRetentionDays | None | NotProvided = Field(
+        default=NOT_PROVIDED,
+        description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
+    )
 
 
 class FlowStepPublic(BaseModel):
@@ -646,7 +549,10 @@ class FlowSparsePublic(BaseModel):
     owner_user_id: UUID | None = None
     published_version: int | None = None
     metadata_json: dict[str, Any] | None = None
-    data_retention_days: int | None = None
+    data_retention_days: FlowDataRetentionDays | None = Field(
+        default=None,
+        description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
+    )
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -660,177 +566,35 @@ class FlowPublic(FlowSparsePublic):
     steps: list[FlowStepPublic]
 
 
-class FlowReviewCheckpointRuntimePathsPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    active_template: str = Field(
-        description=(
-            "GET template for the active review checkpoint on a run. Replace "
-            "`{run_id}` with the run id returned by create_run."
-        )
-    )
-    edit_template: str = Field(
-        description=(
-            "PATCH template for submitting a full corrected checkpoint payload. "
-            "Replace `{run_id}` and `{checkpoint_id}` with values returned by "
-            "create_run and active checkpoint polling. Send "
-            "`expected_checkpoint_revision` plus the full corrected "
-            "`current_payload_json` field from the active checkpoint response."
-        )
-    )
-    approve_template: str = Field(
-        description=(
-            "POST template for approving a checkpoint. Replace `{run_id}` and "
-            "`{checkpoint_id}` with values returned by create_run and active "
-            "checkpoint polling, and send `expected_checkpoint_revision` from "
-            "the latest checkpoint response."
-        )
-    )
-    reject_template: str = Field(
-        description=(
-            "POST template for rejecting a checkpoint. Replace `{run_id}` and "
-            "`{checkpoint_id}` with values returned by create_run and active "
-            "checkpoint polling, then send `expected_checkpoint_revision` and a "
-            "rejection reason."
-        )
-    )
-    resume_template: str = Field(
-        description=(
-            "POST template for resuming a run after checkpoint approval. Replace "
-            "`{run_id}` and `{checkpoint_id}` with values returned by create_run "
-            "and active checkpoint polling, then send the approved checkpoint "
-            "`expected_checkpoint_revision`."
-        )
-    )
-
-
-class FlowRuntimePathsPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    run_contract: str = Field(
-        description=(
-            "GET path for the published run contract. Call this before creating a "
-            "run to discover required inputs, review checkpoints, final output "
-            "delivery, and the published version to pin."
-        )
-    )
-    graph: str = Field(
-        description=(
-            "GET path for the published flow graph. Add the optional `run_id` query "
-            "parameter after run creation to enrich the graph with runtime state."
-        )
-    )
-    upload_flow_file: str = Field(
-        description=(
-            "POST path for uploading flow-level runtime files before run creation. "
-            "Send `multipart/form-data` with the binary file in the `upload_file` "
-            "field; use the returned file id in the create-run payload."
-        )
-    )
-    upload_step_runtime_file_template: str = Field(
-        description=(
-            "POST template for uploading files for a specific runtime step. Replace "
-            "`{step_id}` with a step id from the run contract, then send "
-            "`multipart/form-data` with the binary file in the `upload_file` field. "
-            "Use the returned file id in `step_inputs[step_id].file_ids`."
-        )
-    )
-    create_run: str = Field(
-        description=(
-            "POST path for creating a run. The returned run id is committed before "
-            "`201 Created` is returned, so clients can immediately poll "
-            "`get_run_template`."
-        )
-    )
-    list_runs: str = Field(
-        description=(
-            "GET path for listing visible runs for this flow. Service keys list only "
-            "runs created by the same key."
-        )
-    )
-    review_checkpoints: FlowReviewCheckpointRuntimePathsPublic = Field(
-        description=(
-            "Review checkpoint path templates for human-in-loop clients. These "
-            "templates let web apps discover active checkpoint, edit, approve, "
-            "reject, and resume URLs before a run reaches awaiting_review."
-        )
-    )
-    get_graph_for_run_template: str = Field(
-        description=(
-            "GET template for the run-enriched graph. Replace `{run_id}` with the "
-            "id returned by create_run."
-        )
-    )
-    get_run_template: str = Field(
-        description=(
-            "GET template for polling run status and top-level output. Replace "
-            "`{run_id}` with the id returned by create_run."
-        )
-    )
-    list_steps_template: str = Field(
-        description=(
-            "GET template for inspecting ordered step outputs and result files. "
-            "Replace `{run_id}` with the id returned by create_run."
-        )
-    )
-    evidence_template: str = Field(
-        description=(
-            "GET template for rich run evidence. Service keys need explicit "
-            "`resource_permissions.flow_evidence` and can inspect only their own "
-            "runs."
-        )
-    )
-    artifact_signed_url_template: str = Field(
-        description=(
-            "POST template for generating a signed artifact download URL. Replace "
-            "`{run_id}` and `{file_id}` with values from run or step result files "
-            "and send a SignedURLRequest body."
-        )
-    )
-
-
-class FlowRuntimePublic(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-        json_schema_extra={"example": FLOW_RUNTIME_PUBLIC_EXAMPLE},
-    )
-
-    id: UUID
-    space_id: UUID
-    name: str
-    description: str | None = None
-    published_version: int
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-    runtime_paths: FlowRuntimePathsPublic
-
-
 class StepRunInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     file_ids: list[UUID] = Field(
         default_factory=lambda: cast(list[UUID], []),
         description=(
             "Uploaded file ids to attach to this specific step. Use the step ids "
             "from `GET /api/v1/flows/{id}/run-contract/` rather than sending all "
-            "files to the first step."
+            "files to the first step. File order is preserved for this step after "
+            "duplicate ids are collapsed by first occurrence."
         ),
     )
 
 
+FLOW_RUN_CREATE_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_flow_version": 3,
+    "input_payload_json": {"employee_name": "Alex Example"},
+    "step_inputs": {
+        "00000000-0000-0000-0000-000000000101": {
+            "file_ids": ["00000000-0000-0000-0000-000000000701"]
+        }
+    },
+}
+
+
 class FlowRunCreateRequest(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "expected_flow_version": 7,
-                "input_payload_json": {
-                    "text": "optional context for downstream prompt steps"
-                },
-                "step_inputs": {
-                    "00000000-0000-0000-0000-000000000003": {
-                        "file_ids": ["00000000-0000-0000-0000-000000000004"]
-                    }
-                },
-            }
-        }
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_CREATE_REQUEST_EXAMPLE},
     )
 
     expected_flow_version: int | None = Field(
@@ -865,7 +629,7 @@ class FlowRunCreateRequest(BaseModel):
                 "Top-level file_ids is no longer supported. Call the run contract endpoint "
                 "to find the target step id, then send uploaded files as "
                 "step_inputs[step_id].file_ids.",
-                code="flow_run_top_level_file_ids_not_supported",
+                code=FlowApiErrorCode.RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED.value,
                 context={
                     "invalid_field": "file_ids",
                     "expected_field": "step_inputs[step_id].file_ids",
@@ -877,7 +641,7 @@ class FlowRunCreateRequest(BaseModel):
 
 class FlowAssistantCreateRequest(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": {"name": "Flow Step Assistant"}}
+        extra="forbid", json_schema_extra={"example": {"name": "Flow Step Assistant"}}
     )
 
     name: str
@@ -897,80 +661,6 @@ class FlowRunTokenUsagePublic(BaseModel):
     num_tokens_total: int = Field(
         ge=0,
         description="Total provider-reported tokens consumed by the run.",
-    )
-
-
-class FlowRunStatusCapabilityPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    status: FlowRunStatus = Field(
-        description="Flow run status value this capability row describes."
-    )
-    is_active: bool = Field(
-        description=(
-            "True for statuses where the worker is expected to continue execution "
-            "without waiting for human review."
-        )
-    )
-    should_poll: bool = Field(
-        description=(
-            "True for statuses where client applications should continue polling "
-            "for the next run state. Includes `awaiting_review` so review UIs can "
-            "detect edits, approvals, expiries, and resumes."
-        )
-    )
-    is_terminal: bool = Field(
-        description=(
-            "True when the run lifecycle is complete and normal polling can stop."
-        )
-    )
-    is_cancellable: bool = Field(
-        description=(
-            "True when the cancel endpoint "
-            "`POST /flows/{id}/runs/{run_id}/cancel/` is valid."
-        )
-    )
-    is_awaiting_review: bool = Field(
-        description=(
-            "True only for `awaiting_review`, where clients should load the active "
-            "review checkpoint before resuming the run."
-        )
-    )
-    can_request_redispatch: bool = Field(
-        description=(
-            "True when clients may show a redispatch action for this status. "
-            "Redispatch is still server-gated by staleness; a queued run that is "
-            "not stale returns `redispatched_count: 0`."
-        )
-    )
-
-
-class FlowRunStatusCapabilitiesPublic(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_RUN_STATUS_CAPABILITIES_PUBLIC_EXAMPLE}
-    )
-
-    statuses: list[FlowRunStatusCapabilityPublic] = Field(
-        description=(
-            "Canonical status capability table. API consumers should branch on "
-            "these booleans instead of hard-coding status groups."
-        )
-    )
-    filter_order: list[FlowRunStatus] = Field(
-        description=(
-            "Recommended status filter order for run-history UIs. Contains every "
-            "FlowRunStatus exactly once."
-        )
-    )
-
-
-def flow_run_status_capabilities_public() -> FlowRunStatusCapabilitiesPublic:
-    return FlowRunStatusCapabilitiesPublic(
-        statuses=[
-            FlowRunStatusCapabilityPublic.model_validate(capability)
-            for capability in FLOW_RUN_STATUS_CAPABILITIES.values()
-        ],
-        filter_order=list(FLOW_RUN_STATUS_FILTER_ORDER),
     )
 
 
@@ -1201,6 +891,30 @@ class FlowRunReviewCheckpointResumeResponse(BaseModel):
     run: FlowRunPublic
 
 
+class FlowStepDiagnosticPublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "code": "runtime_input_consumed",
+                "message": "Uploaded audio file was used.",
+                "severity": "info",
+            }
+        },
+    )
+
+    code: str = Field(description="Stable diagnostic code.")
+    message: str = Field(description="Human-readable diagnostic message.")
+    severity: Literal["info", "warning", "error"] = Field(
+        default="warning",
+        description="Diagnostic severity.",
+    )
+
+
+def _empty_runtime_input_file_ids() -> list[UUID]:
+    return []
+
+
 class FlowRunStepPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1216,6 +930,12 @@ class FlowRunStepPublic(BaseModel):
     assistant_id: UUID | None = None
     status: FlowStepResultStatus
     input_payload_json: dict[str, Any] | None = None
+    runtime_input_file_ids: list[UUID] = Field(
+        default_factory=_empty_runtime_input_file_ids,
+        description=(
+            "File ids submitted as runtime input for the current attempt of this step result."
+        ),
+    )
     output_payload_json: dict[str, Any] | None = None
     current_attempt_no: int | None = None
     result_files: list[FlowRunStepResultFile] = Field(
@@ -1225,10 +945,18 @@ class FlowRunStepPublic(BaseModel):
     model_parameters_json: dict[str, Any] | None = None
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
+    error_code: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Stable machine-readable step failure code. Clients should branch on "
+            "this code when present and treat error_message as technical detail."
+        ),
+    )
     error_message: str | None = None
     flow_step_execution_hash: str | None = None
-    diagnostics: list[dict[str, Any]] = Field(
-        default_factory=lambda: cast(list[dict[str, Any]], [])
+    diagnostics: list[FlowStepDiagnosticPublic] = Field(
+        default_factory=lambda: cast(list[FlowStepDiagnosticPublic], [])
     )
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -1262,11 +990,18 @@ class FlowRunStepRerunRequest(BaseModel):
     )
     input_payload_json: dict[str, Any] | None = Field(
         default=None,
-        description="Optional inline payload overrides for the rerun root step.",
+        description=(
+            "Optional replacement for the run's semantic inline input payload when "
+            "the rerun is accepted. Existing orchestration metadata and runtime "
+            "transcription cache values are preserved."
+        ),
     )
     step_inputs: dict[UUID, StepRunInput] | None = Field(
         default=None,
-        description="Optional file inputs keyed by the rerun root step id.",
+        description=(
+            "Optional file inputs keyed by the rerun root step id. Provided step ids "
+            "replace their existing `step_inputs` entry; other step ids are preserved."
+        ),
     )
 
 
@@ -1286,103 +1021,6 @@ class FlowRunStepRerunResponse(BaseModel):
     new_attempt_no: int
     invalidated_step_ids: list[UUID]
     status: FlowRunRerunOperationStatus
-
-
-class GraphNode(BaseModel):
-    id: str
-    label: str
-    type: str
-    step_order: int | None = None
-    input_source: str | None = None
-    input_type: str | None = None
-    output_type: str | None = None
-    output_mode: str | None = None
-    mcp_policy: str | None = None
-    output_classification_override: int | None = None
-    run_status: str | None = None
-    num_tokens_input: int | None = None
-    num_tokens_output: int | None = None
-    error_message: str | None = None
-
-
-class GraphEdge(BaseModel):
-    source: str
-    target: str
-    kind: str | None = None
-    source_step_order: int | None = None
-    target_step_order: int | None = None
-    style: str | None = None
-    label: str | None = None
-
-
-class GraphResponse(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": GRAPH_RESPONSE_EXAMPLE})
-
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
-
-
-class HttpTestRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": HTTP_TEST_REQUEST_EXAMPLE})
-
-    config: dict[str, Any]
-    direction: Literal["input", "output"] = "output"
-    method: str = "POST"
-    test_variables: dict[str, Any] | None = None
-
-
-class HttpTestResponse(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": HTTP_TEST_RESPONSE_EXAMPLE})
-
-    success: bool
-    status_code: int | None = None
-    duration_ms: float = 0.0
-    response_preview: str | None = None
-    request_preview: dict[str, Any] | None = None
-    error_code: str | None = None
-    error_message: str | None = None
-
-
-class FlowTemplatePlaceholderPublic(BaseModel):
-    name: str
-    location: str
-    preview: str | None = None
-
-
-class FlowTemplateInspectionPublic(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE}
-    )
-
-    asset_id: UUID | None = None
-    file_id: UUID
-    file_name: str
-    placeholders: list[FlowTemplatePlaceholderPublic]
-    extracted_text_preview: str | None = None
-    status: FlowTemplateAssetStatus | None = None
-
-
-class FlowTemplateAssetPublic(BaseModel):
-    model_config = ConfigDict(
-        from_attributes=True,
-        json_schema_extra={"example": FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE},
-    )
-
-    id: UUID
-    flow_id: UUID
-    file_id: UUID
-    name: str
-    checksum: str
-    mimetype: str | None = None
-    placeholders: list[str] = Field(default_factory=list)
-    status: FlowTemplateAssetStatus
-    last_updated_by_name: str | None = None
-    can_edit: bool = False
-    can_download: bool = False
-    can_select: bool = False
-    can_inspect: bool = False
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
 
 
 class FlowRunDebugIoTypes(BaseModel):
@@ -1735,6 +1373,20 @@ FLOW_RUN_RESULT_FILE_EXAMPLE: dict[str, Any] = {
 }
 
 
+class FlowRunRerunStepInputOverridePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    step_id: UUID = Field(
+        description="Root step whose runtime input files were explicitly replaced or cleared by the rerun request."
+    )
+    file_ids: list[UUID] = Field(
+        description=(
+            "Runtime file IDs stored for the rerun root attempt. An empty list "
+            "means the rerun explicitly cleared the root step files."
+        )
+    )
+
+
 class FlowRunRerunOperationPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -1756,8 +1408,24 @@ class FlowRunRerunOperationPublic(BaseModel):
     expected_run_revision: int
     accepted_run_revision: int
     reason: str
-    input_payload_json: dict[str, Any] | None = None
-    step_inputs_json: dict[str, Any] | None = None
+    input_payload: dict[str, Any] | None = Field(
+        default=None,
+        description="Inline rerun input payload recorded at rerun acceptance time.",
+    )
+    root_step_input_override: FlowRunRerunStepInputOverridePublic | None = Field(
+        default=None,
+        description=(
+            "Root-step runtime file override recorded at rerun acceptance time. "
+            "Null means files were inherited from the predecessor attempt."
+        ),
+    )
+    root_step_input_override_requested: bool = Field(
+        description=(
+            "True when the rerun request explicitly replaced or cleared root "
+            "step runtime files; false when the root attempt inherits files "
+            "from its predecessor."
+        )
+    )
     requested_by_principal_type: PrincipalType
     requested_by_user_id: UUID | None = None
     requested_by_service_principal: FlowServicePrincipalActorPublic | None = None
@@ -1768,8 +1436,31 @@ class FlowRunRerunOperationPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @model_validator(mode="before")
+    @classmethod
+    def project_public_payload(cls, value: Any) -> Any:
+        payload = _flow_run_rerun_operation_public_payload(
+            value,
+            field_names=tuple(cls.model_fields),
+        )
+        if payload is None:
+            return value
+
+        if "input_payload" not in payload:
+            payload["input_payload"] = payload.get("input_payload_json")
+
+        payload.pop("input_payload_json", None)
+        return payload
+
     @model_validator(mode="after")
     def validate_requested_by_actor(self) -> Self:
+        if self.root_step_input_override_requested != (
+            self.root_step_input_override is not None
+        ):
+            raise ValueError(
+                "root_step_input_override must be present exactly when "
+                "root_step_input_override_requested is true."
+            )
         _validate_public_principal_actor_shape(
             label="requested_by",
             principal_type=self.requested_by_principal_type,
@@ -1778,6 +1469,24 @@ class FlowRunRerunOperationPublic(BaseModel):
             required=True,
         )
         return self
+
+
+def _flow_run_rerun_operation_public_payload(
+    value: Any,
+    *,
+    field_names: tuple[str, ...],
+) -> dict[str, Any] | None:
+    if isinstance(value, Mapping):
+        return dict(cast(Mapping[str, Any], value))
+
+    payload = {
+        field_name: getattr(value, field_name)
+        for field_name in field_names
+        if hasattr(value, field_name)
+    }
+    if hasattr(value, "input_payload_json"):
+        payload["input_payload_json"] = getattr(value, "input_payload_json")
+    return payload or None
 
 
 class FlowRunRerunInvalidatedStepPublic(BaseModel):
@@ -1939,11 +1648,11 @@ class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v5",
+                "schema_version": "flow-evidence-export.v6",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "content_hash": "8f434346648f6b96df89dda901c5176b10a6d83961fca71d1af7bc2f617f4a66",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v5",
+                    "schema_version": "flow-evidence-export.v6",
                     "provenance_schema_version_min": "flow-attempt-provenance.v1",
                     "provenance_schema_version_current": "flow-attempt-provenance.v1",
                     "provenance_persisted_version_status": "not_tracked",
@@ -2209,7 +1918,6 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "input_lineage": {
                                 "input_source": "previous_step",
                                 "used_question_binding": True,
-                                "legacy_prompt_binding_used": False,
                                 "uses_runtime_input": True,
                                 "runtime_input_format": "document",
                                 "runtime_file_count": 1,

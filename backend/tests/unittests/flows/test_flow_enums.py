@@ -17,12 +17,6 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_RESULT_STATUS_VALUES,
     FLOW_TEMPLATE_ASSET_STATUS_VALUES,
 )
-from intric.flows.flow_authoring_spec import (
-    AssistantSpec,
-    InputSource,
-    InputType,
-    StepSpec,
-)
 from intric.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
@@ -30,6 +24,7 @@ from intric.flows.api.flow_models import (
     FlowOutputMode,
     FlowOutputType,
 )
+from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowRunReviewCheckpointState,
@@ -38,7 +33,12 @@ from intric.flows.enums import (
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
 )
-from intric.flows.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    InputSource,
+    InputType,
+    StepSpec,
+)
 
 
 def test_shared_flow_enums_match_current_table_constants() -> None:

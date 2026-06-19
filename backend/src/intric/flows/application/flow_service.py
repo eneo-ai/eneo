@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, TypeAlias, cast
+from typing import Any, cast
 from uuid import UUID
 
 from intric.assistants.assistant import Assistant, AssistantOrigin
@@ -13,7 +13,11 @@ from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
 )
-from intric.flows.domain.flow import Flow, FlowSparse, FlowStep, JsonObject
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowSparse, FlowStep
+from intric.flows.domain.flow_invariant_exceptions import (
+    FlowPublishedDefinitionInvalidError,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
     normalize_persisted_flow_metadata,
@@ -33,38 +37,27 @@ from intric.flows.flow_validators import (
 )
 from intric.flows.http_transport import (
     HttpAuthoredConfig,
+    contains_secret_sentinel,
     encrypt_authored_config,
     is_authored_config,
     merge_secrets_on_update,
 )
-from intric.flows.http_transport.secret_codec import SECRET_SENTINEL
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import (
     build_published_definition_json,
-    published_definition_checksum,
+    parse_published_runtime_steps,
 )
 from intric.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
 )
-from intric.flows.step_config_secrets import encrypt_step_headers_for_storage
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_service import SpaceService
 from intric.users.user import UserInDB
-
-SecretSentinelJsonValue: TypeAlias = (
-    None
-    | bool
-    | int
-    | float
-    | str
-    | list["SecretSentinelJsonValue"]
-    | dict[str, "SecretSentinelJsonValue"]
-)
 
 
 class FlowService:
@@ -104,7 +97,7 @@ class FlowService:
         name: str,
         steps: list[FlowStep],
         description: str | None = None,
-        metadata_json: JsonObject | None = None,
+        metadata_json: FlowPersistedJsonObject | None = None,
         data_retention_days: int | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
@@ -201,7 +194,7 @@ class FlowService:
         name: str | NotProvided = NOT_PROVIDED,
         description: str | None | NotProvided = NOT_PROVIDED,
         steps: list[FlowStep] | None = None,
-        metadata_json: JsonObject | None | NotProvided = NOT_PROVIDED,
+        metadata_json: FlowPersistedJsonObject | None | NotProvided = NOT_PROVIDED,
         data_retention_days: int | None | NotProvided = NOT_PROVIDED,
         expected_revision: int | None = None,
     ) -> Flow:
@@ -230,7 +223,7 @@ class FlowService:
         next_metadata = normalize_persisted_flow_metadata(existing.metadata_json)
         if metadata_json is not NOT_PROVIDED:
             next_metadata = normalize_flow_metadata_for_write(
-                cast(JsonObject | None, metadata_json)
+                cast(FlowPersistedJsonObject | None, metadata_json)
             )
         self._validate_steps(next_steps, metadata_json=next_metadata)
         self._validate_variable_alias_collisions(
@@ -366,7 +359,11 @@ class FlowService:
         if flow.published_version is None:
             raise BadRequestException("Flow is not published.")
         updated = flow.model_copy(update={"published_version": None}, deep=True)
-        return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
+        return await self.flow_repo.update(
+            updated,
+            tenant_id=self.user.tenant_id,
+            expected_revision=flow.draft_revision,
+        )
 
     async def inspect_template_file(
         self,
@@ -417,11 +414,14 @@ class FlowService:
             deep=True,
         )
         definition = await self._build_definition(flow_with_normalized_metadata)
-        checksum = self._definition_checksum(definition)
+        self._validate_published_definition_snapshot(
+            definition,
+            flow_id=flow_id,
+            flow_version=next_version,
+        )
         await self.flow_version_repo.create(
             flow_id=flow_id,
             version=next_version,
-            definition_checksum=checksum,
             definition_json=definition,
             tenant_id=self.user.tenant_id,
         )
@@ -432,10 +432,14 @@ class FlowService:
             },
             deep=True,
         )
-        return await self.flow_repo.update(updated, tenant_id=self.user.tenant_id)
+        return await self.flow_repo.update(
+            updated,
+            tenant_id=self.user.tenant_id,
+            expected_revision=flow.draft_revision,
+        )
 
     def _validate_publishable(
-        self, flow: Flow, *, metadata_json: JsonObject | None
+        self, flow: Flow, *, metadata_json: FlowPersistedJsonObject | None
     ) -> None:
         self._validate_steps(
             flow.steps,
@@ -451,7 +455,7 @@ class FlowService:
         self,
         steps: list[FlowStep],
         *,
-        metadata_json: JsonObject | None = None,
+        metadata_json: FlowPersistedJsonObject | None = None,
         require_complete_template_fill_config: bool = False,
     ) -> None:
         validate_steps(
@@ -464,7 +468,7 @@ class FlowService:
         self,
         *,
         steps: list[FlowStep],
-        metadata_json: JsonObject | None,
+        metadata_json: FlowPersistedJsonObject | None,
     ) -> None:
         validate_variable_alias_collisions(
             steps=steps,
@@ -675,16 +679,16 @@ class FlowService:
             for step in steps
         ]
 
-    def _encrypt_config(self, config: JsonObject | None) -> JsonObject | None:
+    def _encrypt_config(
+        self, config: FlowPersistedJsonObject | None
+    ) -> FlowPersistedJsonObject | None:
         if config is None:
             return config
         if is_authored_config(config):
             authored = HttpAuthoredConfig.model_validate(config)
             encrypted = encrypt_authored_config(authored, self.encryption_service)
             return encrypted.model_dump(mode="json")
-        return encrypt_step_headers_for_storage(
-            config=config, encryption_service=self.encryption_service
-        )
+        return config
 
     def _merge_step_secrets(
         self,
@@ -750,30 +754,14 @@ class FlowService:
 
     @classmethod
     def _step_has_secret_sentinel(cls, step: FlowStep) -> bool:
-        return cls._contains_secret_sentinel(
-            step.input_config
-        ) or cls._contains_secret_sentinel(step.output_config)
-
-    @classmethod
-    def _contains_secret_sentinel(cls, value: SecretSentinelJsonValue) -> bool:
-        if value == SECRET_SENTINEL:
-            return True
-        if isinstance(value, dict):
-            for nested_value in value.values():
-                if cls._contains_secret_sentinel(nested_value):
-                    return True
-            return False
-        if isinstance(value, list):
-            for nested_value in value:
-                if cls._contains_secret_sentinel(nested_value):
-                    return True
-            return False
-        return False
+        return contains_secret_sentinel(step.input_config) or contains_secret_sentinel(
+            step.output_config
+        )
 
     @staticmethod
     def _merge_config_secrets(
-        incoming: JsonObject | None, stored: JsonObject | None
-    ) -> JsonObject | None:
+        incoming: FlowPersistedJsonObject | None, stored: FlowPersistedJsonObject | None
+    ) -> FlowPersistedJsonObject | None:
         if incoming is None or not is_authored_config(incoming):
             return incoming
         if stored is None or not is_authored_config(stored):
@@ -783,7 +771,7 @@ class FlowService:
         merged = merge_secrets_on_update(incoming_config, stored_config)
         return merged.model_dump(mode="json")
 
-    async def _build_definition(self, flow: Flow) -> JsonObject:
+    async def _build_definition(self, flow: Flow) -> FlowPersistedJsonObject:
         return build_published_definition_json(
             flow_id=cast(UUID, flow.id),
             name=flow.name,
@@ -795,12 +783,33 @@ class FlowService:
             ],
         )
 
+    @staticmethod
+    def _validate_published_definition_snapshot(
+        definition_json: FlowPersistedJsonObject,
+        *,
+        flow_id: UUID,
+        flow_version: int,
+    ) -> None:
+        try:
+            parse_published_runtime_steps(
+                definition_json,
+                flow_version=flow_version,
+            )
+        except BadRequestException as exc:
+            raise FlowPublishedDefinitionInvalidError(
+                flow_id=flow_id,
+                flow_version=flow_version,
+                parser_message=str(exc),
+                parser_code=exc.code,
+                parser_context=dict(exc.context) if exc.context is not None else None,
+            ) from exc
+
     async def _step_to_definition(
         self,
         step: FlowStep,
         *,
         flow: Flow,
-    ) -> JsonObject:
+    ) -> FlowPersistedJsonObject:
         output_config = step.output_config
         if step.output_mode == "template_fill":
             output_config = await self._prepare_template_output_config_for_publish(
@@ -877,9 +886,6 @@ class FlowService:
         if assistant.managing_flow_id != flow.id:
             raise NotFoundException("Assistant belongs to a different flow.")
 
-    def _definition_checksum(self, definition: JsonObject) -> str:
-        return published_definition_checksum(definition)
-
     async def _prepare_template_output_config_for_publish(
         self,
         step: FlowStep,
@@ -907,7 +913,7 @@ class FlowService:
             raise BadRequestException(
                 f"Step {step.step_order}: template placeholders are missing bindings: {', '.join(missing)}."
             )
-        for placeholder, binding in cast(JsonObject, bindings).items():
+        for placeholder, binding in cast(FlowPersistedJsonObject, bindings).items():
             if not placeholder.strip():
                 raise BadRequestException(
                     f"Step {step.step_order}: output_config.bindings keys must be non-empty strings."
@@ -944,7 +950,7 @@ class FlowService:
         if file.blob is None:
             raise BadRequestException(
                 "The selected DOCX template could not be read because the file content is missing. Upload the template again or choose another DOCX file.",
-                code="flow_template_missing_content",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
             )
         return asset, file
 
@@ -958,6 +964,7 @@ class FlowService:
             raise BadRequestException(
                 f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
             )
+        flow_id = flow.require_persisted_id()
 
         template_asset_id_raw = step.output_config.get("template_asset_id")
         if template_asset_id_raw not in (None, ""):
@@ -969,7 +976,7 @@ class FlowService:
                 ) from exc
             try:
                 return await self._get_template_asset_file(
-                    flow_id=flow.id,
+                    flow_id=flow_id,
                     asset_id=template_asset_id,
                 )
             except NotFoundException as exc:
@@ -989,13 +996,9 @@ class FlowService:
                 f"Step {step.step_order}: output_config.template_file_id must be a UUID."
             ) from exc
         try:
-            if flow.id is None:
-                raise BadRequestException(
-                    f"Step {step.step_order}: flow id missing while resolving DOCX template asset."
-                )
             template_asset_repo = self._require_template_asset_repo()
             asset = await template_asset_repo.get_by_flow_file(
-                flow_id=flow.id,
+                flow_id=flow_id,
                 file_id=template_file_id,
                 tenant_id=self.user.tenant_id,
             )
@@ -1011,7 +1014,7 @@ class FlowService:
                 ) from exc
         try:
             return await self._get_template_asset_file(
-                flow_id=flow.id,
+                flow_id=flow_id,
                 asset_id=asset.id,
             )
         except NotFoundException as exc:
@@ -1026,7 +1029,7 @@ class FlowService:
     def _template_not_accessible_error(*, step_order: int) -> BadRequestException:
         return BadRequestException(
             f"Step {step_order}: selected DOCX template is no longer available for this flow. Upload the template again or choose another DOCX file.",
-            code="flow_template_not_accessible",
+            code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
         )
 
     async def _promote_legacy_template_file_to_asset(
@@ -1041,17 +1044,14 @@ class FlowService:
         if template_file.blob is None:
             raise BadRequestException(
                 "The selected DOCX template could not be read because the file content is missing. Upload the template again or choose another DOCX file.",
-                code="flow_template_missing_content",
+                code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
             )
 
         placeholders = self._inspect_docx_template(template_file)
-        if flow.id is None:
-            raise BadRequestException(
-                "Flow id missing while promoting legacy DOCX template asset."
-            )
+        flow_id = flow.require_persisted_id()
         template_asset_repo = self._require_template_asset_repo()
         return await template_asset_repo.create(
-            flow_id=flow.id,
+            flow_id=flow_id,
             space_id=flow.space_id,
             tenant_id=self.user.tenant_id,
             file_id=template_file.id,

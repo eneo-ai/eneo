@@ -17,17 +17,23 @@ from fastapi import BackgroundTasks
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import FileType
-from intric.flows.api import flow_router_common as router_common_module
-from intric.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
-from intric.flows.flow import (
+from intric.flows.api import flow_access_context as flow_access_context_module
+from intric.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowStep,
 )
+from intric.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
 from intric.flows.flow_review_policy import FlowStepReviewMode
-from intric.flows.flow_run_evidence_export_summary import build_evidence_export_summary
+from intric.flows.flow_run_evidence_export_manifest import (
+    EvidenceReviewCheckpointSummary,
+)
+from intric.flows.flow_run_evidence_export_summary import (
+    EvidenceExportSummary,
+    EvidenceFinalOutputSummary,
+)
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import (
     UnauthorizedException,
@@ -175,13 +181,41 @@ def _evidence_export_payload(run: FlowRun) -> dict:
         "trace_id": str(run.trace_id),
         "steps_count": 0,
     }
-    summary_typed = build_evidence_export_summary(summary, review_checkpoints=[])
+    review_checkpoint_summary = EvidenceReviewCheckpointSummary(
+        count=0,
+        by_state={state: 0 for state in FlowRunReviewCheckpointState},
+        any_edited=False,
+        any_resumed=False,
+        active_checkpoint_id=None,
+        active_checkpoint_conflict=False,
+    )
+    summary_typed = EvidenceExportSummary(
+        status=run.status.value,
+        trace_id=str(run.trace_id),
+        steps_count=0,
+        completed_steps=0,
+        failed_steps=0,
+        attempts_count=0,
+        artifacts_count=0,
+        duration_ms=None,
+        models_used=[],
+        review_checkpoints=review_checkpoint_summary,
+        final_output=EvidenceFinalOutputSummary(
+            kind="empty",
+            text_present=False,
+            text_preview=None,
+            structured_present=False,
+            artifact_count=0,
+            artifact_names=[],
+        ),
+        step_overview=[],
+    )
     return {
-        "schema_version": "flow-evidence-export.v5",
+        "schema_version": "flow-evidence-export.v6",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v5",
+            "schema_version": "flow-evidence-export.v6",
             "provenance_schema_version_min": "flow-attempt-provenance.v1",
             "provenance_schema_version_current": "flow-attempt-provenance.v1",
             "provenance_persisted_version_status": "not_tracked",
@@ -395,7 +429,7 @@ def _enable_review_checkpoint_route_context(container) -> _ReviewCheckpointRoute
 
 def _disable_flow_scope_filter(monkeypatch):
     monkeypatch.setattr(
-        router_common_module,
+        flow_access_context_module,
         "get_scope_filter",
         lambda _request: ScopeFilter(space_id=None),
     )
@@ -426,6 +460,7 @@ def _user() -> SimpleNamespace:
 def _service_key() -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
+        service_principal_id=uuid4(),
         ownership="service",
         name="Flow service key",
         key_prefix="sk_test",

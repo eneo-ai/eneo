@@ -5,10 +5,10 @@ from typing import Literal, Mapping, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_variable_definitions import (
     is_form_field_namespace_head,
-    is_primary_flow_input_key,
+    is_reserved_form_field_input_key,
     is_step_alias_variable,
 )
 from intric.main.exceptions import BadRequestException
@@ -104,7 +104,7 @@ def validate_form_field_runtime_name(index: int, field_name: str) -> None:
             index=index,
             field_name=field_name,
         )
-    if is_primary_flow_input_key(field_name):
+    if is_reserved_form_field_input_key(field_name):
         raise form_field_name_error(
             message=(
                 f"Form field {index + 1} is named '{field_name}'. That name is used "
@@ -118,7 +118,7 @@ def validate_form_field_runtime_name(index: int, field_name: str) -> None:
 
 
 def parse_flow_form_schema(
-    metadata_json: JsonObject | Mapping[str, object] | None,
+    metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
     *,
     mode: FlowFormSchemaParseMode,
 ) -> FlowFormSchema | None:
@@ -167,12 +167,12 @@ def parse_flow_form_schema(
     return FlowFormSchema.model_validate(schema_payload)
 
 
-def serialize_flow_form_schema(schema: FlowFormSchema) -> JsonObject:
+def serialize_flow_form_schema(schema: FlowFormSchema) -> FlowPersistedJsonObject:
     return schema.model_dump(mode="json", exclude_unset=True)
 
 
 def parse_flow_metadata(
-    metadata_json: JsonObject | Mapping[str, object] | None,
+    metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
     *,
     mode: FlowMetadataParseMode,
 ) -> FlowMetadata:
@@ -196,13 +196,13 @@ def parse_flow_metadata(
     return FlowMetadata.model_validate(payload)
 
 
-def serialize_flow_metadata(metadata: FlowMetadata) -> JsonObject:
+def serialize_flow_metadata(metadata: FlowMetadata) -> FlowPersistedJsonObject:
     return metadata.model_dump(mode="json", exclude_unset=True)
 
 
 def normalize_flow_metadata_for_write(
-    metadata_json: JsonObject | None,
-) -> JsonObject | None:
+    metadata_json: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
     if metadata_json is None:
         return None
     return serialize_flow_metadata(
@@ -211,8 +211,8 @@ def normalize_flow_metadata_for_write(
 
 
 def normalize_persisted_flow_metadata(
-    metadata_json: JsonObject | None,
-) -> JsonObject | None:
+    metadata_json: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
     if metadata_json is None:
         return None
     return serialize_flow_metadata(

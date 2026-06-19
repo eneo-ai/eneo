@@ -13,19 +13,20 @@ def build_default_failed_input_payload(*, input_source: str) -> dict[str, Any]:
         "source_text": "",
         "input_source": input_source,
         "used_question_binding": False,
-        "legacy_prompt_binding_used": False,
     }
 
 
 def build_failed_step_result(
     *,
     claimed: FlowStepResult,
+    error_code: str,
     error_message: str,
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
 ) -> FlowStepResult:
     updates: dict[str, Any] = {
         "status": FlowStepResultStatus.FAILED,
+        "error_code": error_code,
         "error_message": error_message,
     }
     if input_payload_json is not None:
@@ -41,7 +42,6 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> dict[str,
         "source_text": output.source_text,
         "input_source": output.input_source,
         "used_question_binding": output.used_question_binding,
-        "legacy_prompt_binding_used": output.legacy_prompt_binding_used,
     }
     if output.transcription_metadata is not None:
         payload["transcription"] = output.transcription_metadata
@@ -89,6 +89,7 @@ def build_completed_step_result(
         num_tokens_input=output.num_tokens_input,
         num_tokens_output=output.num_tokens_output,
         status=FlowStepResultStatus.COMPLETED,
+        error_code=None,
         error_message=None,
         flow_step_execution_hash=execution_hash,
         created_at=claimed.created_at,

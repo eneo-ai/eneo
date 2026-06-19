@@ -11,8 +11,7 @@ from intric.authentication.auth_models import (
 )
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB, UserState
+from intric.users.user import UserInDB
 
 
 class FlowRunActorError(ValueError):
@@ -187,30 +186,3 @@ class FlowRunActor:
             "target": target_snapshot,
             "extra": extra,
         }
-
-    def container_user_bridge(self, *, tenant: TenantInDB) -> UserInDB:
-        """Bridge legacy container providers until Flow runtime accepts this actor.
-
-        Authorization and ownership must stay on FlowRunActor. The returned user
-        is only for tenant-scoped services that still require `container.user`.
-        """
-        if self.user is not None:
-            return self.user
-        if self.service_principal is None:
-            raise FlowRunActorError("service-principal actor is missing")
-        if tenant.id != self.service_principal.tenant_id:
-            raise FlowRunActorError("tenant does not match service-principal actor")
-        service_principal_id = self.service_principal.id
-        return UserInDB(
-            id=service_principal_id,
-            email=f"sp-{service_principal_id.hex[:12]}@service.principal",
-            username=f"Service Principal ({self.service_principal.display_name})",
-            state=UserState.ACTIVE,
-            tenant_id=self.service_principal.tenant_id,
-            tenant=tenant,
-            active_api_key=None,
-            roles=[],
-            used_tokens=0,
-            email_verified=True,
-            is_active=True,
-        )

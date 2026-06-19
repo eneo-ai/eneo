@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.output_processing import (
     schema_expects_structured,
     validate_against_contract,
@@ -25,24 +26,24 @@ def validate_runtime_input_policy(
     if policy and not policy.supported:
         raise TypedIOValidationException(
             f"Input type '{input_type}' is not yet supported in runtime execution.",
-            code="typed_io_unsupported_type",
+            code=FlowApiErrorCode.TYPED_IO_UNSUPPORTED_TYPE.value,
         )
 
     if input_type == "document" and input_source != "flow_input":
         raise TypedIOValidationException(
             f"Step {step_order}: input_type 'document' is not supported with input_source '{input_source}'.",
-            code="typed_io_document_source_unsupported",
+            code=FlowApiErrorCode.TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED.value,
         )
     if input_type == "file" and input_source != "flow_input":
         raise TypedIOValidationException(
             f"Step {step_order}: input_type 'file' is not supported with input_source '{input_source}'.",
-            code="typed_io_file_source_unsupported",
+            code=FlowApiErrorCode.TYPED_IO_FILE_SOURCE_UNSUPPORTED.value,
         )
 
     if policy and policy.requires_extraction and not raw_extracted_text.strip():
         raise TypedIOValidationException(
             f"Step {step_order}: {input_type} extraction produced empty text.",
-            code="typed_io_empty_extraction",
+            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
         )
 
     if policy and policy.requires_files:
@@ -55,7 +56,7 @@ def validate_runtime_input_policy(
         if not usable:
             raise TypedIOValidationException(
                 f"Step {step_order}: image input requires at least one valid image file.",
-                code="typed_io_missing_required_files",
+                code=FlowApiErrorCode.TYPED_IO_MISSING_REQUIRED_FILES.value,
             )
 
         non_images = [
@@ -66,7 +67,7 @@ def validate_runtime_input_policy(
         if non_images:
             raise TypedIOValidationException(
                 f"Step {step_order}: non-image file(s) for image input: {non_images}",
-                code="typed_io_invalid_file_type",
+                code=FlowApiErrorCode.TYPED_IO_INVALID_FILE_TYPE.value,
             )
 
     return policy
@@ -94,7 +95,7 @@ def validate_input_contract(
             }
             exc = TypedIOValidationException(
                 f"Step {step_order}: input_type 'json' requires valid JSON input before contract validation.",
-                code="typed_io_invalid_json_input",
+                code=FlowApiErrorCode.TYPED_IO_INVALID_JSON_INPUT.value,
             )
             setattr(exc, "contract_validation", contract_validation)
             raise exc
@@ -130,7 +131,7 @@ def validate_input_contract(
                     f"Step {step_order} input: expected valid JSON text for "
                     "the structured input contract."
                 ),
-                code="typed_io_contract_violation",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
             setattr(exc, "contract_validation", contract_validation)
             raise exc

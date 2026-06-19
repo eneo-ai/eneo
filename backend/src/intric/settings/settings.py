@@ -1,11 +1,13 @@
 from dataclasses import asdict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.config import JsonDict
+from pydantic.json_schema import SkipJsonSchema
 
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
+from intric.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from intric.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from intric.flows.flow_input_limits import (
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
@@ -117,6 +119,25 @@ FLOW_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
     "run_debug_evidence_days": 14,
 }
 
+FLOW_CLASSIFICATION_RETENTION_POLICY_EXAMPLE: JsonDict = {
+    "security_classification_id": "6f982fa9-8f74-451f-b6fc-773f937af7ef",
+    "data_retention_days": 7,
+}
+
+FLOW_CLASSIFICATION_RETENTION_POLICIES_EXAMPLE: JsonDict = {
+    "policies": [FLOW_CLASSIFICATION_RETENTION_POLICY_EXAMPLE],
+}
+
+FLOW_CLASSIFICATION_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
+    "data_retention_days": 14,
+}
+
+FlowEvidencePolicyUpdateFlag = bool | SkipJsonSchema[None]
+
+
+def _strip_json_schema_default(schema: JsonDict) -> None:
+    schema.pop("default", None)
+
 
 class FlowInputLimitsPublic(BaseModel):
     model_config = ConfigDict(
@@ -147,7 +168,8 @@ class FlowInputLimitsPublic(BaseModel):
 
 class FlowInputLimitsUpdate(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_INPUT_LIMITS_UPDATE_EXAMPLE}
+        extra="forbid",
+        json_schema_extra={"example": FLOW_INPUT_LIMITS_UPDATE_EXAMPLE},
     )
 
     file_max_size_bytes: int | None = Field(
@@ -228,7 +250,8 @@ class FlowDocumentRenderLimitsPublic(BaseModel):
 
 class FlowDocumentRenderLimitsUpdate(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_DOCUMENT_RENDER_LIMITS_UPDATE_EXAMPLE}
+        extra="forbid",
+        json_schema_extra={"example": FLOW_DOCUMENT_RENDER_LIMITS_UPDATE_EXAMPLE},
     )
 
     max_source_chars: int | None = Field(
@@ -303,7 +326,8 @@ class FlowRuntimePolicyPublic(BaseModel):
 
 class FlowRuntimePolicyUpdate(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_RUNTIME_POLICY_UPDATE_EXAMPLE}
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUNTIME_POLICY_UPDATE_EXAMPLE},
     )
 
     default_step_timeout_seconds: int | None = Field(
@@ -342,14 +366,44 @@ class FlowEvidencePolicyPublic(BaseModel):
 
 
 class FlowEvidencePolicyUpdate(BaseModel):
+    """Omit fields to keep them unchanged; explicit null is not a policy value."""
+
     model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE}
+        extra="forbid",
+        json_schema_extra={"example": FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE},
     )
 
-    allow_sensitive_flow_exports: bool | None = None
-    allow_space_admin_raw_export_class3: bool | None = None
-    allow_run_owner_raw_export_class3: bool | None = None
-    allow_service_key_raw_export_class3: bool | None = None
+    allow_sensitive_flow_exports: FlowEvidencePolicyUpdateFlag = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    allow_space_admin_raw_export_class3: FlowEvidencePolicyUpdateFlag = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    allow_run_owner_raw_export_class3: FlowEvidencePolicyUpdateFlag = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+    )
+    allow_service_key_raw_export_class3: FlowEvidencePolicyUpdateFlag = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+    )
+
+    @field_validator(
+        "allow_sensitive_flow_exports",
+        "allow_space_admin_raw_export_class3",
+        "allow_run_owner_raw_export_class3",
+        "allow_service_key_raw_export_class3",
+        mode="before",
+    )
+    @classmethod
+    def reject_null_flags(cls, value: object) -> object:
+        if value is None:
+            raise ValueError(
+                "Flow evidence policy flags must be true or false; omit fields to leave them unchanged."
+            )
+        return value
 
 
 class FlowRetentionPolicyPublic(BaseModel):
@@ -367,3 +421,41 @@ class FlowRetentionPolicyUpdate(BaseModel):
     )
 
     run_debug_evidence_days: int | None = None
+
+
+class FlowClassificationRetentionPolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_CLASSIFICATION_RETENTION_POLICY_EXAMPLE}
+    )
+
+    security_classification_id: UUID
+    data_retention_days: int = Field(
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description="Full Flow run and step history retention window in days.",
+    )
+
+
+class FlowClassificationRetentionPoliciesPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_CLASSIFICATION_RETENTION_POLICIES_EXAMPLE}
+    )
+
+    policies: list[FlowClassificationRetentionPolicyPublic]
+
+
+class FlowClassificationRetentionPolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": FLOW_CLASSIFICATION_RETENTION_POLICY_UPDATE_EXAMPLE
+        },
+    )
+
+    data_retention_days: int = Field(
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description="Full Flow run and step history retention window in days.",
+    )

@@ -1421,7 +1421,7 @@ def test_direct_text_transform_restraint_ignores_form_field_driven_transform() -
 def test_direct_text_transform_restraint_applies_in_edit_context() -> None:
     from uuid import uuid4
 
-    from intric.flows.flow import Flow, FlowStep
+    from intric.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -1481,7 +1481,7 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
 ):
     from uuid import uuid4
 
-    from intric.flows.flow import Flow, FlowStep
+    from intric.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -1560,7 +1560,7 @@ def test_flags_edit_plan_that_fakes_audio_transcription_by_downgrading_to_generi
 def test_allows_audio_first_edit_when_plan_uses_real_transcription_step() -> None:
     from uuid import uuid4
 
-    from intric.flows.flow import Flow, FlowStep
+    from intric.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -2024,7 +2024,7 @@ def test_quality_feedback_prefers_confirmed_docx_output_over_pdf_input_mentions(
 def test_flags_non_terminal_docx_conversion_for_output_only_edit() -> None:
     from uuid import uuid4
 
-    from intric.flows.flow import Flow, FlowStep
+    from intric.flows.domain.flow import Flow, FlowStep
 
     flow = Flow(
         id=uuid4(),
@@ -4037,7 +4037,7 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
     def test_redundant_terminal_json_tail_fires_in_edit_context(self) -> None:
         from uuid import uuid4
 
-        from intric.flows.flow import Flow, FlowStep
+        from intric.flows.domain.flow import Flow, FlowStep
 
         flow = Flow(
             id=uuid4(),

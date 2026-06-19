@@ -3,6 +3,8 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
+    getFlowRuntimeErrorMessageByCode,
+    getFlowRunErrorMessage,
     getReviewPolicyAffectedStepsFromRunError,
     isReviewPolicyInvalidRunError,
     isReviewPolicyRunErrorStepExact,
@@ -13,15 +15,20 @@
 
   let {
     error = null,
+    errorCode = null,
     message,
     steps = []
   }: {
     error?: FlowRunError | null;
+    errorCode?: string | null;
     message: string;
     steps?: readonly FlowReviewPolicyErrorStep[];
   } = $props();
 
   const isReviewPolicyError = $derived(isReviewPolicyInvalidRunError(error));
+  const localizedStepErrorMessage = $derived(getFlowRuntimeErrorMessageByCode(errorCode));
+  const localizedRunErrorMessage = $derived(getFlowRunErrorMessage(error));
+  const localizedErrorMessage = $derived(localizedStepErrorMessage ?? localizedRunErrorMessage);
   const reviewPolicySteps = $derived(getReviewPolicyAffectedStepsFromRunError(error, steps));
   const hasExactReviewPolicyStep = $derived(isReviewPolicyRunErrorStepExact(error));
   const affectedStepsLabel = $derived(
@@ -60,6 +67,8 @@
           </ul>
         </div>
       {/if}
+    {:else if localizedErrorMessage}
+      <span>{localizedErrorMessage}</span>
     {:else}
       <span>{m.flow_run_error_desc()}</span>
     {/if}

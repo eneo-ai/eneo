@@ -24,11 +24,9 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
-from intric.flows.flow_authoring_spec import (
-    JsonObject,
-)
+from intric.flows.domain.flow import FlowPersistedJsonObject
 
-AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_SESSION_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "session_id": "00000000-0000-0000-0000-000000000701",
     "status": "chatting",
     "target_kind": "create",
@@ -73,7 +71,7 @@ AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {
     "updated_at": "2026-03-17T10:00:03Z",
 }
 
-AI_BUILDER_SESSION_LIST_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_SESSION_LIST_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "sessions": [
         {
             "session_id": "00000000-0000-0000-0000-000000000701",
@@ -89,7 +87,7 @@ AI_BUILDER_SESSION_LIST_RESPONSE_EXAMPLE: JsonObject = {
     ]
 }
 
-AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "models": [
         {
             "id": "00000000-0000-0000-0000-000000000710",
@@ -100,7 +98,7 @@ AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE: JsonObject = {
     "default_model_id": "00000000-0000-0000-0000-000000000710",
 }
 
-AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_PLAN_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "plan_id": "00000000-0000-0000-0000-000000000702",
     "session_id": "00000000-0000-0000-0000-000000000701",
     "status": "proposed",
@@ -170,16 +168,16 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
     "updated_at": "2026-03-17T10:02:00Z",
 }
 
-AI_BUILDER_SESSION_PLANS_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_SESSION_PLANS_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "plans": [AI_BUILDER_PLAN_RESPONSE_EXAMPLE],
 }
 
-AI_BUILDER_PLAN_APPROVAL_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_PLAN_APPROVAL_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "plan_id": "00000000-0000-0000-0000-000000000702",
     "status": "approved",
 }
 
-AI_BUILDER_APPLY_RESULT_RESPONSE_EXAMPLE: JsonObject = {
+AI_BUILDER_APPLY_RESULT_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_name": "Employee Review Summary",
     "steps_created": 2,

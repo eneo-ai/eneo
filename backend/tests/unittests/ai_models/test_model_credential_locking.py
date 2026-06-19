@@ -10,8 +10,8 @@ Runtime credential validation still occurs when models are actually used.
 from datetime import datetime
 from uuid import uuid4
 
-
 from intric.completion_models.domain.completion_model import CompletionModel
+from intric.tenants.tenant import TenantInDB
 
 
 class MockSettings:
@@ -21,23 +21,12 @@ class MockSettings:
         self.tenant_credentials_enabled = tenant_credentials_enabled
 
 
-class MockTenant:
-    """Mock TenantInDB object for testing."""
-
-    def __init__(self, api_credentials: dict | None = None):
-        self.id = uuid4()
-        self.name = "Test Tenant"
-        self.api_credentials = api_credentials or {}
-
-
-class MockUser:
-    """Mock UserInDB object for testing."""
-
-    def __init__(self, tenant: MockTenant | None = None, modules: list = None):
-        self.id = uuid4()
-        self.tenant = tenant
-        self.tenant_id = tenant.id if tenant else None
-        self.modules = modules or []
+def _tenant(api_credentials: dict[str, object] | None = None) -> TenantInDB:
+    return TenantInDB.model_construct(
+        id=uuid4(),
+        name="Test Tenant",
+        api_credentials=api_credentials or {},
+    )
 
 
 class TestModelCredentialLocking:
@@ -52,13 +41,12 @@ class TestModelCredentialLocking:
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
-        tenant = MockTenant(api_credentials={})  # No credentials
-        user = MockUser(tenant=tenant)
+        tenant = _tenant(api_credentials={})
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
-            user=user,
+            tenant=tenant,
             id=uuid4(),
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -93,13 +81,12 @@ class TestModelCredentialLocking:
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
-        tenant = MockTenant(api_credentials={"openai": {"api_key": "sk-test-key"}})
-        user = MockUser(tenant=tenant)
+        tenant = _tenant(api_credentials={"openai": {"api_key": "sk-test-key"}})
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
-            user=user,
+            tenant=tenant,
             id=uuid4(),
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -134,13 +121,12 @@ class TestModelCredentialLocking:
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
-        tenant = MockTenant(api_credentials={})  # No credentials
-        user = MockUser(tenant=tenant)
+        tenant = _tenant(api_credentials={})
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
-            user=user,
+            tenant=tenant,
             id=uuid4(),
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -181,13 +167,12 @@ class TestModelCredentialLocking:
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=False)
-        tenant = MockTenant(api_credentials={})  # No credentials
-        user = MockUser(tenant=tenant)
+        tenant = _tenant(api_credentials={})
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
-            user=user,
+            tenant=tenant,
             id=uuid4(),
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -221,15 +206,14 @@ class TestModelCredentialLocking:
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
-        tenant = MockTenant(
+        tenant = _tenant(
             api_credentials={"openai": {"api_key": "sk-test"}}  # Has OpenAI, not Azure
         )
-        user = MockUser(tenant=tenant)
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
 
         model = CompletionModel(
-            user=user,
+            tenant=tenant,
             id=uuid4(),
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -289,11 +273,10 @@ class TestModelCredentialLocking:
 
         for family, expected_provider in test_cases:
             # Model without credentials - should show credential warning
-            tenant_no_creds = MockTenant(api_credentials={})
-            user_no_creds = MockUser(tenant=tenant_no_creds)
+            tenant_no_creds = _tenant(api_credentials={})
 
             model_no_creds = CompletionModel(
-                user=user_no_creds,
+                tenant=tenant_no_creds,
                 id=uuid4(),
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
@@ -325,13 +308,12 @@ class TestModelCredentialLocking:
             )
 
             # Model with credentials - should have no warning
-            tenant_with_creds = MockTenant(
+            tenant_with_creds = _tenant(
                 api_credentials={expected_provider: {"api_key": "test-key"}}
             )
-            user_with_creds = MockUser(tenant=tenant_with_creds)
 
             model_with_creds = CompletionModel(
-                user=user_with_creds,
+                tenant=tenant_with_creds,
                 id=uuid4(),
                 created_at=datetime.now(),
                 updated_at=datetime.now(),

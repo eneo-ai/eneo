@@ -37,7 +37,7 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
-from intric.flows.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,

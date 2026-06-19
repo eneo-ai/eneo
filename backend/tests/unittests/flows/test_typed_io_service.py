@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.application.flow_service import FlowService
-from intric.flows.flow import FlowStep
+from intric.flows.domain.flow import FlowStep
 from intric.main.exceptions import BadRequestException
 
 
@@ -386,13 +386,19 @@ def test_allows_http_only_flow_without_flow_input(user):
             step_order=1,
             input_source="http_get",
             input_type="text",
-            input_config={"url": "https://example.org/input"},
+            input_config={
+                "url": "https://example.org/input",
+                "auth": {"mode": "none"},
+            },
         ),
         _step(
             step_order=2,
             input_source="http_post",
             input_type="text",
-            input_config={"url": "https://example.org/input"},
+            input_config={
+                "url": "https://example.org/input",
+                "auth": {"mode": "none"},
+            },
         ),
     ]
 

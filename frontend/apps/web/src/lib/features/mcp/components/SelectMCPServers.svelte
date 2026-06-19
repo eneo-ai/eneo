@@ -5,48 +5,63 @@
 -->
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import {
+    sanitizeMcpSelection,
+    type MCPSelectionServer,
+    type MCPSelectionTool,
+    type MCPToolSelection
+  } from "$lib/features/mcp/mcpSelection";
 
-  interface MCPTool {
+  interface MCPTool extends MCPSelectionTool {
     id: string;
     name: string;
     description?: string;
     is_enabled: boolean;
   }
 
-  interface MCPServer {
+  interface MCPServer extends MCPSelectionServer {
     id: string;
     name: string;
     description?: string;
     tags?: string[];
     tools?: MCPTool[];
-    [key: string]: unknown;
   }
 
+  type ServerCompatibility = {
+    isCompatible: boolean;
+    requiredLevel?: number | null;
+    reason?: string;
+  };
+
+  type MCPSelectionChangeDetail = {
+    selectedMCPServers: MCPSelectionServer[];
+    selectedMCPTools: MCPToolSelection[];
+  };
+
   type Props = {
-    /** Array of MCP server objects that are selected. Uses index signature for schema compatibility. */
-    selectedMCPServers: { [key: string]: unknown }[] | undefined;
-    /** Optional: MCP tool settings to track tool-level overrides */
-    selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
-    /** Optional: Currently selected completion model to check tool calling support */
+    selectedMCPServers: MCPSelectionServer[] | undefined;
+    selectedMCPTools?: MCPToolSelection[];
     selectedModel?: { supports_tool_calling?: boolean } | null;
+    serverCompatibilityById?: Record<string, ServerCompatibility>;
   };
 
   let {
     selectedMCPServers = $bindable([]),
     selectedMCPTools = $bindable([]),
-    selectedModel = null
+    selectedModel = null,
+    serverCompatibilityById = {}
   }: Props = $props();
 
-  /** Type-safe view of selectedMCPServers */
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
 
   let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
+  const dispatch = createEventDispatcher<{ change: MCPSelectionChangeDetail }>();
 
   const {
     state: { currentSpace }
@@ -55,7 +70,6 @@
   let availableServers = $state<MCPServer[]>([]);
   let loading = $state(true);
 
-  // Track expanded servers
   const expandedServers = new SvelteSet<string>();
 
   function toggleExpanded(serverId: string) {
@@ -70,15 +84,12 @@
     return server.tools ?? [];
   }
 
-  // Load available MCP servers from space
   async function loadAvailableServers() {
     loading = true;
     try {
-      // Get servers enabled for this space, and filter to only show enabled tools
       const spaceServers = ($currentSpace.mcp_servers || []) as unknown as MCPServer[];
       availableServers = spaceServers.map((server) => ({
         ...server,
-        // Only include tools that are enabled at the space level
         tools: server.tools?.filter((tool) => tool.is_enabled) || []
       }));
     } catch (error) {
@@ -89,122 +100,155 @@
     }
   }
 
-  // Ensure all tools from ALL selected servers are tracked in selectedMCPTools
-  // This is called when user toggles any tool to ensure complete state is sent to backend
-  function ensureAllSelectedServersToolsTracked() {
-    let newOverrides: Array<{ tool_id: string; is_enabled: boolean }> = [];
+  function withAllSelectedToolOverrides(
+    selectedServers: MCPSelectionServer[],
+    currentTools: MCPToolSelection[]
+  ): MCPToolSelection[] {
+    const toolsById = new Map(currentTools.map((tool) => [tool.tool_id, tool.is_enabled]));
 
-    for (const selectedServer of servers) {
-      if (!selectedServer.tools) continue;
-
-      // Check if any tool from this server is already tracked
-      const serverToolIds = new Set(selectedServer.tools.map((t: MCPTool) => t.id));
-      const hasAnyTracked = selectedMCPTools.some((t) => serverToolIds.has(t.tool_id));
-
-      // If not tracking any tools from this server yet, add ALL of them
-      if (!hasAnyTracked) {
-        const serverOverrides = selectedServer.tools.map((tool: MCPTool) => ({
-          tool_id: tool.id,
-          is_enabled: tool.is_enabled
-        }));
-        newOverrides = [...newOverrides, ...serverOverrides];
+    for (const selectedServer of selectedServers) {
+      for (const tool of selectedServer.tools ?? []) {
+        if (typeof tool.id !== "string" || toolsById.has(tool.id)) continue;
+        toolsById.set(tool.id, tool.is_enabled === true);
       }
     }
 
-    if (newOverrides.length > 0) {
-      selectedMCPTools = [...selectedMCPTools, ...newOverrides];
-    }
+    return [...toolsById.entries()].map(([tool_id, is_enabled]) => ({ tool_id, is_enabled }));
+  }
+
+  function commitSelection(
+    nextServers: MCPSelectionServer[],
+    nextTools: MCPToolSelection[]
+  ): void {
+    const sanitized = sanitizeMcpSelection({
+      selectedServers: nextServers,
+      selectedTools: nextTools,
+      availableServers
+    });
+
+    selectedMCPServers = sanitized.selectedServers;
+    selectedMCPTools = sanitized.selectedTools;
+    dispatch("change", {
+      selectedMCPServers: sanitized.selectedServers,
+      selectedMCPTools: sanitized.selectedTools
+    });
   }
 
   onMount(() => {
     loadAvailableServers();
   });
 
-  // Check if a server is selected
   function isServerSelected(serverId: string): boolean {
     return servers.some((s) => s.id === serverId);
   }
 
-  // Get the selected server object (if it exists with tools)
   function getSelectedServer(serverId: string): MCPServer | undefined {
     return servers.find((s) => s.id === serverId);
   }
 
-  // Check if a tool is enabled
   function isToolEnabled(server: MCPServer, toolId: string): boolean {
-    // First check if there's a tool override in selectedMCPTools
     const toolOverride = selectedMCPTools.find((t) => t.tool_id === toolId);
     if (toolOverride !== undefined) {
       return toolOverride.is_enabled;
     }
 
-    // Otherwise, check the selected server's tools
     const selectedServer = getSelectedServer(server.id);
     if (selectedServer && selectedServer.tools) {
       const tool = selectedServer.tools.find((t) => t.id === toolId);
       if (tool) return tool.is_enabled;
     }
 
-    // Fall back to the available server's tool default
-    // Note: Tools are OFF by default for assistants unless explicitly enabled
     const tool = server.tools?.find((t) => t.id === toolId);
     return tool?.is_enabled ?? false;
   }
 
+  function isServerCompatible(serverId: string): boolean {
+    return serverCompatibilityById[serverId]?.isCompatible !== false;
+  }
+
   function toggleServer(server: MCPServer) {
     if (isServerSelected(server.id)) {
-      // Remove server and its tool overrides
-      selectedMCPServers = servers.filter((s) => s.id !== server.id);
-      if (server.tools) {
-        selectedMCPTools = selectedMCPTools.filter(
-          (t) => !server.tools?.some((tool) => tool.id === t.tool_id)
-        );
-      }
-    } else {
-      // Add server with all tools enabled for convenience
-      const newServer = {
-        ...server,
-        tools: server.tools?.map((tool) => ({ ...tool, is_enabled: true })) || []
-      };
-      selectedMCPServers = [...servers, newServer];
-
-      // Also add tool overrides so they're sent to backend
-      if (server.tools && server.tools.length > 0) {
-        const toolOverrides = server.tools.map((tool) => ({
-          tool_id: tool.id,
-          is_enabled: true
-        }));
-        selectedMCPTools = [...selectedMCPTools, ...toolOverrides];
-      }
+      const serverToolIds = new Set((server.tools ?? []).map((tool) => tool.id));
+      commitSelection(
+        servers.filter((s) => s.id !== server.id),
+        selectedMCPTools.filter((tool) => !serverToolIds.has(tool.tool_id))
+      );
+      return;
     }
+
+    if (!isServerCompatible(server.id)) return;
+
+    const nextServer = {
+      ...server,
+      tools: (server.tools ?? []).map((tool) => ({ ...tool, is_enabled: true }))
+    };
+    const nextServerToolIds = new Set(nextServer.tools.map((tool) => tool.id));
+    const nextTools = [
+      ...selectedMCPTools.filter((tool) => !nextServerToolIds.has(tool.tool_id)),
+      ...nextServer.tools.map((tool) => ({
+        tool_id: tool.id,
+        is_enabled: true
+      }))
+    ];
+
+    commitSelection([...servers, nextServer], nextTools);
   }
 
   function toggleTool(server: MCPServer, tool: MCPTool) {
-    // First ensure ALL tools from ALL selected servers are tracked (so they're all sent to backend)
-    ensureAllSelectedServersToolsTracked();
-
     const currentEnabled = isToolEnabled(server, tool.id);
+    const nextServers = servers.map((selectedServer) => {
+      if (selectedServer.id !== server.id) return selectedServer;
+      return {
+        ...selectedServer,
+        tools: (selectedServer.tools ?? []).map((selectedTool) =>
+          selectedTool.id === tool.id
+            ? { ...selectedTool, is_enabled: !currentEnabled }
+            : selectedTool
+        )
+      };
+    });
 
-    // Update the tool override (it should exist now after ensureAllSelectedServersToolsTracked)
-    const existingIndex = selectedMCPTools.findIndex((t) => t.tool_id === tool.id);
-    if (existingIndex !== -1) {
-      selectedMCPTools[existingIndex].is_enabled = !currentEnabled;
-      selectedMCPTools = [...selectedMCPTools];
-    } else {
-      selectedMCPTools = [...selectedMCPTools, { tool_id: tool.id, is_enabled: !currentEnabled }];
+    const nextTools = withAllSelectedToolOverrides(nextServers, selectedMCPTools).map(
+      (selectedTool) =>
+        selectedTool.tool_id === tool.id
+          ? { ...selectedTool, is_enabled: !currentEnabled }
+          : selectedTool
+    );
+
+    commitSelection(nextServers, nextTools);
+  }
+
+  function toggleAllTools(server: MCPServer, enabled: boolean) {
+    const serverTools = server.tools ?? [];
+    if (!serverTools.some((tool) => isToolEnabled(server, tool.id) !== enabled)) return;
+
+    const serverToolIds = new Set(serverTools.map((tool) => tool.id));
+    const nextServers = servers.map((selectedServer) => {
+      if (selectedServer.id !== server.id) return selectedServer;
+      return {
+        ...selectedServer,
+        tools: (selectedServer.tools ?? []).map((selectedTool) =>
+          serverToolIds.has(selectedTool.id)
+            ? { ...selectedTool, is_enabled: enabled }
+            : selectedTool
+        )
+      };
+    });
+    const nextToolsById = new Map(
+      withAllSelectedToolOverrides(nextServers, selectedMCPTools).map((tool) => [
+        tool.tool_id,
+        tool.is_enabled
+      ])
+    );
+
+    for (const tool of serverTools) {
+      nextToolsById.set(tool.id, enabled);
     }
 
-    // Also update the tool in the selected server object
-    const selectedServerIndex = servers.findIndex((s) => s.id === server.id);
-    if (selectedServerIndex !== -1 && servers[selectedServerIndex].tools) {
-      const toolIndex = servers[selectedServerIndex].tools!.findIndex(
-        (t: MCPTool) => t.id === tool.id
-      );
-      if (toolIndex !== -1) {
-        servers[selectedServerIndex].tools![toolIndex].is_enabled = !currentEnabled;
-        selectedMCPServers = [...servers];
-      }
-    }
+    commitSelection(
+      nextServers,
+      [...nextToolsById.entries()].map(([tool_id, is_enabled]) => ({ tool_id, is_enabled }))
+    );
   }
 </script>
 
@@ -268,12 +312,11 @@
         {@const hasTools = isSelected && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
+        {@const isCompatible = isServerCompatible(server.id)}
         {@const enabledToolCount =
           server.tools?.filter((t) => isToolEnabled(server, t.id)).length ?? 0}
         <div class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}">
-          <!-- Server Row -->
           <div class="flex items-center">
-            <!-- Expand Button -->
             <button
               type="button"
               class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
@@ -287,12 +330,27 @@
               />
             </button>
 
-            <!-- Server Toggle -->
             <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
+              <Input.Switch
+                value={isSelected}
+                disabled={!isSelected && !isCompatible}
+                sideEffect={() => toggleServer(server)}
+              >
                 <div class="flex flex-col gap-0.5">
                   <div class="flex items-center gap-2">
                     <span class="text-default font-medium">{server.name}</span>
+                    {#if !isCompatible}
+                      <Tooltip
+                        text={m.flow_step_mcp_server_does_not_meet_security_classification()}
+                        placement="bottom"
+                      >
+                        <span
+                          class="label-warning border-label-default bg-label-dimmer text-label-stronger inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium"
+                        >
+                          {m.security_classification()}
+                        </span>
+                      </Tooltip>
+                    {/if}
                     {#if hasTools}
                       <span
                         class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
@@ -311,14 +369,12 @@
             </div>
           </div>
 
-          <!-- Tools List (only show if expanded) -->
           {#if hasTools && isExpanded}
             <div
               class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
               role="group"
               aria-label={m.mcp_tools_for_server_aria({ name: server.name })}
             >
-              <!-- Tools header with bulk actions -->
               <div class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5">
                 <span class="text-muted text-[11px] font-medium tracking-wider uppercase"
                   >{m.tools()} ({toolCount})</span
@@ -327,11 +383,7 @@
                   <button
                     type="button"
                     class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                    onclick={() => {
-                      server.tools?.forEach((tool) => {
-                        if (!isToolEnabled(server, tool.id)) toggleTool(server, tool);
-                      });
-                    }}
+                    onclick={() => toggleAllTools(server, true)}
                   >
                     {m.mcp_all_on()}
                   </button>
@@ -339,18 +391,13 @@
                   <button
                     type="button"
                     class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                    onclick={() => {
-                      server.tools?.forEach((tool) => {
-                        if (isToolEnabled(server, tool.id)) toggleTool(server, tool);
-                      });
-                    }}
+                    onclick={() => toggleAllTools(server, false)}
                   >
                     {m.mcp_all_off()}
                   </button>
                 </div>
               </div>
 
-              <!-- Scrollable tools list -->
               <div class="max-h-[240px] overflow-y-auto">
                 <div class="divide-dimmer divide-y">
                   {#each getServerTools(server) as tool (tool.id)}
@@ -375,7 +422,9 @@
                       <Input.Switch
                         value={toolEnabled}
                         sideEffect={() => toggleTool(server, tool)}
-                      />
+                      >
+                        <span class="sr-only">{tool.name}</span>
+                      </Input.Switch>
                     </div>
                   {/each}
                 </div>

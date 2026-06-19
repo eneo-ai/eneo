@@ -20,11 +20,16 @@ import intric.flows.runtime.executor as executor_module
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.outcome import Outcome
 from intric.authentication.principal_types import PrincipalType
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
+    RerunStepInputOverride,
+)
+from intric.flows.flow_run_input_envelope import (
+    RerunInputOverride,
+    build_rerun_execution_input_envelope,
 )
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.executor import (
@@ -33,6 +38,7 @@ from intric.flows.runtime.executor import (
     RuntimeStep,
     StepInputValue,
 )
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.output_formats import resolve_format_spec
 from intric.flows.runtime.output_formats.base import append_output_format_instructions
 from intric.main.exceptions import TypedIOValidationException
@@ -50,7 +56,9 @@ def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
         trace_id=uuid4(),
         status=status,
         cancelled_at=None,
-        input_payload_json=input_payload or {"text": "hello"},
+        input_payload_json=(
+            input_payload if input_payload is not None else {"text": "hello"}
+        ),
         output_payload_json=None,
         job_id=None,
         created_at=now,
@@ -64,11 +72,14 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = AsyncMock()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
     flow_version_repo = AsyncMock()
+    flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
-    template_asset_service = AsyncMock()
+    template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
 
@@ -83,15 +94,17 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
 
     flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
     executor = FlowRunExecutor(
-        user=user,
+        runtime_actor=FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
-        template_asset_service=template_asset_service,
+        template_asset_repo=template_asset_repo,
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=max_inline_text_bytes,
@@ -143,18 +156,6 @@ def _prompt_for_output_format(
     return append_output_format_instructions(
         prompt, spec.prompt_instructions(output_contract)
     )
-
-
-def _runtime_file_payload(
-    *,
-    step_id,
-    file_ids: list[str],
-    text: str = "",
-) -> dict[str, object]:
-    return {
-        "text": text,
-        "step_inputs": {str(step_id): {"file_ids": file_ids}},
-    }
 
 
 def _completed_step_result(
@@ -250,7 +251,6 @@ def test_step_input_value_defaults():
     assert val.structured is None
     assert val.input_source == "flow_input"
     assert val.used_question_binding is False
-    assert val.legacy_prompt_binding_used is False
 
 
 # --- _resolve_step_input async + JSON structured ---
@@ -403,11 +403,7 @@ async def test_resolve_step_input_document_loads_files(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[str(file_id)],
-            text="fallback",
-        ),
+        input_payload={"text": "fallback"},
     )
     fake_file = SimpleNamespace(
         id=file_id,
@@ -428,6 +424,7 @@ async def test_resolve_step_input_document_loads_files(user):
         context=context,
         run=run,
         prior_results=[],
+        requested_file_ids=[file_id],
     )
 
     assert resolved.files == [fake_file]
@@ -465,10 +462,7 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[str(file_id)],
-        ),
+        input_payload={},
     )
     fake_file = SimpleNamespace(id=file_id, text="detta ar mycket langre an atta bytes")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
@@ -481,6 +475,7 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
             context=context,
             run=run,
             prior_results=[],
+            requested_file_ids=[file_id],
         )
 
     assert exc.value.code == "typed_io_input_too_large"
@@ -496,11 +491,7 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[str(file_id_1), str(file_id_2)],
-            text="x",
-        ),
+        input_payload={"text": "x"},
     )
     # Only return one of the two requested files
     fake_file = SimpleNamespace(id=file_id_1, text="doc")
@@ -514,57 +505,87 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
             context=context,
             run=run,
             prior_results=[],
+            requested_file_ids=[file_id_1, file_id_2],
         )
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_invalid_file_ids_type_raises_typed_error(user):
-    """Non-list file_ids should fail with typed_io_invalid_file_ids."""
+async def test_resolve_step_input_ignores_removed_top_level_file_ids(user):
     executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
     step = _runtime_step(input_type="document")
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={
-            "text": "x",
-            "step_inputs": {str(step.step_id): {"file_ids": "not-a-list"}},
-        },
+        input_payload={"text": "fallback", "file_ids": [str(file_id)]},
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=[],
-        )
-    assert exc.value.code == "typed_io_invalid_file_ids"
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert resolved.files is None
+    assert resolved.text == "fallback"
+    executor.file_repo.get_list_by_id_for_owner.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_invalid_file_id_value_raises_typed_error(user):
-    """Malformed file ID values should fail with typed_io_invalid_file_ids."""
+async def test_resolve_step_input_uses_relational_selection_over_stale_payload(user):
     executor, _, _, _ = _build_executor(user)
+    old_file_id = uuid4()
+    new_file_id = uuid4()
     step = _runtime_step(input_type="document")
+    execution_payload = build_rerun_execution_input_envelope(
+        current={
+            "case_id": "before",
+            "step_inputs": {str(step.step_id): {"file_ids": [str(old_file_id)]}},
+        },
+        override=RerunInputOverride(
+            inline_payload_json={"case_id": "after"},
+            root_step_input=RerunStepInputOverride(
+                step_id=step.step_id,
+                file_ids=(new_file_id,),
+            ),
+        ),
+    )
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={
-            "text": "x",
-            "step_inputs": {str(step.step_id): {"file_ids": ["not-a-uuid"]}},
-        },
+        input_payload=execution_payload,
     )
+    fake_file = SimpleNamespace(
+        id=new_file_id,
+        text="Replacement file text",
+        name="replacement.pdf",
+        checksum="checksum-new",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    with pytest.raises(TypedIOValidationException) as exc:
-        await executor._resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=[],
-        )
-    assert exc.value.code == "typed_io_invalid_file_ids"
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[new_file_id],
+    )
+
+    assert resolved.source_text == '{"case_id": "after"}'
+    assert resolved.files == [fake_file]
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["file_ids"] == [str(new_file_id)]
+    assert str(old_file_id) not in json.dumps(
+        resolved.runtime_input_metadata,
+        ensure_ascii=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -859,6 +880,7 @@ async def test_resolve_step_input_http_get_uses_interpolated_url_and_timeout(use
         input_type="text",
         input_config={
             "url": "https://example.org/items/{{flow_input.request_id}}?q={{flow_input.text}}",
+            "auth": {"mode": "none"},
             "timeout_seconds": 7,
         },
     )
@@ -889,7 +911,7 @@ async def test_resolve_step_input_http_get_timeout_maps_typed_error(user):
     step = _runtime_step(
         input_source="http_get",
         input_type="text",
-        input_config={"url": "https://example.org"},
+        input_config={"url": "https://example.org", "auth": {"mode": "none"}},
     )
     executor._send_http_request = AsyncMock(
         side_effect=httpx.TimeoutException("timeout")
@@ -915,7 +937,7 @@ async def test_resolve_step_input_http_get_non_200_maps_typed_error(user):
     step = _runtime_step(
         input_source="http_get",
         input_type="text",
-        input_config={"url": "https://example.org"},
+        input_config={"url": "https://example.org", "auth": {"mode": "none"}},
     )
     request = httpx.Request("GET", "https://example.org")
     executor._send_http_request = AsyncMock(
@@ -942,7 +964,7 @@ async def test_resolve_step_input_http_json_malformed_response_maps_typed_error(
     step = _runtime_step(
         input_source="http_get",
         input_type="json",
-        input_config={"url": "https://example.org/json"},
+        input_config={"url": "https://example.org/json", "auth": {"mode": "none"}},
     )
     request = httpx.Request("GET", "https://example.org/json")
     executor._send_http_request = AsyncMock(
@@ -962,10 +984,9 @@ async def test_resolve_step_input_http_json_malformed_response_maps_typed_error(
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_http_post_uses_body_json_and_interpolated_headers(
+async def test_resolve_step_input_http_post_uses_authored_json_template_and_headers(
     user,
 ):
-    """http_post should interpolate url/headers/body_json and send structured JSON payload."""
     executor, _, _, _ = _build_executor(user)
     executor.encryption_service.is_encrypted = MagicMock(return_value=False)
     executor.encryption_service.decrypt = MagicMock(side_effect=lambda value: value)
@@ -982,11 +1003,21 @@ async def test_resolve_step_input_http_post_uses_body_json_and_interpolated_head
         input_type="text",
         input_config={
             "url": "https://example.org/webhook/{{flow_input.request_id}}",
+            "auth": {"mode": "none"},
             "timeout_seconds": 11,
-            "headers": {"X-Request-Id": "{{flow_input.request_id}}"},
-            "body_json": {
-                "citizen_name": "{{flow_input.payload.name}}",
-                "request_id": "{{flow_input.request_id}}",
+            "custom_headers": [
+                {
+                    "name": "X-Request-Id",
+                    "value": "{{flow_input.request_id}}",
+                    "secret": False,
+                }
+            ],
+            "body": {
+                "mode": "json_template",
+                "template": (
+                    '{"citizen_name": "{{flow_input.payload.name}}", '
+                    '"request_id": {{flow_input.request_id}}}'
+                ),
             },
         },
     )
@@ -1020,22 +1051,21 @@ async def test_resolve_step_input_http_post_uses_body_json_and_interpolated_head
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_http_post_rejects_conflicting_body_config(user):
-    """http_post must reject simultaneous body_template and body_json definitions."""
+async def test_resolve_step_input_http_post_rejects_flat_config_before_send(user):
     executor, _, _, _ = _build_executor(user)
+    request = httpx.Request("POST", "https://example.org")
+    executor._send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="ok")
+    )
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
     step = _runtime_step(
         input_source="http_post",
         input_type="text",
-        input_config={
-            "url": "https://example.org",
-            "body_template": '{"value":"{{flow_input.text}}"}',
-            "body_json": {"value": "{{flow_input.text}}"},
-        },
+        input_config={"url": "https://example.org"},
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
-    with pytest.raises(TypedIOValidationException) as exc:
+    with pytest.raises(TypedIOValidationException, match="authored HTTP config") as exc:
         await executor._resolve_step_input(
             step=step,
             context=context,
@@ -1044,33 +1074,7 @@ async def test_resolve_step_input_http_post_rejects_conflicting_body_config(user
         )
 
     assert exc.value.code == "typed_io_http_invalid_config"
-
-
-@pytest.mark.asyncio
-async def test_resolve_step_input_http_post_rejects_non_string_header_keys(user):
-    """http_post must reject non-string header keys before sending outbound requests."""
-    executor, _, _, _ = _build_executor(user)
-    executor.encryption_service.is_encrypted = MagicMock(return_value=False)
-    executor.encryption_service.decrypt = MagicMock(side_effect=lambda value: value)
-    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
-    step = _runtime_step(
-        input_source="http_post",
-        input_type="text",
-        input_config={
-            "url": "https://example.org",
-            "headers": {1: "value"},
-            "body_json": {"value": "{{flow_input.text}}"},
-        },
-    )
-    context = executor.variable_resolver.build_context(run.input_payload_json, [])
-
-    with pytest.raises(TypedIOValidationException):
-        await executor._resolve_step_input(
-            step=step,
-            context=context,
-            run=run,
-            prior_results=[],
-        )
+    executor._send_http_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1083,11 +1087,7 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={
-            "step_inputs": {
-                str(uuid4()): {"file_ids": [str(file.id)]},
-            }
-        },
+        input_payload={},
     )
     step = _runtime_step(
         step_order=1,
@@ -1096,9 +1096,6 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
         input_bindings={"question": "Literal step_input.text marker"},
         input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
     )
-    run.input_payload_json["step_inputs"] = {
-        str(step.step_id): {"file_ids": [str(file.id)]}
-    }
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     with pytest.raises(TypedIOValidationException, match="step_input"):
@@ -1107,6 +1104,7 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
             context=context,
             run=run,
             prior_results=[],
+            requested_file_ids=[file.id],
         )
 
 
@@ -1125,12 +1123,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={
-            "expected_flow_version": 9,
-            "step_inputs": {
-                str(step.step_id): {"file_ids": [str(file.id)]},
-            },
-        },
+        input_payload={"expected_flow_version": 9},
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
@@ -1139,6 +1132,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
         context=context,
         run=run,
         prior_results=[],
+        requested_file_ids=[file.id],
     )
 
     assert resolved.source_text == ""
@@ -1153,9 +1147,7 @@ async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={
-            "step_inputs": {},
-        },
+        input_payload={},
     )
     step = _runtime_step(
         step_order=1,
@@ -1164,9 +1156,6 @@ async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
         input_bindings={"question": "UNDERLAG:\n{{ step_input.text }}"},
         input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
     )
-    run.input_payload_json["step_inputs"] = {
-        str(step.step_id): {"file_ids": [str(file.id)]}
-    }
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     resolved = await executor._resolve_step_input(
@@ -1174,6 +1163,7 @@ async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
         context=context,
         run=run,
         prior_results=[],
+        requested_file_ids=[file.id],
     )
 
     assert any(d.code == "flow_underlag_summary" for d in resolved.diagnostics)
@@ -1439,7 +1429,7 @@ async def test_audio_input_previous_step_rejected_runtime(user):
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run, state=run_state)
+        await executor._execute_step(step=step, run=run, state=run_state, attempt_no=1)
 
     assert exc.value.code == "typed_io_audio_source_unsupported"
 
@@ -1456,14 +1446,12 @@ async def test_empty_document_extraction_fails(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[str(file_id)],
-        ),
+        input_payload={},
     )
     # File exists but has no extracted text
     fake_file = SimpleNamespace(id=file_id, text="")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
 
     mock_assistant = MagicMock()
     mock_assistant.get_prompt_text.return_value = ""
@@ -1478,7 +1466,7 @@ async def test_empty_document_extraction_fails(user):
     executor._load_assistant = AsyncMock(return_value=mock_assistant)
 
     with pytest.raises(TypedIOValidationException, match="empty text"):
-        await executor._execute_step(step=step, run=run)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
 
 @pytest.mark.asyncio
@@ -1490,20 +1478,17 @@ async def test_document_extraction_does_not_fallback_to_payload_text(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[str(file_id)],
-            text="fallback payload text",
-        ),
+        input_payload={"text": "fallback payload text"},
     )
     fake_file = SimpleNamespace(id=file_id, text="")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc.value.code == "typed_io_empty_extraction"
 
@@ -1517,18 +1502,16 @@ async def test_file_input_uses_extracted_file_text(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[str(file_id)],
-        ),
+        input_payload={},
     )
     fake_file = SimpleNamespace(id=file_id, text="Extracted file text")
     executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
+    executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.input_text == "Extracted file text"
     assert output.full_text == "ok"
@@ -1564,7 +1547,7 @@ async def test_document_previous_step_rejected_with_specific_code(user):
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run, state=run_state)
+        await executor._execute_step(step=step, run=run, state=run_state, attempt_no=1)
 
     assert exc.value.code == "typed_io_document_source_unsupported"
 
@@ -1577,11 +1560,7 @@ async def test_image_requires_valid_files(user):
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload=_runtime_file_payload(
-            step_id=step.step_id,
-            file_ids=[],
-            text="x",
-        ),
+        input_payload={"text": "x"},
     )
 
     mock_assistant = MagicMock()
@@ -1589,7 +1568,7 @@ async def test_image_requires_valid_files(user):
     executor._load_assistant = AsyncMock(return_value=mock_assistant)
 
     with pytest.raises(TypedIOValidationException, match="not yet supported|requires"):
-        await executor._execute_step(step=step, run=run)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
 
 @pytest.mark.asyncio
@@ -1613,7 +1592,7 @@ async def test_audio_step_does_not_forward_audio_files_to_llm(user):
         )
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.input_text == "Transcribed text"
     assert assistant.get_response.await_args.kwargs["files"] == []
@@ -1649,7 +1628,7 @@ async def test_audio_transcribe_only_skips_llm_and_rag(user):
         return_value=([], {"status": "should_not_run"}, [])
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assistant.get_response.assert_not_awaited()
     executor._retrieve_rag_chunks.assert_not_awaited()
@@ -1678,7 +1657,7 @@ async def test_json_input_contract_rejects_unparseable_json(user):
     executor._load_assistant = AsyncMock(return_value=mock_assistant)
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc.value.code == "typed_io_invalid_json_input"
 
@@ -1703,7 +1682,7 @@ async def test_text_input_contract_accepts_json_object_string(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.input_text == '{"title":"Sakerhetsanalys"}'
     assert output.full_text == "ok"
@@ -1734,7 +1713,7 @@ async def test_text_input_contract_accepts_json_array_string(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.input_text == '["a","b"]'
     assert output.full_text == "ok"
@@ -1768,7 +1747,7 @@ async def test_text_input_contract_rejects_non_json_for_object_schema(user):
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc.value.code == "typed_io_contract_violation"
     assert raw_text not in str(exc.value)
@@ -1797,7 +1776,7 @@ async def test_text_input_contract_rejects_extra_properties(user):
     )
 
     with pytest.raises(TypedIOValidationException) as exc:
-        await executor._execute_step(step=step, run=run)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc.value.code == "typed_io_contract_violation"
     assert "Additional properties are not allowed" in str(exc.value)
@@ -1819,7 +1798,7 @@ async def test_text_input_contract_string_schema_keeps_string_behavior(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.input_text == '{"title":"still a string"}'
     assert output.full_text == "ok"
@@ -1868,7 +1847,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
         return_value=_mock_assistant_for_execute_step(response_text="Rapport")
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.artifacts is not None
     assert len(output.artifacts) == 1
@@ -1892,7 +1871,7 @@ async def test_docx_output_handles_empty_assistant_response(user):
         return_value=_mock_assistant_for_execute_step(response_text="")
     )
 
-    output = (await executor._execute_step(step=step, run=run)).output
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.artifacts is not None
     assert output.artifacts[0]["file_id"] == str(stored_file.id)
@@ -1915,7 +1894,7 @@ async def test_http_input_audit_logged_on_success(user):
     step = _runtime_step(
         input_source="http_get",
         input_type="text",
-        input_config={"url": "https://example.org/data"},
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
     )
     request = httpx.Request("GET", "https://example.org/data")
     executor._send_http_request = AsyncMock(
@@ -1945,7 +1924,7 @@ async def test_http_input_audit_logged_on_success(user):
 
 
 @pytest.mark.asyncio
-async def test_resolve_http_input_decrypts_encrypted_headers(user):
+async def test_resolve_http_input_decrypts_authored_header_secrets(user):
     executor, _, _, _ = _build_executor(user)
     executor.encryption_service.is_encrypted = MagicMock(
         side_effect=lambda v: v.startswith("enc:")
@@ -1959,7 +1938,13 @@ async def test_resolve_http_input_decrypts_encrypted_headers(user):
         input_type="text",
         input_config={
             "url": "https://example.org/data",
-            "headers": {"Authorization": "enc:Bearer token456", "X-Plain": "visible"},
+            "auth": {
+                "mode": "bearer_token",
+                "token": "enc:token456",
+            },
+            "custom_headers": [
+                {"name": "X-Plain", "value": "visible", "secret": False}
+            ],
         },
     )
     request = httpx.Request("GET", "https://example.org/data")
@@ -1979,7 +1964,7 @@ async def test_resolve_http_input_decrypts_encrypted_headers(user):
     headers = executor._send_http_request.await_args.kwargs["headers"]
     assert headers["Authorization"] == "Bearer token456"
     assert headers["X-Plain"] == "visible"
-    executor.encryption_service.decrypt.assert_called_once_with("enc:Bearer token456")
+    executor.encryption_service.decrypt.assert_called_once_with("enc:token456")
 
 
 def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() -> None:

@@ -1,0 +1,873 @@
+import { Callout } from "nextra/components";
+
+# Integrating Flows
+
+This page is for teams wiring Eneo Flows into an application, and it shows the endpoint order for creating, reviewing, rerunning, and finishing a run.
+
+You are in the integration step of the consumer journey, where the published design becomes runtime calls and user-facing states.
+
+Use this page for flow runtime journeys. Use the reference for full schemas: [Flows API Guide](/guides/flows-api-guide).
+
+## Sequence overview
+
+Use this table to choose the right runtime journey before you read the detailed endpoint facts below.
+
+| Journey                             | Use it when                                                                                                    | Key endpoint                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                 | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                         | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                         | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
+| Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                  | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
+| Results                             | Drive the UI from run status, step results, result files, and status capabilities.                             | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
+| Reruns                              | Reruns invalidate downstream work and preserve lineage so clients can explain what changed.                    | `POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` (`rerun_flow_run_step`)                           |
+| Robustness                          | Use idempotency, version pins, polling backoff, and status capabilities for retry-safe clients.                | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
+| Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                      | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
+| Service keys and tenancy guarantees | Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
+
+## Worked end-to-end example
+
+This example follows an audio-to-report run from contract discovery to final artifact download.
+
+Each response below is a public example for that hop. Use it to understand shape and order; your ids and timestamps will differ.
+
+Endpoint order:
+
+| Hop                         | Endpoint                                                                       | Method  | Success        | Operation                               |
+| --------------------------- | ------------------------------------------------------------------------------ | ------- | -------------- | --------------------------------------- |
+| Discover contract           | `/api/v1/flows/{id}/run-contract/`                                             | `GET`   | `200 OK`       | `get_flow_run_contract`                 |
+| Upload runtime file         | `/api/v1/flows/{id}/steps/{step_id}/runtime-files/`                            | `POST`  | `201 Created`  | `upload_flow_runtime_file`              |
+| Create run                  | `/api/v1/flows/{id}/runs/`                                                     | `POST`  | `201 Created`  | `create_flow_run`                       |
+| Poll run                    | `/api/v1/flows/{id}/runs/{run_id}/`                                            | `GET`   | `200 OK`       | `get_flow_run`                          |
+| Find active review          | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/`                  | `GET`   | `200 OK`       | `get_active_flow_run_review_checkpoint` |
+| Edit review payload         | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/`         | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint`       |
+| Approve review              | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/` | `POST`  | `200 OK`       | `approve_flow_run_review_checkpoint`    |
+| Resume run                  | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/`  | `POST`  | `202 Accepted` | `resume_flow_run_review_checkpoint`     |
+| List and filter step output | `/api/v1/flows/{id}/runs/{run_id}/steps/`                                      | `GET`   | `200 OK`       | `list_flow_run_steps`                   |
+| Fetch final artifact        | `/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`             | `POST`  | `200 OK`       | `generate_flow_run_artifact_signed_url` |
+
+### 1. Discover contract
+
+Request the published run contract before you show upload or form controls.
+
+Request:
+
+```text
+GET /api/v1/flows/{id}/run-contract/
+```
+
+The response tells your app which inputs, review steps, and final output to expect.
+
+Response:
+
+```json
+{
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "published_flow_version": 3,
+  "final_output": {
+    "step_id": "00000000-0000-0000-0000-000000000104",
+    "step_order": 3,
+    "label": "Create Word report",
+    "output_type": "docx",
+    "output_mode": "pass_through",
+    "delivery": "artifact",
+    "output_contract": null
+  },
+  "form_fields": [
+    {
+      "name": "employee_name",
+      "type": "text",
+      "label": "Employee name",
+      "required": true
+    }
+  ],
+  "steps_requiring_input": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000101",
+      "step_order": 1,
+      "label": "Upload audio",
+      "description": "Provide the recorded review conversation.",
+      "required": true,
+      "input_format": "audio",
+      "max_files": 1,
+      "max_file_size_bytes": 52428800,
+      "accepted_mimetypes": ["audio/wav", "audio/mpeg"]
+    }
+  ],
+  "runtime_upload_policy": {
+    "min_timeout_seconds": 120,
+    "seconds_per_mebibyte": 8,
+    "max_timeout_seconds": 600,
+    "idle_timeout_seconds": 120
+  },
+  "steps_requiring_review": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000103",
+      "step_order": 2,
+      "label": "Review transcription",
+      "review_mode": "edit",
+      "output_type": "json",
+      "expires_after_seconds": 1209600,
+      "output_contract": {
+        "type": "object",
+        "properties": {
+          "transcription": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "aggregate_max_files": 1,
+  "template_readiness": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "template_asset_id": null,
+      "template_file_id": null,
+      "template_name": null,
+      "checksum": null,
+      "published_flow_version": 3,
+      "status": "unavailable",
+      "can_edit": false,
+      "can_download": false,
+      "message_code": null
+    }
+  ]
+}
+```
+
+### 2. Upload runtime file
+
+Upload the audio file to the step that consumes audio input.
+
+Request:
+
+```text
+POST /api/v1/flows/{id}/steps/{step_id}/runtime-files/
+Content-Type: multipart/form-data
+
+upload_file=@review-audio.mp3
+```
+
+The response returns the file id that will be bound to the step input.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000701",
+  "name": "review-audio.mp3",
+  "mimetype": "audio/mpeg",
+  "size": 1843200,
+  "created_at": "2026-03-17T10:04:00Z",
+  "updated_at": "2026-03-17T10:04:00Z"
+}
+```
+
+### 3. Create run
+
+Create the run with the version pin and the uploaded file bound to the audio step.
+
+Request:
+
+Headers:
+
+```text
+Idempotency-Key: audio-report-alex-example-2026-03-17
+```
+
+Body:
+
+```json
+{
+  "expected_flow_version": 3,
+  "input_payload_json": {
+    "employee_name": "Alex Example"
+  },
+  "step_inputs": {
+    "00000000-0000-0000-0000-000000000101": {
+      "file_ids": ["00000000-0000-0000-0000-000000000701"]
+    }
+  }
+}
+```
+
+The response gives your app the run id to poll.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000301",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_version": 3,
+  "principal_type": null,
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "trace_id": "00000000-0000-0000-0000-000000000302",
+  "revision": 1,
+  "status": "queued",
+  "cancelled_at": null,
+  "started_at": null,
+  "finished_at": null,
+  "input_payload_json": {
+    "employee_name": "Alex Example"
+  },
+  "output_payload_json": null,
+  "result_files": [],
+  "token_usage": null,
+  "error": null,
+  "job_id": "00000000-0000-0000-0000-000000000401",
+  "created_at": "2026-03-17T10:05:00Z",
+  "updated_at": "2026-03-17T10:05:00Z"
+}
+```
+
+### 4. Poll run
+
+Poll the run until it is terminal or reaches `awaiting_review`.
+
+Request:
+
+```text
+GET /api/v1/flows/{id}/runs/{run_id}/
+```
+
+When review is needed, the run status tells the UI to open the review flow.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000301",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_version": 3,
+  "principal_type": null,
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "trace_id": "00000000-0000-0000-0000-000000000302",
+  "revision": 2,
+  "status": "awaiting_review",
+  "cancelled_at": null,
+  "started_at": null,
+  "finished_at": null,
+  "input_payload_json": {
+    "employee_name": "Alex Example"
+  },
+  "output_payload_json": null,
+  "result_files": [],
+  "token_usage": null,
+  "error": null,
+  "job_id": "00000000-0000-0000-0000-000000000401",
+  "created_at": "2026-03-17T10:05:00Z",
+  "updated_at": "2026-03-17T10:05:00Z"
+}
+```
+
+### 5. Find active review
+
+Fetch the active checkpoint before showing the review screen.
+
+Request:
+
+```text
+GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/
+```
+
+The response includes the checkpoint id, current payload, and revision.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000901",
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_run_id": "00000000-0000-0000-0000-000000000301",
+  "step_id": "00000000-0000-0000-0000-000000000103",
+  "step_order": 2,
+  "attempt_no": 1,
+  "state": "awaiting_review",
+  "revision": 1,
+  "schema_version": 1,
+  "original_payload_json": {
+    "transcription": "Hello and welcome to the annual review..."
+  },
+  "current_payload_json": {
+    "transcription": "Hello and welcome to the annual review..."
+  },
+  "step_label": "Review transcription",
+  "review_mode": "edit",
+  "output_type": "json",
+  "output_contract": {
+    "type": "object",
+    "properties": {
+      "transcription": {
+        "type": "string"
+      }
+    }
+  },
+  "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
+  "requester_user_id": "00000000-0000-0000-0000-000000000030",
+  "requester_service_principal": null,
+  "requester_principal_type": "user",
+  "decided_by_user_id": null,
+  "decided_by_service_principal": null,
+  "decided_by_principal_type": null,
+  "edited_at": null,
+  "approved_at": null,
+  "rejected_at": null,
+  "resumed_at": null,
+  "cancelled_at": null,
+  "expires_at": "2026-03-31T10:05:30Z",
+  "expired_at": null,
+  "created_at": "2026-03-17T10:05:30Z",
+  "updated_at": "2026-03-17T10:05:30Z"
+}
+```
+
+### 6. Edit review payload
+
+Submit the full corrected payload with the revision the reviewer saw.
+
+Request:
+
+```json
+{
+  "expected_checkpoint_revision": 1,
+  "current_payload_json": {
+    "transcription": "Corrected transcription for the annual review."
+  }
+}
+```
+
+The response returns the edited checkpoint and the next revision.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000901",
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_run_id": "00000000-0000-0000-0000-000000000301",
+  "step_id": "00000000-0000-0000-0000-000000000103",
+  "step_order": 2,
+  "attempt_no": 1,
+  "state": "edited",
+  "revision": 2,
+  "schema_version": 1,
+  "original_payload_json": {
+    "transcription": "Hello and welcome to the annual review..."
+  },
+  "current_payload_json": {
+    "transcription": "Corrected transcription for the annual review."
+  },
+  "step_label": "Review transcription",
+  "review_mode": "edit",
+  "output_type": "json",
+  "output_contract": {
+    "type": "object",
+    "properties": {
+      "transcription": {
+        "type": "string"
+      }
+    }
+  },
+  "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
+  "requester_user_id": "00000000-0000-0000-0000-000000000030",
+  "requester_service_principal": null,
+  "requester_principal_type": "user",
+  "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+  "decided_by_service_principal": null,
+  "decided_by_principal_type": "user",
+  "edited_at": "2026-03-17T10:06:30Z",
+  "approved_at": null,
+  "rejected_at": null,
+  "resumed_at": null,
+  "cancelled_at": null,
+  "expires_at": "2026-03-31T10:05:30Z",
+  "expired_at": null,
+  "created_at": "2026-03-17T10:05:30Z",
+  "updated_at": "2026-03-17T10:05:30Z"
+}
+```
+
+### 7. Approve review
+
+Approve the edited checkpoint with the latest revision.
+
+Request:
+
+```json
+{
+  "expected_checkpoint_revision": 2
+}
+```
+
+The response records the approval and gives the revision used for resume.
+
+Response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000901",
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_run_id": "00000000-0000-0000-0000-000000000301",
+  "step_id": "00000000-0000-0000-0000-000000000103",
+  "step_order": 2,
+  "attempt_no": 1,
+  "state": "approved",
+  "revision": 3,
+  "schema_version": 1,
+  "original_payload_json": {
+    "transcription": "Hello and welcome to the annual review..."
+  },
+  "current_payload_json": {
+    "transcription": "Corrected transcription for the annual review."
+  },
+  "step_label": "Review transcription",
+  "review_mode": "edit",
+  "output_type": "json",
+  "output_contract": {
+    "type": "object",
+    "properties": {
+      "transcription": {
+        "type": "string"
+      }
+    }
+  },
+  "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
+  "requester_user_id": "00000000-0000-0000-0000-000000000030",
+  "requester_service_principal": null,
+  "requester_principal_type": "user",
+  "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+  "decided_by_service_principal": null,
+  "decided_by_principal_type": "user",
+  "edited_at": "2026-03-17T10:06:30Z",
+  "approved_at": "2026-03-17T10:07:30Z",
+  "rejected_at": null,
+  "resumed_at": null,
+  "cancelled_at": null,
+  "expires_at": "2026-03-31T10:05:30Z",
+  "expired_at": null,
+  "created_at": "2026-03-17T10:05:30Z",
+  "updated_at": "2026-03-17T10:05:30Z"
+}
+```
+
+### 8. Resume run
+
+Resume the run after approval so the worker can continue.
+
+Request:
+
+Headers:
+
+```text
+Idempotency-Key: review-resume-00000000-0000-0000-0000-000000000901
+```
+
+Body:
+
+```json
+{
+  "expected_checkpoint_revision": 3
+}
+```
+
+The response returns the resumed checkpoint and the queued run.
+
+Response:
+
+```json
+{
+  "checkpoint": {
+    "id": "00000000-0000-0000-0000-000000000901",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "step_id": "00000000-0000-0000-0000-000000000103",
+    "step_order": 2,
+    "attempt_no": 1,
+    "state": "resumed",
+    "revision": 4,
+    "schema_version": 1,
+    "original_payload_json": {
+      "transcription": "Hello and welcome to the annual review..."
+    },
+    "current_payload_json": {
+      "transcription": "Corrected transcription for the annual review."
+    },
+    "step_label": "Review transcription",
+    "review_mode": "edit",
+    "output_type": "json",
+    "output_contract": {
+      "type": "object",
+      "properties": {
+        "transcription": {
+          "type": "string"
+        }
+      }
+    },
+    "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
+    "requester_user_id": "00000000-0000-0000-0000-000000000030",
+    "requester_service_principal": null,
+    "requester_principal_type": "user",
+    "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+    "decided_by_service_principal": null,
+    "decided_by_principal_type": "user",
+    "edited_at": "2026-03-17T10:06:30Z",
+    "approved_at": "2026-03-17T10:07:30Z",
+    "rejected_at": null,
+    "resumed_at": "2026-03-17T10:08:00Z",
+    "cancelled_at": null,
+    "expires_at": "2026-03-31T10:05:30Z",
+    "expired_at": null,
+    "created_at": "2026-03-17T10:05:30Z",
+    "updated_at": "2026-03-17T10:05:30Z"
+  },
+  "run": {
+    "id": "00000000-0000-0000-0000-000000000301",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "flow_version": 3,
+    "principal_type": null,
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "trace_id": "00000000-0000-0000-0000-000000000302",
+    "revision": 2,
+    "status": "queued",
+    "cancelled_at": null,
+    "started_at": null,
+    "finished_at": null,
+    "input_payload_json": {
+      "employee_name": "Alex Example"
+    },
+    "output_payload_json": null,
+    "result_files": [],
+    "token_usage": null,
+    "error": null,
+    "job_id": "00000000-0000-0000-0000-000000000401",
+    "created_at": "2026-03-17T10:05:00Z",
+    "updated_at": "2026-03-17T10:05:00Z"
+  }
+}
+```
+
+### 9. List and filter step output
+
+There is no single-step GET for run steps. Call the list endpoint and filter the list by `step_id` for the final DOCX step.
+
+Request:
+
+```text
+GET /api/v1/flows/{id}/runs/{run_id}/steps/
+```
+
+The full response normally contains every step; this example shows the final artifact-producing step after filtering.
+
+Response:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000504",
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "step_id": "00000000-0000-0000-0000-000000000104",
+    "step_order": 3,
+    "assistant_id": "00000000-0000-0000-0000-000000000201",
+    "status": "completed",
+    "input_payload_json": {
+      "source_step_ids": ["00000000-0000-0000-0000-000000000103"]
+    },
+    "runtime_input_file_ids": [],
+    "output_payload_json": null,
+    "result_files": [
+      {
+        "flow_run_id": "00000000-0000-0000-0000-000000000301",
+        "flow_id": "00000000-0000-0000-0000-000000000001",
+        "tenant_id": "00000000-0000-0000-0000-000000000010",
+        "step_result_id": "00000000-0000-0000-0000-000000000504",
+        "step_id": "00000000-0000-0000-0000-000000000104",
+        "step_order": 3,
+        "attempt_no": 1,
+        "file_id": "00000000-0000-0000-0000-000000000702",
+        "ordinal": 0,
+        "source": "generated_output",
+        "name": "annual-review-report.docx",
+        "checksum": "sha256:annual-review-report",
+        "size": 24576,
+        "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "file_type": "document",
+        "availability": "available"
+      }
+    ],
+    "current_attempt_no": 1,
+    "num_tokens_input": 0,
+    "num_tokens_output": 0,
+    "error_code": null,
+    "error_message": null,
+    "diagnostics": [],
+    "started_at": "2026-03-17T10:05:05Z",
+    "finished_at": "2026-03-17T10:05:30Z",
+    "created_at": "2026-03-17T10:05:05Z",
+    "updated_at": "2026-03-17T10:05:30Z"
+  }
+]
+```
+
+### 10. Fetch final artifact
+
+Request a short-lived signed URL for the artifact file id from the final step result.
+
+Request:
+
+```json
+{
+  "expires_in": 3600,
+  "content_disposition": "attachment"
+}
+```
+
+The response contains the download URL and an epoch-integer `expires_at` value.
+
+Response:
+
+```json
+{
+  "url": "https://api.example.com/api/v1/files/00000000-0000-0000-0000-000000000702/download/?token=signed-token",
+  "expires_at": 1773742500
+}
+```
+
+## Endpoint sequences
+
+Start with the smallest complete run path. It proves the contract, idempotency, polling, and step-result loop.
+
+### Quickstart
+
+Discover the contract, create a run with idempotency, poll status, then read the final result.
+
+1. Call `runtime_paths.run_contract` to get required inputs, review steps, final output, and `published_flow_version`.
+2. Call `runtime_paths.create_run` with `expected_flow_version` and an `Idempotency-Key`; the response returns a run id.
+3. Call `runtime_paths.get_run_template` until the run is terminal or `awaiting_review`.
+4. Call `runtime_paths.list_steps_template` to get per-step status, output, result files, and error codes.
+
+Endpoint facts:
+
+| Endpoint                                  | Method | Success       | Operation               |
+| ----------------------------------------- | ------ | ------------- | ----------------------- |
+| `/api/v1/flows/{id}/run-contract/`        | `GET`  | `200 OK`      | `get_flow_run_contract` |
+| `/api/v1/flows/{id}/runs/`                | `POST` | `201 Created` | `create_flow_run`       |
+| `/api/v1/flows/{id}/runs/{run_id}/`       | `GET`  | `200 OK`      | `get_flow_run`          |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/` | `GET`  | `200 OK`      | `list_flow_run_steps`   |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_not_published`, `flow_run_idempotency_conflict`, `flow_run_stale_version`.
+
+When the contract names file inputs, handle uploads before you create the run.
+
+### Files
+
+Upload files before run creation and bind returned ids to the step that consumes them.
+
+1. Call `runtime_paths.run_contract` to find `steps_requiring_input` and accepted file rules.
+2. Call `runtime_paths.upload_step_runtime_file_template` for each file; the response returns runtime file ids.
+3. Send `step_inputs[step_id].file_ids` in `runtime_paths.create_run`.
+4. Call `runtime_paths.delete_runtime_file_template` only for abandoned uploads that are not attached to a run.
+
+Endpoint facts:
+
+| Endpoint                                            | Method   | Success          | Operation                  |
+| --------------------------------------------------- | -------- | ---------------- | -------------------------- |
+| `/api/v1/flows/{id}/run-contract/`                  | `GET`    | `200 OK`         | `get_flow_run_contract`    |
+| `/api/v1/flows/{id}/steps/{step_id}/runtime-files/` | `POST`   | `201 Created`    | `upload_flow_runtime_file` |
+| `/api/v1/flows/{id}/runtime-files/{file_id}/`       | `DELETE` | `204 No Content` | `delete_flow_runtime_file` |
+| `/api/v1/flows/{id}/runs/`                          | `POST`   | `201 Created`    | `create_flow_run`          |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_run_required_step_input_missing`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, `flow_run_step_input_mimetype_rejected`, `flow_runtime_file_attached`.
+
+After inputs are bound, plan how the UI behaves when a review-marked step pauses the run.
+
+### Human-in-the-loop pause and resume
+
+Runs pause only at review-marked steps and resume through review checkpoint endpoints.
+
+1. Call `runtime_paths.run_contract` before run creation and inspect `steps_requiring_review`.
+2. Poll `runtime_paths.get_run_template`; when status is `awaiting_review`, show the review UI.
+3. Call `review_checkpoints.active_template` to get the open checkpoint and revision.
+4. Call `edit_template`, `approve_template`, or `reject_template`; the response returns the updated checkpoint.
+5. Call `resume_template` after approval so the worker continues the run.
+
+Endpoint facts:
+
+| Endpoint                                                                       | Method  | Success        | Operation                               |
+| ------------------------------------------------------------------------------ | ------- | -------------- | --------------------------------------- |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/`                  | `GET`   | `200 OK`       | `get_active_flow_run_review_checkpoint` |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/`         | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint`       |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/` | `POST`  | `200 OK`       | `approve_flow_run_review_checkpoint`    |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/`  | `POST`  | `200 OK`       | `reject_flow_run_review_checkpoint`     |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/`  | `POST`  | `202 Accepted` | `resume_flow_run_review_checkpoint`     |
+| `/api/v1/flows/{id}/runs/{run_id}/`                                            | `GET`   | `200 OK`       | `get_flow_run`                          |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_idempotency_key_required`, `flow_review_reject_reason_required`.
+
+If a user asks for files during execution, route the product design through review or rerun instead of inventing an unsupported upload path.
+
+### Sending files mid-run
+
+Eneo Flows does not accept arbitrary file injection while a run is executing.
+
+1. If the flow needs new files, design a review-marked step before the file-consuming step.
+2. At the checkpoint, edit the reviewed output or reject/cancel the run based on your product rules.
+3. For different runtime files, create a rerun with explicit step input overrides after the original step has completed.
+
+Endpoint facts:
+
+| Endpoint                                                               | Method  | Success        | Operation                         |
+| ---------------------------------------------------------------------- | ------- | -------------- | --------------------------------- |
+| `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint` |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/`              | `POST`  | `202 Accepted` | `rerun_flow_run_step`             |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_review_not_active`, `flow_run_rerun_step_inputs_invalid`.
+
+Once review is resolved, drive the result screen from run status, step results, and artifact links.
+
+### Results
+
+Drive the UI from run status, step results, result files, and status capabilities.
+
+1. Call `runtime_paths.get_run_template` to get run status and final output when ready.
+2. Call `runtime_paths.list_steps_template` to get each step result as it completes.
+3. Use the file id from run or step `result_files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.
+4. Call `/api/v1/flows/runs/status-capabilities/` to get status meaning instead of hardcoding transitions.
+
+Endpoint facts:
+
+| Endpoint                                                           | Method | Success  | Operation                               |
+| ------------------------------------------------------------------ | ------ | -------- | --------------------------------------- |
+| `/api/v1/flows/{id}/runs/{run_id}/`                                | `GET`  | `200 OK` | `get_flow_run`                          |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/`                          | `GET`  | `200 OK` | `list_flow_run_steps`                   |
+| `/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/` | `POST` | `200 OK` | `generate_flow_run_artifact_signed_url` |
+| `/api/v1/flows/runs/status-capabilities/`                          | `GET`  | `200 OK` | `get_flow_run_status_capabilities`      |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_run_artifact_not_found`, `flow_run_artifact_content_unavailable`, `flow_run_access_denied`.
+
+When a user needs to correct completed work, use reruns so lineage and invalidation stay visible.
+
+### Reruns
+
+Reruns invalidate downstream work and preserve lineage so clients can explain what changed.
+
+1. Call `runtime_paths.rerun_step_template` for a completed step to get accepted rerun operation state.
+2. Send explicit file overrides when replacing inputs; send an explicit empty override when the step should run without files.
+3. Use review checkpoint edits for corrected outputs before approval; rerun inputs are not direct post-run output edits.
+4. Poll `runtime_paths.get_run_template` and `list_steps_template`; downstream steps show the new lineage.
+
+Endpoint facts:
+
+| Endpoint                                                  | Method | Success        | Operation             |
+| --------------------------------------------------------- | ------ | -------------- | --------------------- |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` | `POST` | `202 Accepted` | `rerun_flow_run_step` |
+| `/api/v1/flows/{id}/runs/{run_id}/`                       | `GET`  | `200 OK`       | `get_flow_run`        |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/`                 | `GET`  | `200 OK`       | `list_flow_run_steps` |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_inputs_invalid`.
+
+After the happy path works, add retries and polling rules so the integration behaves well under load.
+
+### Robustness
+
+Use idempotency, version pins, polling backoff, and status capabilities for retry-safe clients.
+
+1. Reuse the same `Idempotency-Key` only for the same create-run payload.
+2. Send `expected_flow_version` from the run contract so edited published versions do not surprise clients.
+3. Back off polling when `status_capabilities.should_poll` is false.
+4. Use run and step polling as the source of truth for status changes.
+
+Endpoint facts:
+
+| Endpoint                            | Method | Success       | Operation         |
+| ----------------------------------- | ------ | ------------- | ----------------- |
+| `/api/v1/flows/{id}/runs/`          | `POST` | `201 Created` | `create_flow_run` |
+| `/api/v1/flows/{id}/runs/{run_id}/` | `GET`  | `200 OK`      | `get_flow_run`    |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_run_idempotency_conflict`, `flow_run_concurrency_limit_reached`, `flow_worker_stalled`.
+
+When a run or step fails, branch on typed codes and show the user the next action.
+
+### Failures
+
+Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.
+
+1. Call `runtime_paths.get_run_template` and read the run-level `error.code` when terminal failure happens.
+2. Call `runtime_paths.list_steps_template` and read the failed step and nullable step `error_code`.
+3. Map known codes to localized copy; degrade unknown codes to a generic support path.
+
+Endpoint facts:
+
+| Endpoint                                  | Method | Success  | Operation             |
+| ----------------------------------------- | ------ | -------- | --------------------- |
+| `/api/v1/flows/{id}/runs/{run_id}/`       | `GET`  | `200 OK` | `get_flow_run`        |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/` | `GET`  | `200 OK` | `list_flow_run_steps` |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_task_failure`, `flow_step_execution_failed`, `typed_io_validation_failed`, `typed_io_output_parse_failed`.
+
+For backend integrations, finish by checking service-key scope and tenant isolation.
+
+### Service keys and tenancy guarantees
+
+Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs.
+
+1. Use a key scoped to the flow's space.
+2. Create runs through published runtime paths, not draft authoring paths.
+3. List runs with `runtime_paths.list_runs`; service keys see only their own runs.
+4. Request evidence only when the key has the explicit evidence permission.
+
+Endpoint facts:
+
+| Endpoint                                     | Method | Success       | Operation               |
+| -------------------------------------------- | ------ | ------------- | ----------------------- |
+| `/api/v1/flows/{id}/runs/`                   | `POST` | `201 Created` | `create_flow_run`       |
+| `/api/v1/flows/{id}/runs/`                   | `GET`  | `200 OK`      | `list_flow_runs`        |
+| `/api/v1/flows/{id}/runs/{run_id}/evidence/` | `GET`  | `200 OK`      | `get_flow_run_evidence` |
+
+Contract coverage: These endpoints are contract-tested.
+
+Errors you must handle: `flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_service_key_admin_required`.
+
+<Callout type="warning">
+
+**Not supported: Arbitrary mid-run pause.**
+
+Runs pause only at steps configured for human review.
+
+Closest supported alternative: Design a review-marked step where your app needs human input, or rerun a completed step with explicit overrides.
+
+</Callout>
+
+<Callout type="warning">
+
+**Not supported: Run-status webhooks.**
+
+Eneo Flows does not expose a run-status webhook subscription surface today.
+
+Closest supported alternative: Poll the run and step endpoints and use status capabilities to decide when polling should stop.
+
+</Callout>
+
+Next: [Flows FAQ](/guides/flows/flows-faq).

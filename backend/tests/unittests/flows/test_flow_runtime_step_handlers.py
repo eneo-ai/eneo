@@ -87,7 +87,6 @@ def _step_output() -> StepExecutionOutput:
         source_text="hello",
         input_source="flow_input",
         used_question_binding=False,
-        legacy_prompt_binding_used=False,
         full_text="done",
         persisted_text="done",
         generated_file_ids=[],
@@ -153,7 +152,7 @@ class _OutputOnlyHandler:
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> StepExecutionResult:
         return StepExecutionResult(output=_step_output())
 
@@ -225,20 +224,6 @@ async def test_http_post_handler_emits_exactly_one_webhook_intent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_post_handler_requires_attempt_no() -> None:
-    handler = HttpPostStepHandler(completion_handler=_OutputOnlyHandler())
-
-    with pytest.raises(ValueError, match="requires attempt_no"):
-        await handler.execute(
-            step=_step(output_mode="http_post"),
-            run=_run(),
-            state=_state(),
-            version_metadata=None,
-            attempt_no=None,
-        )
-
-
-@pytest.mark.asyncio
 async def test_pass_through_handler_wraps_completion_output(monkeypatch) -> None:
     completion_output = _step_output()
     complete_step_execution = AsyncMock(return_value=completion_output)
@@ -253,7 +238,7 @@ async def test_pass_through_handler_wraps_completion_output(monkeypatch) -> None
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> PreparedAssistantStep:
         return _prepared_assistant_step()
 
@@ -321,7 +306,7 @@ async def test_transcribe_only_handler_skips_llm_and_rag() -> None:
         run: FlowRun,
         state: RunExecutionState,
         version_metadata: dict[str, object] | None,
-        attempt_no: int | None,
+        attempt_no: int,
     ) -> PreparedAssistantStep:
         return prepared_step
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
-from typing import Annotated, cast
+from typing import Annotated, Final, cast
 from uuid import UUID
 
 from fastapi import (
@@ -20,7 +20,7 @@ from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.database.database import AsyncSession
-from intric.flows.api import flow_router_common as common
+from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
@@ -38,20 +38,41 @@ from intric.flows.api.flow_models import (
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
     FlowRunReviewCheckpointResumeResponse,
-    FlowRunStatusCapabilitiesPublic,
     FlowRunStepRerunRequest,
     FlowRunStepRerunResponse,
+)
+from intric.flows.api.flow_run_status_capability_models import (
+    FlowRunStatusCapabilitiesPublic,
     flow_run_status_capabilities_public,
 )
+from intric.flows.api.flow_runtime_paths import (
+    FLOW_REVIEW_ACTIVE_PATH,
+    FLOW_REVIEW_APPROVE_PATH,
+    FLOW_REVIEW_CHECKPOINT_PATH,
+    FLOW_REVIEW_REJECT_PATH,
+    FLOW_REVIEW_RESUME_PATH,
+    FLOW_RUN_CANCEL_PATH,
+    FLOW_RUN_PATH,
+    FLOW_RUN_REDISPATCH_PATH,
+    FLOW_RUN_STATUS_CAPABILITIES_PATH,
+    FLOW_RUN_STEP_RERUN_PATH,
+    FLOW_RUNS_PATH,
+)
 from intric.flows.api.flow_service_principal_actor_read_model import (
-    enrich_review_checkpoint_service_principal_summaries,
+    FlowServicePrincipalActorPresenter,
+)
+from intric.flows.application.flow_dispatch import (
+    dispatch_flow_run_after_commit,
+    dispatch_flow_run_recoverably_after_commit,
 )
 from intric.flows.domain.flow import FlowRunReviewCheckpoint
+from intric.flows.flow_access_policy import FlowApiAction
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_run_dispatch_request import FlowRunDispatchRequest
 from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
-from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
-from intric.main.models import GeneralError, OffsetPaginatedResponse
+from intric.main.models import OffsetPaginatedResponse
 from intric.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
@@ -60,12 +81,10 @@ from intric.server.dependencies.container import (
 router = APIRouter()
 
 _FLOW_RUN_FORBIDDEN_DESCRIPTION = (
-    "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
-    "space scope does not match the flow, `insufficient_tenant_permission` or "
-    "`insufficient_space_permission` for callers without the required access, "
-    "`flow_run_access_denied` when a caller tries to access a run outside the current "
-    "visibility policy, and `flow_service_key_principal_not_supported` on flow surfaces "
-    "that still require a user principal."
+    "Forbidden. Caller scope, tenant or space permission, and run visibility are "
+    "evaluated before returning Flow runtime data. Machine-readable codes include "
+    "`insufficient_scope`, `flow_run_access_denied`, and "
+    "`flow_service_key_principal_not_supported`."
 )
 
 _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
@@ -75,6 +94,17 @@ _FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "Replay is available while the matching run row is retained; clients should keep "
     "the returned run id as the durable polling handle."
 )
+
+_FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION = (
+    "Required caller-supplied idempotency key for review resume retries."
+)
+_FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_PARAMETER: Final[Mapping[str, object]] = {
+    "name": "Idempotency-Key",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string"},
+    "description": _FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION,
+}
 
 _FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE = (
     "Service-key human-review clients should use a service-owned `sk_` key with "
@@ -119,16 +149,23 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
     Generic consumer sequence:
     1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
        required runtime step inputs, and version pinning requirements.
-    2. Upload any required files via `POST /api/v1/flows/{id}/files/` or the relevant
-       `.../steps/{step_id}/runtime-files/` endpoint.
+    2. Upload required files via `.../steps/{step_id}/runtime-files/` using step ids
+       from the run contract before creating the run. A returned file id may be
+       reused under each compatible `step_inputs[step_id].file_ids` entry for
+       the same Flow.
     3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
        together with any structured `input_payload_json` fields in this run request.
     4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` and `.../steps/` for progress and outputs.
 
+    Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
+    `400` with code `flow_run_top_level_file_ids_not_supported`; use
+    `step_inputs[step_id].file_ids` instead.
+
     `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
     the same request payload returns the existing run payload. Reusing the same key with a
-    different payload returns `400` with code `flow_run_idempotency_conflict`. Replay lasts while
-    the matching run row is retained; clients should keep the returned run id as the durable
+    different payload returns `400` with code `flow_run_idempotency_conflict`. Replay does not
+    enqueue another run; it returns the current retained run row. Replay lasts while the
+    matching run row is retained; clients should keep the returned run id as the durable
     polling handle.
 
     Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
@@ -141,7 +178,7 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
 )
 
 _FLOW_RUN_STATUS_DESCRIPTION = """
-    Get one run for a flow using flow-first routing.
+    Get one run for a specific flow.
 
     Use this endpoint for run status and top-level output payload when building consumer apps.
     Current runtime visibility is policy-based: callers always see their own runs, tenant admins
@@ -152,7 +189,7 @@ _FLOW_RUN_STATUS_DESCRIPTION = """
 _FLOW_RUN_LIST_DESCRIPTION = """
     List runs for a specific flow.
 
-    This is a flow-first alias for run listing to keep runtime orchestration under `/flows/{id}`.
+    Use this endpoint to list runs under `/flows/{id}`.
     The `count` field in the paginated response reports the number of items returned in the
     current page, not the total number of matching runs across all pages. `has_more` reports
     whether another page exists after this offset window.
@@ -257,7 +294,7 @@ policy used by the approve and reject endpoints.
 _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review checkpoint step 1 output: 'summary' is a required property",
     "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-    "code": "typed_io_contract_violation",
+    "code": FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
     "context": {
         "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
         "step_id": "3a6610d2-8b8b-4837-b260-8e66d2155405",
@@ -269,7 +306,7 @@ _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE: dict[str, object] = {
 _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review checkpoint revision is stale.",
     "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-    "code": "flow_review_stale_revision",
+    "code": FlowApiErrorCode.REVIEW_STALE_REVISION.value,
     "context": {
         "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
         "expected_checkpoint_revision": 2,
@@ -280,7 +317,7 @@ _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
 _FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review checkpoint has expired.",
     "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-    "code": "flow_review_expired",
+    "code": FlowApiErrorCode.REVIEW_EXPIRED.value,
     "context": {
         "checkpoint_id": "7f4f6d62-0e2b-4682-9fa4-f046c3df1b15",
         "state": "awaiting_review",
@@ -288,39 +325,238 @@ _FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE: dict[str, object] = {
     },
 }
 
+_FLOW_RUN_REVIEW_NOT_ACTIVE_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint is not active for this operation.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
+    "context": {"state": "resumed"},
+}
+
+_FLOW_RUN_REVIEW_RESUME_NOT_ACTIVE_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Flow run is not awaiting review.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
+    "context": {"status": "cancelled"},
+}
+
+_FLOW_RUN_REVIEW_STEP_RESULT_NOT_FOUND_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Current step result projection was not found for review edit.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND.value,
+}
+
 _FLOW_RUN_REVIEW_REJECT_REASON_REQUIRED_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review rejection reason is required.",
     "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-    "code": "flow_review_reject_reason_required",
+    "code": FlowApiErrorCode.REVIEW_REJECT_REASON_REQUIRED.value,
 }
 
 _FLOW_RUN_REVIEW_REJECT_REASON_TOO_LONG_ERROR_EXAMPLE: dict[str, object] = {
     "message": "Review rejection reason must be at most 1024 characters.",
     "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-    "code": "flow_review_reject_reason_too_long",
+    "code": FlowApiErrorCode.REVIEW_REJECT_REASON_TOO_LONG.value,
     "context": {"max_length": 1024},
 }
 
+_FLOW_RUN_REVIEW_IDEMPOTENCY_KEY_REQUIRED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review resume requires an Idempotency-Key header.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED.value,
+}
+
+_FLOW_RUN_INVALID_IDEMPOTENCY_KEY_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Idempotency key must be between 1 and 255 characters.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY.value,
+    "context": {"max_length": 255},
+}
+
+_FLOW_RUN_REVIEW_NOT_APPROVED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint must be approved before resume.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_NOT_APPROVED.value,
+    "context": {"state": "awaiting_review"},
+}
+
+_FLOW_RUN_REVIEW_ALREADY_RESUMED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint has already been resumed.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_ALREADY_RESUMED.value,
+}
+
+_FLOW_RUN_REVIEW_REJECTED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint was rejected.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_REJECTED.value,
+}
+
+_FLOW_RUN_REVIEW_CANCELLED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Review checkpoint was cancelled.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.REVIEW_CANCELLED.value,
+}
+
+_FLOW_RUN_RERUN_REASON_REQUIRED_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Rerun reason is required.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_REASON_REQUIRED.value,
+}
+
+_FLOW_RUN_RERUN_REASON_TOO_LONG_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Rerun reason must be at most 1024 characters.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_REASON_TOO_LONG.value,
+    "context": {"max_length": 1024},
+}
+
+_FLOW_RUN_RERUN_STALE_REVISION_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Flow run revision is stale.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_STALE_REVISION.value,
+    "context": {
+        "expected_run_revision": 4,
+        "current_run_revision": 5,
+    },
+}
+
+_FLOW_RUN_RERUN_INVALID_TRANSITION_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Flow run is not eligible for rerun.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION.value,
+    "context": {"status": "running"},
+}
+
+_FLOW_RUN_RERUN_STEP_NOT_FOUND_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Rerun step is not in the published flow snapshot.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND.value,
+}
+
+_FLOW_RUN_RERUN_STEP_INCOMPLETE_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Rerun step has no completed current result.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_STEP_INCOMPLETE.value,
+    "context": {"step_ids": ["3a6610d2-8b8b-4837-b260-8e66d2155405"]},
+}
+
+_FLOW_RUN_RERUN_STEP_INPUTS_INVALID_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "Rerun step_inputs may only target the rerun root step.",
+    "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID.value,
+    "context": {"step_ids": ["7b8d0f64-3ae6-4b7b-a018-795f85e0d78a"]},
+}
+
 _FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
-    "flow_review_stale_revision": {
+    FlowApiErrorCode.REVIEW_STALE_REVISION.value: {
         "summary": "Checkpoint revision changed before this request.",
         "value": _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE,
     },
-    "flow_review_expired": {
+    FlowApiErrorCode.REVIEW_EXPIRED.value: {
         "summary": "Checkpoint expired before review completion.",
         "value": _FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE,
     },
 }
 
+_FLOW_RUN_REVIEW_EDIT_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
+    FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value: {
+        "summary": "Edited payload violates the step output contract.",
+        "value": _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE,
+    },
+    **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value: {
+        "summary": "Checkpoint state no longer accepts edits.",
+        "value": _FLOW_RUN_REVIEW_NOT_ACTIVE_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND.value: {
+        "summary": "Reviewed step output is no longer available.",
+        "value": _FLOW_RUN_REVIEW_STEP_RESULT_NOT_FOUND_ERROR_EXAMPLE,
+    },
+}
+
+_FLOW_RUN_REVIEW_APPROVE_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
+    **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value: {
+        "summary": "Checkpoint state no longer accepts approval.",
+        "value": _FLOW_RUN_REVIEW_NOT_ACTIVE_ERROR_EXAMPLE,
+    },
+}
+
 _FLOW_RUN_REVIEW_REJECT_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
     **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
-    "flow_review_reject_reason_required": {
+    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value: {
+        "summary": "Checkpoint state no longer accepts rejection.",
+        "value": _FLOW_RUN_REVIEW_NOT_ACTIVE_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_REJECT_REASON_REQUIRED.value: {
         "summary": "Reject request did not include a non-empty reason.",
         "value": _FLOW_RUN_REVIEW_REJECT_REASON_REQUIRED_ERROR_EXAMPLE,
     },
-    "flow_review_reject_reason_too_long": {
+    FlowApiErrorCode.REVIEW_REJECT_REASON_TOO_LONG.value: {
         "summary": "Reject reason exceeded the accepted length.",
         "value": _FLOW_RUN_REVIEW_REJECT_REASON_TOO_LONG_ERROR_EXAMPLE,
+    },
+}
+
+_FLOW_RUN_REVIEW_RESUME_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
+    FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED.value: {
+        "summary": "Resume request did not include a retry key.",
+        "value": _FLOW_RUN_REVIEW_IDEMPOTENCY_KEY_REQUIRED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY.value: {
+        "summary": "Resume retry key exceeded the accepted length.",
+        "value": _FLOW_RUN_INVALID_IDEMPOTENCY_KEY_ERROR_EXAMPLE,
+    },
+    **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value: {
+        "summary": "Run or checkpoint state no longer accepts resume.",
+        "value": _FLOW_RUN_REVIEW_RESUME_NOT_ACTIVE_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_NOT_APPROVED.value: {
+        "summary": "Checkpoint has not been approved yet.",
+        "value": _FLOW_RUN_REVIEW_NOT_APPROVED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_ALREADY_RESUMED.value: {
+        "summary": "Checkpoint was already resumed with another retry key.",
+        "value": _FLOW_RUN_REVIEW_ALREADY_RESUMED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_REJECTED.value: {
+        "summary": "Rejected checkpoint cannot be resumed.",
+        "value": _FLOW_RUN_REVIEW_REJECTED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_CANCELLED.value: {
+        "summary": "Cancelled checkpoint cannot be resumed.",
+        "value": _FLOW_RUN_REVIEW_CANCELLED_ERROR_EXAMPLE,
+    },
+}
+
+_FLOW_RUN_RERUN_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
+    FlowApiErrorCode.RUN_RERUN_REASON_REQUIRED.value: {
+        "summary": "Rerun request did not include a non-empty reason.",
+        "value": _FLOW_RUN_RERUN_REASON_REQUIRED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_RERUN_REASON_TOO_LONG.value: {
+        "summary": "Rerun reason exceeded the accepted length.",
+        "value": _FLOW_RUN_RERUN_REASON_TOO_LONG_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_RERUN_STALE_REVISION.value: {
+        "summary": "Run revision changed before rerun acceptance.",
+        "value": _FLOW_RUN_RERUN_STALE_REVISION_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION.value: {
+        "summary": "Run status cannot accept a step rerun.",
+        "value": _FLOW_RUN_RERUN_INVALID_TRANSITION_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND.value: {
+        "summary": "Selected step is absent from the published snapshot.",
+        "value": _FLOW_RUN_RERUN_STEP_NOT_FOUND_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_RERUN_STEP_INCOMPLETE.value: {
+        "summary": "Selected step or downstream graph has no completed current result.",
+        "value": _FLOW_RUN_RERUN_STEP_INCOMPLETE_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID.value: {
+        "summary": "Rerun file overrides targeted a downstream step.",
+        "value": _FLOW_RUN_RERUN_STEP_INPUTS_INVALID_ERROR_EXAMPLE,
     },
 }
 
@@ -394,17 +630,8 @@ async def _commit_flow_runtime_write_before_response(
         yield
 
 
-def _result_files_by_run_id(
-    result_files: list[FlowRunStepResultFile],
-) -> dict[UUID, list[FlowRunStepResultFile]]:
-    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
-    for result_file in result_files:
-        grouped.setdefault(result_file.flow_run_id, []).append(result_file)
-    return grouped
-
-
 @router.get(
-    "/runs/status-capabilities/",
+    FLOW_RUN_STATUS_CAPABILITIES_PATH,
     response_model=FlowRunStatusCapabilitiesPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_status_capabilities",
@@ -418,7 +645,7 @@ async def get_flow_run_status_capabilities(
 
 
 @router.post(
-    "/{id}/runs/",
+    FLOW_RUNS_PATH,
     response_model=FlowRunPublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_flow_run",
@@ -427,18 +654,17 @@ async def get_flow_run_status_capabilities(
     responses={
         400: error_response(
             description=(
-                "Flow cannot be run in its current state or request payload is invalid. "
-                "Representative machine-readable codes include: flow_not_published, "
-                "flow_run_input_payload_too_large, flow_run_concurrency_limit_reached, "
-                "flow_input_required_field_missing, flow_input_invalid_number, "
-                "flow_run_required_step_input_missing, and flow_run_idempotency_conflict "
-                "when an Idempotency-Key is replayed with different input. "
-                "Runtime step-input errors include context.step_ids so clients can "
-                "highlight the missing required upload controls."
+                "Flow cannot be run in its current state or the request payload is "
+                "invalid. Machine-readable codes include "
+                "`flow_not_published`, `flow_run_top_level_file_ids_not_supported`, "
+                "`flow_run_idempotency_conflict`, and "
+                "`flow_run_required_step_input_missing`. Runtime step-input errors "
+                "include context.step_ids so clients can highlight the missing "
+                "required upload controls."
             ),
             message="Flow must be published before creating runs.",
             intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_not_published",
+            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -473,21 +699,22 @@ async def create_flow_run(
     container: Container = Depends(
         get_container_for_explicit_transaction(with_user=True)
     ),
-):
+) -> FlowRunPublic:
     assembler = FlowAssembler()
+    dispatch_request: FlowRunDispatchRequest | None = None
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.RUN,
+            required_access=FlowApiAction.RUN,
             allow_service_key_principals=True,
             require_published_for_service_key=True,
         )
         run_service = container.flow_run_service()
         user = container.user()
         actor_kwargs = audit_actor_kwargs(user)
-        run = await run_service.create_run(
+        create_result = await run_service.create_run(
             flow_id=id,
             input_payload_json=run_in.input_payload_json,
             expected_flow_version=run_in.expected_flow_version,
@@ -501,33 +728,35 @@ async def create_flow_run(
             ),
             idempotency_key=idempotency_key,
         )
+        run = create_result.run
+        if create_result.created:
+            await container.audit_service().log_async(
+                tenant_id=user.tenant_id,
+                actor_id=actor_kwargs["actor_id"],
+                actor_type=actor_kwargs["actor_type"],
+                actor_api_key_id=actor_kwargs["actor_api_key_id"],
+                action=ActionType.FLOW_RUN_CREATED,
+                entity_type=EntityType.FLOW_RUN,
+                entity_id=run.id,
+                description=f"Created flow run for flow {id}",
+                metadata=AuditMetadata.standard(actor=user, target=run),
+            )
+            dispatch_request = run_service.build_dispatch_request(run)
 
-        await container.audit_service().log_async(
-            tenant_id=user.tenant_id,
-            actor_id=actor_kwargs["actor_id"],
-            actor_type=actor_kwargs["actor_type"],
-            actor_api_key_id=actor_kwargs["actor_api_key_id"],
-            action=ActionType.FLOW_RUN_CREATED,
-            entity_type=EntityType.FLOW_RUN,
-            entity_id=run.id,
-            description=f"Created flow run for flow {id}",
-            metadata=AuditMetadata.standard(actor=user, target=run),
+    if dispatch_request is not None:
+        background_tasks.add_task(
+            dispatch_flow_run_after_commit,
+            request=dispatch_request,
         )
-        dispatch_request = run_service.build_dispatch_request(run)
-
-    background_tasks.add_task(
-        common.dispatch_flow_run_after_commit,
-        request=dispatch_request,
-    )
     return assembler.to_run_public(run)
 
 
 @router.get(
-    "/{id}/runs/",
+    FLOW_RUNS_PATH,
     response_model=OffsetPaginatedResponse[FlowRunPublic],
     status_code=status.HTTP_200_OK,
-    operation_id="list_flow_runs_alias",
-    summary="List flow runs (flow-first)",
+    operation_id="list_flow_runs",
+    summary="List flow runs",
     description=_FLOW_RUN_LIST_DESCRIPTION,
     responses={
         200: {
@@ -557,7 +786,7 @@ async def create_flow_run(
         ),
     },
 )
-async def list_flow_runs_alias(
+async def list_flow_runs(
     id: Annotated[
         UUID, Path(description="Identifier of the flow whose runs should be listed.")
     ],
@@ -570,46 +799,40 @@ async def list_flow_runs_alias(
     ),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
-        require_flow_lookup_without_scope=True,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     run_service = container.flow_run_service()
-    runs = await run_service.list_runs(
+    page = await run_service.list_runs_with_result_files_and_token_usage(
         flow_id=id,
-        limit=limit + 1,
+        limit=limit,
         offset=offset,
     )
     assembler = FlowAssembler()
-    page_items = runs[:limit]
-    result_files_by_run_id = _result_files_by_run_id(
-        await run_service.list_result_files_for_runs(runs=page_items)
-    )
-    token_usage_by_run_id = await run_service.list_token_usage_for_runs(runs=page_items)
     return {
-        "count": len(page_items),
+        "count": len(page.items),
         "items": [
             assembler.to_run_public(
-                item,
-                result_files=result_files_by_run_id.get(item.id, []),
-                token_usage=token_usage_by_run_id.get(item.id),
+                item.run,
+                result_files=item.result_files,
+                token_usage=item.token_usage,
             )
-            for item in page_items
+            for item in page.items
         ],
-        "has_more": len(runs) > limit,
+        "has_more": page.has_more,
     }
 
 
 @router.get(
-    "/{id}/runs/{run_id}/",
+    FLOW_RUN_PATH,
     response_model=FlowRunPublic,
     status_code=status.HTTP_200_OK,
-    operation_id="get_flow_run_alias",
-    summary="Get flow run (flow-first)",
+    operation_id="get_flow_run",
+    summary="Get flow run",
     description=_FLOW_RUN_STATUS_DESCRIPTION,
     responses={
         403: error_response(
@@ -627,7 +850,7 @@ async def list_flow_runs_alias(
         ),
     },
 )
-async def get_flow_run_alias(
+async def get_flow_run(
     id: Annotated[
         UUID, Path(description="Identifier of the flow that owns the requested run.")
     ],
@@ -635,26 +858,27 @@ async def get_flow_run_alias(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     run_service = container.flow_run_service()
-    run = await run_service.get_run(run_id=run_id, flow_id=id)
-    result_files = await run_service.list_result_files_for_runs(runs=[run])
-    token_usage_by_run_id = await run_service.list_token_usage_for_runs(runs=[run])
+    run_view = await run_service.get_run_with_result_files_and_token_usage(
+        run_id=run_id,
+        flow_id=id,
+    )
     return FlowAssembler().to_run_public(
-        run,
-        result_files=result_files,
-        token_usage=token_usage_by_run_id.get(run.id),
+        run_view.run,
+        result_files=run_view.result_files,
+        token_usage=run_view.token_usage,
     )
 
 
 @router.get(
-    "/{id}/runs/{run_id}/review-checkpoints/active/",
+    FLOW_REVIEW_ACTIVE_PATH,
     response_model=FlowRunReviewCheckpointPublic | None,
     status_code=status.HTTP_200_OK,
     operation_id="get_active_flow_run_review_checkpoint",
@@ -684,11 +908,11 @@ async def get_active_flow_run_review_checkpoint(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
     checkpoint = await container.flow_run_review_checkpoint_service().get_active_review_checkpoint(
@@ -697,13 +921,11 @@ async def get_active_flow_run_review_checkpoint(
     )
     if checkpoint is None:
         return None
-    return await _to_review_checkpoint_public(
-        container=container, checkpoint=checkpoint
-    )
+    return await _present_review_checkpoint(container=container, checkpoint=checkpoint)
 
 
 @router.patch(
-    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+    FLOW_REVIEW_CHECKPOINT_PATH,
     response_model=FlowRunReviewCheckpointPublic,
     status_code=status.HTTP_200_OK,
     operation_id="edit_flow_run_review_checkpoint",
@@ -722,35 +944,17 @@ async def get_active_flow_run_review_checkpoint(
                 }
             },
         },
-        400: {
-            "model": GeneralError,
-            "description": (
+        400: error_response(
+            description=(
                 "Review edit failed. Representative machine-readable codes include "
-                "typed_io_contract_violation, flow_review_stale_revision, "
-                "flow_review_expired, flow_review_not_active, and "
-                "flow_review_step_result_not_found. "
-                "Contract validation errors include context.checkpoint_id, "
-                "context.step_id, context.step_order, and context.payload_field."
+                "`typed_io_contract_violation`, `flow_review_stale_revision`, "
+                "`flow_review_expired`, `flow_review_not_active`, and "
+                "`flow_review_step_result_not_found`. Contract validation errors "
+                "include context.checkpoint_id, context.step_id, "
+                "context.step_order, and context.payload_field."
             ),
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "typed_io_contract_violation": {
-                            "summary": "Edited payload violates the step output contract.",
-                            "value": _FLOW_RUN_REVIEW_EDIT_CONTRACT_ERROR_EXAMPLE,
-                        },
-                        "flow_review_stale_revision": {
-                            "summary": "Checkpoint revision changed before edit.",
-                            "value": _FLOW_RUN_REVIEW_STALE_REVISION_ERROR_EXAMPLE,
-                        },
-                        "flow_review_expired": {
-                            "summary": "Checkpoint expired before review completion.",
-                            "value": _FLOW_RUN_REVIEW_EXPIRED_ERROR_EXAMPLE,
-                        },
-                    },
-                }
-            },
-        },
+            examples=_FLOW_RUN_REVIEW_EDIT_ERROR_EXAMPLES,
+        ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
             message="You do not have permission to review flows.",
@@ -762,7 +966,7 @@ async def get_active_flow_run_review_checkpoint(
             description="Run or checkpoint not found for this flow and tenant.",
             message="Review checkpoint not found.",
             intric_error_code=ErrorCodes.NOT_FOUND,
-            code="flow_review_checkpoint_not_found",
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
 )
@@ -779,11 +983,11 @@ async def edit_flow_run_review_checkpoint(
     ),
 ):
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.REVIEW,
+            required_access=FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
         checkpoint = (
@@ -795,14 +999,14 @@ async def edit_flow_run_review_checkpoint(
                 current_payload_json=review_in.current_payload_json,
             )
         )
-        response = await _to_review_checkpoint_public(
+        response = await _present_review_checkpoint(
             container=container, checkpoint=checkpoint
         )
     return response
 
 
 @router.post(
-    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+    FLOW_REVIEW_APPROVE_PATH,
     response_model=FlowRunReviewCheckpointPublic,
     status_code=status.HTTP_200_OK,
     operation_id="approve_flow_run_review_checkpoint",
@@ -825,10 +1029,10 @@ async def edit_flow_run_review_checkpoint(
         400: error_response(
             description=(
                 "Review approval failed. Representative machine-readable codes include "
-                "flow_review_stale_revision, flow_review_expired, and "
-                "flow_review_not_active."
+                "`flow_review_stale_revision`, `flow_review_expired`, and "
+                "`flow_review_not_active`."
             ),
-            examples=_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+            examples=_FLOW_RUN_REVIEW_APPROVE_ERROR_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -841,7 +1045,7 @@ async def edit_flow_run_review_checkpoint(
             description="Run or checkpoint not found for this flow and tenant.",
             message="Review checkpoint not found.",
             intric_error_code=ErrorCodes.NOT_FOUND,
-            code="flow_review_checkpoint_not_found",
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
 )
@@ -858,11 +1062,11 @@ async def approve_flow_run_review_checkpoint(
     ),
 ):
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.REVIEW,
+            required_access=FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
         checkpoint = await container.flow_run_review_checkpoint_service().approve_review_checkpoint(
@@ -871,14 +1075,14 @@ async def approve_flow_run_review_checkpoint(
             checkpoint_id=checkpoint_id,
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
         )
-        response = await _to_review_checkpoint_public(
+        response = await _present_review_checkpoint(
             container=container, checkpoint=checkpoint
         )
     return response
 
 
 @router.post(
-    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+    FLOW_REVIEW_REJECT_PATH,
     response_model=FlowRunReviewCheckpointPublic,
     status_code=status.HTTP_200_OK,
     operation_id="reject_flow_run_review_checkpoint",
@@ -901,8 +1105,9 @@ async def approve_flow_run_review_checkpoint(
         400: error_response(
             description=(
                 "Review rejection failed. Representative machine-readable codes include "
-                "flow_review_stale_revision, flow_review_expired, flow_review_not_active, "
-                "flow_review_reject_reason_required, and flow_review_reject_reason_too_long."
+                "`flow_review_stale_revision`, `flow_review_expired`, "
+                "`flow_review_not_active`, `flow_review_reject_reason_required`, "
+                "and `flow_review_reject_reason_too_long`."
             ),
             examples=_FLOW_RUN_REVIEW_REJECT_ERROR_EXAMPLES,
         ),
@@ -917,7 +1122,7 @@ async def approve_flow_run_review_checkpoint(
             description="Run or checkpoint not found for this flow and tenant.",
             message="Review checkpoint not found.",
             intric_error_code=ErrorCodes.NOT_FOUND,
-            code="flow_review_checkpoint_not_found",
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
 )
@@ -934,11 +1139,11 @@ async def reject_flow_run_review_checkpoint(
     ),
 ):
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.REVIEW,
+            required_access=FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
         checkpoint = await container.flow_run_review_checkpoint_service().reject_review_checkpoint(
@@ -948,17 +1153,20 @@ async def reject_flow_run_review_checkpoint(
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
             reason=review_in.reason,
         )
-        response = await _to_review_checkpoint_public(
+        response = await _present_review_checkpoint(
             container=container, checkpoint=checkpoint
         )
     return response
 
 
 @router.post(
-    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+    FLOW_REVIEW_RESUME_PATH,
     response_model=FlowRunReviewCheckpointResumeResponse,
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="resume_flow_run_review_checkpoint",
+    openapi_extra={
+        "parameters": [_FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_PARAMETER],
+    },
     summary="Resume flow run review checkpoint",
     description=_FLOW_RUN_REVIEW_RESUME_DESCRIPTION,
     responses={
@@ -977,11 +1185,13 @@ async def reject_flow_run_review_checkpoint(
         400: error_response(
             description=(
                 "Review resume failed. Representative machine-readable codes include "
-                "flow_review_idempotency_key_required, flow_review_stale_revision, "
-                "flow_review_expired, flow_review_not_approved, flow_review_already_resumed, "
-                "flow_review_rejected, and flow_review_cancelled."
+                "`flow_review_idempotency_key_required`, "
+                "`flow_run_invalid_idempotency_key`, `flow_review_stale_revision`, "
+                "`flow_review_expired`, `flow_review_not_active`, "
+                "`flow_review_not_approved`, `flow_review_already_resumed`, "
+                "`flow_review_rejected`, and `flow_review_cancelled`."
             ),
-            examples=_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+            examples=_FLOW_RUN_REVIEW_RESUME_ERROR_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -994,7 +1204,7 @@ async def reject_flow_run_review_checkpoint(
             description="Run or checkpoint not found for this flow and tenant.",
             message="Review checkpoint not found.",
             intric_error_code=ErrorCodes.NOT_FOUND,
-            code="flow_review_checkpoint_not_found",
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
         ),
     },
 )
@@ -1008,23 +1218,24 @@ async def resume_flow_run_review_checkpoint(
     review_in: FlowRunReviewCheckpointResumeRequest,
     background_tasks: BackgroundTasks,
     idempotency_key: Annotated[
-        str,
+        str | None,
         Header(
             alias="Idempotency-Key",
-            description="Required caller-supplied idempotency key for review resume retries.",
+            include_in_schema=False,
+            description=_FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION,
         ),
-    ],
+    ] = None,
     container: Container = Depends(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
     dispatch_request = None
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.RESUME,
+            required_access=FlowApiAction.RESUME,
             allow_service_key_principals=True,
         )
         review_service = container.flow_run_review_checkpoint_service()
@@ -1038,13 +1249,13 @@ async def resume_flow_run_review_checkpoint(
         if result.accepted:
             run_service = container.flow_run_service()
             dispatch_request = run_service.build_dispatch_request(result.run)
-        checkpoint = await _to_review_checkpoint_public(
+        checkpoint = await _present_review_checkpoint(
             container=container,
             checkpoint=result.checkpoint,
         )
     if dispatch_request is not None:
         background_tasks.add_task(
-            common.dispatch_flow_run_recoverably_after_commit,
+            dispatch_flow_run_recoverably_after_commit,
             request=dispatch_request,
         )
     return FlowRunReviewCheckpointResumeResponse(
@@ -1053,24 +1264,24 @@ async def resume_flow_run_review_checkpoint(
     )
 
 
-async def _to_review_checkpoint_public(
+async def _present_review_checkpoint(
     *,
     container: Container,
     checkpoint: FlowRunReviewCheckpoint,
 ) -> FlowRunReviewCheckpointPublic:
-    return await enrich_review_checkpoint_service_principal_summaries(
+    presenter = FlowServicePrincipalActorPresenter(
         api_key_repo=container.api_key_v2_repo(),
         tenant_id=container.user().tenant_id,
-        checkpoint=checkpoint,
     )
+    return await presenter.present_review_checkpoint(checkpoint)
 
 
 @router.post(
-    "/{id}/runs/{run_id}/cancel/",
+    FLOW_RUN_CANCEL_PATH,
     response_model=FlowRunPublic,
     status_code=status.HTTP_200_OK,
-    operation_id="cancel_flow_run_alias",
-    summary="Cancel flow run (flow-first)",
+    operation_id="cancel_flow_run",
+    summary="Cancel flow run",
     description=_FLOW_RUN_CANCEL_DESCRIPTION,
     responses={
         403: error_response(
@@ -1088,7 +1299,7 @@ async def _to_review_checkpoint_public(
         ),
     },
 )
-async def cancel_flow_run_alias(
+async def cancel_flow_run(
     id: Annotated[
         UUID, Path(description="Identifier of the flow that owns the run to cancel.")
     ],
@@ -1099,21 +1310,20 @@ async def cancel_flow_run_alias(
     ),
 ):
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.RUN,
+            required_access=FlowApiAction.RUN,
             allow_service_key_principals=True,
         )
         run_service = container.flow_run_service()
-        await run_service.get_run(run_id=run_id, flow_id=id)
-        run = await run_service.cancel_run(run_id=run_id)
+        run = await run_service.cancel_run(run_id=run_id, flow_id=id)
     return FlowAssembler().to_run_public(run)
 
 
 @router.post(
-    "/{id}/runs/{run_id}/steps/{step_id}/rerun/",
+    FLOW_RUN_STEP_RERUN_PATH,
     response_model=FlowRunStepRerunResponse,
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="rerun_flow_run_step",
@@ -1122,15 +1332,24 @@ async def cancel_flow_run_alias(
     responses={
         400: error_response(
             description=(
-                "Rerun request is invalid for the current run state. Representative "
-                "machine-readable codes include: flow_run_rerun_stale_revision, "
-                "flow_run_rerun_invalid_transition, flow_run_rerun_step_not_found, "
-                "flow_run_rerun_step_incomplete, flow_run_rerun_step_inputs_invalid, "
-                "flow_run_rerun_reason_required, and flow_run_rerun_reason_too_long."
+                "Rerun request is invalid. Representative machine-readable codes "
+                "include `flow_run_rerun_reason_required`, "
+                "`flow_run_rerun_reason_too_long`, "
+                "`flow_run_rerun_stale_revision`, "
+                "`flow_run_rerun_invalid_transition`, "
+                "`flow_run_rerun_step_not_found`, "
+                "`flow_run_rerun_step_incomplete`, and "
+                "`flow_run_rerun_step_inputs_invalid`. If the request includes "
+                "`input_payload_json` or `step_inputs`, rerun can also return "
+                "the shared run input and runtime-file validation codes used by "
+                "create-run, such as `flow_run_reserved_input_payload_key`, "
+                "`flow_run_input_payload_too_large`, `flow_run_file_not_bound_to_flow`, "
+                "`flow_run_file_not_accessible`, `flow_run_runtime_input_disabled`, "
+                "`flow_run_step_input_max_files_exceeded`, "
+                "`flow_run_step_input_file_too_large`, and "
+                "`flow_run_step_input_mimetype_rejected`."
             ),
-            message="Flow run revision is stale.",
-            intric_error_code=ErrorCodes.BAD_REQUEST,
-            code="flow_run_rerun_stale_revision",
+            examples=_FLOW_RUN_RERUN_ERROR_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -1160,12 +1379,15 @@ async def rerun_flow_run_step(
 ):
     dispatch_request = None
     async with _commit_flow_runtime_write_before_response(container):
-        await common.enforce_flow_scope_for_request(
+        await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
-            required_access=common.FlowApiAction.RERUN,
+            required_access=FlowApiAction.RERUN,
+            allow_service_key_principals=True,
         )
+        user = container.user()
+        actor_kwargs = audit_actor_kwargs(user)
         run_service = container.flow_run_service()
         rerun_service = container.flow_run_rerun_service()
         result = await rerun_service.rerun_step(
@@ -1186,11 +1408,33 @@ async def rerun_flow_run_step(
                 else None
             ),
         )
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            actor_id=actor_kwargs["actor_id"],
+            actor_type=actor_kwargs["actor_type"],
+            actor_api_key_id=actor_kwargs["actor_api_key_id"],
+            action=ActionType.FLOW_RUN_RERUN_REQUESTED,
+            entity_type=EntityType.FLOW_RUN,
+            entity_id=result.run.id,
+            description=(
+                f"Requested rerun for flow run {result.run.id} step {step_id}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=result.run,
+                extra={
+                    "flow_id": str(id),
+                    "rerun_operation_id": str(result.operation.id),
+                    "rerun_step_id": str(step_id),
+                    "rerun_created": result.created,
+                },
+            ),
+        )
         if result.created:
             dispatch_request = run_service.build_dispatch_request(result.run)
     if dispatch_request is not None:
         background_tasks.add_task(
-            common.dispatch_flow_run_recoverably_after_commit,
+            dispatch_flow_run_recoverably_after_commit,
             request=dispatch_request,
         )
     return FlowAssembler().to_rerun_response(
@@ -1201,11 +1445,11 @@ async def rerun_flow_run_step(
 
 
 @router.post(
-    "/{id}/runs/{run_id}/redispatch/",
+    FLOW_RUN_REDISPATCH_PATH,
     response_model=FlowRunRedispatchResponse,
     status_code=status.HTTP_200_OK,
-    operation_id="redispatch_flow_run_alias",
-    summary="Redispatch stale queued run (flow-first)",
+    operation_id="redispatch_flow_run",
+    summary="Redispatch stale queued run",
     description="""
     Attempt to redispatch a stale queued run.
 
@@ -1230,7 +1474,7 @@ async def rerun_flow_run_step(
         ),
     },
 )
-async def redispatch_flow_run_alias(
+async def redispatch_flow_run(
     id: Annotated[
         UUID, Path(description="Identifier of the flow that owns the stale queued run.")
     ],
@@ -1241,25 +1485,21 @@ async def redispatch_flow_run_alias(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    await common.enforce_flow_scope_for_request(
+    await flow_access_context.enforce_flow_scope(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.RUN,
+        required_access=FlowApiAction.RUN,
         allow_service_key_principals=True,
     )
     user = container.user()
     actor_kwargs = audit_actor_kwargs(user)
     run_service = container.flow_run_service()
-    run = await run_service.get_run(run_id=run_id, flow_id=id)
-
-    redispatched = await run_service.redispatch_stale_queued_runs(
+    result = await run_service.redispatch_run(
         flow_id=id,
-        run_id=run.id,
-        limit=1,
+        run_id=run_id,
         execution_backend=container.flow_execution_backend(),
     )
-    refreshed = await run_service.get_run(run_id=run_id, flow_id=id)
 
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -1268,15 +1508,14 @@ async def redispatch_flow_run_alias(
         actor_api_key_id=actor_kwargs["actor_api_key_id"],
         action=ActionType.FLOW_RUN_REDISPATCHED,
         entity_type=EntityType.FLOW_RUN,
-        entity_id=refreshed.id,
-        description=f"Redispatch requested for flow run {refreshed.id} (dispatch_count={redispatched})",
-        metadata=AuditMetadata.standard(actor=user, target=refreshed),
+        entity_id=result.run.id,
+        description=f"Redispatch requested for flow run {result.run.id} (dispatch_count={result.redispatched_count})",
+        metadata=AuditMetadata.standard(actor=user, target=result.run),
     )
-    response = FlowRunRedispatchResponse(
-        run=FlowAssembler().to_run_public(refreshed),
-        redispatched_count=redispatched,
+    return FlowRunRedispatchResponse(
+        run=FlowAssembler().to_run_public(result.run),
+        redispatched_count=result.redispatched_count,
     )
-    return {
-        "run": response.run,
-        "redispatched_count": response.redispatched_count,
-    }
+
+
+__all__ = ["router"]

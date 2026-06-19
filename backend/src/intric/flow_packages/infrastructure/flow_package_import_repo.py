@@ -15,7 +15,7 @@ from intric.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSource,
     FlowPackageImportStatus,
 )
-from intric.flow_packages.domain.flow_package_manifest import JsonObject
+from intric.json_types import JsonObject
 
 
 class FlowPackageImportRepository:

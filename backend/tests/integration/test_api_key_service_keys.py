@@ -233,7 +233,7 @@ async def _remove_space_member(db_container, space_id: str, user_id: UUID):
 def _assert_service_key_admin_required(response) -> None:
     assert response.status_code == 403, response.text
     body = response.json()
-    assert body["code"] == "service_key_admin_required"
+    assert body["code"] == "flow_service_key_admin_required"
     context = body["context"]
     assert context["auth_layer"] == "service_key_principal"
     assert context["capability"] == "view_current_definition"

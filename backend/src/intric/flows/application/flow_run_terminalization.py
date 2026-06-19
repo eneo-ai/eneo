@@ -10,14 +10,23 @@ from intric.audit.domain.actor_types import ActorType
 from intric.flows.application.flow_run_lifecycle_events import (
     emit_flow_run_terminalization_event,
 )
-from intric.flows.domain.flow import FlowRun, FlowRunStatus, JsonObject
+from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowRun,
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+)
 from intric.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
-from intric.flows.flow import FlowStepAttemptStatus, FlowStepResultStatus
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.principal import FlowAuditActorFields, FlowPrincipal
 
 logger = logging.getLogger(__name__)
@@ -40,10 +49,14 @@ class FlowRunTerminalizer:
     def __init__(
         self,
         flow_run_repo: FlowRunRepository,
+        flow_run_rerun_repo: FlowRunRerunRepository,
         audit_outbox_repo: FlowRunAuditOutboxRepository,
+        flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
     ):
         self.flow_run_repo = flow_run_repo
+        self.flow_run_rerun_repo = flow_run_rerun_repo
         self.audit_outbox_repo = audit_outbox_repo
+        self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
 
     async def terminalize_run(
         self,
@@ -53,7 +66,7 @@ class FlowRunTerminalizer:
         target_status: FlowRunStatus,
         source: FlowRunLifecycleSource,
         error: FlowRunError | None = None,
-        output_payload_json: JsonObject | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
         principal: FlowPrincipal | None = None,
     ) -> FlowRunTerminalizationResult:
@@ -94,7 +107,7 @@ class FlowRunTerminalizer:
         target_status: FlowRunStatus,
         source: FlowRunLifecycleSource,
         error: FlowRunError | None = None,
-        output_payload_json: JsonObject | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
         principal: FlowPrincipal | None = None,
         stale_before: datetime | None = None,
@@ -178,13 +191,14 @@ class FlowRunTerminalizer:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowStepResultStatus.FAILED,
+                error_code=effective_error_code,
                 error_message=effective_error_message,
             )
             await self.flow_run_repo.close_open_step_attempts_for_terminal_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowStepAttemptStatus.FAILED,
-                error_code=effective_error_code or source.value,
+                error_code=effective_error_code,
                 error_message=effective_error_message,
             )
         elif target_status == FlowRunStatus.CANCELLED:
@@ -192,21 +206,22 @@ class FlowRunTerminalizer:
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowStepResultStatus.CANCELLED,
+                error_code=effective_error_code,
                 error_message=effective_error_message,
             )
             await self.flow_run_repo.close_open_step_attempts_for_terminal_run(
                 run_id=run_id,
                 tenant_id=tenant_id,
                 target_status=FlowStepAttemptStatus.CANCELLED,
-                error_code=effective_error_code or source.value,
+                error_code=effective_error_code,
                 error_message=effective_error_message,
             )
 
-        await self.flow_run_repo.close_active_rerun_operations_for_terminal_run(
+        await self.flow_run_rerun_repo.close_active_rerun_operations_for_terminal_run(
             run_id=run_id,
             tenant_id=tenant_id,
             target_status=target_status,
-            error_code=effective_error_code or source.value,
+            error_code=effective_error_code,
             error_message=effective_error_message,
         )
 
@@ -215,7 +230,7 @@ class FlowRunTerminalizer:
             principal=principal,
         )
         if target_status == FlowRunStatus.CANCELLED:
-            await self.flow_run_repo.cancel_active_review_checkpoint_for_terminal_run(
+            await self.flow_run_review_checkpoint_repo.cancel_active_review_checkpoint_for_terminal_run(
                 tenant_id=tenant_id,
                 flow_run_id=run_id,
                 run_revision=terminal_run.revision,

@@ -26,13 +26,13 @@ from intric.flows.flow_input_limits import (
 )
 from intric.flows.flow_retention_policy import (
     apply_flow_retention_policy_patch,
-    normalize_flow_retention_policy_settings,
     resolve_flow_retention_policy,
 )
 from intric.flows.flow_runtime_policy import (
     apply_flow_runtime_policy_patch,
     resolve_flow_runtime_policy,
 )
+from intric.flows.flow_settings import normalize_flow_settings_object
 from intric.main.config import get_settings as get_app_settings
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
@@ -198,9 +198,7 @@ class SettingService:
         return await self.tenant_repo.get(self.user.tenant_id)
 
     async def _persist_flow_settings(self, flow_settings: dict[str, Any]) -> None:
-        normalized_flow_settings = normalize_flow_retention_policy_settings(
-            flow_settings
-        )
+        normalized_flow_settings = normalize_flow_settings_object(flow_settings)
         tenant_update = TenantUpdate(
             id=self.user.tenant_id,
             flow_settings=normalized_flow_settings,
@@ -479,11 +477,17 @@ class SettingService:
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
         tenant = await self._get_tenant_for_flow_settings()
-        next_flow_settings = apply_flow_retention_policy_patch(
-            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
-            **patch,
-            remove_keys={key for key, value in patch.items() if value is None},
-        )
+        try:
+            next_flow_settings = apply_flow_retention_policy_patch(
+                cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None)),
+                **patch,
+                remove_keys={key for key, value in patch.items() if value is None},
+            )
+        except ValueError as error:
+            raise BadRequestException(
+                str(error),
+                code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
+            ) from error
         await self._persist_flow_settings(next_flow_settings)
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,

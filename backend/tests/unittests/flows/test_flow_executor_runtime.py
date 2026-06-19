@@ -9,33 +9,62 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 import intric.flows.runtime.executor as executor_module
+import intric.flows.runtime.flow_runtime_trace as flow_runtime_trace
+from intric.authentication.auth_models import (
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ServicePrincipalInDB,
+    ServicePrincipalState,
+)
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
     stable_hash,
 )
-from intric.flows.enums import FlowRunLifecycleSource
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     FlowRun,
+    FlowRunRerunInvalidatedStep,
+    FlowRunRerunOperation,
     FlowRunStatus,
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
+    RerunStepInputOverride,
 )
-from intric.flows.flow import (
+from intric.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
+from intric.flows.domain.rerun_exceptions import (
+    FlowRunRerunAttemptLineageConflictError,
+    FlowRunRerunMultipleActiveOperationsError,
+)
+from intric.flows.domain.review_checkpoint_exceptions import (
+    FlowReviewCheckpointRunNotRunningError,
+    FlowReviewCheckpointStepResultIncompleteError,
+    FlowReviewMultipleActiveCheckpointsError,
+    FlowReviewOpenBlockedByActiveCheckpointError,
+)
+from intric.flows.enums import (
+    FlowRunLifecycleSource,
+    FlowRunRerunInvalidationRole,
+    FlowRunRerunOperationStatus,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
     ModelParameterSnapshot,
 )
 from intric.flows.flow_runtime_policy import FlowRuntimePolicy
-from intric.flows.infrastructure.flow_run_repo import (
-    FlowReviewCheckpointRunNotRunningError,
+from intric.flows.infrastructure.flow_run_rerun_repo import (
+    FlowRunActiveRerunOperation,
+    FlowRunRerunRepository,
 )
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
@@ -47,6 +76,7 @@ from intric.flows.runtime.executor import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
 from intric.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -57,6 +87,18 @@ from intric.main.exceptions import BadRequestException, TypedIOValidationExcepti
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
+
+
+@pytest.fixture
+def captured_flow_spans(monkeypatch):
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        flow_runtime_trace, "_tracer", provider.get_tracer("test.flows")
+    )
+    yield exporter
+    exporter.clear()
 
 
 def _run(*, status: FlowRunStatus, user) -> FlowRun:
@@ -226,6 +268,23 @@ def _step_result(output: StepExecutionOutput) -> StepExecutionResult:
     return StepExecutionResult(output=output)
 
 
+def _minimal_step_execution_output() -> StepExecutionOutput:
+    return StepExecutionOutput(
+        input_text="hello",
+        source_text="hello",
+        input_source="flow_input",
+        used_question_binding=False,
+        full_text="answer",
+        persisted_text="answer",
+        generated_file_ids=[],
+        tool_calls_metadata=None,
+        num_tokens_input=1,
+        num_tokens_output=2,
+        effective_prompt="Prompt",
+        model_parameters_json={"temperature": 0.2},
+    )
+
+
 def _typed_output_result() -> TypedOutputProcessingResult:
     return TypedOutputProcessingResult(
         structured_output=None,
@@ -272,13 +331,41 @@ def _run_get_mock(*runs: FlowRun) -> AsyncMock:
     return AsyncMock(side_effect=_get)
 
 
-def _build_executor(user):
+def _service_principal(user) -> ServicePrincipalInDB:
+    return ServicePrincipalInDB(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        display_name="Runtime service principal",
+        description=None,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        state=ServicePrincipalState.ACTIVE,
+        created_by_user_id=user.id,
+    )
+
+
+def _service_run(user, service_principal: ServicePrincipalInDB, *, api_key_id: UUID):
+    return SimpleNamespace(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=user.tenant_id,
+        principal_type=PrincipalType.SERVICE_KEY.value,
+        principal_user_id=None,
+        principal_service_id=service_principal.id,
+        created_by_api_key_id=api_key_id,
+        runtime_service_permission=ApiKeyPermission.WRITE,
+    )
+
+
+def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     flow_repo = AsyncMock()
     session = AsyncMock()
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
     flow_version_repo = AsyncMock()
+    flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
 
     async def _create_or_get_attempt_started(**kwargs):
@@ -296,14 +383,18 @@ def _build_executor(user):
         return SimpleNamespace(get_assistant=lambda assistant_id: assistant)
 
     flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=1)
-    flow_run_repo.get_active_rerun_operation = AsyncMock(return_value=None)
+    flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(return_value=None)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    flow_run_repo.copy_step_input_files_from_predecessor_attempt = AsyncMock()
+    flow_run_rerun_repo.link_rerun_invalidated_step_attempt = AsyncMock()
+    flow_run_rerun_repo.mark_rerun_operation_running = AsyncMock()
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
         side_effect=_create_or_get_attempt_started
     )
     space_repo.get_space_by_assistant = AsyncMock(side_effect=_get_space_by_assistant)
     completion_service = AsyncMock()
     file_repo = AsyncMock()
-    template_asset_service = AsyncMock()
+    template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
 
@@ -318,20 +409,41 @@ def _build_executor(user):
 
     flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
     executor = FlowRunExecutor(
-        user=user,
+        runtime_actor=runtime_actor or FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
-        template_asset_service=template_asset_service,
+        template_asset_repo=template_asset_repo,
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=1024 * 1024,
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
+
+
+def test_executor_derives_service_principal_owner_from_runtime_actor(user):
+    service_principal = _service_principal(user)
+    api_key_id = uuid4()
+    actor = FlowRunActor.from_service_principal_run(
+        run=_service_run(user, service_principal, api_key_id=api_key_id),
+        service_principal=service_principal,
+    )
+
+    executor, *_ = _build_executor(user, runtime_actor=actor)
+
+    assert executor.runtime_actor is actor
+    assert executor.principal is actor.principal
+    assert executor._template_fill_runtime_deps().principal.file_owner_fields() == {
+        "owner_type": PrincipalType.SERVICE_KEY.value,
+        "owner_user_id": None,
+        "owner_service_id": service_principal.id,
+    }
 
 
 def _empty_execution_state() -> RunExecutionState:
@@ -341,6 +453,76 @@ def _empty_execution_state() -> RunExecutionState:
         assistant_cache={},
         json_mode_supported={},
         file_cache={},
+    )
+
+
+def _active_rerun_operation(
+    *,
+    user,
+    run: FlowRun,
+    step: RuntimeStep,
+    role: FlowRunRerunInvalidationRole,
+    root_step_input_override: RerunStepInputOverride | None,
+    root_step_input_override_requested: bool | None = None,
+    root_attempt_no: int = 3,
+    prior_attempt_id: UUID | None = None,
+) -> tuple[FlowRunActiveRerunOperation, FlowRunRerunInvalidatedStep]:
+    now = datetime.now(timezone.utc)
+    operation = FlowRunRerunOperation(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        rerun_step_id=step.step_id,
+        rerun_step_order=step.step_order,
+        root_attempt_no=root_attempt_no,
+        root_attempt_id=None,
+        status=FlowRunRerunOperationStatus.QUEUED,
+        request_fingerprint="rerun-fingerprint",
+        expected_run_revision=1,
+        accepted_run_revision=2,
+        reason="rerun",
+        input_payload_json=None,
+        root_step_input_override_requested=(
+            root_step_input_override is not None
+            if root_step_input_override_requested is None
+            else root_step_input_override_requested
+        ),
+        root_step_input_override=root_step_input_override,
+        requested_by_principal_type=PrincipalType.USER,
+        requested_by_user_id=user.id,
+        requested_by_service_id=None,
+        failure_code=None,
+        failure_message=None,
+        started_at=None,
+        finished_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+    invalidated_step = FlowRunRerunInvalidatedStep(
+        id=uuid4(),
+        operation_id=operation.id,
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        invalidation_order=1,
+        role=role,
+        dependency_sources_json=[],
+        prior_step_result_id=uuid4(),
+        prior_attempt_id=prior_attempt_id,
+        new_attempt_no=None,
+        new_attempt_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+    return (
+        FlowRunActiveRerunOperation(
+            operation=operation,
+            invalidated_steps=(invalidated_step,),
+        ),
+        invalidated_step,
     )
 
 
@@ -357,15 +539,141 @@ async def test_flow_is_active_delegates_to_flow_repo(user):
     flow_repo.is_active.assert_awaited_once_with(flow_id=flow_id, tenant_id=tenant_id)
 
 
+@pytest.mark.asyncio
+async def test_start_step_attempt_skips_file_copy_for_root_rerun_file_override(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_rerun_repo = executor.flow_run_rerun_repo
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    prior_attempt_id = uuid4()
+    active_operation, invalidated_step = _active_rerun_operation(
+        user=user,
+        run=run,
+        step=step,
+        role=FlowRunRerunInvalidationRole.ROOT,
+        root_step_input_override=RerunStepInputOverride(
+            step_id=step.step_id,
+            file_ids=(),
+        ),
+        root_step_input_override_requested=True,
+        prior_attempt_id=prior_attempt_id,
+    )
+
+    started = await executor._start_step_attempt(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step=step,
+        celery_task_id="rerun-root",
+        active_rerun_operation=active_operation,
+        active_rerun_invalidated_step=invalidated_step,
+    )
+
+    assert started.attempt_no == active_operation.operation.root_attempt_no
+    flow_run_repo.copy_step_input_files_from_predecessor_attempt.assert_not_awaited()
+    flow_run_rerun_repo.link_rerun_invalidated_step_attempt.assert_awaited_once_with(
+        operation_id=active_operation.operation.id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        new_attempt_no=started.attempt_no,
+        new_attempt_id=started.id,
+    )
+    flow_run_rerun_repo.mark_rerun_operation_running.assert_awaited_once_with(
+        operation_id=active_operation.operation.id,
+        tenant_id=run.tenant_id,
+        root_attempt_id=started.id,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "role",
+        "root_step_input_override",
+        "root_step_input_override_requested",
+        "allocated_attempt_no",
+        "expected_mark_running",
+    ),
+    [
+        (FlowRunRerunInvalidationRole.ROOT, None, False, 3, True),
+        (
+            FlowRunRerunInvalidationRole.DOWNSTREAM,
+            "override",
+            True,
+            4,
+            False,
+        ),
+    ],
+)
+async def test_start_step_attempt_copies_file_rows_for_rerun_inherited_inputs(
+    user,
+    role: FlowRunRerunInvalidationRole,
+    root_step_input_override: str | None,
+    root_step_input_override_requested: bool,
+    allocated_attempt_no: int,
+    expected_mark_running: bool,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_rerun_repo = executor.flow_run_rerun_repo
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+    prior_attempt_id = uuid4()
+    flow_run_repo.allocate_next_attempt_no = AsyncMock(
+        return_value=allocated_attempt_no
+    )
+    active_operation, invalidated_step = _active_rerun_operation(
+        user=user,
+        run=run,
+        step=step,
+        role=role,
+        root_step_input_override=(
+            RerunStepInputOverride(step_id=step.step_id, file_ids=())
+            if root_step_input_override is not None
+            else None
+        ),
+        root_step_input_override_requested=root_step_input_override_requested,
+        root_attempt_no=3,
+        prior_attempt_id=prior_attempt_id,
+    )
+
+    started = await executor._start_step_attempt(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step=step,
+        celery_task_id="rerun-inherited",
+        active_rerun_operation=active_operation,
+        active_rerun_invalidated_step=invalidated_step,
+    )
+
+    assert started.attempt_no == allocated_attempt_no
+    flow_run_repo.copy_step_input_files_from_predecessor_attempt.assert_awaited_once_with(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        predecessor_attempt_id=prior_attempt_id,
+        target_attempt_no=started.attempt_no,
+    )
+    flow_run_rerun_repo.link_rerun_invalidated_step_attempt.assert_awaited_once()
+    if expected_mark_running:
+        flow_run_rerun_repo.mark_rerun_operation_running.assert_awaited_once()
+    else:
+        flow_run_rerun_repo.mark_rerun_operation_running.assert_not_awaited()
+
+
 def test_executor_accepts_grouped_config(user):
     flow_repo = AsyncMock()
     session = AsyncMock()
     flow_run_repo = AsyncMock()
+    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
     flow_version_repo = AsyncMock()
+    flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
-    template_asset_service = AsyncMock()
+    template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     config = FlowRunExecutorConfig(
         max_inline_text_bytes=2048,
@@ -386,16 +694,19 @@ def test_executor_accepts_grouped_config(user):
     )
 
     executor = FlowRunExecutor(
-        user=user,
+        runtime_actor=FlowRunActor.from_user(user=user),
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
+        flow_run_rerun_repo=flow_run_rerun_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
         completion_service=completion_service,
         file_repo=file_repo,
-        template_asset_service=template_asset_service,
+        template_asset_repo=template_asset_repo,
         encryption_service=encryption_service,
+        flow_run_terminalizer=AsyncMock(),
         config=config,
     )
 
@@ -515,7 +826,6 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="result",
                 persisted_text="result",
                 generated_file_ids=[],
@@ -562,7 +872,6 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
         "source_text": "hello",
         "input_source": "flow_input",
         "used_question_binding": False,
-        "legacy_prompt_binding_used": False,
         "transcription": {
             "model": "kb-whisper-large",
             "language": "sv",
@@ -598,7 +907,29 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
     flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
-    flow_run_repo.finish_attempt = AsyncMock()
+    lifecycle_events: list[str] = []
+    create_attempt = flow_run_repo.create_or_get_attempt_started.side_effect
+
+    async def _create_attempt_in_order(**kwargs):
+        lifecycle_events.append("attempt_started")
+        return await create_attempt(**kwargs)
+
+    async def _save_step_result_in_order(*args, **kwargs):
+        lifecycle_events.append("step_result_saved")
+        return args[1]
+
+    async def _finish_attempt_in_order(**kwargs):
+        lifecycle_events.append("attempt_finished")
+
+    async def _insert_delivery_in_order(**kwargs):
+        lifecycle_events.append("delivery_inserted")
+        return uuid4()
+
+    flow_run_repo.create_or_get_attempt_started = AsyncMock(
+        side_effect=_create_attempt_in_order
+    )
+    flow_repo.save_step_result = AsyncMock(side_effect=_save_step_result_in_order)
+    flow_run_repo.finish_attempt = AsyncMock(side_effect=_finish_attempt_in_order)
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
@@ -628,7 +959,6 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="result",
                 persisted_text="result",
                 generated_file_ids=[],
@@ -643,7 +973,7 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
         )
     )
     executor.webhook_delivery_repo.insert_pending_delivery = AsyncMock(
-        return_value=uuid4()
+        side_effect=_insert_delivery_in_order
     )
 
     result = await executor.execute(
@@ -666,6 +996,12 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
     assert call_kwargs["tenant_id"] == user.tenant_id
     assert call_kwargs["intent"].flow_run_id == queued_run.id
     assert call_kwargs["intent"].step_id == step_id
+    assert lifecycle_events == [
+        "attempt_started",
+        "step_result_saved",
+        "attempt_finished",
+        "delivery_inserted",
+    ]
     executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
 
 
@@ -736,7 +1072,6 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
                     source_text="hello",
                     input_source="flow_input",
                     used_question_binding=False,
-                    legacy_prompt_binding_used=False,
                     full_text="step-one",
                     persisted_text="step-one",
                     generated_file_ids=[],
@@ -757,7 +1092,6 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
                     source_text="step-one",
                     input_source="previous_step",
                     used_question_binding=False,
-                    legacy_prompt_binding_used=False,
                     full_text="step-two",
                     persisted_text="step-two",
                     generated_file_ids=[],
@@ -979,11 +1313,11 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     )
 
     assert result["status"] == "failed"
-    assert result["error"] == "step_execution_failed"
+    assert result["error"] == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
     flow_run_repo.finish_attempt.assert_awaited_once()
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert finish_kwargs["status"] == FlowStepAttemptStatus.FAILED
-    assert finish_kwargs["error_code"] == "step_execution_failed"
+    assert finish_kwargs["error_code"] == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
     assert finish_kwargs["error_message"] == "Flow step 1 execution failed."
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     update_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
@@ -1046,7 +1380,10 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "step_execution_failed"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
     flow_run_repo.finish_attempt.assert_not_awaited()
     saved_result = flow_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
@@ -1057,6 +1394,178 @@ async def test_attempt_start_failure_after_claim_marks_run_and_step_failed(user)
         ]
         == FlowRunStatus.FAILED
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_terminalizes_multiple_active_rerun_operations(
+    user,
+    caplog,
+):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    flow_run_rerun_repo = executor.flow_run_rerun_repo
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    failed_run = queued_run.model_copy(
+        update={
+            "status": FlowRunStatus.FAILED,
+            "error": FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT,
+                message="Rerun failed because multiple active rerun operations exist.",
+            ),
+        }
+    )
+    step_id = uuid4()
+    assistant_id = uuid4()
+
+    flow_run_repo.get = _run_get_mock(queued_run, failed_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.list_step_results = AsyncMock(return_value=[])
+    flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(
+        side_effect=FlowRunRerunMultipleActiveOperationsError(flow_run_id=queued_run.id)
+    )
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    with caplog.at_level(logging.CRITICAL, logger="intric.flows.runtime.executor"):
+        result = await executor.execute(
+            run_id=queued_run.id,
+            flow_id=queued_run.flow_id,
+            tenant_id=user.tenant_id,
+            celery_task_id="task-1",
+            retry_count=0,
+        )
+
+    assert result == {
+        "status": "failed",
+        "error": "Rerun failed because multiple active rerun operations exist.",
+    }
+    flow_repo.save_step_result.assert_not_awaited()
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.session.rollback.assert_awaited_once()
+    terminalize_kwargs = (
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    )
+    assert terminalize_kwargs["target_status"] == FlowRunStatus.FAILED
+    run_error = terminalize_kwargs["error"]
+    assert run_error.code == "flow_run_rerun_multiple_active_operations_invariant"
+    assert (
+        run_error.message
+        == "Rerun failed because multiple active rerun operations exist."
+    )
+    assert "flow_executor.rerun_multiple_active_operations_terminalized_failed" in (
+        caplog.text
+    )
+
+
+@pytest.mark.asyncio
+async def test_rerun_lineage_conflict_uses_specific_run_error_after_claim(user):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    flow_run_rerun_repo = executor.flow_run_rerun_repo
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step = _runtime_step(step_order=1, input_source="flow_input")
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    active_operation, _ = _active_rerun_operation(
+        user=user,
+        run=queued_run,
+        step=step,
+        role=FlowRunRerunInvalidationRole.ROOT,
+        root_step_input_override=None,
+        root_step_input_override_requested=False,
+        prior_attempt_id=uuid4(),
+    )
+
+    flow_run_repo.get = _run_get_mock(queued_run, running_run, running_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.list_step_results = AsyncMock(return_value=[])
+    flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(
+        return_value=active_operation
+    )
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_rerun_repo.link_rerun_invalidated_step_attempt = AsyncMock(
+        side_effect=FlowRunRerunAttemptLineageConflictError(
+            operation_id=active_operation.operation.id,
+            step_id=step.step_id,
+            new_attempt_id=uuid4(),
+        )
+    )
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step.step_id),
+                        "step_order": step.step_order,
+                        "assistant_id": str(step.assistant_id),
+                        "input_source": step.input_source,
+                        "output_mode": step.output_mode,
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
+    flow_run_repo.finish_attempt.assert_not_awaited()
+    flow_run_rerun_repo.mark_rerun_operation_running.assert_not_awaited()
+    saved_result = flow_repo.save_step_result.await_args.args[1]
+    assert saved_result.status == FlowStepResultStatus.FAILED
+    assert saved_result.error_message == "Flow step 1 execution failed."
+    terminalize_kwargs = (
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
+    )
+    run_error = terminalize_kwargs["error"]
+    assert run_error.code == "flow_run_rerun_attempt_lineage_conflict_invariant"
+    assert (
+        run_error.message
+        == "Rerun failed because the invalidated step is already linked to another attempt."
+    )
+    assert run_error.step_order == 1
 
 
 @pytest.mark.asyncio
@@ -1333,6 +1842,49 @@ async def test_typed_validation_failure_terminalizes_with_bounded_public_error(u
 
 
 @pytest.mark.asyncio
+async def test_typed_validation_failure_unknown_code_uses_cataloged_fallback(user):
+    executor, flow_repo, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+
+    step = _step_for_execute_step(step_order=2)
+    run_id = uuid4()
+    flow_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    typed_exc = TypedIOValidationException(
+        "Step 2 failed with an uncataloged typed IO code.",
+        code="typed_io_private_unregistered",
+    )
+
+    await executor._handle_typed_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload=None,
+        state=_empty_execution_state(),
+    )
+
+    fallback_code = FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value
+    finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
+    assert finish_kwargs["error_code"] == fallback_code
+    saved_result = flow_repo.save_step_result.await_args.args[1]
+    assert saved_result.error_code == fallback_code
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert terminal_error.code == fallback_code
+
+
+@pytest.mark.asyncio
 async def test_cancelled_step_retains_attempt_start_provenance(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
@@ -1478,7 +2030,6 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
         "source_text": "",
         "input_source": "flow_input",
         "used_question_binding": False,
-        "legacy_prompt_binding_used": False,
     }
 
 
@@ -1780,7 +2331,6 @@ async def test_execute_uses_persisted_next_attempt_no_for_attempt_lifecycle(user
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="done",
                 persisted_text="done",
                 generated_file_ids=[],
@@ -1867,7 +2417,6 @@ async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancel
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="step-one",
                 persisted_text="step-one",
                 generated_file_ids=[],
@@ -1945,7 +2494,6 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="result",
                 persisted_text="result",
                 generated_file_ids=[],
@@ -1985,7 +2533,7 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
             "status": FlowRunStatus.FAILED,
             "error": FlowRunError.from_source(
                 FlowRunLifecycleSource.EXECUTOR_FAILED,
-                code="flow_run_failed",
+                code=FlowApiErrorCode.RUN_TASK_FAILURE,
                 message="Run was terminalized as failed.",
             ),
         }
@@ -2013,9 +2561,9 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.open_review_checkpoint_for_completed_step = AsyncMock(
+    executor.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step = AsyncMock(
         side_effect=FlowReviewCheckpointRunNotRunningError(
-            "Flow run changed state before review checkpoint opened."
+            status=FlowRunStatus.FAILED.value
         )
     )
     flow_repo.save_step_result = AsyncMock(return_value=completed)
@@ -2049,7 +2597,6 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="done",
                 persisted_text="done",
                 generated_file_ids=[],
@@ -2072,17 +2619,57 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
         )
 
     assert result == {"status": "failed", "error": "Run was terminalized as failed."}
-    flow_run_repo.open_review_checkpoint_for_completed_step.assert_awaited_once()
+    executor.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step.assert_awaited_once()
     executor.session.rollback.assert_awaited_once()
     assert "flow_executor.review_open_skipped_run_terminal" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_execute_propagates_non_terminal_review_open_errors(user):
+@pytest.mark.parametrize(
+    ("review_open_error", "expected_code", "expected_message"),
+    [
+        (
+            FlowReviewOpenBlockedByActiveCheckpointError(active_checkpoint_id=uuid4()),
+            FlowApiErrorCode.REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT,
+            "Review checkpoint opening failed because another checkpoint is active.",
+        ),
+        (
+            FlowReviewCheckpointStepResultIncompleteError(
+                step_id=uuid4(), attempt_no=1
+            ),
+            FlowApiErrorCode.REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT,
+            "Review checkpoint opening failed because the completed step result was unavailable.",
+        ),
+        (
+            FlowReviewMultipleActiveCheckpointsError(),
+            FlowApiErrorCode.REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT,
+            "Review checkpoint opening failed because multiple checkpoints are active.",
+        ),
+    ],
+)
+async def test_execute_terminalizes_review_open_invariant_errors(
+    user,
+    caplog,
+    review_open_error,
+    expected_code,
+    expected_message,
+):
     executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
     step_id = uuid4()
+    failed_run = queued_run.model_copy(
+        update={
+            "status": FlowRunStatus.FAILED,
+            "error": FlowRunError.from_source(
+                FlowRunLifecycleSource.EXECUTOR_FAILED,
+                code=expected_code,
+                message=expected_message,
+                step_id=step_id,
+                step_order=1,
+            ),
+        }
+    )
     assistant_id = uuid4()
     claimed = _claimed_step_result(
         run_id=queued_run.id,
@@ -2098,17 +2685,15 @@ async def test_execute_propagates_non_terminal_review_open_errors(user):
         },
         deep=True,
     )
-    review_conflict = BadRequestException(
-        "Flow run already has an active review checkpoint.",
-        code="flow_review_checkpoint_active_conflict",
+    flow_run_repo.get = AsyncMock(
+        side_effect=[queued_run, running_run, running_run, failed_run]
     )
-
-    flow_run_repo.get = AsyncMock(side_effect=[queued_run, running_run, running_run])
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
     flow_run_repo.finish_attempt = AsyncMock()
-    flow_run_repo.open_review_checkpoint_for_completed_step = AsyncMock(
-        side_effect=review_conflict
+    executor._terminalize_run = AsyncMock()
+    executor.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step = AsyncMock(
+        side_effect=review_open_error
     )
     flow_repo.save_step_result = AsyncMock(return_value=completed)
     flow_version_repo.get = AsyncMock(
@@ -2141,7 +2726,6 @@ async def test_execute_propagates_non_terminal_review_open_errors(user):
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="done",
                 persisted_text="done",
                 generated_file_ids=[],
@@ -2154,8 +2738,8 @@ async def test_execute_propagates_non_terminal_review_open_errors(user):
         )
     )
 
-    with pytest.raises(BadRequestException) as exc_info:
-        await executor.execute(
+    with caplog.at_level(logging.INFO, logger="intric.flows.runtime.executor"):
+        result = await executor.execute(
             run_id=queued_run.id,
             flow_id=queued_run.flow_id,
             tenant_id=user.tenant_id,
@@ -2163,8 +2747,26 @@ async def test_execute_propagates_non_terminal_review_open_errors(user):
             retry_count=0,
         )
 
-    assert exc_info.value is review_conflict
-    executor.session.rollback.assert_not_awaited()
+    assert result == {"status": "failed", "error": expected_message}
+    executor.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step.assert_awaited_once()
+    executor.session.rollback.assert_awaited_once()
+    executor._terminalize_run.assert_awaited_once()
+    terminalize_kwargs = executor._terminalize_run.await_args.kwargs
+    assert terminalize_kwargs["target_status"] == FlowRunStatus.FAILED
+    assert terminalize_kwargs["source"] == FlowRunLifecycleSource.EXECUTOR_FAILED
+    terminal_error = terminalize_kwargs["error"]
+    assert isinstance(terminal_error, FlowRunError)
+    assert terminal_error.code == expected_code
+    assert terminal_error.message == expected_message
+    assert terminal_error.step_id == step_id
+    assert terminal_error.step_order == 1
+    if isinstance(review_open_error, FlowReviewMultipleActiveCheckpointsError):
+        assert (
+            "flow_executor.review_open_multiple_active_terminalized_failed"
+            in caplog.text
+        )
+    else:
+        assert "flow_executor.review_open_terminalized_failed" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -2246,7 +2848,6 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
                 source_text="from-step-1",
                 input_source="previous_step",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="from-step-2",
                 persisted_text="from-step-2",
                 generated_file_ids=[],
@@ -2338,7 +2939,6 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="step-one",
                 persisted_text="step-one",
                 generated_file_ids=[],
@@ -2419,84 +3019,6 @@ def _completed_step_result(
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_previous_step_prefers_source_text_over_legacy_text_binding(
-    user,
-):
-    executor, _, _, _ = _build_executor(user)
-    run = _run(status=FlowRunStatus.RUNNING, user=user)
-    prior = [
-        _completed_step_result(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            tenant_id=run.tenant_id,
-            step_order=1,
-            text="HELLO WORLD",
-        )
-    ]
-    step = _runtime_step(
-        step_order=2,
-        input_source="previous_step",
-        input_bindings={"text": "legacy {{flow_input.text}}"},
-    )
-    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
-
-    resolved = await executor._resolve_step_input(
-        step=step,
-        context=context,
-        run=run,
-        prior_results=prior,
-    )
-
-    assert resolved.text == "HELLO WORLD"
-    assert resolved.used_question_binding is False
-    assert resolved.legacy_prompt_binding_used is True
-    assert resolved.input_source == "previous_step"
-
-
-@pytest.mark.asyncio
-async def test_resolve_step_input_all_previous_steps_prefers_aggregated_source_text(
-    user,
-):
-    executor, _, _, _ = _build_executor(user)
-    run = _run(status=FlowRunStatus.RUNNING, user=user)
-    prior = [
-        _completed_step_result(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            tenant_id=run.tenant_id,
-            step_order=1,
-            text="ONE",
-        ),
-        _completed_step_result(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            tenant_id=run.tenant_id,
-            step_order=2,
-            text="TWO",
-        ),
-    ]
-    step = _runtime_step(
-        step_order=3,
-        input_source="all_previous_steps",
-        input_bindings={"text": "legacy override"},
-    )
-    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
-
-    resolved = await executor._resolve_step_input(
-        step=step,
-        context=context,
-        run=run,
-        prior_results=prior,
-    )
-
-    assert "<step_1_output>\nONE\n</step_1_output>" in resolved.text
-    assert "<step_2_output>\nTWO\n</step_2_output>" in resolved.text
-    assert resolved.used_question_binding is False
-    assert resolved.legacy_prompt_binding_used is True
-    assert resolved.input_source == "all_previous_steps"
-
-
-@pytest.mark.asyncio
 async def test_resolve_step_input_question_binding_overrides_source_text(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
@@ -2512,10 +3034,7 @@ async def test_resolve_step_input_question_binding_overrides_source_text(user):
     step = _runtime_step(
         step_order=2,
         input_source="previous_step",
-        input_bindings={
-            "question": "Summarize: {{step_1.output.text}}",
-            "text": "legacy",
-        },
+        input_bindings={"question": "Summarize: {{step_1.output.text}}"},
     )
     context = executor.variable_resolver.build_context(run.input_payload_json, prior)
 
@@ -2528,11 +3047,10 @@ async def test_resolve_step_input_question_binding_overrides_source_text(user):
 
     assert resolved.text == "Summarize: HELLO WORLD"
     assert resolved.used_question_binding is True
-    assert resolved.legacy_prompt_binding_used is True
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_legacy_mirrored_question_binding_uses_source_text(
+async def test_resolve_step_input_explicit_question_binding_is_resolved(
     user,
 ):
     executor, _, _, _ = _build_executor(user)
@@ -2560,12 +3078,46 @@ async def test_resolve_step_input_legacy_mirrored_question_binding_uses_source_t
         context=context,
         run=run,
         prior_results=prior,
-        assistant_prompt_text="Du ska alltid konvertera texten till stora bokstäver",
     )
 
-    assert resolved.text == "HELLO WORLD"
-    assert resolved.used_question_binding is False
-    assert resolved.legacy_prompt_binding_used is True
+    assert resolved.text == "Du ska alltid konvertera texten till stora bokstäver"
+    assert resolved.used_question_binding is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_runtime_question_binding_must_consume_runtime_input(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(
+        return_value=[SimpleNamespace(id=file_id, text="runtime file text")]
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input",
+        input_type="document",
+        input_bindings={"question": "Use uploaded context"},
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+        output_mode="pass_through",
+        output_config=None,
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[file_id],
+        )
+
+    assert exc_info.value.code == "flow_runtime_input_not_consumed"
 
 
 @pytest.mark.asyncio
@@ -2626,7 +3178,10 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "step_missing"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_MISSING.value,
+    }
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
         executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
@@ -2643,23 +3198,29 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
 
     flow_run_repo.get = AsyncMock(return_value=queued_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(queued_run.flow_id),
+        "name": "Test flow",
+        "description": None,
+        "metadata_json": None,
+        "steps": [
+            {
+                "step_id": str(uuid4()),
+                "step_order": 1,
+                "assistant_id": str(uuid4()),
+                "input_source": "flow_input",
+                "output_mode": "invalid_mode",
+            }
+        ],
+    }
     flow_version_repo.get = AsyncMock(
         return_value=FlowVersion(
             flow_id=queued_run.flow_id,
             version=queued_run.flow_version,
             tenant_id=user.tenant_id,
-            definition_checksum="checksum",
-            definition_json={
-                "steps": [
-                    {
-                        "step_id": str(uuid4()),
-                        "step_order": 1,
-                        "assistant_id": str(uuid4()),
-                        "input_source": "flow_input",
-                        "output_mode": "invalid_mode",
-                    }
-                ]
-            },
+            definition_checksum=stable_hash(definition_json),
+            definition_json=definition_json,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -2674,7 +3235,10 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "flow_definition_steps_invalid"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.DEFINITION_STEPS_INVALID.value,
+    }
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
         executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
@@ -2685,8 +3249,63 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
     run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
         "error"
     ]
-    assert run_error.code == "flow_definition_steps_invalid"
+    assert run_error.code == FlowApiErrorCode.DEFINITION_STEPS_INVALID.value
     assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+
+
+@pytest.mark.asyncio
+async def test_execute_terminalizes_definition_without_executable_steps(user):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+
+    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(queued_run.flow_id),
+        "name": "Test flow",
+        "description": None,
+        "metadata_json": None,
+        "steps": [],
+    }
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=stable_hash(definition_json),
+            definition_json=definition_json,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": "flow_definition_no_executable_steps",
+    }
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+    assert (
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
+    )
+    run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+        "error"
+    ]
+    assert run_error.code == "flow_definition_no_executable_steps"
+    assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+    flow_run_repo.create_or_get_attempt_started.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2748,12 +3367,15 @@ async def test_execute_rejects_question_binding_input_contract_before_step_execu
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "flow_input_contract_inapplicable"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+    }
     flow_run_repo.create_or_get_attempt_started.assert_not_awaited()
     run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
         "error"
     ]
-    assert run_error.code == "flow_input_contract_inapplicable"
+    assert run_error.code == FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value
     assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
     assert run_error.step_order == 2
 
@@ -2772,14 +3394,35 @@ def test_run_error_from_bad_request_sanitizes_context(user) -> None:
             },
         ),
         source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
-        default_code="invalid_flow_definition",
+        default_code=FlowApiErrorCode.DEFINITION_INVALID,
     )
 
+    assert error.code == FlowApiErrorCode.REVIEW_POLICY_INVALID.value
     assert error.step_order == 3
     assert error.details is not None
     assert error.details.model_dump(exclude_none=True) == {
         "step_description": "Analysera bakgrund"
     }
+
+
+def test_run_error_from_bad_request_falls_back_and_logs_uncataloged_code(
+    user, caplog
+) -> None:
+    executor, _, _, _ = _build_executor(user)
+
+    with caplog.at_level(logging.WARNING):
+        error = executor._run_error_from_bad_request(
+            BadRequestException(
+                "Definition parser returned a private code.",
+                code="flow_private_parser_code",
+            ),
+            source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+            default_code=FlowApiErrorCode.DEFINITION_INVALID,
+        )
+
+    assert error.code == FlowApiErrorCode.DEFINITION_INVALID.value
+    assert "flow_executor.bad_request_uncataloged_code" in caplog.text
+    assert "flow_private_parser_code" in caplog.text
 
 
 # --- RunExecutionState ---
@@ -2927,6 +3570,65 @@ def _assistant_for_snapshot(
         integration_knowledge_list=[],
         mcp_servers=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_step_records_flow_step_span(user, captured_flow_spans):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step(step_order=2)
+
+    class _Handler:
+        async def execute(self, **_kwargs):
+            return _step_result(_minimal_step_execution_output())
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    result = await executor._execute_step(
+        step=step,
+        run=run,
+        state=_empty_execution_state(),
+        attempt_no=3,
+    )
+
+    assert result.output.full_text == "answer"
+    span = captured_flow_spans.get_finished_spans()[0]
+    assert span.name == flow_runtime_trace.FLOW_STEP_EXECUTE_SPAN_NAME
+    assert set(span.attributes) <= flow_runtime_trace.FLOW_STEP_SPAN_ATTRIBUTE_KEYS
+    assert span.attributes["flow.run.id"] == str(run.id)
+    assert span.attributes["flow.run.trace_id"] == str(run.trace_id)
+    assert span.attributes["flow.id"] == str(run.flow_id)
+    assert span.attributes["flow.tenant.id"] == str(run.tenant_id)
+    assert span.attributes["flow.step.id"] == str(step.step_id)
+    assert span.attributes["flow.step.order"] == 2
+    assert span.attributes["flow.step.attempt_no"] == 3
+    assert span.attributes["flow.step.result.status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_execute_step_marks_flow_step_span_failed(user, captured_flow_spans):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+
+    class _Handler:
+        async def execute(self, **_kwargs):
+            raise RuntimeError("provider failed")
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        await executor._execute_step(
+            step=step,
+            run=run,
+            state=_empty_execution_state(),
+            attempt_no=1,
+        )
+
+    span = captured_flow_spans.get_finished_spans()[0]
+    assert span.name == flow_runtime_trace.FLOW_STEP_EXECUTE_SPAN_NAME
+    assert span.attributes["flow.step.result.status"] == "failed"
+    assert span.status.status_code.name == "ERROR"
 
 
 @pytest.mark.asyncio
@@ -3107,7 +3809,9 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
         return_value=SimpleNamespace(chunks=chunks, no_duplicate_chunks=[chunks[0]])
     )
 
-    output = (await executor._execute_step(step=step, run=run, state=state)).output
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
 
     executor.references_service.get_references.assert_awaited_once()
     rag_kwargs = executor.references_service.get_references.await_args.kwargs
@@ -3155,7 +3859,9 @@ async def test_execute_step_skips_rag_when_assistant_has_no_knowledge(user):
     executor.references_service = AsyncMock()
     executor.references_service.get_references = AsyncMock()
 
-    output = (await executor._execute_step(step=step, run=run, state=state)).output
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
 
     executor.references_service.get_references.assert_not_awaited()
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
@@ -3191,7 +3897,9 @@ async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
         side_effect=asyncio.TimeoutError()
     )
 
-    output = (await executor._execute_step(step=step, run=run, state=state)).output
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
 
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
     assert output.rag_metadata is not None
@@ -3228,7 +3936,9 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
         side_effect=RuntimeError("boom")
     )
 
-    output = (await executor._execute_step(step=step, run=run, state=state)).output
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
 
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
     assert output.rag_metadata is not None
@@ -3263,7 +3973,9 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
     executor.references_service = AsyncMock()
     executor.references_service.get_references = AsyncMock()
 
-    output = (await executor._execute_step(step=step, run=run, state=state)).output
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
 
     executor.references_service.get_references.assert_not_awaited()
     assert output.rag_metadata is not None
@@ -3400,7 +4112,6 @@ async def test_prior_results_bootstrap_once(user):
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="result",
                 persisted_text="result",
                 generated_file_ids=[],
@@ -3485,7 +4196,10 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "assistant_snapshot_drift"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
+    }
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
     assert (
@@ -3546,7 +4260,10 @@ async def test_execute_fails_before_parse_when_definition_checksum_drifted(
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "definition_checksum_mismatch"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value,
+    }
     parse_published_runtime_steps.assert_not_called()
     flow_run_repo.list_step_results.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
@@ -3597,7 +4314,10 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "assistant_snapshot_drift"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
+    }
     executor._load_assistant.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
@@ -3627,7 +4347,6 @@ async def test_file_cache_hit(user):
         update={
             "input_payload_json": {
                 "text": "x",
-                "step_inputs": {str(step_id): {"file_ids": [str(file_id)]}},
             }
         }
     )
@@ -3646,10 +4365,20 @@ async def test_file_cache_hit(user):
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
     await executor._resolve_step_input(
-        step=step, context=context, run=run, prior_results=[], state=state
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=state,
+        requested_file_ids=[file_id],
     )
     await executor._resolve_step_input(
-        step=step, context=context, run=run, prior_results=[], state=state
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=state,
+        requested_file_ids=[file_id],
     )
 
     assert executor.file_repo.get_list_by_id_for_owner.call_count == 1
@@ -3719,7 +4448,6 @@ async def test_execute_audits_completed_run_terminal_state(user):
                 source_text="hello",
                 input_source="flow_input",
                 used_question_binding=False,
-                legacy_prompt_binding_used=False,
                 full_text="done",
                 persisted_text="done",
                 generated_file_ids=[],
@@ -3800,7 +4528,10 @@ async def test_execute_audits_failed_run_terminal_state(user):
         retry_count=0,
     )
 
-    assert result == {"status": "failed", "error": "step_execution_failed"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
     audit_service.log_async.assert_not_awaited()
     terminal_kwargs = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
     assert terminal_kwargs["target_status"] == FlowRunStatus.FAILED

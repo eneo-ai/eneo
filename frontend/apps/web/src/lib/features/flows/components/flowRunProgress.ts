@@ -14,6 +14,7 @@ export type FlowRunProgressStep = {
   outputMode?: string;
   outputType?: string;
   errorMessage?: string | null;
+  errorCode?: string | null;
   numTokensInput?: number | null;
   numTokensOutput?: number | null;
   inputPayload?: Record<string, unknown> | null;
@@ -64,6 +65,7 @@ export function buildFlowRunProgressSnapshot(
       outputMode: typeof node.output_mode === "string" ? node.output_mode : undefined,
       outputType: typeof node.output_type === "string" ? node.output_type : undefined,
       errorMessage: live?.error_message ?? node.error_message ?? null,
+      errorCode: live?.error_code ?? null,
       numTokensInput: live?.num_tokens_input ?? node.num_tokens_input ?? null,
       numTokensOutput: live?.num_tokens_output ?? node.num_tokens_output ?? null,
       inputPayload: live?.input_payload_json ?? null,
@@ -83,6 +85,7 @@ export function buildFlowRunProgressSnapshot(
       label: `Step ${live.step_order}`,
       status: live.status,
       errorMessage: live.error_message ?? null,
+      errorCode: live.error_code ?? null,
       numTokensInput: live.num_tokens_input ?? null,
       numTokensOutput: live.num_tokens_output ?? null,
       inputPayload: live.input_payload_json ?? null,

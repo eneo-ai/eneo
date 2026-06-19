@@ -19,27 +19,27 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
-from intric.flows.assistant_execution_snapshot import (
-    build_assistant_execution_snapshot,
-    stable_hash,
-)
+from intric.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from intric.flows.domain.flow import (
     Flow,
+    FlowPersistedJsonObject,
     FlowRunStatus,
     FlowStep,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    JsonObject,
 )
 from intric.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import build_published_definition_json
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from intric.main.container.container import Container
+from intric.main.exceptions import NotFoundException
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +103,7 @@ def _build_flow(
     assistant_id: UUID,
     output_mode: str = "pass_through",
     output_type: str = "text",
-    output_contract: JsonObject | None = None,
+    output_contract: FlowPersistedJsonObject | None = None,
 ) -> Flow:
     return Flow(
         id=None,
@@ -155,10 +155,10 @@ async def _create_runtime_worker_context(
     completion_service,
     output_mode: str = "pass_through",
     output_type: str = "text",
-    output_contract: JsonObject | None = None,
+    output_contract: FlowPersistedJsonObject | None = None,
 ) -> _RuntimeWorkerContext:
     enable_autobegin_for_flow_task_session(session)
-    container = Container(
+    setup_container = Container(
         session=providers.Object(session),
         user=providers.Object(admin_user),
         tenant=providers.Object(test_tenant),
@@ -221,7 +221,6 @@ async def _create_runtime_worker_context(
     await version_repo.create(
         flow_id=flow.id,
         version=1,
-        definition_checksum=stable_hash(definition_json),
         definition_json=definition_json,
         tenant_id=admin_user.tenant_id,
     )
@@ -229,29 +228,37 @@ async def _create_runtime_worker_context(
         flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
-    run = await container.flow_run_service().create_run(
+    create_result = await setup_container.flow_run_service().create_run(
         flow_id=flow.id,
         input_payload_json={"question": "What happened?"},
         expected_flow_version=1,
         step_inputs=None,
         idempotency_key=f"runtime-worker-contract-{uuid4()}",
     )
+    assert create_result.created is True
+    run = create_result.run
     audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
+    worker_container = Container(
+        session=providers.Object(session),
+        tenant=providers.Object(test_tenant),
+    )
     executor = FlowRunExecutor(
-        user=admin_user,
+        runtime_actor=FlowRunActor.from_user(user=admin_user),
         session=session,
-        flow_repo=container.flow_repo(),
-        flow_run_repo=container.flow_run_repo(),
-        flow_run_terminalizer=container.flow_run_terminalizer(),
-        flow_version_repo=container.flow_version_repo(),
-        space_repo=container.space_repo(),
+        flow_repo=worker_container.flow_repo(),
+        flow_run_repo=worker_container.flow_run_repo(),
+        flow_run_rerun_repo=worker_container.flow_run_rerun_repo(),
+        flow_run_review_checkpoint_repo=worker_container.flow_run_review_checkpoint_repo(),
+        flow_run_terminalizer=worker_container.flow_run_terminalizer(),
+        flow_version_repo=worker_container.flow_version_repo(),
+        space_repo=worker_container.tenant_scoped_space_repo(),
         completion_service=completion_service,
-        file_repo=container.file_repo(),
-        template_asset_service=container.flow_template_asset_service(),
-        encryption_service=container.encryption_service(),
+        file_repo=worker_container.file_repo(),
+        template_asset_repo=worker_container.flow_template_asset_repo(),
+        encryption_service=worker_container.encryption_service(),
         audit_service=audit_service,
-        references_service=container.references_service(),
-        transcriber=container.transcriber(),
+        references_service=worker_container.references_service(),
+        transcriber=worker_container.transcriber(),
         config=FlowRunExecutorConfig(
             max_inline_text_bytes=1024 * 1024,
             http_request_timeout_seconds=2.0,
@@ -314,6 +321,45 @@ async def _failure_state_from_fresh_session(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_tenant_scoped_space_repo_does_not_load_cross_tenant_assistant(
+    async_session,
+    tenant_factory,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    model = await completion_model_factory(async_session, "gpt-4o-mini")
+    space = await space_factory(
+        async_session,
+        "Runtime worker tenant-isolation space",
+        [model.id],
+    )
+    assistant = await assistant_factory(
+        async_session,
+        "Runtime Worker Tenant Isolation Assistant",
+        model.id,
+        space_id=space.id,
+    )
+    other_tenant_row = await tenant_factory(
+        async_session,
+        name=f"runtime-space-other-{uuid4()}",
+    )
+    bootstrap_container = Container(session=providers.Object(async_session))
+    other_tenant = await bootstrap_container.tenant_repo().get(other_tenant_row.id)
+    assert other_tenant is not None
+    other_tenant_container = Container(
+        session=providers.Object(async_session),
+        tenant=providers.Object(other_tenant),
+    )
+
+    with pytest.raises(NotFoundException):
+        await other_tenant_container.tenant_scoped_space_repo().get_space_by_assistant(
+            assistant_id=assistant.id
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("target_status", "expected_worker_result", "expected_step_status"),
     [
@@ -360,7 +406,6 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
                 enable_autobegin_for_flow_task_session(terminal_session)
                 terminal_container = Container(
                     session=providers.Object(terminal_session),
-                    user=providers.Object(admin_user),
                     tenant=providers.Object(test_tenant),
                 )
                 await terminal_container.flow_run_terminalizer().terminalize_run(
@@ -378,7 +423,11 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
                             if target_status == FlowRunStatus.CANCELLED
                             else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
                         ),
-                        code=f"terminalized_{target_status.value}",
+                        code=(
+                            FlowApiErrorCode.RUN_USER_CANCELLED
+                            if target_status == FlowRunStatus.CANCELLED
+                            else FlowApiErrorCode.RUN_WORKER_STALLED
+                        ),
                         message=f"Run was terminalized as {target_status.value}.",
                     ),
                 )
@@ -503,7 +552,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum=stable_hash(definition_json),
             definition_json=definition_json,
             tenant_id=admin_user.tenant_id,
         )
@@ -512,13 +560,15 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             tenant_id=admin_user.tenant_id,
         )
 
-        run = await container.flow_run_service().create_run(
+        create_result = await container.flow_run_service().create_run(
             flow_id=flow.id,
             input_payload_json={"question": "What happened?"},
             expected_flow_version=1,
             step_inputs=None,
             idempotency_key=run_correlation_id,
         )
+        assert create_result.created is True
+        run = create_result.run
 
         completion_service = SimpleNamespace(
             get_response=AsyncMock(
@@ -536,16 +586,18 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         )
         audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
         executor = FlowRunExecutor(
-            user=admin_user,
+            runtime_actor=FlowRunActor.from_user(user=admin_user),
             session=session,
             flow_repo=container.flow_repo(),
             flow_run_repo=container.flow_run_repo(),
+            flow_run_rerun_repo=container.flow_run_rerun_repo(),
+            flow_run_review_checkpoint_repo=container.flow_run_review_checkpoint_repo(),
             flow_run_terminalizer=container.flow_run_terminalizer(),
             flow_version_repo=container.flow_version_repo(),
             space_repo=container.space_repo(),
             completion_service=completion_service,
             file_repo=container.file_repo(),
-            template_asset_service=container.flow_template_asset_service(),
+            template_asset_repo=container.flow_template_asset_repo(),
             encryption_service=container.encryption_service(),
             audit_service=audit_service,
             references_service=container.references_service(),
@@ -786,7 +838,10 @@ async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
             retry_count=0,
         )
 
-    assert result == {"status": "failed", "error": "step_execution_failed"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
     (
         run_row,
         step_result_row,
@@ -808,7 +863,7 @@ async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
     assert step_result_row.error_message == "Flow step 1 execution failed."
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
-    assert attempt_rows[0].error_code == "step_execution_failed"
+    assert attempt_rows[0].error_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
     assert attempt_rows[0].finished_at is not None
     assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
     assert [row.source for row in outbox_rows] == [
@@ -826,7 +881,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
     space_factory,
     assistant_factory,
 ):
-    output_contract: JsonObject = {
+    output_contract: FlowPersistedJsonObject = {
         "type": "object",
         "required": ["summary"],
         "properties": {"summary": {"type": "string"}},
@@ -934,7 +989,10 @@ async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
             retry_count=0,
         )
 
-    assert result == {"status": "failed", "error": "step_execution_failed"}
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
     (
         run_row,
         step_result_row,

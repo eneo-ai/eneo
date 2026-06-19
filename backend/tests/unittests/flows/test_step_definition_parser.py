@@ -221,6 +221,24 @@ def test_parse_runtime_steps_allows_question_binding_without_input_contract():
     assert parsed[1].input_contract is None
 
 
+def test_parse_runtime_steps_rejects_unsupported_input_binding_key():
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    input_bindings={"text": "{{ flow_input.text }}"},
+                )
+            )
+        )
+
+    assert exc_info.value.code == "flow_input_binding_unsupported_key"
+    assert exc_info.value.context == {
+        "field": "input_bindings",
+        "key": "text",
+        "step_order": 1,
+    }
+
+
 def test_parse_runtime_steps_rejects_duplicate_step_orders():
     with pytest.raises(BadRequestException, match="Duplicate step_order detected"):
         parse_runtime_steps(

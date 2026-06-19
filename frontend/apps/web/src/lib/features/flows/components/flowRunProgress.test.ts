@@ -85,6 +85,7 @@ describe("flowRunProgress helpers", () => {
         outputMode: "pass_through",
         outputType: "text",
         errorMessage: null,
+        errorCode: null,
         numTokensInput: 10,
         numTokensOutput: 20,
         inputPayload: null,
@@ -122,6 +123,7 @@ describe("flowRunProgress helpers", () => {
         outputMode: "pass_through",
         outputType: "text",
         errorMessage: null,
+        errorCode: null,
         numTokensInput: null,
         numTokensOutput: null,
         inputPayload: null,
@@ -156,6 +158,7 @@ describe("flowRunProgress helpers", () => {
         label: "Step 3",
         status: "pending",
         errorMessage: null,
+        errorCode: null,
         numTokensInput: null,
         numTokensOutput: null,
         inputPayload: null,
@@ -167,6 +170,65 @@ describe("flowRunProgress helpers", () => {
         updatedAt: "2026-01-01T00:00:00Z"
       }
     ]);
+  });
+
+  test("carries live step error codes for localized step-card failures", () => {
+    const snapshot = buildFlowRunProgressSnapshot(
+      {
+        nodes: [
+          {
+            id: "step-1",
+            label: "Extract text",
+            type: "llm",
+            step_order: 1,
+            error_message: "Graph fallback error"
+          }
+        ],
+        edges: []
+      },
+      [
+        {
+          flow_run_id: "run-1",
+          flow_id: "flow-1",
+          tenant_id: "tenant-1",
+          step_id: "step-1",
+          step_order: 1,
+          status: "failed",
+          error_code: "flow_step_execution_failed",
+          error_message: "Step failed during execution.",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:01Z"
+        }
+      ]
+    );
+
+    expect(snapshot.steps[0]).toMatchObject({
+      errorMessage: "Step failed during execution.",
+      errorCode: "flow_step_execution_failed"
+    });
+  });
+
+  test("does not invent an error code for graph-only fallback errors", () => {
+    const snapshot = buildFlowRunProgressSnapshot(
+      {
+        nodes: [
+          {
+            id: "step-1",
+            label: "Extract text",
+            type: "llm",
+            step_order: 1,
+            error_message: "Graph fallback error"
+          }
+        ],
+        edges: []
+      },
+      []
+    );
+
+    expect(snapshot.steps[0]).toMatchObject({
+      errorMessage: "Graph fallback error",
+      errorCode: null
+    });
   });
 
   test("focuses the running step while a run progresses", () => {

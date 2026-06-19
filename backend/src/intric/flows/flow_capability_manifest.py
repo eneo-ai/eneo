@@ -3,8 +3,8 @@
 Declares the `FlowCapability` shape, seeds one entry per key in
 `INPUT_TYPE_POLICIES`, absorbs chain-compatibility / citation /
 transcription-wizard rules, and exposes the public API
-(`resolve_capability_for_tuple`, `validate_step_chain`,
-`render_critic_invariants`, `coverage_report`).
+(`resolve_capability_for_tuple`, `render_critic_invariants`,
+`coverage_report`).
 
 Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
 Planner-facing copy and strategy live on the Pattern Registry and
@@ -22,10 +22,10 @@ bump-discipline CI test covers this full surface, not just keys and
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Literal
 
 from intric.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
@@ -40,7 +40,7 @@ from intric.flows.enums import (
 )
 from intric.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 1
+FCM_VERSION: int = 2
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -254,9 +254,8 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
             (
                 "Final output is delivered by POSTing to a configured URL. "
                 "`output_config` must pass `validate_http_output_config`, "
-                "which dispatches to the authored or legacy HTTP config "
-                "validator as appropriate. Concrete shape rules (URL, body, "
-                "auth, timeout) live in the transport validators — this "
+                "which accepts the authored HTTP transport config. Concrete "
+                "shape rules (URL, body, auth, timeout) live in the transport validators — this "
                 "capability only asserts that a valid config exists."
             ),
             (
@@ -265,12 +264,11 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
                     description=(
                         "Steps using `http_post` output mode must declare an "
                         "`output_config` object that passes "
-                        "`validate_http_output_config`; both the authored "
-                        "(`http_transport.validator`) and legacy "
-                        "(`flow_validators_http.validate_http_config_common`) "
-                        "shapes are acceptable. The capability does not pin "
-                        "per-field rules — see the transport validators for "
-                        "URL scheme, body-mode, and timeout constraints."
+                        "`validate_http_output_config`; the authored HTTP "
+                        "transport config is the only accepted shape. The "
+                        "capability does not pin per-field rules — see the "
+                        "transport validators for URL scheme, body-mode, auth, "
+                        "and timeout constraints."
                     ),
                 ),
             ),
@@ -647,43 +645,8 @@ def is_citation_capable_step(
 
 
 # ---------------------------------------------------------------------
-# Public API — capability resolution, chain validation, invariant render,
-# coverage report.
+# Public API — capability resolution, invariant render, coverage report.
 # ---------------------------------------------------------------------
-
-
-class ChainStep(Protocol):
-    """Enum-typed step shape consumed by :func:`validate_step_chain`.
-
-    Structural (Protocol) — any frozen dataclass with these four properties
-    satisfies the contract. The legacy `step_chain_rules.StepChainShape`
-    uses `str` attrs; this Protocol uses enum types so consumers get
-    enum-identity checks instead of string comparisons.
-    """
-
-    @property
-    def step_order(self) -> int: ...
-    @property
-    def input_source(self) -> FlowInputSource: ...
-    @property
-    def input_type(self) -> FlowInputType: ...
-    @property
-    def output_type(self) -> FlowOutputType: ...
-
-
-@dataclass(frozen=True)
-class ChainViolation:
-    """FCM step-chain violation — typed re-expression of
-    `step_chain_rules.StepChainViolation`.
-
-    `code` vocabulary matches the legacy one verbatim for drop-in
-    compatibility (builder UX and logging consumers see the same code
-    strings regardless of which validator surfaces them).
-    """
-
-    step_order: int
-    message: str
-    code: str
 
 
 @dataclass(frozen=True)
@@ -712,10 +675,10 @@ _TEMPORARY_REASON_MARKER = "temporary"
 
 # Source-type legality rules mirrored from `step_chain_rules.py` and
 # `flow_validators_http.py`. Single-cell in scope — step-order-dependent
-# rules (e.g. step 1 cannot use `previous_step`) belong to a chain-level
-# validator. `previous_step` chain-compat depends on the prior step's
-# `output_type` and is enforced by `validate_step_chain`; the single-cell
-# `CHAIN_COMPATIBILITY` constant is already guarded by its own parity test.
+# rules (e.g. step 1 cannot use `previous_step`) belong to
+# `step_chain_rules.find_first_step_chain_violation`. `previous_step`
+# chain-compat depends on the prior step's `output_type`; the single-cell
+# `CHAIN_COMPATIBILITY` constant is guarded by its own parity test.
 _HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset(
     {FlowInputSource.HTTP_GET, FlowInputSource.HTTP_POST}
 )
@@ -740,7 +703,7 @@ def _source_type_illegality(
 
     Mirrors the three single-cell rules from `step_chain_rules.py` and
     `flow_validators_http.py`; the full set of chain-level rules lives in
-    :func:`validate_step_chain`.
+    `step_chain_rules.find_first_step_chain_violation`.
     """
     if (
         input_source in _HTTP_INPUT_SOURCES
@@ -848,149 +811,6 @@ def resolve_capability_for_tuple(
     input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
     mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
     return (input_cap, mode_cap)
-
-
-def validate_step_chain(
-    steps: Sequence[ChainStep],
-) -> tuple[ChainViolation, ...]:
-    """Validate a step chain, returning every violation surfaced.
-
-    Enum-typed re-expression of
-    `step_chain_rules.find_first_step_chain_violation`. Divergence from
-    the legacy: legacy returns the first violation; this returns all of
-    them so builder UX can fix multi-rule failures in one pass instead of
-    whack-a-mole. Violation codes match the legacy vocabulary verbatim.
-    """
-    if not steps:
-        return ()
-
-    sorted_steps = sorted(steps, key=lambda s: s.step_order)
-    steps_by_order = {s.step_order: s for s in sorted_steps}
-    flow_input_steps = [
-        s for s in sorted_steps if s.input_source is FlowInputSource.FLOW_INPUT
-    ]
-
-    violations: list[ChainViolation] = []
-
-    for extra in flow_input_steps[1:]:
-        violations.append(
-            ChainViolation(
-                step_order=extra.step_order,
-                message="Only one step may use input_source 'flow_input'.",
-                code="typed_io_multiple_flow_input_steps",
-            )
-        )
-    if flow_input_steps and flow_input_steps[0].step_order != 1:
-        misplaced = flow_input_steps[0]
-        violations.append(
-            ChainViolation(
-                step_order=misplaced.step_order,
-                message="input_source 'flow_input' must be step 1 if present.",
-                code="typed_io_flow_input_position_invalid",
-            )
-        )
-
-    for step in sorted_steps:
-        if step.step_order == 1 and step.input_source in {
-            FlowInputSource.PREVIOUS_STEP,
-            FlowInputSource.ALL_PREVIOUS_STEPS,
-        }:
-            violations.append(
-                ChainViolation(
-                    step_order=step.step_order,
-                    message=(
-                        "Step 1 cannot use previous_step/all_previous_steps "
-                        "input source. Use flow_input."
-                    ),
-                    code="typed_io_invalid_input_source_position",
-                )
-            )
-        if (
-            step.input_type is FlowInputType.DOCUMENT
-            and step.input_source is not FlowInputSource.FLOW_INPUT
-        ):
-            violations.append(
-                ChainViolation(
-                    step_order=step.step_order,
-                    message=(
-                        f"Step {step.step_order}: input_type 'document' is only "
-                        "supported with input_source 'flow_input'."
-                    ),
-                    code="typed_io_document_source_unsupported",
-                )
-            )
-        if (
-            step.input_type is FlowInputType.AUDIO
-            and step.input_source is not FlowInputSource.FLOW_INPUT
-        ):
-            violations.append(
-                ChainViolation(
-                    step_order=step.step_order,
-                    message=(
-                        f"Step {step.step_order}: input_type 'audio' is only "
-                        "supported with input_source 'flow_input'."
-                    ),
-                    code="typed_io_audio_source_unsupported",
-                )
-            )
-        if (
-            step.input_type is FlowInputType.FILE
-            and step.input_source is not FlowInputSource.FLOW_INPUT
-        ):
-            violations.append(
-                ChainViolation(
-                    step_order=step.step_order,
-                    message=(
-                        f"Step {step.step_order}: input_type 'file' is only "
-                        "supported with input_source 'flow_input'."
-                    ),
-                    code="typed_io_file_source_unsupported",
-                )
-            )
-        if (
-            step.input_type is FlowInputType.JSON
-            and step.input_source is FlowInputSource.ALL_PREVIOUS_STEPS
-        ):
-            violations.append(
-                ChainViolation(
-                    step_order=step.step_order,
-                    message=(
-                        f"Step {step.step_order}: input_type 'json' is "
-                        "incompatible with input_source 'all_previous_steps' "
-                        "(concatenated text is not valid JSON)."
-                    ),
-                    code="typed_io_invalid_input_source_combination",
-                )
-            )
-        if step.input_source is FlowInputSource.PREVIOUS_STEP and step.step_order > 1:
-            previous = steps_by_order.get(step.step_order - 1)
-            if previous is None:
-                violations.append(
-                    ChainViolation(
-                        step_order=step.step_order,
-                        message=(
-                            f"Step {step.step_order}: input_source "
-                            "'previous_step' requires step "
-                            f"{step.step_order - 1} to exist."
-                        ),
-                        code="typed_io_missing_previous_step",
-                    )
-                )
-            elif (previous.output_type, step.input_type) not in CHAIN_COMPATIBILITY:
-                violations.append(
-                    ChainViolation(
-                        step_order=step.step_order,
-                        message=(
-                            f"Step {step.step_order}: incompatible type "
-                            "chain — previous step output_type "
-                            f"'{previous.output_type.value}' cannot feed "
-                            f"input_type '{step.input_type.value}'."
-                        ),
-                        code="typed_io_incompatible_type_chain",
-                    )
-                )
-
-    return tuple(violations)
 
 
 def render_critic_invariants() -> tuple[tuple[CapabilityId, InvariantSpec], ...]:

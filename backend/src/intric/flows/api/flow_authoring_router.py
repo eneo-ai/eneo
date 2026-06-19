@@ -1,37 +1,42 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from typing import Annotated, Any, NoReturn, Protocol, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 
-from intric.actors.actors.space_actor import SpaceRole
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.flows.api import flow_router_common as common
+from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_definition_access import (
-    ensure_can_mutate_flow_draft,
+    SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
+    require_flow_current_definition_access,
+    require_flow_delete_access,
     require_flow_edit_access,
+    require_flow_publish_access,
+    require_flow_published_runtime_access,
+    require_flow_unpublish_access,
 )
 from intric.flows.api.flow_models import (
     PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE,
     FlowCreateRequest,
     FlowPublic,
-    FlowRuntimePublic,
     FlowSparsePublic,
     FlowUpdateRequest,
 )
-from intric.flows.flow_access_policy import (
-    PUBLISHED_FLOW_RUNTIME_ALTERNATIVE,
-    ServiceKeyRuntimeAlternativeKey,
+from intric.flows.api.flow_runtime_paths import (
+    PUBLISHED_FLOW_RUNTIME_PATH,
+    FlowRuntimePublic,
 )
+from intric.flows.flow_access_policy import FlowApiAction
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.principal import FlowPrincipal
+from intric.main.config import get_settings
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
+from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.main.models import NOT_PROVIDED, OffsetPaginatedResponse
 from intric.server.dependencies.container import get_container
 
@@ -77,94 +82,17 @@ _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (
 _PUBLISHED_FLOW_RUNTIME_OPERATION_ID = "get_published_flow_runtime"
 
 
-class _FlowReaderProtocol(Protocol):
-    def get_current_role(self) -> SpaceRole | None: ...
-
-    def can_read_flow(self, flow: object) -> bool: ...
-
-
-_SERVICE_KEY_CURRENT_DEFINITION_ROLES = frozenset({SpaceRole.ADMIN, SpaceRole.OWNER})
-_SERVICE_KEY_ADMIN_REQUIRED_MESSAGE = (
-    "Service-key principals require admin role to read draft definitions. "
-    "Use /api/v1/flows/{id}/published/ for runtime-safe published projections."
-)
-
-
-def _raise_service_key_admin_required() -> NoReturn:
-    raise UnauthorizedException(
-        _SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
-        code="service_key_admin_required",
-        context={
-            "auth_layer": "service_key_principal",
-            "capability": "view_current_definition",
-            "required_role": SpaceRole.ADMIN.value,
-            "runtime_endpoint_hint": PUBLISHED_FLOW_RUNTIME_ALTERNATIVE.as_error_context(),
-        },
-    )
-
-
-def _ensure_service_key_can_read_current_definition(
-    *,
-    principal: FlowPrincipal,
-    actor: _FlowReaderProtocol,
-) -> None:
-    if not principal.is_service_key:
-        return
-    if actor.get_current_role() in _SERVICE_KEY_CURRENT_DEFINITION_ROLES:
-        return
-    _raise_service_key_admin_required()
-
-
-def _path_for_operation_id(request: Request, operation_id: str) -> str | None:
-    app = getattr(request, "app", None)
-    routes = cast(Iterable[object], getattr(app, "routes", ()))
-    for route in routes:
-        if getattr(route, "operation_id", None) != operation_id:
-            continue
-        path = getattr(route, "path", None)
-        if isinstance(path, str):
-            return path
-    return None
-
-
-def _with_published_runtime_endpoint_hint(
-    request: Request,
-    exc: UnauthorizedException,
-) -> UnauthorizedException:
-    context = exc.context
-    if context is None:
-        return exc
-
-    hint = context.get("runtime_endpoint_hint")
-    if not isinstance(hint, Mapping):
-        return exc
-    hint_mapping = cast(Mapping[object, object], hint)
-    if (
-        hint_mapping.get("key")
-        != ServiceKeyRuntimeAlternativeKey.PUBLISHED_FLOW_RUNTIME.value
-    ):
-        return exc
-
-    endpoint_template = _path_for_operation_id(
-        request,
-        _PUBLISHED_FLOW_RUNTIME_OPERATION_ID,
-    )
-    if endpoint_template is None:
-        return exc
-
-    runtime_hint: dict[str, object] = {
-        "key": hint_mapping.get("key"),
-        "description": hint_mapping.get("description"),
-        "endpoint_template": endpoint_template,
-    }
-    return UnauthorizedException(
-        str(exc),
-        code=exc.code,
-        context={
-            **context,
-            "runtime_endpoint_hint": runtime_hint,
-        },
-    )
+def _classification_override_step_orders(
+    flow_data: FlowCreateRequest | FlowUpdateRequest,
+) -> list[int]:
+    steps = flow_data.steps
+    if not steps:
+        return []
+    return [
+        step.step_order
+        for step in steps
+        if step.output_classification_override is not None
+    ]
 
 
 @router.post(
@@ -198,13 +126,13 @@ async def create_flow(
     flow_in: FlowCreateRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_space_access_context_for_request(
+    access_context = await flow_access_context.resolve_space_access_context(
         request,
         container,
         space_id=flow_in.space_id,
-        required_access=common.FlowApiAction.EDIT,
+        required_access=FlowApiAction.EDIT,
         scope_mismatch_message=(
-            f"API key is scoped to space '{common.get_scope_filter(request).space_id}'. "
+            f"API key is scoped to space '{flow_access_context.get_scope_filter(request).space_id}'. "
             f"Cannot create flow in space '{flow_in.space_id}'."
         ),
     )
@@ -228,24 +156,25 @@ async def create_flow(
         data_retention_days=flow_in.data_retention_days,
     )
 
+    created_flow_id = created.require_persisted_id()
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.FLOW_CREATED,
         entity_type=EntityType.FLOW,
-        entity_id=common.required_uuid(created.id, field="flow.id"),
+        entity_id=created_flow_id,
         description=f"Created flow '{created.name}'",
         metadata=AuditMetadata.standard(actor=user, target=created),
     )
-    overrides = common.find_classification_overrides(flow_in)
+    overrides = _classification_override_step_orders(flow_in)
     if overrides:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
             actor_id=user.id,
             action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
             entity_type=EntityType.FLOW,
-            entity_id=common.required_uuid(created.id, field="flow.id"),
+            entity_id=created_flow_id,
             description="Configured output classification overrides for flow steps.",
             metadata=AuditMetadata.standard(
                 actor=user,
@@ -305,11 +234,11 @@ async def list_flows(
     ),
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_space_access_context_for_request(
+    access_context = await flow_access_context.resolve_space_access_context(
         request,
         container,
         space_id=space_id,
-        required_access=common.FlowApiAction.VIEW,
+        required_access=FlowApiAction.VIEW,
         scope_mismatch_message="API key space scope does not match requested space.",
         allow_service_key_principals=True,
     )
@@ -357,7 +286,7 @@ async def list_flows(
             description=(
                 "Forbidden. Machine-readable codes include `insufficient_scope` when the "
                 "API key space scope does not match the flow, "
-                "`service_key_admin_required` when a non-admin service-key principal "
+                "`flow_service_key_admin_required` when a non-admin service-key principal "
                 "calls the current draft definition endpoint, and "
                 "`insufficient_space_permission` when the caller cannot read the flow."
             ),
@@ -371,12 +300,12 @@ async def list_flows(
                         "context": {"auth_layer": "api_key_scope"},
                     },
                 },
-                "service_key_admin_required": {
+                FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED.value: {
                     "summary": "Non-admin service-key principal called current draft endpoint",
                     "value": {
-                        "message": _SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
+                        "message": SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
                         "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
-                        "code": "service_key_admin_required",
+                        "code": FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED.value,
                         "context": {
                             "auth_layer": "service_key_principal",
                             "capability": "view_current_definition",
@@ -409,40 +338,18 @@ async def get_flow(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    try:
-        access_context = await common.get_flow_access_context_for_request(
-            request,
-            container,
-            flow_id=id,
-            required_access=common.FlowApiAction.VIEW,
-            allow_service_key_principals=True,
-        )
-        actor = cast(_FlowReaderProtocol | None, access_context.actor)
-        if actor is None:
-            raise UnauthorizedException(
-                "You do not have permission to access this flow.",
-                code="insufficient_space_permission",
-                context={"auth_layer": "space_membership"},
-            )
-        _ensure_service_key_can_read_current_definition(
-            principal=FlowPrincipal.from_user(container.user()),
-            actor=actor,
-        )
-        if not actor.can_read_flow(cast(Any, access_context.flow)):
-            raise UnauthorizedException(
-                "You do not have permission to access this flow.",
-                code="insufficient_space_permission",
-                context={"auth_layer": "space_membership"},
-            )
-    except UnauthorizedException as exc:
-        raise _with_published_runtime_endpoint_hint(request, exc) from exc
+    access_context = await require_flow_current_definition_access(
+        request,
+        container,
+        flow_id=id,
+    )
     assembler = FlowAssembler()
 
     return assembler.to_public(access_context.flow)
 
 
 @router.get(
-    "/{id}/published/",
+    PUBLISHED_FLOW_RUNTIME_PATH,
     response_model=FlowRuntimePublic,
     status_code=status.HTTP_200_OK,
     operation_id=_PUBLISHED_FLOW_RUNTIME_OPERATION_ID,
@@ -483,27 +390,18 @@ async def get_published_flow_runtime(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_flow_access_context_for_request(
+    published_access = await require_flow_published_runtime_access(
         request,
         container,
         flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-        require_published_for_service_key=True,
     )
-    if access_context.flow.published_version is None:
-        raise NotFoundException("Flow not found.")
-
-    actor = cast(_FlowReaderProtocol | None, access_context.actor)
-    if actor is None or not actor.can_read_flow(cast(Any, access_context.flow)):
-        raise UnauthorizedException(
-            "You do not have permission to access this flow.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
-        )
 
     assembler = FlowAssembler()
-    return assembler.to_runtime_public(access_context.flow)
+    return assembler.to_runtime_public(
+        published_access.flow,
+        published_version=published_access.published_version,
+        api_prefix=get_settings().api_prefix,
+    )
 
 
 @router.patch(
@@ -563,6 +461,7 @@ async def update_flow(
         data_retention_days=payload.get("data_retention_days", NOT_PROVIDED),
     )
 
+    updated_flow_id = updated.require_persisted_id()
     user = container.user()
     audit_service = container.audit_service()
     await audit_service.log_async(
@@ -570,18 +469,18 @@ async def update_flow(
         actor_id=user.id,
         action=ActionType.FLOW_UPDATED,
         entity_type=EntityType.FLOW,
-        entity_id=common.required_uuid(updated.id, field="flow.id"),
+        entity_id=updated_flow_id,
         description=f"Updated flow '{updated.name}'",
         metadata=AuditMetadata.standard(actor=user, target=updated),
     )
-    overrides = common.find_classification_overrides(flow_in)
+    overrides = _classification_override_step_orders(flow_in)
     if overrides:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
             actor_id=user.id,
             action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
             entity_type=EntityType.FLOW,
-            entity_id=common.required_uuid(updated.id, field="flow.id"),
+            entity_id=updated_flow_id,
             description="Updated output classification overrides for flow steps.",
             metadata=AuditMetadata.standard(
                 actor=user,
@@ -625,19 +524,7 @@ async def delete_flow(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_flow_access_context_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.EDIT,
-    )
-    if access_context.actor is None or not access_context.actor.can_delete_flows():
-        raise UnauthorizedException(
-            "You do not have permission to delete flows in this space.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
-        )
-    ensure_can_mutate_flow_draft(container, access_context)
+    access_context = await require_flow_delete_access(request, container, flow_id=id)
 
     await container.flow_service().delete_flow(id)
     user = container.user()
@@ -691,19 +578,7 @@ async def publish_flow(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_flow_access_context_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.EDIT,
-    )
-    if access_context.actor is None or not access_context.actor.can_publish_flows():
-        raise UnauthorizedException(
-            "You do not have permission to publish flows in this space.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
-        )
-    ensure_can_mutate_flow_draft(container, access_context)
+    await require_flow_publish_access(request, container, flow_id=id)
 
     published = await container.flow_service().publish_flow(flow_id=id)
     user = container.user()
@@ -759,19 +634,7 @@ async def unpublish_flow(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_flow_access_context_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.EDIT,
-    )
-    if access_context.actor is None or not access_context.actor.can_publish_flows():
-        raise UnauthorizedException(
-            "You do not have permission to unpublish flows in this space.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
-        )
-    ensure_can_mutate_flow_draft(container, access_context)
+    await require_flow_unpublish_access(request, container, flow_id=id)
 
     unpublished = await container.flow_service().unpublish_flow(flow_id=id)
     user = container.user()
@@ -787,13 +650,4 @@ async def unpublish_flow(
     return FlowAssembler().to_public(unpublished)
 
 
-__all__ = [
-    "create_flow",
-    "delete_flow",
-    "get_flow",
-    "list_flows",
-    "publish_flow",
-    "router",
-    "unpublish_flow",
-    "update_flow",
-]
+__all__ = ["router"]

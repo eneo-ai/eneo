@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Any, Callable, cast
+from typing import Callable, cast
 
 from anyio.to_thread import run_sync
 from celery import Celery  # pyright: ignore[reportMissingTypeStubs]
@@ -35,12 +35,12 @@ class CeleryFlowExecutionBackend:
         request: FlowRunDispatchRequest,
     ) -> None:
         send_task = cast(
-            Callable[..., Any],
+            Callable[..., object],
             self.celery_app.send_task,  # pyright: ignore[reportUnknownMemberType]
         )
-        await run_sync(
+        async_result = await run_sync(
             cast(
-                Callable[[], Any],
+                Callable[[], object],
                 partial(
                     send_task,
                     FLOW_EXECUTE_TASK_NAME,
@@ -49,6 +49,8 @@ class CeleryFlowExecutionBackend:
                 ),
             )
         )
+        task_id = getattr(async_result, "id", None)
+        celery_task_id = task_id if isinstance(task_id, str) else None
         logger.info(
             "Dispatched flow run to Celery queue",
             extra={
@@ -56,5 +58,6 @@ class CeleryFlowExecutionBackend:
                 "flow_id": str(request.flow_id),
                 "tenant_id": str(request.tenant_id),
                 "queue": self.queue_name,
+                "celery_task_id": celery_task_id,
             },
         )

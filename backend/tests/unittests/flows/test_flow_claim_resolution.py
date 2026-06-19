@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from intric.flows.flow import FlowStepResult, FlowStepResultStatus
+from intric.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from intric.flows.runtime.claim_resolution import resolve_step_claim
 from intric.flows.runtime.models import RunExecutionState
 

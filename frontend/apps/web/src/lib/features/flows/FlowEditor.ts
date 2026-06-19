@@ -43,6 +43,8 @@ type FlowWizardMetadata = {
   transcription_language?: string;
 };
 type FlowSaveStatus = "saved" | "saving" | "unsaved";
+const FLOW_RETENTION_MIN_DAYS = 1;
+const FLOW_RETENTION_MAX_DAYS = 2555;
 
 function getFlowWizardMetadata(
   metadata: Flow["metadata_json"] | null | undefined
@@ -62,6 +64,19 @@ function getUnifiedFlowSaveStatus(
   if (assistantStatus === "error" || assistantStatus === "pending") return "unsaved";
   if (flowStatus === "unsaved") return "unsaved";
   return "saved";
+}
+
+function isFlowRetentionDays(value: number): boolean {
+  return (
+    Number.isInteger(value) && value >= FLOW_RETENTION_MIN_DAYS && value <= FLOW_RETENTION_MAX_DAYS
+  );
+}
+
+function parseFlowRetentionDaysInput(value: string): number | null | undefined {
+  const rawValue = value.trim();
+  if (rawValue === "") return null;
+  if (!/^\d+$/.test(rawValue)) return undefined;
+  return Number(rawValue);
 }
 
 function stripTemporaryStepId(step: FlowStep): FlowStep {
@@ -328,51 +343,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     await assistantSaveManager.saveImmediately(assistantId, changes);
   }
 
-  let legacyTemplateCleanupStarted = false;
-  async function cleanupLegacyMirroredInputTemplates(): Promise<void> {
-    if (legacyTemplateCleanupStarted) return;
-    if (get(isPublished)) return;
-    legacyTemplateCleanupStarted = true;
-
-    const currentSteps = [...(get(editor.state.update).steps ?? [])];
-    if (currentSteps.length === 0) return;
-
-    let changed = false;
-    const nextSteps = [...currentSteps];
-    for (let index = 0; index < currentSteps.length; index += 1) {
-      const step = currentSteps[index] as FlowStep;
-      const bindings = (step.input_bindings ?? {}) as Record<string, unknown>;
-      const question = typeof bindings.question === "string" ? bindings.question.trim() : "";
-      if (question.length === 0) continue;
-      if (!step.assistant_id || step.assistant_id === "") continue;
-
-      const assistant = await loadAssistant(step.assistant_id);
-      if (!assistant || typeof assistant !== "object") continue;
-      const promptText =
-        typeof (assistant as { prompt?: { text?: unknown } }).prompt?.text === "string"
-          ? (assistant as { prompt: { text: string } }).prompt.text.trim()
-          : "";
-      if (promptText.length === 0) continue;
-      if (question !== promptText) continue;
-
-      const nextBindings: Record<string, unknown> = { ...bindings };
-      delete nextBindings.question;
-      delete nextBindings.text;
-      nextSteps[index] = {
-        ...step,
-        input_bindings: Object.keys(nextBindings).length > 0 ? nextBindings : null
-      };
-      changed = true;
-    }
-
-    if (!changed) return;
-    editor.state.update.update((resource) => ({
-      ...resource,
-      steps: nextSteps
-    }));
-    scheduleAutoSave();
-  }
-
   async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
     await assistantSaveManager.save(assistantId, changes);
   }
@@ -437,10 +407,18 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function setDataRetentionDays(days: number | null): void {
+    if (days !== null && !isFlowRetentionDays(days)) return;
+
     editor.state.update.update((resource) => ({
       ...resource,
-      data_retention_days: Number.isFinite(days) ? days : null
+      data_retention_days: days
     }));
+  }
+
+  function setDataRetentionDaysFromInput(value: string): void {
+    const days = parseFlowRetentionDaysInput(value);
+    if (days === undefined) return;
+    setDataRetentionDays(days);
   }
 
   function isValidStepIndex(index: number, steps: FlowStep[]): boolean {
@@ -1014,6 +992,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     setName,
     setDescription,
     setDataRetentionDays,
+    setDataRetentionDaysFromInput,
     replaceStepAtIndex,
     removeStepAtIndex,
     moveStepAtIndex,
@@ -1030,7 +1009,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     destroy
   });
 
-  void cleanupLegacyMirroredInputTemplates();
   return flowEditor;
 }
 

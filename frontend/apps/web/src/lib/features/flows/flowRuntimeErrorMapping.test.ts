@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import { IntricError } from "@intric/intric-js";
 
 import {
+  describeFlowRunError,
   describeFlowApiError,
   getFlowRuntimeErrorMessage,
   classifyUploadError,
   getUploadErrorHint,
   friendlyMimeNames,
+  FLOW_API_ERROR_CODE,
   FLOW_API_ERROR_CODES,
   getReviewPolicyAffectedStepsFromRunError,
   getReviewPolicyErrorStepsFromDefinitionSnapshot,
+  getFlowRuntimeErrorMessageByCode,
   isReviewPolicyInvalidRunError,
   isReviewPolicyRunErrorRelevantForStep,
   isReviewPolicyRunErrorStepExact,
@@ -107,6 +110,43 @@ describe("flowRuntimeErrorMapping", () => {
     }
   });
 
+  it("describes persisted run errors with generated Flow API codes", () => {
+    const error: FlowRunError = {
+      schema_version: 1,
+      code: FLOW_API_ERROR_CODE.STEP_EXECUTION_FAILED,
+      message: "Step 2: typed input/output validation failed.",
+      source: "executor_failed",
+      step_order: 2
+    };
+
+    expect(describeFlowRunError(error)).toEqual({
+      code: FLOW_API_ERROR_CODE.STEP_EXECUTION_FAILED,
+      messageKey: "flow_error_flow_step_execution_failed",
+      context: { step_order: 2 }
+    });
+  });
+
+  it("returns null for unknown persisted run error codes", () => {
+    const error: FlowRunError = {
+      schema_version: 1,
+      code: "provider_timeout",
+      message: "Provider timed out.",
+      source: "executor_failed"
+    };
+
+    expect(describeFlowRunError(error)).toBeNull();
+  });
+
+  it("localizes every generated Flow API error code by code", () => {
+    for (const code of FLOW_API_ERROR_CODES) {
+      expect(getFlowRuntimeErrorMessageByCode(code)).toBeTruthy();
+    }
+  });
+
+  it("returns null for unknown run error codes so callers can show the stored message", () => {
+    expect(getFlowRuntimeErrorMessageByCode("provider_timeout")).toBeNull();
+  });
+
   it("uses the structured response code over the legacy client code", () => {
     const error = new IntricError(
       "stale",
@@ -141,21 +181,99 @@ describe("flowRuntimeErrorMapping", () => {
     expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
   });
 
-  it("maps rerun unsupported code through the Flow API descriptor", () => {
+  it.each([
+    [
+      "flow_run_access_denied",
+      [
+        "You do not have access to this flow run.",
+        "Du har inte åtkomst till den här flödeskörningen."
+      ]
+    ],
+    [
+      "flow_run_evidence_forbidden",
+      [
+        "You do not have permission to view evidence for this run.",
+        "Du har inte behörighet att visa evidens för den här körningen."
+      ]
+    ],
+    [
+      "flow_run_evidence_raw_export_forbidden",
+      [
+        "Raw evidence export is blocked by policy for this run.",
+        "Råexport av evidens blockeras av policy för den här körningen."
+      ]
+    ]
+  ])("maps %s through the localized Flow API descriptor", (code, messages) => {
     const error = new IntricError(
-      "rerun unsupported",
+      "forbidden",
+      "RESPONSE",
+      403,
+      0,
+      { code },
+      { endpoint: "GET@test" }
+    );
+
+    expect(describeFlowApiError(error)).toMatchObject({
+      code,
+      messageKey: `flow_error_${code}`
+    });
+    expect(messages).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
+  });
+
+  it("maps invalid rerun step inputs through the Flow API descriptor", () => {
+    const error = new IntricError(
+      "Rerun step_inputs may only target the rerun root step.",
       "RESPONSE",
       400,
       0,
-      { code: "flow_run_rerun_step_inputs_unsupported" },
+      {
+        code: "flow_run_rerun_step_inputs_invalid",
+        context: { step_ids: ["downstream-step"] }
+      },
       { endpoint: "POST@test" }
     );
 
     expect(describeFlowApiError(error)).toMatchObject({
-      code: "flow_run_rerun_step_inputs_unsupported",
-      messageKey: "flow_error_flow_run_rerun_step_inputs_unsupported"
+      code: "flow_run_rerun_step_inputs_invalid",
+      messageKey: "flow_error_flow_run_rerun_step_inputs_invalid",
+      context: { step_ids: ["downstream-step"] }
     });
-    expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
+    expect([
+      "Rerun files can only be attached to the step being rerun. Remove files from other steps and try again.",
+      "Filer vid omkörning kan bara kopplas till steget som körs om. Ta bort filer från andra steg och försök igen."
+    ]).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
+  });
+
+  it.each([
+    [
+      "flow_run_invalid_idempotency_key",
+      [
+        "The retry key is empty or too long. Send a key between 1 and 255 characters.",
+        "Nyckeln för säkra omförsök är tom eller för lång. Skicka en nyckel med 1 till 255 tecken."
+      ]
+    ],
+    [
+      "flow_run_file_not_bound_to_flow",
+      [
+        "One or more selected files were uploaded for another flow. Upload them through this flow and try again.",
+        "En eller flera valda filer laddades upp för ett annat flöde. Ladda upp dem via det här flödet och försök igen."
+      ]
+    ],
+    [
+      "flow_run_rerun_step_incomplete",
+      [
+        "The selected rerun step does not have a completed current result. Reload the run and choose a completed step.",
+        "Det valda omkörningssteget har inget slutfört aktuellt resultat. Läs om körningen och välj ett slutfört steg."
+      ]
+    ]
+  ])("maps newly cataloged %s through the localized Flow API descriptor", (code, messages) => {
+    const error = new IntricError(code, "RESPONSE", 400, 0, { code }, { endpoint: "POST@test" });
+
+    expect(describeFlowApiError(error)).toMatchObject({
+      code,
+      messageKey: `flow_error_${code}`
+    });
+    expect(messages).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
   });
 
   it("maps invalid published form schema errors through the Flow API descriptor", () => {
@@ -197,7 +315,7 @@ describe("review policy run error helpers", () => {
 
   const reviewPolicyError = (overrides: Partial<FlowRunError> = {}): FlowRunError => ({
     schema_version: 1,
-    code: "flow_review_policy_invalid",
+    code: FLOW_API_ERROR_CODE.REVIEW_POLICY_INVALID,
     message: "Step 10 (Final review): review_policy is invalid.",
     source: "invalid_flow_definition",
     step_order: 10,
@@ -214,7 +332,7 @@ describe("review policy run error helpers", () => {
     expect(isReviewPolicyInvalidRunError(reviewPolicyError())).toBe(true);
     expect(
       isReviewPolicyInvalidRunError(
-        reviewPolicyError({ code: "invalid_flow_definition", step_order: null })
+        reviewPolicyError({ code: FLOW_API_ERROR_CODE.DEFINITION_INVALID, step_order: null })
       )
     ).toBe(false);
   });
@@ -243,7 +361,7 @@ describe("review policy run error helpers", () => {
   it("returns no affected steps for unrelated errors", () => {
     expect(
       getReviewPolicyAffectedStepsFromRunError(
-        reviewPolicyError({ code: "invalid_flow_definition" }),
+        reviewPolicyError({ code: FLOW_API_ERROR_CODE.DEFINITION_INVALID }),
         reviewSteps
       )
     ).toEqual([]);

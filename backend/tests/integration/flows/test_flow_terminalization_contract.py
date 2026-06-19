@@ -31,13 +31,34 @@ from intric.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_factory import FlowFactory
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 
 LIFECYCLE_LOGGER = "intric.flows.application.flow_run_lifecycle_events"
+
+
+def _flow_run_terminalizer(run_repo: FlowRunRepository) -> FlowRunTerminalizer:
+    return FlowRunTerminalizer(
+        run_repo,
+        FlowRunRerunRepository(
+            session=run_repo.session,
+            factory=run_repo.factory,
+        ),
+        run_repo.audit_outbox_repo,
+        FlowRunReviewCheckpointRepository(
+            session=run_repo.session,
+            factory=run_repo.factory,
+            audit_outbox_repo=run_repo.audit_outbox_repo,
+        ),
+    )
 
 
 @contextmanager
@@ -163,7 +184,6 @@ async def _create_running_run(
     await version_repo.create(
         flow_id=flow.id,
         version=1,
-        definition_checksum="terminalization-contract",
         definition_json={
             "steps": [
                 {
@@ -270,7 +290,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             attempt_no=1,
             celery_task_id="terminalization-contract-other-run",
         )
-        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        terminalizer = _flow_run_terminalizer(run_repo)
 
         with _capture_flow_lifecycle_logs(caplog):
             first = await terminalizer.terminalize_run(
@@ -280,7 +300,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
                 source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                    code="flow_worker_stalled",
+                    code=FlowApiErrorCode.RUN_WORKER_STALLED,
                     message="flow_worker_stalled: stale run reconciled.",
                 ),
             )
@@ -291,7 +311,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
                 source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                    code="flow_worker_stalled",
+                    code=FlowApiErrorCode.RUN_WORKER_STALLED,
                     message="flow_worker_stalled: duplicate reconciliation.",
                 ),
             )
@@ -323,6 +343,12 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             )
         )
         assert attempt_status == FlowStepAttemptStatus.FAILED.value
+        attempt_error_code = await session.scalar(
+            sa.select(FlowStepAttempts.error_code).where(
+                FlowStepAttempts.flow_run_id == run.id
+            )
+        )
+        assert attempt_error_code == "flow_worker_stalled"
         other_step_statuses = (
             (
                 await session.execute(
@@ -390,6 +416,42 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_failed_terminalization_without_structured_error_closes_attempt_with_null_error_code(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        run, _flow, run_repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        terminalizer = _flow_run_terminalizer(run_repo)
+
+        await terminalizer.terminalize_run(
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.TASK_FAILURE,
+        )
+
+        attempt_row = await session.scalar(
+            sa.select(FlowStepAttempts).where(FlowStepAttempts.flow_run_id == run.id)
+        )
+        assert attempt_row is not None
+        assert attempt_row.status == FlowStepAttemptStatus.FAILED.value
+        assert attempt_row.error_code is None
+        assert attempt_row.error_message is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_stale_running_query_excludes_awaiting_review_runs(
     db_container,
     completion_model_factory,
@@ -449,7 +511,7 @@ async def test_terminalization_lost_race_emits_noop_event(
             "terminalize_run_status",
             AsyncMock(return_value=None),
         )
-        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        terminalizer = _flow_run_terminalizer(run_repo)
 
         with _capture_flow_lifecycle_logs(caplog):
             result = await terminalizer.terminalize_run(
@@ -459,7 +521,7 @@ async def test_terminalization_lost_race_emits_noop_event(
                 source=FlowRunLifecycleSource.TASK_FAILURE,
                 error=FlowRunError.from_source(
                     FlowRunLifecycleSource.TASK_FAILURE,
-                    code="flow_task_failure",
+                    code=FlowApiErrorCode.RUN_TASK_FAILURE,
                     message="flow_task_failure: task failed.",
                 ),
             )
@@ -504,7 +566,7 @@ async def test_completed_terminalization_rejects_open_runtime_rows(
             space_factory=space_factory,
             assistant_factory=assistant_factory,
         )
-        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        terminalizer = _flow_run_terminalizer(run_repo)
 
         with pytest.raises(FlowRunTerminalizationInvariantError):
             await terminalizer.terminalize_run(
@@ -551,7 +613,7 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
             "insert_terminal_audit_outbox",
             AsyncMock(side_effect=RuntimeError("outbox unavailable")),
         )
-        terminalizer = FlowRunTerminalizer(run_repo, run_repo.audit_outbox_repo)
+        terminalizer = _flow_run_terminalizer(run_repo)
 
         with _capture_flow_lifecycle_logs(caplog):
             with pytest.raises(RuntimeError, match="outbox unavailable"):
@@ -563,7 +625,7 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
                         source=FlowRunLifecycleSource.TASK_FAILURE,
                         error=FlowRunError.from_source(
                             FlowRunLifecycleSource.TASK_FAILURE,
-                            code="flow_task_failure",
+                            code=FlowApiErrorCode.RUN_TASK_FAILURE,
                             message="flow_task_failure: task failed.",
                         ),
                     )

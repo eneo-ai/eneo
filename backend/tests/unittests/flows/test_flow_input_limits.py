@@ -10,6 +10,7 @@ from intric.flows.flow_input_limits import (
     effective_runtime_max_files,
     effective_runtime_upload_policy,
     resolve_flow_input_limits,
+    validate_flow_input_limits_object,
 )
 from intric.main.exceptions import BadRequestException
 
@@ -120,6 +121,36 @@ def test_apply_patch_rejects_out_of_range() -> None:
 def test_apply_patch_rejects_boolean_values() -> None:
     with pytest.raises(BadRequestException, match="file_max_size_bytes"):
         apply_flow_input_limits_patch({}, file_max_size_bytes=True)
+
+
+def test_validate_accepts_all_known_input_limit_fields() -> None:
+    payload = {
+        "file_max_size_bytes": 10_000_000,
+        "audio_max_size_bytes": 25_000_000,
+        "max_files_per_run": 50,
+        "audio_max_files_per_run": 10,
+    }
+
+    assert validate_flow_input_limits_object(payload) == payload
+
+
+def test_validate_rejects_unknown_input_limit_field() -> None:
+    with pytest.raises(
+        BadRequestException,
+        match="flow_settings.input_limits contains unknown fields: unknown",
+    ):
+        validate_flow_input_limits_object({"unknown": 1})
+
+
+def test_validate_rejects_unknown_input_limit_field_mixed_with_valid_field() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        validate_flow_input_limits_object(
+            {"file_max_size_bytes": 10_000_000, "typo": 1}
+        )
+
+    message = str(exc_info.value)
+    assert "typo" in message
+    assert "file_max_size_bytes" not in message
 
 
 def test_effective_limit_prefers_audio_for_audio_type() -> None:

@@ -1,21 +1,70 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Sequence
+from typing import cast
 
+from pydantic import BaseModel, ConfigDict
+from pydantic.config import JsonDict
+
+from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStepResult
 from intric.flows.step_lineage import (
     build_step_ref_mapping,
     resolve_reference_step_orders,
 )
 from intric.flows.template_reference_analyzer import analyze_template
 
+GRAPH_RESPONSE_EXAMPLE: JsonDict = {
+    "nodes": [
+        {"id": "step-1", "label": "Transcribe uploaded audio", "type": "step"},
+        {"id": "step-2", "label": "Create PDF summary", "type": "step"},
+    ],
+    "edges": [
+        {"source": "step-1", "target": "step-2"},
+    ],
+}
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    type: str
+    step_order: int | None = None
+    input_source: str | None = None
+    input_type: str | None = None
+    output_type: str | None = None
+    output_mode: str | None = None
+    mcp_policy: str | None = None
+    output_classification_override: int | None = None
+    run_status: str | None = None
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
+    error_message: str | None = None
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    kind: str | None = None
+    source_step_order: int | None = None
+    target_step_order: int | None = None
+    style: str | None = None
+    label: str | None = None
+
+
+class GraphResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": GRAPH_RESPONSE_EXAMPLE})
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
 
 def build_graph_from_steps(
-    steps: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    nodes: list[dict[str, Any]] = [
-        {"id": "input", "label": "Input", "type": "input"},
+    steps: Sequence[FlowPersistedJsonObject],
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    nodes: list[GraphNode] = [
+        GraphNode(id="input", label="Input", type="input"),
     ]
-    edges: list[dict[str, Any]] = []
+    edges: list[GraphEdge] = []
 
     sorted_steps = sorted(steps, key=lambda item: int(item["step_order"]))
     for step in sorted_steps:
@@ -23,23 +72,23 @@ def build_graph_from_steps(
         label = step.get("user_description") or f"Steg {step['step_order']}"
         output_mode = step.get("output_mode")
         nodes.append(
-            {
-                "id": step_id,
-                "label": label,
-                "type": "assembly" if output_mode == "template_fill" else "llm",
-                "step_order": step["step_order"],
-                "input_source": step.get("input_source"),
-                "input_type": step.get("input_type"),
-                "output_type": step.get("output_type"),
-                "output_mode": output_mode,
-                "mcp_policy": step.get("mcp_policy"),
-                "output_classification_override": step.get(
+            GraphNode(
+                id=step_id,
+                label=label,
+                type="assembly" if output_mode == "template_fill" else "llm",
+                step_order=int(step["step_order"]),
+                input_source=step.get("input_source"),
+                input_type=step.get("input_type"),
+                output_type=step.get("output_type"),
+                output_mode=output_mode,
+                mcp_policy=step.get("mcp_policy"),
+                output_classification_override=step.get(
                     "output_classification_override"
                 ),
-            }
+            )
         )
 
-    nodes.append({"id": "output", "label": "Output", "type": "output"})
+    nodes.append(GraphNode(id="output", label="Output", type="output"))
     step_ref_mapping = build_step_ref_mapping(sorted_steps)
 
     for step in sorted_steps:
@@ -48,16 +97,17 @@ def build_graph_from_steps(
         input_source = step.get("input_source")
 
         if input_source in {"flow_input", "http_get", "http_post"}:
-            edge: dict[str, Any] = {
-                "source": "input",
-                "target": step_id,
-                "kind": input_source,
-                "source_step_order": 0,
-                "target_step_order": step_order,
-            }
-            if input_source != "flow_input":
-                edge["style"] = "dashed"
-            edges.append(edge)
+            style = "dashed" if input_source != "flow_input" else None
+            edges.append(
+                GraphEdge(
+                    source="input",
+                    target=step_id,
+                    kind=input_source,
+                    source_step_order=0,
+                    target_step_order=step_order,
+                    style=style,
+                )
+            )
 
         if input_source == "previous_step" and step_order > 1:
             prev = next(
@@ -70,45 +120,45 @@ def build_graph_from_steps(
             )
             if prev is not None:
                 edges.append(
-                    {
-                        "source": str(prev.get("step_id") or prev.get("id")),
-                        "target": step_id,
-                        "kind": "previous_step",
-                        "source_step_order": int(prev["step_order"]),
-                        "target_step_order": step_order,
-                    }
+                    GraphEdge(
+                        source=str(prev.get("step_id") or prev.get("id")),
+                        target=step_id,
+                        kind="previous_step",
+                        source_step_order=int(prev["step_order"]),
+                        target_step_order=step_order,
+                    )
                 )
         elif input_source == "all_previous_steps":
             for prev in sorted_steps:
                 if int(prev["step_order"]) < step_order:
                     edges.append(
-                        {
-                            "source": str(prev.get("step_id") or prev.get("id")),
-                            "target": step_id,
-                            "kind": "all_previous_steps",
-                            "source_step_order": int(prev["step_order"]),
-                            "target_step_order": step_order,
-                            "style": "dashed",
-                            "label": "aggregated",
-                        }
+                        GraphEdge(
+                            source=str(prev.get("step_id") or prev.get("id")),
+                            target=step_id,
+                            kind="all_previous_steps",
+                            source_step_order=int(prev["step_order"]),
+                            target_step_order=step_order,
+                            style="dashed",
+                            label="aggregated",
+                        )
                     )
             edges.append(
-                {
-                    "source": "input",
-                    "target": step_id,
-                    "kind": "all_previous_steps",
-                    "source_step_order": 0,
-                    "target_step_order": step_order,
-                    "style": "dashed",
-                }
+                GraphEdge(
+                    source="input",
+                    target=step_id,
+                    kind="all_previous_steps",
+                    source_step_order=0,
+                    target_step_order=step_order,
+                    style="dashed",
+                )
             )
 
         existing_upstream_orders = {
-            int(edge["source_step_order"])
+            edge.source_step_order
             for edge in edges
-            if edge.get("target") == step_id
-            and isinstance(edge.get("source_step_order"), int)
-            and int(edge["source_step_order"]) > 0
+            if edge.target == step_id
+            and edge.source_step_order is not None
+            and edge.source_step_order > 0
         }
         for upstream_order in _binding_upstream_orders(
             step=step,
@@ -127,23 +177,23 @@ def build_graph_from_steps(
             if upstream is None:
                 continue
             edges.append(
-                {
-                    "source": str(upstream.get("step_id") or upstream.get("id")),
-                    "target": step_id,
-                    "kind": "input_bindings.question",
-                    "source_step_order": upstream_order,
-                    "target_step_order": step_order,
-                    "style": "dashed",
-                    "label": "underlag",
-                }
+                GraphEdge(
+                    source=str(upstream.get("step_id") or upstream.get("id")),
+                    target=step_id,
+                    kind="input_bindings.question",
+                    source_step_order=upstream_order,
+                    target_step_order=step_order,
+                    style="dashed",
+                    label="underlag",
+                )
             )
 
     if sorted_steps:
         step_ids = {str(step.get("step_id") or step.get("id")) for step in sorted_steps}
         source_step_ids = {
-            str(edge["source"])
+            edge.source
             for edge in edges
-            if str(edge["source"]) in step_ids and str(edge["target"]) in step_ids
+            if edge.source in step_ids and edge.target in step_ids
         }
         terminal_steps = [
             step
@@ -152,24 +202,24 @@ def build_graph_from_steps(
         ]
         for step in terminal_steps:
             edges.append(
-                {
-                    "source": str(step.get("step_id") or step.get("id")),
-                    "target": "output",
-                    "kind": "flow_output",
-                    "source_step_order": int(step["step_order"]),
-                    "target_step_order": None,
-                }
+                GraphEdge(
+                    source=str(step.get("step_id") or step.get("id")),
+                    target="output",
+                    kind="flow_output",
+                    source_step_order=int(step["step_order"]),
+                    target_step_order=None,
+                )
             )
     else:
         edges.append(
-            {
-                "source": "input",
-                "target": "output",
-                "kind": "empty",
-                "source_step_order": 0,
-                "target_step_order": None,
-                "style": "dashed",
-            }
+            GraphEdge(
+                source="input",
+                target="output",
+                kind="empty",
+                source_step_order=0,
+                target_step_order=None,
+                style="dashed",
+            )
         )
 
     return nodes, edges
@@ -177,7 +227,7 @@ def build_graph_from_steps(
 
 def _binding_upstream_orders(
     *,
-    step: dict[str, Any],
+    step: FlowPersistedJsonObject,
     step_ref_mapping: dict[str, int],
 ) -> list[int]:
     """Return upstream orders referenced by explicit underlag."""
@@ -202,24 +252,38 @@ def _binding_upstream_orders(
 
 
 def enrich_nodes_with_run_results(
-    nodes: list[dict[str, Any]],
-    step_results: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    by_step_id = {str(item["step_id"]): item for item in step_results}
+    nodes: Sequence[GraphNode],
+    step_results: Sequence[FlowStepResult],
+) -> list[GraphNode]:
+    by_step_id = {str(item.step_id): item for item in step_results}
 
-    enriched: list[dict[str, Any]] = []
+    enriched: list[GraphNode] = []
     for node in nodes:
-        if node["type"] not in {"llm", "assembly"}:
+        if node.type not in {"llm", "assembly"}:
             enriched.append(node)
             continue
-        result = by_step_id.get(node["id"])
+        result = by_step_id.get(node.id)
         if result is None:
             enriched.append(node)
             continue
-        merged = dict(node)
-        merged["run_status"] = result.get("status")
-        merged["num_tokens_input"] = result.get("num_tokens_input")
-        merged["num_tokens_output"] = result.get("num_tokens_output")
-        merged["error_message"] = result.get("error_message")
-        enriched.append(merged)
+        enriched.append(
+            node.model_copy(
+                update={
+                    "run_status": result.status.value,
+                    "num_tokens_input": result.num_tokens_input,
+                    "num_tokens_output": result.num_tokens_output,
+                    "error_message": result.error_message,
+                }
+            )
+        )
     return enriched
+
+
+def build_graph_response(
+    steps: Sequence[FlowPersistedJsonObject],
+    step_results: Sequence[FlowStepResult] = (),
+) -> GraphResponse:
+    nodes, edges = build_graph_from_steps(steps)
+    if step_results:
+        nodes = enrich_nodes_with_run_results(nodes, step_results)
+    return GraphResponse(nodes=nodes, edges=edges)

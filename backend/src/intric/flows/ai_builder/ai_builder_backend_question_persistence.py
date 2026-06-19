@@ -22,8 +22,7 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import ASK_STRUCTURED_QUESTION_TOOL_NAME
-from intric.flows.domain.flow import Flow
-from intric.flows.flow_authoring_spec import JsonObject
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +95,7 @@ async def persist_backend_question(
 
 def _persisted_question_arguments(
     question_data: StructuredQuestionPayload,
-) -> JsonObject:
+) -> FlowPersistedJsonObject:
     return question_data.model_dump(
         mode="json",
         exclude_none=False,

@@ -17,6 +17,7 @@ from intric.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    FLOW_METHOD_PERMISSION_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
@@ -51,6 +52,7 @@ from intric.flow_packages.api import (
     tenant_router as flow_package_tenant_router,
 )
 from intric.flows.api.flow_router import router as flows_router
+from intric.flows.api.flow_runtime_paths import FLOW_ROOT_PATH
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
 from intric.icons.api.icon_router import router as icons_router
@@ -403,10 +405,15 @@ router.include_router(
 )
 router.include_router(
     flows_router,
-    prefix="/flows",
+    prefix=FLOW_ROOT_PATH,
     tags=["flows"],
     dependencies=[
-        Depends(require_resource_permission_for_method("flows")),
+        Depends(
+            require_resource_permission_for_method(
+                "flows",
+                method_permission_overrides=FLOW_METHOD_PERMISSION_OVERRIDES,
+            )
+        ),
         Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
     ],
 )

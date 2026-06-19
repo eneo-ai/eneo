@@ -1,10 +1,30 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
+from typing import cast
+from uuid import UUID, uuid4
 
-from intric.flows.flow import FlowStepResult, FlowStepResultStatus
-from intric.flows.runtime.run_outcome import determine_run_outcome
+import pytest
+
+from intric.flows.application.flow_run_terminalization import (
+    FlowRunTerminalizationResult,
+    FlowRunTerminalizer,
+)
+from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowRun,
+    FlowRunStatus,
+    FlowStepResult,
+    FlowStepResultStatus,
+)
+from intric.flows.enums import FlowRunLifecycleSource
+from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.flow_run_error import FlowRunError
+from intric.flows.principal import FlowPrincipal
+from intric.flows.runtime.run_outcome import (
+    determine_run_outcome,
+    finalize_run_from_current_results,
+)
 
 
 def _result(
@@ -33,6 +53,49 @@ def _result(
     )
 
 
+class RecordingTerminalizer:
+    def __init__(self) -> None:
+        self.error: FlowRunError | None = None
+        self.target_status: FlowRunStatus | None = None
+        self.source: FlowRunLifecycleSource | None = None
+
+    async def terminalize_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowRunStatus,
+        source: FlowRunLifecycleSource,
+        error: FlowRunError | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
+        cancelled_at: datetime | None = None,
+        principal: FlowPrincipal | None = None,
+    ) -> FlowRunTerminalizationResult:
+        _ = (cancelled_at, principal)
+        now = datetime.now(timezone.utc)
+        self.error = error
+        self.target_status = target_status
+        self.source = source
+        return FlowRunTerminalizationResult(
+            run=FlowRun(
+                id=run_id,
+                flow_id=uuid4(),
+                flow_version=1,
+                tenant_id=tenant_id,
+                trace_id=uuid4(),
+                status=target_status,
+                output_payload_json=output_payload_json,
+                error=error,
+                created_at=now,
+                updated_at=now,
+            ),
+            did_transition=True,
+            target_status=target_status,
+            source=source,
+            audit_outbox_id=None,
+        )
+
+
 def test_determine_run_outcome_prefers_failed_results():
     outcome = determine_run_outcome(
         results=[
@@ -46,11 +109,20 @@ def test_determine_run_outcome_prefers_failed_results():
     assert outcome.error_message == "One or more flow steps failed."
 
 
-def test_determine_run_outcome_returns_skipped_for_in_progress_runs():
+@pytest.mark.parametrize(
+    "active_status",
+    [
+        FlowStepResultStatus.PENDING,
+        FlowStepResultStatus.RUNNING,
+    ],
+)
+def test_determine_run_outcome_returns_skipped_for_in_progress_runs(
+    active_status: FlowStepResultStatus,
+):
     outcome = determine_run_outcome(
         results=[
             _result(1, status=FlowStepResultStatus.COMPLETED, text="ok"),
-            _result(2, status=FlowStepResultStatus.RUNNING),
+            _result(2, status=active_status),
         ]
     )
 
@@ -90,3 +162,22 @@ def test_determine_run_outcome_handles_empty_results_as_completed_without_payloa
     assert outcome.result_status == "completed"
     assert outcome.flow_status == "completed"
     assert outcome.output_payload_json is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_run_from_current_results_uses_cancelled_run_error_code():
+    terminalizer = RecordingTerminalizer()
+
+    result = await finalize_run_from_current_results(
+        run_id=uuid4(),
+        tenant_id=uuid4(),
+        results=[_result(1, status=FlowStepResultStatus.CANCELLED)],
+        terminalizer=cast(FlowRunTerminalizer, terminalizer),
+    )
+
+    assert result.terminalization is not None
+    assert result.terminalization.run.status == FlowRunStatus.CANCELLED
+    assert terminalizer.target_status == FlowRunStatus.CANCELLED
+    assert terminalizer.source == FlowRunLifecycleSource.EXECUTOR_FAILED
+    assert terminalizer.error is not None
+    assert terminalizer.error.code == FlowApiErrorCode.RUN_CANCELLED.value

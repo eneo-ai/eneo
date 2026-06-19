@@ -11,23 +11,21 @@ import sqlalchemy as sa
 from dependency_injector import providers
 
 from intric.authentication.principal_types import PrincipalType
+from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
     FlowRuns,
+    FlowRunStepInputFiles,
+    FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
 )
 from intric.database.tables.roles_table import Roles
 from intric.database.tables.users_table import users_roles_table
-from intric.flows import (
-    Flow,
-    FlowFactory,
-    FlowRepository,
-    FlowStep,
-    FlowVersionRepository,
-)
+from intric.flows import FlowFactory, FlowRepository, FlowVersionRepository
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.enums import (
     FlowOutputType,
     FlowRunRerunInvalidationRole,
@@ -236,7 +234,6 @@ async def _seed_flow_run_contract_data(
         await version_repo.create(
             flow_id=flow.id,
             version=1,
-            definition_checksum="evidence-contract-checksum",
             definition_json={
                 "metadata_json": {
                     "ai_builder": {
@@ -265,6 +262,36 @@ async def _seed_flow_run_contract_data(
         flow = flow.model_copy(update={"published_version": 1})
         flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
+        runtime_input_file = Files(
+            name="underlag.pdf",
+            text="case file text",
+            blob=None,
+            checksum="input-checksum",
+            size=256,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+            owner_type="user",
+            owner_user_id=admin_user.id,
+            owner_service_id=None,
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(runtime_input_file)
+        await session.flush()
+
+        session.add(
+            FlowRuntimeUploadedFiles(
+                file_id=runtime_input_file.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                uploaded_for_step_id=step.id,
+                owner_type="user",
+                owner_user_id=admin_user.id,
+                owner_service_id=None,
+            )
+        )
+        await session.flush()
+
         started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
         finished_at = datetime.now(timezone.utc)
         run = FlowRuns(
@@ -292,22 +319,23 @@ async def _seed_flow_run_contract_data(
             step_id=step.id,
             step_order=1,
             assistant_id=assistant.id,
+            current_attempt_no=1,
             input_payload_json={
                 "question": "What happened?",
                 "token": "super-secret",
                 "diagnostics": [{"code": "ok"}],
                 "runtime_input": {
-                    "file_ids": ["input-file-1"],
+                    "file_ids": [str(runtime_input_file.id)],
                     "files_count": 1,
                     "files": [
                         {
-                            "id": "input-file-1",
-                            "name": "underlag.pdf",
-                            "checksum": "input-checksum",
-                            "size": 256,
+                            "id": str(runtime_input_file.id),
+                            "name": "json-stale.pdf",
+                            "checksum": "json-stale-checksum",
+                            "size": 999,
                             "mimetype": "application/pdf",
                             "file_type": "document",
-                            "text_length": 42,
+                            "text_length": 999,
                             "has_text": True,
                             "has_transcription": False,
                         }
@@ -421,6 +449,20 @@ async def _seed_flow_run_contract_data(
         session.add(initial_attempt)
         await session.flush()
 
+        session.add(
+            FlowRunStepInputFiles(
+                flow_run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                step_id=step.id,
+                step_order=step.step_order,
+                attempt_no=1,
+                file_id=runtime_input_file.id,
+                ordinal=0,
+            )
+        )
+        await session.flush()
+
         rerun_operation_id: str | None = None
         rerun_invalidated_step_id: str | None = None
         replacement_attempt_id: str | None = None
@@ -477,12 +519,7 @@ async def _seed_flow_run_contract_data(
                     "question": "What changed?",
                     "api_key": "super-secret",
                 },
-                step_inputs_json={
-                    str(step.id): {
-                        "file_ids": ["rerun-input-file-1"],
-                        "api_key": "super-secret",
-                    }
-                },
+                root_step_input_override_requested=True,
                 requested_by_principal_type=PrincipalType.USER.value,
                 requested_by_user_id=admin_user.id,
                 failure_code=None,
@@ -528,6 +565,19 @@ async def _seed_flow_run_contract_data(
             )
             session.add(replacement_attempt)
             await session.flush()
+            session.add(
+                FlowRunStepInputFiles(
+                    flow_run_id=run.id,
+                    flow_id=flow.id,
+                    tenant_id=admin_user.tenant_id,
+                    step_id=step.id,
+                    step_order=step.step_order,
+                    attempt_no=replacement_attempt.attempt_no,
+                    file_id=runtime_input_file.id,
+                    ordinal=0,
+                )
+            )
+            await session.flush()
 
             rerun_operation.root_attempt_id = replacement_attempt.id
             initial_attempt.superseded_by_attempt_id = replacement_attempt.id
@@ -564,6 +614,7 @@ async def _seed_flow_run_contract_data(
         }
         if rerun_operation_id is not None:
             seeded["rerun_operation_id"] = rerun_operation_id
+            seeded["rerun_runtime_input_file_id"] = str(runtime_input_file.id)
         if rerun_invalidated_step_id is not None:
             seeded["rerun_invalidated_step_id"] = rerun_invalidated_step_id
         if replacement_attempt_id is not None:
@@ -746,9 +797,13 @@ async def test_flow_run_evidence_endpoint_includes_rerun_lineage(
     )
     assert payload["rerun_operations"][0]["expected_run_revision"] == 1
     assert payload["rerun_operations"][0]["accepted_run_revision"] == 2
-    assert payload["rerun_operations"][0]["input_payload_json"]["api_key"] == (
-        "[REDACTED]"
-    )
+    assert payload["rerun_operations"][0]["input_payload"]["api_key"] == ("[REDACTED]")
+    assert payload["rerun_operations"][0]["root_step_input_override"] == {
+        "step_id": payload["rerun_operations"][0]["rerun_step_id"],
+        "file_ids": [seeded["rerun_runtime_input_file_id"]],
+    }
+    assert "input_payload_json" not in payload["rerun_operations"][0]
+    assert "step_inputs_json" not in payload["rerun_operations"][0]
     assert (
         payload["rerun_invalidated_steps"][0]["id"]
         == (seeded["rerun_invalidated_step_id"])
@@ -879,8 +934,8 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
     redacted_bundle = redacted_payload["bundle"]
     raw_bundle = raw_payload["bundle"]
 
-    assert redacted_payload["schema_version"] == "flow-evidence-export.v5"
-    assert raw_payload["schema_version"] == "flow-evidence-export.v5"
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v6"
+    assert raw_payload["schema_version"] == "flow-evidence-export.v6"
     assert (
         redacted_payload["content_hash"] == (repeated_redacted_payload["content_hash"])
     )
@@ -894,22 +949,21 @@ async def test_flow_run_evidence_export_preserves_rerun_lineage_redaction_shape(
 
     raw_operation = raw_bundle["rerun_operations"][0]
     redacted_operation = redacted_bundle["rerun_operations"][0]
-    rerun_step_id = raw_operation["rerun_step_id"]
     assert raw_operation["input_payload_json"]["api_key"] == "super-secret"
     assert redacted_operation["input_payload_json"]["api_key"] == "[REDACTED]"
-    assert raw_operation["step_inputs_json"][rerun_step_id]["api_key"] == (
-        "super-secret"
-    )
-    assert redacted_operation["step_inputs_json"][rerun_step_id]["api_key"] == (
-        "[REDACTED]"
+    assert "step_inputs_json" not in raw_operation
+    assert "step_inputs_json" not in redacted_operation
+    assert raw_operation["root_step_input_override"] == {
+        "step_id": raw_operation["rerun_step_id"],
+        "file_ids": [seeded["rerun_runtime_input_file_id"]],
+    }
+    assert (
+        redacted_operation["root_step_input_override"]
+        == (raw_operation["root_step_input_override"])
     )
     assert (
         "bundle.rerun_operations[0].input_payload_json.api_key"
         in redacted_payload["redaction"]["masked_paths"]
-    )
-    assert (
-        "bundle.rerun_operations[0].step_inputs_json."
-        f"{rerun_step_id}.api_key" in redacted_payload["redaction"]["masked_paths"]
     )
     assert redacted_payload["summary"]["rerun_lineage"] == {
         "operations_count": 1,
@@ -967,8 +1021,8 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
     redacted_checkpoint = redacted_payload["bundle"]["review_checkpoints"][0]
     raw_checkpoint = raw_payload["bundle"]["review_checkpoints"][0]
 
-    assert raw_payload["schema_version"] == "flow-evidence-export.v5"
-    assert redacted_payload["schema_version"] == "flow-evidence-export.v5"
+    assert raw_payload["schema_version"] == "flow-evidence-export.v6"
+    assert redacted_payload["schema_version"] == "flow-evidence-export.v6"
     assert raw_checkpoint["id"] == seeded["review_checkpoint_id"]
     assert raw_checkpoint["original_payload_json"]["summary"] == "Looks good"
     assert raw_checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
@@ -1057,7 +1111,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert response.headers["content-type"].startswith("application/json")
     assert "attachment;" in response.headers["content-disposition"]
     payload = response.json()
-    assert payload["schema_version"] == "flow-evidence-export.v5"
+    assert payload["schema_version"] == "flow-evidence-export.v6"
     assert payload["manifest"]["schema_version"] == payload["schema_version"]
     assert payload["manifest"]["run_id"] == seeded["run_id"]
     assert payload["manifest"]["tenant_id"] == str(trace_user.tenant_id)
@@ -1144,6 +1198,24 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     assert payload["summary"]["step_overview"][0]["input_lineage"][
         "runtime_file_checksums"
     ] == ["input-checksum"]
+    runtime_input = payload["bundle"]["step_results"][0]["input_payload_json"][
+        "runtime_input"
+    ]
+    assert runtime_input["files_count"] == 1
+    assert runtime_input["total_file_size"] == 256
+    assert runtime_input["files"] == [
+        {
+            "id": str(runtime_input["file_ids"][0]),
+            "name": "underlag.pdf",
+            "checksum": "input-checksum",
+            "size": 256,
+            "mimetype": "application/pdf",
+            "file_type": "document",
+            "text_length": len("case file text"),
+            "has_text": True,
+            "has_transcription": False,
+        }
+    ]
     assert (
         payload["summary"]["step_overview"][0]["output_summary"]["preview"]
         == "Looks good"

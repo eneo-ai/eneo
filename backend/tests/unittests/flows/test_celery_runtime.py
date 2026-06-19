@@ -11,8 +11,13 @@ import pytest
 
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_run_dispatch_request import (
+    FlowRunDispatchMalformedPayload,
+    FlowRunDispatchMalformedReason,
+    FlowRunDispatchMissingPrincipal,
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
+    flow_run_dispatch_task_kwargs,
+    parse_flow_run_dispatch_task_kwargs,
 )
 from intric.flows.runtime.celery_execution_backend import (
     FLOW_EXECUTE_TASK_NAME,
@@ -38,9 +43,160 @@ def _fake_flow_task_session():
     )
 
 
+def test_flow_run_dispatch_parser_round_trips_user_task_kwargs():
+    request = FlowRunUserDispatchRequest(
+        run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        principal_user_id=uuid4(),
+    )
+    kwargs = flow_run_dispatch_task_kwargs(request)
+
+    result = parse_flow_run_dispatch_task_kwargs(
+        run_id=str(kwargs["run_id"]),
+        flow_id=str(kwargs["flow_id"]),
+        tenant_id=str(kwargs["tenant_id"]),
+        principal_type=kwargs["principal_type"],
+        principal_user_id=kwargs["principal_user_id"],
+        principal_service_id=kwargs["principal_service_id"],
+    )
+
+    assert result == request
+
+
+def test_flow_run_dispatch_parser_round_trips_service_key_task_kwargs():
+    request = FlowRunServiceKeyDispatchRequest(
+        run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        principal_service_id=uuid4(),
+    )
+    kwargs = flow_run_dispatch_task_kwargs(request)
+
+    result = parse_flow_run_dispatch_task_kwargs(
+        run_id=str(kwargs["run_id"]),
+        flow_id=str(kwargs["flow_id"]),
+        tenant_id=str(kwargs["tenant_id"]),
+        principal_type=kwargs["principal_type"],
+        principal_user_id=kwargs["principal_user_id"],
+        principal_service_id=kwargs["principal_service_id"],
+    )
+
+    assert result == request
+
+
+def test_flow_run_dispatch_parser_reports_missing_user_principal():
+    run_id = uuid4()
+    tenant_id = uuid4()
+
+    result = parse_flow_run_dispatch_task_kwargs(
+        run_id=str(run_id),
+        flow_id=str(uuid4()),
+        tenant_id=str(tenant_id),
+        principal_type="user",
+    )
+
+    assert result == FlowRunDispatchMissingPrincipal(
+        run_id=run_id,
+        tenant_id=tenant_id,
+    )
+
+
+def test_flow_run_dispatch_parser_reports_missing_service_key_principal():
+    run_id = uuid4()
+    tenant_id = uuid4()
+
+    result = parse_flow_run_dispatch_task_kwargs(
+        run_id=str(run_id),
+        flow_id=str(uuid4()),
+        tenant_id=str(tenant_id),
+        principal_type="service_key",
+    )
+
+    assert result == FlowRunDispatchMissingPrincipal(
+        run_id=run_id,
+        tenant_id=tenant_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_reason"),
+    [
+        (
+            {"run_id": "not-a-uuid"},
+            FlowRunDispatchMalformedReason.INVALID_RUN_ID,
+        ),
+        (
+            {"tenant_id": "not-a-uuid"},
+            FlowRunDispatchMalformedReason.INVALID_TENANT_ID,
+        ),
+        (
+            {"flow_id": "not-a-uuid"},
+            FlowRunDispatchMalformedReason.INVALID_FLOW_ID,
+        ),
+        (
+            {"principal_type": "robot"},
+            FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_TYPE,
+        ),
+        (
+            {"principal_user_id": "not-a-uuid"},
+            FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_USER_ID,
+        ),
+        (
+            {
+                "principal_type": "service_key",
+                "principal_service_id": "not-a-uuid",
+            },
+            FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_SERVICE_ID,
+        ),
+    ],
+)
+def test_flow_run_dispatch_parser_reports_malformed_reason(payload, expected_reason):
+    base_payload = {
+        "run_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "tenant_id": str(uuid4()),
+        "principal_type": "user",
+        "principal_user_id": str(uuid4()),
+        "principal_service_id": None,
+    }
+    base_payload.update(payload)
+
+    result = parse_flow_run_dispatch_task_kwargs(**base_payload)
+
+    assert result == FlowRunDispatchMalformedPayload(reason=expected_reason)
+
+
+def test_flow_run_dispatch_parser_reports_first_malformed_field():
+    result = parse_flow_run_dispatch_task_kwargs(
+        run_id="not-a-run-id",
+        flow_id="not-a-flow-id",
+        tenant_id="not-a-tenant-id",
+        principal_type="robot",
+        principal_user_id="not-a-user-id",
+        principal_service_id="not-a-service-id",
+    )
+
+    assert result == FlowRunDispatchMalformedPayload(
+        reason=FlowRunDispatchMalformedReason.INVALID_RUN_ID
+    )
+
+
+def test_flow_run_dispatch_parser_has_no_logger():
+    dispatch_module = importlib.import_module("intric.flows.flow_run_dispatch_request")
+
+    assert not hasattr(dispatch_module, "logger")
+
+
 @pytest.mark.asyncio
-async def test_celery_execution_backend_dispatches_task():
+async def test_celery_execution_backend_dispatches_task(monkeypatch):
+    execution_module = importlib.import_module(
+        "intric.flows.runtime.celery_execution_backend"
+    )
+    logger = MagicMock()
+    monkeypatch.setattr(execution_module, "logger", logger)
     celery_app = MagicMock()
+    celery_app.send_task.return_value.id = "celery-task-1"
     backend = CeleryFlowExecutionBackend(
         celery_app=celery_app, queue_name="flows.execute"
     )
@@ -70,11 +226,19 @@ async def test_celery_execution_backend_dispatches_task():
         },
         queue="flows.execute",
     )
+    logger.info.assert_called_once()
+    assert logger.info.call_args.kwargs["extra"]["celery_task_id"] == "celery-task-1"
 
 
 @pytest.mark.asyncio
-async def test_celery_execution_backend_dispatches_service_key_principal():
+async def test_celery_execution_backend_dispatches_service_key_principal(monkeypatch):
+    execution_module = importlib.import_module(
+        "intric.flows.runtime.celery_execution_backend"
+    )
+    logger = MagicMock()
+    monkeypatch.setattr(execution_module, "logger", logger)
     celery_app = MagicMock()
+    celery_app.send_task.return_value.id = "celery-task-2"
     backend = CeleryFlowExecutionBackend(
         celery_app=celery_app, queue_name="flows.execute"
     )
@@ -104,6 +268,8 @@ async def test_celery_execution_backend_dispatches_service_key_principal():
         },
         queue="flows.execute",
     )
+    logger.info.assert_called_once()
+    assert logger.info.call_args.kwargs["extra"]["celery_task_id"] == "celery-task-2"
 
 
 @pytest.mark.asyncio
@@ -117,6 +283,7 @@ async def test_celery_execution_backend_uses_default_queue(monkeypatch):
         lambda: SimpleNamespace(flow_celery_queue="flows.default"),
     )
     celery_app = MagicMock()
+    celery_app.send_task.return_value.id = "celery-task-default"
     backend = execution_module.CeleryFlowExecutionBackend(celery_app=celery_app)
 
     await backend.dispatch(
@@ -239,6 +406,110 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
     assert error.message == (
         "flow_missing_principal: Flow run execution skipped because run has no execution principal."
     )
+
+
+def test_execute_flow_run_marks_failed_when_service_key_id_is_missing(monkeypatch):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    terminalize_failure = AsyncMock()
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+
+    class _Future:
+        def result(self, timeout=None):
+            return None
+
+    def _run_coroutine_threadsafe(coroutine, _loop):
+        asyncio.run(coroutine)
+        return _Future()
+
+    monkeypatch.setattr(
+        tasks_module.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_threadsafe,
+    )
+
+    result = tasks_module._execute_flow_run_task(
+        run_id=str(uuid4()),
+        flow_id=str(uuid4()),
+        tenant_id=str(uuid4()),
+        principal_type="service_key",
+        task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "reason": "missing_principal"}
+    assert terminalize_failure.await_count == 1
+    assert terminalize_failure.await_args.kwargs["source"] == (
+        FlowRunLifecycleSource.MISSING_PRINCIPAL
+    )
+    error = terminalize_failure.await_args.kwargs["error"]
+    assert error.code == "flow_missing_principal"
+    assert error.message == (
+        "flow_missing_principal: Flow run execution skipped because run has no execution principal."
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_reason"),
+    [
+        (
+            {"run_id": "not-a-uuid"},
+            FlowRunDispatchMalformedReason.INVALID_RUN_ID,
+        ),
+        (
+            {"flow_id": "not-a-uuid"},
+            FlowRunDispatchMalformedReason.INVALID_FLOW_ID,
+        ),
+        (
+            {"principal_type": "robot"},
+            FlowRunDispatchMalformedReason.INVALID_PRINCIPAL_TYPE,
+        ),
+    ],
+)
+def test_execute_flow_run_rejects_malformed_dispatch_payload_without_runtime(
+    monkeypatch, payload, expected_reason
+):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    terminalize_failure = AsyncMock()
+    execute_async = AsyncMock()
+    logger = MagicMock()
+    get_loop = MagicMock(side_effect=AssertionError("malformed payload requested loop"))
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
+    monkeypatch.setattr(tasks_module, "_execute_flow_run_async", execute_async)
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", get_loop)
+    monkeypatch.setattr(tasks_module, "logger", logger)
+    base_payload = {
+        "run_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "tenant_id": str(uuid4()),
+        "principal_type": "user",
+        "principal_user_id": str(uuid4()),
+        "principal_service_id": None,
+    }
+    base_payload.update(payload)
+
+    result = tasks_module._execute_flow_run_task(
+        **base_payload,
+        task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "reason": "invalid_dispatch_payload"}
+    terminalize_failure.assert_not_awaited()
+    execute_async.assert_not_called()
+    get_loop.assert_not_called()
+    logger.error.assert_called_once()
+    log_extra = logger.error.call_args.kwargs["extra"]
+    assert log_extra["parse_reason"] == expected_reason.value
+    assert log_extra["task_id"] == "task-1"
 
 
 def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
@@ -426,6 +697,68 @@ def test_reconcile_stale_running_task_processes_all_tenants(monkeypatch):
         call.kwargs["error"].code
         for call in terminalizer.terminalize_stale_running_run.await_args_list
     } == {"flow_worker_stalled"}
+    assert {
+        call.kwargs["error"].message
+        for call in terminalizer.terminalize_stale_running_run.await_args_list
+    } == {
+        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+    }
+
+
+def test_reconcile_stale_running_task_skips_already_reconciled_runs(monkeypatch):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    tenant = SimpleNamespace(id=uuid4())
+    stale_run = SimpleNamespace(id=uuid4(), tenant_id=tenant.id)
+    repo = MagicMock()
+    tenant_repo = MagicMock()
+    tenant_repo.get_all_tenants = AsyncMock(return_value=[tenant])
+    repo.list_stale_running_runs = AsyncMock(return_value=[stale_run])
+    terminalizer = MagicMock()
+    terminalizer.terminalize_stale_running_run = AsyncMock(
+        return_value=SimpleNamespace(did_transition=False)
+    )
+
+    class _Container:
+        def __init__(self, session=None):
+            self._repo = repo
+            self._tenant_repo = tenant_repo
+
+        def flow_run_repo(self):
+            return self._repo
+
+        def flow_run_terminalizer(self):
+            return terminalizer
+
+        def tenant_repo(self):
+            return self._tenant_repo
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return AsyncMock()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(tasks_module, "Container", _Container)
+    monkeypatch.setattr(
+        tasks_module.sessionmanager, "session", lambda: _SessionContext()
+    )
+    monkeypatch.setattr(
+        tasks_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_task_timeout_seconds=540),
+    )
+
+    result = asyncio.run(tasks_module._reconcile_stale_running_runs_all_tenants())
+
+    assert result["status"] == "ok"
+    assert result["reconciled"] == 0
+    terminalizer.terminalize_stale_running_run.assert_awaited_once()
+    terminal_kwargs = terminalizer.terminalize_stale_running_run.await_args.kwargs
+    assert terminal_kwargs["error"].code == "flow_worker_stalled"
+    assert terminal_kwargs["error"].message == (
+        "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+    )
 
 
 def test_reconcile_review_expiry_task_processes_all_tenants(monkeypatch):

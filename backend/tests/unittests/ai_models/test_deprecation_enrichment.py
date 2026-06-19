@@ -19,18 +19,15 @@ from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
+from intric.tenants.tenant import TenantInDB
 from intric.transcription_models.domain.transcription_model import TranscriptionModel
 from intric.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
 )
 
 
-class MockUser:
-    def __init__(self):
-        self.id = uuid4()
-        self.tenant_id = uuid4()
-        self.tenant = None
-        self.modules = []
+def _tenant() -> TenantInDB:
+    return TenantInDB.model_construct(id=uuid4(), name="Test Tenant")
 
 
 MOCK_MODEL_COST = {
@@ -53,9 +50,8 @@ MOCK_MODEL_COST = {
 
 
 def _make_completion_model(name="gpt-4o", provider_type="openai", is_deprecated=False):
-    user = MockUser()
     return CompletionModel(
-        user=user,
+        tenant=_tenant(),
         id=uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -82,9 +78,8 @@ def _make_completion_model(name="gpt-4o", provider_type="openai", is_deprecated=
 
 
 def _make_embedding_model(name="text-embedding-3-small", provider_type="openai"):
-    user = MockUser()
     return EmbeddingModel(
-        user=user,
+        tenant=_tenant(),
         id=uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -107,9 +102,8 @@ def _make_embedding_model(name="text-embedding-3-small", provider_type="openai")
 
 
 def _make_transcription_model(name="whisper-1", provider_type="openai"):
-    user = MockUser()
     return TranscriptionModel(
-        user=user,
+        tenant=_tenant(),
         id=uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),

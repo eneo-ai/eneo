@@ -63,9 +63,9 @@ def test_marks_unknown_step_input_key_as_invalid() -> None:
     assert refs[0].path_error_code == "unknown_step_input_key"
 
 
-def test_validates_sequence_indexes_for_runtime_variables() -> None:
+def test_validates_sequence_indexes_for_step_input_file_ids() -> None:
     refs = analyze_template(
-        "{{ indata_filer.first }} and {{ indata_filer.0 }}",
+        "{{ step_input.file_ids.first }} and {{ step_input.file_ids.0 }}",
         step_refs={},
         form_field_names=set(),
     )

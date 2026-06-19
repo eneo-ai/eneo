@@ -1,5 +1,7 @@
 import importlib
+import inspect
 import os
+import pkgutil
 import subprocess
 import sys
 from pathlib import Path
@@ -7,7 +9,7 @@ from pathlib import Path
 from fastapi.routing import APIRoute
 
 
-def test_server_main_imports_without_circular_flow_template_validation_cycle() -> None:
+def test_server_main_imports_cleanly() -> None:
     module = importlib.import_module("intric.server.main")
 
     assert module is not None
@@ -34,24 +36,6 @@ def test_server_main_imports_in_fresh_python_process() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_flow_template_validation_delegates_to_files_domain_helpers() -> None:
-    files_validation = importlib.import_module("intric.files.docx_template_validation")
-    flow_validation = importlib.import_module("intric.flows.flow_template_validation")
-
-    assert (
-        flow_validation.validate_docx_template_archive
-        is files_validation.validate_docx_template_archive
-    )
-    assert (
-        flow_validation.validate_template_extension
-        is files_validation.validate_template_extension
-    )
-    assert (
-        flow_validation.normalize_template_extraction_error
-        is files_validation.normalize_template_extraction_error
-    )
-
-
 def test_intric_flows_package_does_not_import_services_as_side_effect() -> None:
     sys.modules.pop("intric.flows", None)
     sys.modules.pop("intric.flows.application.flow_service", None)
@@ -72,6 +56,48 @@ def test_intric_flows_runtime_package_does_not_import_celery_as_side_effect() ->
 
     assert "intric.flows.runtime.celery_app" not in sys.modules
     assert "intric.flows.runtime.celery_execution_backend" not in sys.modules
+
+
+def test_flow_api_router_modules_export_only_router() -> None:
+    api_package = importlib.import_module("intric.flows.api")
+    router_module_names = sorted(
+        module_info.name
+        for module_info in pkgutil.iter_modules(
+            api_package.__path__,
+            f"{api_package.__name__}.",
+        )
+        if module_info.name.endswith("_router")
+    )
+    expected_sentinels = {
+        "intric.flows.api.flow_authoring_router",
+        "intric.flows.api.flow_definition_router",
+        "intric.flows.api.flow_router",
+        "intric.flows.api.flow_run_execution_router",
+        "intric.flows.api.flow_upload_router",
+    }
+    assert expected_sentinels <= set(router_module_names)
+
+    invalid_exports = {}
+    for module_name in router_module_names:
+        module = importlib.import_module(module_name)
+        if getattr(module, "__all__", None) != ["router"]:
+            invalid_exports[module_name] = getattr(module, "__all__", None)
+
+    assert invalid_exports == {}
+
+
+def test_flow_definition_router_exports_only_aggregate_router() -> None:
+    module = importlib.import_module("intric.flows.api.flow_definition_router")
+
+    public_coroutine_names = [
+        name
+        for name in dir(module)
+        if not name.startswith("_")
+        and name != "router"
+        and inspect.iscoroutinefunction(getattr(module, name))
+    ]
+
+    assert public_coroutine_names == []
 
 
 def test_flow_canonical_layer_imports_are_available() -> None:
@@ -173,6 +199,10 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
 
 def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
     flow_models = importlib.import_module("intric.flows.api.flow_models")
+    flow_graph = importlib.import_module("intric.flows.api.flow_graph")
+    flow_template_asset_models = importlib.import_module(
+        "intric.flows.api.flow_template_asset_models"
+    )
     ai_builder_api_models = importlib.import_module(
         "intric.flows.ai_builder.ai_builder_api_models"
     )
@@ -184,10 +214,10 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
         flow_models.FlowRunStepPublic,
         flow_models.FlowRunRedispatchResponse,
         flow_models.FlowRunStepRerunResponse,
-        flow_models.FlowTemplateAssetPublic,
-        flow_models.FlowTemplateInspectionPublic,
+        flow_template_asset_models.FlowTemplateAssetPublic,
+        flow_template_asset_models.FlowTemplateInspectionPublic,
         flow_models.FlowRunContractPublic,
-        flow_models.GraphResponse,
+        flow_graph.GraphResponse,
         flow_models.FlowRunDebugExport,
         flow_models.FlowRunEvidenceResponse,
         flow_models.FlowRunEvidenceExportResponse,
@@ -373,12 +403,6 @@ def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -
         param["name"]: param for param in run_contract_operation["parameters"]
     }
     assert run_contract_params["id"]["description"]
-
-    upload_flow_file_operation = schema["paths"]["/api/v1/flows/{id}/files/"]["post"]
-    upload_flow_file_params = {
-        param["name"]: param for param in upload_flow_file_operation["parameters"]
-    }
-    assert upload_flow_file_params["id"]["description"]
 
     upload_runtime_file_operation = schema["paths"][
         "/api/v1/flows/{id}/steps/{step_id}/runtime-files/"

@@ -1,37 +1,14 @@
-import { IntricError } from "@intric/intric-js";
+import {
+  FLOW_API_ERROR_CODE,
+  FLOW_API_ERROR_CODES,
+  IntricError,
+  type FlowApiErrorCode
+} from "@intric/intric-js";
 import type { FlowRunError as FlowRunErrorContract } from "@intric/intric-js";
 import { m } from "$lib/paraglide/messages";
 
-export const FLOW_API_ERROR_CODES = [
-  "flow_run_required_step_input_missing",
-  "flow_run_top_level_file_ids_not_supported",
-  "flow_run_idempotency_conflict",
-  "typed_io_contract_violation",
-  "flow_published_form_schema_invalid",
-  "flow_review_stale_revision",
-  "flow_review_expired",
-  "flow_review_not_active",
-  "flow_review_step_result_not_found",
-  "flow_review_checkpoint_not_found",
-  "flow_review_reject_reason_required",
-  "flow_review_reject_reason_too_long",
-  "flow_review_idempotency_key_required",
-  "flow_review_not_approved",
-  "flow_review_already_resumed",
-  "flow_review_rejected",
-  "flow_review_cancelled",
-  "flow_template_invalid_archive",
-  "flow_template_corrupted_archive",
-  "flow_template_macro_not_allowed",
-  "flow_template_missing_required_parts",
-  "flow_template_not_accessible",
-  "flow_template_read_only",
-  "flow_template_unsupported_extension",
-  "flow_template_missing_content",
-  "flow_run_rerun_step_inputs_unsupported"
-] as const;
-
-export type FlowApiErrorCode = (typeof FLOW_API_ERROR_CODES)[number];
+export { FLOW_API_ERROR_CODE, FLOW_API_ERROR_CODES };
+export type { FlowApiErrorCode };
 export type FlowApiErrorMessageKey = `flow_error_${FlowApiErrorCode}`;
 
 export type FlowApiErrorContext = {
@@ -64,7 +41,7 @@ export type FlowReviewPolicyAffectedStep = {
 
 export type FlowRunError = FlowRunErrorContract;
 
-const FLOW_API_ERROR_CODE_SET = new Set<string>(FLOW_API_ERROR_CODES);
+const FLOW_API_ERROR_CODE_SET = new Set<FlowApiErrorCode>(FLOW_API_ERROR_CODES);
 
 const UPLOAD_ERROR_HINTS: Record<string, string> = {
   timeout: " Försök igen med en mindre fil eller kontrollera din internetanslutning.",
@@ -151,7 +128,7 @@ function extractFlowApiErrorContext(value: unknown): FlowApiErrorContext {
 }
 
 function isFlowApiErrorCode(code: string): code is FlowApiErrorCode {
-  return FLOW_API_ERROR_CODE_SET.has(code);
+  return FLOW_API_ERROR_CODE_SET.has(code as FlowApiErrorCode);
 }
 
 function getResponseCode(error: IntricError): string | null {
@@ -171,7 +148,7 @@ function messageKeyForCode(code: FlowApiErrorCode): FlowApiErrorMessageKey {
 }
 
 export function isReviewPolicyInvalidRunError(error: FlowRunError | null | undefined): boolean {
-  return error?.code === "flow_review_policy_invalid";
+  return error?.code === FLOW_API_ERROR_CODE.REVIEW_POLICY_INVALID;
 }
 
 export function reviewPolicyRunErrorStepOrder(
@@ -268,13 +245,30 @@ export function describeFlowApiError(error: unknown): FlowApiErrorDescriptor | n
   };
 }
 
-function descriptorForCode(code: string | null | undefined): FlowApiErrorDescriptor | null {
+function descriptorForCode(
+  code: string | null | undefined,
+  context: FlowApiErrorContext = {}
+): FlowApiErrorDescriptor | null {
   if (!code || !isFlowApiErrorCode(code)) return null;
   return {
     code,
     messageKey: messageKeyForCode(code),
-    context: {}
+    context
   };
+}
+
+export function describeFlowRunError(
+  error: FlowRunError | null | undefined
+): FlowApiErrorDescriptor | null {
+  if (!error) return null;
+
+  const context: FlowApiErrorContext = {};
+  if (typeof error.step_id === "string") context.step_id = error.step_id;
+  if (typeof error.step_order === "number" && Number.isFinite(error.step_order)) {
+    context.step_order = error.step_order;
+  }
+
+  return descriptorForCode(error.code, context);
 }
 
 function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string {
@@ -304,6 +298,11 @@ export function getFlowRuntimeErrorMessage(error: unknown, fallbackMessage: stri
 
 export function getFlowRuntimeErrorMessageByCode(code: string | null | undefined): string | null {
   const descriptor = descriptorForCode(code);
+  return descriptor ? resolveFlowApiErrorMessage(descriptor) : null;
+}
+
+export function getFlowRunErrorMessage(error: FlowRunError | null | undefined): string | null {
+  const descriptor = describeFlowRunError(error);
   return descriptor ? resolveFlowApiErrorMessage(descriptor) : null;
 }
 

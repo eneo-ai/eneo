@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, cast
-
+from intric.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
     StepSpec,
 )
-
-JsonObject = dict[str, Any]
 
 _FILE_BASED_INPUT_TYPES = {
     InputType.AUDIO,
@@ -45,20 +42,19 @@ def normalize_flow_draft_runtime_inputs(
 def resolve_runtime_input_config(
     *,
     step_spec: StepSpec,
-    existing_input_config: JsonObject | None = None,
-) -> JsonObject | None:
+    existing_input_config: FlowPersistedJsonObject | None = None,
+) -> FlowPersistedJsonObject | None:
     """Return the effective input_config for a compiled AI Builder step."""
-    base_config = _clone_json_object(step_spec.input_config)
+    base_config = clone_json_object(step_spec.input_config)
     if base_config is None:
-        base_config = _clone_json_object(existing_input_config)
+        base_config = clone_json_object(existing_input_config)
 
     if not _requires_runtime_upload(step_spec):
         return _remove_runtime_input_config(base_config)
 
-    effective_config = dict(base_config or {})
-    runtime_input = effective_config.get("runtime_input")
-    runtime_input_config: JsonObject = (
-        dict(cast(JsonObject, runtime_input)) if isinstance(runtime_input, dict) else {}
+    effective_config = base_config if base_config is not None else {}
+    runtime_input_config = (
+        clone_json_object(effective_config.get("runtime_input")) or {}
     )
     runtime_input_config["enabled"] = True
 
@@ -87,22 +83,18 @@ def _requires_runtime_upload(step_spec: StepSpec) -> bool:
     )
 
 
-def _clone_json_object(value: JsonObject | None) -> JsonObject | None:
-    if isinstance(value, dict):
-        return dict(value)
-    return None
-
-
 def _sync_description_after_type_change(
-    runtime_input_config: dict[str, Any],
-    previous_format: str,
+    runtime_input_config: FlowPersistedJsonObject,
+    previous_format: object,
     new_input_type: InputType,
 ) -> None:
-    """Update description when input_format changes, but only if it's a default."""
     current_description = runtime_input_config.get("description")
 
-    # Check if current description is a known default for the *old* format
-    old_input_type = _FORMAT_TO_INPUT_TYPE.get(previous_format)
+    old_input_type = (
+        _FORMAT_TO_INPUT_TYPE.get(previous_format)
+        if isinstance(previous_format, str)
+        else None
+    )
     old_default = (
         _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS.get(old_input_type)
         if old_input_type is not None
@@ -115,7 +107,9 @@ def _sync_description_after_type_change(
         ]
 
 
-def _remove_runtime_input_config(value: JsonObject | None) -> JsonObject | None:
+def _remove_runtime_input_config(
+    value: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
     if not isinstance(value, dict):
         return None
 

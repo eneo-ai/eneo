@@ -17,7 +17,8 @@ from intric.flows.citation_sidecar import (
     CITATION_MODE_OFF,
     resolve_citation_mode,
 )
-from intric.flows.domain.flow import FlowStep, JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_capability_manifest import (
     FlowOutputMode,
     FlowOutputType,
@@ -36,7 +37,9 @@ from intric.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
 from intric.flows.input_binding_contract_rules import (
+    FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     input_contract_conflicts_with_question_binding,
+    unsupported_input_binding_key,
 )
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.output_processing import (
@@ -73,7 +76,7 @@ __all__ = [
 def validate_steps(
     steps: list[FlowStep],
     *,
-    metadata_json: JsonObject | None = None,
+    metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
 ) -> None:
     if not steps:
@@ -171,6 +174,8 @@ def validate_steps(
             _validate_output_contract_compatibility(step=step)
 
         if step.input_bindings is not None:
+            if require_complete_template_fill_config:
+                _validate_supported_input_binding_keys(step=step)
             _validate_binding_references(
                 input_bindings=step.input_bindings,
                 current_step_order=step.step_order,
@@ -298,12 +303,24 @@ def _validate_input_contract_binding_compatibility(*, step: FlowStep) -> None:
         "input_bindings.question because the question binding supplies the "
         "complete rendered step input. Remove input_contract or remove "
         "input_bindings.question.",
-        code="flow_input_contract_inapplicable",
+        code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
         context={
             "step_order": step.step_order,
             "field": "input_contract",
             "conflict": "input_bindings.question",
         },
+    )
+
+
+def _validate_supported_input_binding_keys(*, step: FlowStep) -> None:
+    unsupported_key = unsupported_input_binding_key(step.input_bindings)
+    if unsupported_key is None:
+        return
+    raise BadRequestException(
+        f"Step {step.step_order}: unsupported input_bindings key '{unsupported_key}'. "
+        "Only input_bindings.question is supported.",
+        code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        context={"field": "input_bindings", "key": unsupported_key},
     )
 
 
@@ -335,7 +352,7 @@ def _enum_value(value: object) -> object:
 def _validate_audio_transcription_settings(
     *,
     steps: list[FlowStep],
-    metadata_json: JsonObject | None,
+    metadata_json: FlowPersistedJsonObject | None,
 ) -> None:
     if not any(step.input_type == "audio" for step in steps):
         return
@@ -374,7 +391,7 @@ def _validate_audio_document_transcript_chain(*, steps: list[FlowStep]) -> None:
 
 def _validate_binding_references(
     *,
-    input_bindings: JsonObject,
+    input_bindings: FlowPersistedJsonObject,
     current_step_order: int,
     available_orders: set[int],
 ) -> None:

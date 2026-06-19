@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 FLOW_RUN_LIFECYCLE_EVENT_SCHEMA_VERSION: Final[int] = 1
 FLOW_RUN_LIFECYCLE_EVENT_NAME: Final[str] = "flow_run.lifecycle"
+FLOW_RUN_LIFECYCLE_LOG_MESSAGE: Final[str] = "flow_run_lifecycle_event"
 FLOW_RUN_TERMINALIZATION_OPERATION: Final[str] = "terminalize_run"
 
 FlowRunTerminalizationOutcome = Literal[
@@ -72,4 +73,4 @@ def emit_flow_run_terminalization_event(
         "audit_outbox_id": str(audit_outbox_id) if audit_outbox_id else None,
         "error_code": error_code,
     }
-    logger.info("flow_run_lifecycle_event", extra=dict(payload))
+    logger.info(FLOW_RUN_LIFECYCLE_LOG_MESSAGE, extra=dict(payload))

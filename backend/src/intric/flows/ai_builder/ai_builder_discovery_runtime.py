@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -26,11 +26,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     slot_names_blocked_by_explicit_uncertainty,
 )
-from intric.flows.ai_builder.ai_builder_question_phrasing import (
-    phrase_clarification_question,
-)
 from intric.flows.ai_builder.ai_builder_question_state import (
-    derive_asked_question_state,
     last_answered_question,
 )
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
@@ -312,32 +308,6 @@ async def build_discovery_runtime_result(
         flow=flow,
         analysis=analysis,
     )
-    if (
-        followup is not None
-        and litellm_client is not None
-        and litellm_model is not None
-    ):
-        ask_count = derive_asked_question_state(conversation).question_id_counts.get(
-            followup.question_data.question_id, 0
-        )
-        # Phrase only on a re-ask: the curated catalog wording is fine the first
-        # time, but a repeat that went unanswered needs a smarter, different
-        # question rather than the same text again.
-        if ask_count >= 1:
-            phrased = await phrase_clarification_question(
-                litellm_client=litellm_client,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs or {},
-                baseline_text=followup.assistant_text,
-                question_text=followup.question_data.question,
-                options=[option.label for option in followup.question_data.options],
-                question_id=followup.question_data.question_id,
-                ask_count=ask_count,
-                ui_language=ui_language,
-                tenant_id=tenant_id,
-            )
-            if phrased is not None:
-                followup = replace(followup, assistant_text=phrased)
     discovery_block_message = build_discovery_block_message(
         conversation,
         flow=flow,

@@ -87,7 +87,7 @@ class SpaceFactory:
     def create_space_from_db(
         self,
         space_in_db: Spaces,
-        user: "UserInDB",
+        user: "UserInDB | None",
         collections_in_db: Sequence[tuple[CollectionsTable, int]] | None = None,
         websites_in_db: Sequence["Websites"] | None = None,
         completion_models: Sequence["CompletionModel"] | None = None,

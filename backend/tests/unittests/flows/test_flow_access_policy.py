@@ -13,6 +13,7 @@ from intric.flows.flow_access_policy import (
     require_flow_action,
     user_can_perform_flow_action,
 )
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.exceptions import UnauthorizedException
 from intric.roles.permissions import Permission
 
@@ -25,8 +26,28 @@ def _service_key_user(*permissions: Permission):
     return MagicMock(
         id=uuid4(),
         permissions=list(permissions),
-        active_api_key=SimpleNamespace(id=uuid4(), ownership="service"),
+        active_api_key=SimpleNamespace(
+            id=uuid4(),
+            ownership="service",
+            service_principal_id=uuid4(),
+        ),
     )
+
+
+_BUILDER_ACTIONS = (
+    FlowApiAction.BUILDER_SESSION_CREATE,
+    FlowApiAction.BUILDER_SESSION_LIST,
+    FlowApiAction.BUILDER_MESSAGE_SEND,
+    FlowApiAction.BUILDER_SESSION_READ,
+    FlowApiAction.BUILDER_ATTACHMENT_DETACH,
+    FlowApiAction.BUILDER_MODELS_LIST,
+    FlowApiAction.BUILDER_PLAN_READ,
+    FlowApiAction.BUILDER_PLAN_LIST,
+    FlowApiAction.BUILDER_SESSION_CANCEL,
+    FlowApiAction.BUILDER_PLAN_APPROVE,
+    FlowApiAction.BUILDER_PLAN_APPLY,
+    FlowApiAction.BUILDER_PLAN_REVISE,
+)
 
 
 @pytest.mark.parametrize(
@@ -42,16 +63,25 @@ def _service_key_user(*permissions: Permission):
             FlowApiAction.TRACE_VIEW,
             [Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
         ),
-        (
-            FlowApiAction.BUILDER_SESSION_CREATE,
-            [Permission.FLOWS_MANAGE, Permission.FLOWS_AI_BUILDER],
-        ),
     ],
 )
 def test_policy_accepts_explicit_permissions_for_shipped_actions(
     action: FlowApiAction, permissions: list[Permission]
 ) -> None:
     assert user_can_perform_flow_action(_user(*permissions), action) is True
+
+
+@pytest.mark.parametrize("action", _BUILDER_ACTIONS)
+def test_builder_actions_accept_explicit_builder_permissions(
+    action: FlowApiAction,
+) -> None:
+    assert (
+        user_can_perform_flow_action(
+            _user(Permission.FLOWS_MANAGE, Permission.FLOWS_AI_BUILDER),
+            action,
+        )
+        is True
+    )
 
 
 @pytest.mark.parametrize(
@@ -83,7 +113,7 @@ def test_coarse_permissions_do_not_grant_unimplemented_actions(
         FlowApiAction.RERUN,
         FlowApiAction.REVIEW,
         FlowApiAction.RESUME,
-        FlowApiAction.BUILDER_SESSION_CREATE,
+        *_BUILDER_ACTIONS,
         FlowApiAction.TRACE_VIEW,
     ],
 )
@@ -104,26 +134,28 @@ def test_rerun_requires_manage_permission_not_run_or_view() -> None:
             require_flow_action(user, FlowApiAction.RERUN)
 
 
-def test_rerun_rejects_service_key_principals() -> None:
+def test_edit_requires_manage_permission_not_view_only() -> None:
+    with pytest.raises(UnauthorizedException, match="manage flows"):
+        require_flow_action(_user(Permission.FLOWS_VIEW), FlowApiAction.EDIT)
+
+
+def test_rerun_requires_explicit_service_key_opt_in() -> None:
     service_key_user = _service_key_user(Permission.FLOWS_MANAGE)
 
     with pytest.raises(UnauthorizedException) as default_exc_info:
         require_flow_action(service_key_user, FlowApiAction.RERUN)
 
     assert default_exc_info.value.code == "flow_service_key_principal_not_supported"
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        require_flow_action(
-            service_key_user,
-            FlowApiAction.RERUN,
-            allow_service_key_principals=True,
-        )
-
-    assert exc_info.value.code == "flow_service_key_principal_not_supported"
-    assert exc_info.value.context == {
+    assert default_exc_info.value.context == {
         "auth_layer": "service_key_principal",
         "capability": "rerun",
     }
+
+    require_flow_action(
+        service_key_user,
+        FlowApiAction.RERUN,
+        allow_service_key_principals=True,
+    )
 
 
 @pytest.mark.parametrize(
@@ -142,7 +174,10 @@ def test_review_mutations_require_explicit_service_key_opt_in(
     with pytest.raises(UnauthorizedException) as exc_info:
         require_flow_action(service_key_user, action)
 
-    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
+    )
     assert exc_info.value.context == {
         "auth_layer": "service_key_principal",
         "capability": capability,
@@ -155,11 +190,36 @@ def test_review_mutations_require_explicit_service_key_opt_in(
     )
 
 
-def test_builder_actions_require_edit_and_builder_permissions() -> None:
+@pytest.mark.parametrize("action", _BUILDER_ACTIONS)
+def test_builder_actions_require_edit_and_builder_permissions(
+    action: FlowApiAction,
+) -> None:
     user = _user(Permission.FLOWS_MANAGE)
 
     with pytest.raises(UnauthorizedException, match="Flow AI Builder"):
-        require_flow_action(user, FlowApiAction.BUILDER_SESSION_CREATE)
+        require_flow_action(user, action)
+
+
+@pytest.mark.parametrize("action", _BUILDER_ACTIONS)
+def test_builder_actions_reject_service_key_principals(
+    action: FlowApiAction,
+) -> None:
+    service_key_user = _service_key_user(
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS_AI_BUILDER,
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        require_flow_action(service_key_user, action)
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
+    )
+    assert exc_info.value.context == {
+        "auth_layer": "service_key_principal",
+        "capability": "ai_builder",
+    }
 
 
 def test_trace_requires_view_and_trace_permissions() -> None:
@@ -175,7 +235,10 @@ def test_service_key_principals_fail_closed_unless_route_explicitly_allows() -> 
     with pytest.raises(UnauthorizedException) as exc_info:
         require_flow_action(service_key_user, FlowApiAction.VIEW)
 
-    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
+    )
     context = exc_info.value.context
     assert context is not None
     assert context["auth_layer"] == "service_key_principal"
@@ -194,16 +257,30 @@ def test_service_key_principals_fail_closed_unless_route_explicitly_allows() -> 
     )
 
 
-def test_non_view_service_key_denials_do_not_get_runtime_endpoint_hint() -> None:
+@pytest.mark.parametrize(
+    ("action", "capability"),
+    [
+        (FlowApiAction.EDIT, "manage"),
+        (FlowApiAction.RUN, "run"),
+        (FlowApiAction.TRACE_VIEW, "trace"),
+    ],
+)
+def test_non_view_service_key_denials_do_not_get_runtime_endpoint_hint(
+    action: FlowApiAction,
+    capability: str,
+) -> None:
     service_key_user = _service_key_user(Permission.FLOWS)
 
     with pytest.raises(UnauthorizedException) as exc_info:
-        require_flow_action(service_key_user, FlowApiAction.EDIT)
+        require_flow_action(service_key_user, action)
 
-    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
+    )
     assert exc_info.value.context == {
         "auth_layer": "service_key_principal",
-        "capability": "manage",
+        "capability": capability,
     }
 
 

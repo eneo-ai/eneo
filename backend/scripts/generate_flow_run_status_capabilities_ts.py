@@ -7,7 +7,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_SRC = REPO_ROOT / "backend" / "src"
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(BACKEND_SRC))
+
+from flow_sdk_codegen import object_freeze_string_array  # noqa: E402
 
 from intric.flows.enums import (  # noqa: E402
     FLOW_RUN_STATUS_CAPABILITIES,
@@ -33,13 +38,13 @@ def _js_bool(value: bool) -> str:
 def _capability_literal(capability: Mapping[str, object]) -> list[str]:
     return [
         "  {",
-        f'    status: {json.dumps(capability["status"])},',
-        f'    is_active: {_js_bool(bool(capability["is_active"]))},',
-        f'    should_poll: {_js_bool(bool(capability["should_poll"]))},',
-        f'    is_terminal: {_js_bool(bool(capability["is_terminal"]))},',
-        f'    is_cancellable: {_js_bool(bool(capability["is_cancellable"]))},',
-        f'    is_awaiting_review: {_js_bool(bool(capability["is_awaiting_review"]))},',
-        f'    can_request_redispatch: {_js_bool(bool(capability["can_request_redispatch"]))}',
+        f"    status: {json.dumps(capability['status'])},",
+        f"    is_active: {_js_bool(bool(capability['is_active']))},",
+        f"    should_poll: {_js_bool(bool(capability['should_poll']))},",
+        f"    is_terminal: {_js_bool(bool(capability['is_terminal']))},",
+        f"    is_cancellable: {_js_bool(bool(capability['is_cancellable']))},",
+        f"    is_awaiting_review: {_js_bool(bool(capability['is_awaiting_review']))},",
+        f"    can_request_redispatch: {_js_bool(bool(capability['can_request_redispatch']))}",
         "  }",
     ]
 
@@ -53,15 +58,6 @@ def _capabilities_literal(capabilities: Sequence[Mapping[str, object]]) -> str:
         lines.extend(entry)
     lines.append("]")
     return "\n".join(lines)
-
-
-def _object_freeze_string_array(name: str, values: list[str]) -> list[str]:
-    lines = [f"export const {name} = Object.freeze(["]
-    for index, value in enumerate(values):
-        comma = "," if index < len(values) - 1 else ""
-        lines.append(f"  {json.dumps(value)}{comma}")
-    lines.append("]);")
-    return lines
 
 
 def main() -> None:
@@ -88,7 +84,9 @@ def main() -> None:
                 "export const FLOW_RUN_STATUS_CAPABILITIES = Object.freeze(",
                 "  capabilities.map((capability) => Object.freeze(capability))",
                 ");",
-                *_object_freeze_string_array("FLOW_RUN_STATUS_FILTER_ORDER", filter_order),
+                *object_freeze_string_array(
+                    "FLOW_RUN_STATUS_FILTER_ORDER", filter_order
+                ),
                 "",
             ]
         ),

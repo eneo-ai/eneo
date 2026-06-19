@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Final, TypeAlias
 
 from intric.flows.enums import FlowOutputMode
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from intric.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
 from intric.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
@@ -36,12 +37,12 @@ def resolve_handler_mode(output_mode: str) -> FlowOutputMode:
     except ValueError as exc:
         raise TypedIOValidationException(
             f"Unsupported output mode '{output_mode}'.",
-            code="flow_unsupported_output_mode",
+            code=FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE.value,
         ) from exc
     if mode not in STEP_HANDLER_REGISTRY:
         raise TypedIOValidationException(
             f"Unsupported output mode '{output_mode}'.",
-            code="flow_unsupported_output_mode",
+            code=FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE.value,
         )
     return mode
 

@@ -11,3 +11,13 @@ body {
 .dark body {
   background: linear-gradient(180deg,transparent 0,#111 300px),fixed 0 0 /20px 20px radial-gradient(#313131 1px,transparent 0),fixed 10px 10px /20px 20px radial-gradient(#313131 1px,transparent 0);
 }
+
+.flow-docs-mermaid-figure {
+  overflow-x: auto;
+  background: #f8f6f0;
+  border: 1px solid #d8ccbb;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  color-scheme: light;
+}

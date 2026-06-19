@@ -398,6 +398,7 @@
         {#if result.error_message && shouldShowStepError}
           <FlowRunErrorAlert
             error={runError}
+            errorCode={result.error_code}
             message={result.error_message}
             steps={reviewPolicyDefinitionSteps.filter(
               (step) => step.step_order === result.step_order

@@ -91,36 +91,80 @@ def test_all_previous_steps_invalidates_consumers_without_unrelated_steps():
             RerunDependencyKind.INPUT_BINDINGS_QUESTION,
         ),
         (
-            {"input_config": {"url": "https://example.test/{{ step_1.output.id }}"}},
+            {
+                "input_config": {
+                    "url": "https://example.test/{{ step_1.output.id }}",
+                    "auth": {"mode": "none"},
+                }
+            },
             RerunDependencyKind.INPUT_CONFIG_URL,
         ),
         (
-            {"input_config": {"headers": {"X-Case": "{{ step_1.output.id }}"}}},
+            {
+                "input_config": {
+                    "url": "https://example.test/static",
+                    "auth": {"mode": "none"},
+                    "custom_headers": [
+                        {
+                            "name": "X-Case",
+                            "value": "{{ step_1.output.id }}",
+                            "secret": False,
+                        }
+                    ],
+                }
+            },
             RerunDependencyKind.INPUT_CONFIG_HEADERS,
         ),
         (
-            {"input_config": {"body_template": "{{ step_1.output.text }}"}},
+            {
+                "input_config": {
+                    "url": "https://example.test/static",
+                    "auth": {"mode": "none"},
+                    "body": {
+                        "mode": "text_template",
+                        "template": "{{ step_1.output.text }}",
+                    },
+                }
+            },
             RerunDependencyKind.INPUT_CONFIG_BODY_TEMPLATE,
         ),
         (
-            {"input_config": {"body_json": {"case": ["{{ step_1.output.id }}"]}}},
-            RerunDependencyKind.INPUT_CONFIG_BODY_JSON,
-        ),
-        (
-            {"output_config": {"url": "https://example.test/{{ step_1.output.id }}"}},
+            {
+                "output_config": {
+                    "url": "https://example.test/{{ step_1.output.id }}",
+                    "auth": {"mode": "none"},
+                }
+            },
             RerunDependencyKind.OUTPUT_CONFIG_URL,
         ),
         (
-            {"output_config": {"headers": {"X-Case": "{{ step_1.output.id }}"}}},
+            {
+                "output_config": {
+                    "url": "https://example.test/static",
+                    "auth": {"mode": "none"},
+                    "custom_headers": [
+                        {
+                            "name": "X-Case",
+                            "value": "{{ step_1.output.id }}",
+                            "secret": False,
+                        }
+                    ],
+                }
+            },
             RerunDependencyKind.OUTPUT_CONFIG_HEADERS,
         ),
         (
-            {"output_config": {"body_template": "{{ step_1.output.text }}"}},
+            {
+                "output_config": {
+                    "url": "https://example.test/static",
+                    "auth": {"mode": "none"},
+                    "body": {
+                        "mode": "text_template",
+                        "template": "{{ step_1.output.text }}",
+                    },
+                }
+            },
             RerunDependencyKind.OUTPUT_CONFIG_BODY_TEMPLATE,
-        ),
-        (
-            {"output_config": {"body_json": {"case": ["{{ step_1.output.id }}"]}}},
-            RerunDependencyKind.OUTPUT_CONFIG_BODY_JSON,
         ),
         (
             {

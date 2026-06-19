@@ -20,6 +20,7 @@ from intric.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
+    FLOW_METHOD_PERMISSION_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     _raise_api_key_http_error,
     require_api_key_permission,
@@ -93,10 +94,12 @@ def _make_request(
 def _config(
     resource_type: str = "apps",
     read_override_endpoints: frozenset[str] | None = None,
+    method_permission_overrides: dict[str, str] | None = None,
 ) -> dict:
     return {
         "resource_type": resource_type,
         "read_override_endpoints": read_override_endpoints,
+        "method_permission_overrides": method_permission_overrides,
     }
 
 
@@ -193,6 +196,63 @@ class TestMethodAwarePermissionCheck:
         request = _fake_request("DELETE")
         _check_method_resource_permission(request, key, _config("apps"))
 
+    def test_write_key_delete_passes_for_runtime_file_delete_override(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "intric.authentication.api_key_resolver.get_settings",
+            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
+        )
+        key = _make_key(
+            resource_permissions=ResourcePermissions(
+                flows=ResourcePermissionLevel.WRITE
+            ),
+        )
+        request = _fake_request(
+            "DELETE",
+            endpoint_name="delete_flow_runtime_file",
+        )
+
+        _check_method_resource_permission(
+            request,
+            key,
+            _config(
+                "flows",
+                method_permission_overrides=FLOW_METHOD_PERMISSION_OVERRIDES,
+            ),
+        )
+
+    @pytest.mark.parametrize("endpoint_name", ["delete_flow", "delete_flow_assistant"])
+    def test_write_key_delete_override_does_not_apply_to_draft_flow_deletes(
+        self,
+        monkeypatch,
+        endpoint_name: str,
+    ):
+        monkeypatch.setattr(
+            "intric.authentication.api_key_resolver.get_settings",
+            lambda: SimpleNamespace(api_key_enforce_resource_permissions=True),
+        )
+        key = _make_key(
+            resource_permissions=ResourcePermissions(
+                flows=ResourcePermissionLevel.WRITE
+            ),
+        )
+        request = _fake_request("DELETE", endpoint_name=endpoint_name)
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            _check_method_resource_permission(
+                request,
+                key,
+                _config(
+                    "flows",
+                    method_permission_overrides=FLOW_METHOD_PERMISSION_OVERRIDES,
+                ),
+            )
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.code == "insufficient_permission"
+        assert exc_info.value.context["required_level"] == "admin"
+
     def test_unknown_method_defaults_to_admin(self, monkeypatch):
         """7. Unknown HTTP method → admin (fail-closed)."""
         monkeypatch.setattr(
@@ -220,11 +280,13 @@ class TestMethodAwarePermissionCheck:
         assert request.state._resource_perm_config == {
             "resource_type": "apps",
             "read_override_endpoints": ASSISTANTS_READ_OVERRIDES,
+            "method_permission_overrides": None,
         }
         assert request.state._resource_perm_configs == [
             {
                 "resource_type": "apps",
                 "read_override_endpoints": ASSISTANTS_READ_OVERRIDES,
+                "method_permission_overrides": None,
             }
         ]
 
@@ -239,10 +301,19 @@ class TestMethodAwarePermissionCheck:
         assert request.state._resource_perm_config == {
             "resource_type": "assistants",
             "read_override_endpoints": None,
+            "method_permission_overrides": None,
         }
         assert request.state._resource_perm_configs == [
-            {"resource_type": "assistants", "read_override_endpoints": None},
-            {"resource_type": "conversations", "read_override_endpoints": None},
+            {
+                "resource_type": "assistants",
+                "read_override_endpoints": None,
+                "method_permission_overrides": None,
+            },
+            {
+                "resource_type": "conversations",
+                "read_override_endpoints": None,
+                "method_permission_overrides": None,
+            },
         ]
 
     def test_post_override_endpoint_treated_as_read(self, monkeypatch):

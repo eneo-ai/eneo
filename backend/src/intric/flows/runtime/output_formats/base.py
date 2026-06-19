@@ -5,9 +5,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from intric.flows.domain.flow import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.output_processing import (
-    JsonStructuredValue,
+    StructuredOutputValue,
     prune_extras_to_strict_schema,
 )
 from intric.flows.runtime.models import StepDiagnostic
@@ -18,14 +18,14 @@ _MAX_DROPPED_PATHS_MESSAGE_LENGTH = 1600
 
 
 class ParseJsonOutputFn(Protocol):
-    def __call__(self, raw_text: str, /) -> JsonStructuredValue: ...
+    def __call__(self, raw_text: str, /) -> StructuredOutputValue: ...
 
 
 class ValidateAgainstContractFn(Protocol):
     def __call__(
         self,
         data: object,
-        schema: JsonObject,
+        schema: FlowPersistedJsonObject,
         *,
         label: str,
     ) -> None: ...
@@ -44,11 +44,11 @@ class RenderDocumentFn(Protocol):
 class RenderStructuredDocumentFn(Protocol):
     def __call__(
         self,
-        data: JsonStructuredValue,
+        data: StructuredOutputValue,
         output_type: str,
         *,
         step_order: int,
-        schema: JsonObject | None = None,
+        schema: FlowPersistedJsonObject | None = None,
     ) -> tuple[bytes, str, str]: ...
 
 
@@ -65,7 +65,7 @@ class RenderedOutputArtifact:
 
 @dataclass(frozen=True, slots=True)
 class OutputFormatProcessingResult:
-    structured_output: JsonStructuredValue | None = None
+    structured_output: StructuredOutputValue | None = None
     artifact: RenderedOutputArtifact | None = None
     diagnostics: tuple[StepDiagnostic, ...] = ()
 
@@ -83,11 +83,11 @@ class OutputFormatProcessingContext:
 
 class OutputFormatSpec(Protocol):
     def prompt_instructions(
-        self, output_contract: JsonObject | None
+        self, output_contract: FlowPersistedJsonObject | None
     ) -> tuple[str, ...]: ...
 
     def should_request_native_json_object_mode(
-        self, output_contract: JsonObject | None
+        self, output_contract: FlowPersistedJsonObject | None
     ) -> bool: ...
 
     def process_model_output(
@@ -95,7 +95,7 @@ class OutputFormatSpec(Protocol):
         full_text: str,
         *,
         step_order: int,
-        output_contract: JsonObject | None,
+        output_contract: FlowPersistedJsonObject | None,
         context: OutputFormatProcessingContext,
     ) -> OutputFormatProcessingResult: ...
 
@@ -107,7 +107,7 @@ def append_output_format_instructions(prompt: str, instructions: Sequence[str]) 
     return f"{prompt}\n\n{suffix}" if prompt.strip() else suffix
 
 
-def schema_yields_top_level_object(schema: JsonObject) -> bool:
+def schema_yields_top_level_object(schema: FlowPersistedJsonObject) -> bool:
     raw_type = schema.get("type")
     if isinstance(raw_type, str):
         return raw_type == "object"
@@ -123,7 +123,9 @@ def schema_yields_top_level_object(schema: JsonObject) -> bool:
     return False
 
 
-def json_schema_instructions(output_contract: JsonObject | None) -> tuple[str, ...]:
+def json_schema_instructions(
+    output_contract: FlowPersistedJsonObject | None,
+) -> tuple[str, ...]:
     instructions = (
         "Return ONLY valid JSON.",
         "Do not include markdown code fences, commentary, or any surrounding text.",
@@ -140,7 +142,7 @@ def json_schema_instructions(output_contract: JsonObject | None) -> tuple[str, .
 
 
 def document_prompt_instructions(
-    *, artifact_name: str, output_contract: JsonObject | None
+    *, artifact_name: str, output_contract: FlowPersistedJsonObject | None
 ) -> tuple[str, ...]:
     if output_contract is None:
         return (
@@ -162,7 +164,7 @@ def document_prompt_instructions(
 
 
 def document_prefers_native_json_object_mode(
-    output_contract: JsonObject | None,
+    output_contract: FlowPersistedJsonObject | None,
 ) -> bool:
     if output_contract is None:
         return False
@@ -170,8 +172,8 @@ def document_prefers_native_json_object_mode(
 
 
 def prune_model_output_extras(
-    structured_output: JsonStructuredValue,
-    output_contract: JsonObject,
+    structured_output: StructuredOutputValue,
+    output_contract: FlowPersistedJsonObject,
 ) -> tuple[StepDiagnostic, ...]:
     result = prune_extras_to_strict_schema(structured_output, output_contract)
     if not result.dropped_paths:
@@ -190,7 +192,7 @@ def process_structured_document_output(
     *,
     output_type: str,
     step_order: int,
-    output_contract: JsonObject,
+    output_contract: FlowPersistedJsonObject,
     context: OutputFormatProcessingContext,
 ) -> OutputFormatProcessingResult:
     structured_output = context.parse_json_output(full_text)

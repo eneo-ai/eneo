@@ -41,7 +41,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
 )
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
-from intric.flows.flow import Flow
+from intric.flows.domain.flow import Flow
 
 # ---------------------------------------------------------------------------
 # Fixtures

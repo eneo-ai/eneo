@@ -120,6 +120,16 @@ def test_parse_flow_form_schema_preserves_write_error_messages(
             {"field_index": 0, "field_name": "text"},
         ),
         (
+            _metadata([{"name": "expected_flow_version", "type": "text"}]),
+            "flow_form_field_name_primary_input_key",
+            {"field_index": 0, "field_name": "expected_flow_version"},
+        ),
+        (
+            _metadata([{"name": "step_inputs", "type": "text"}]),
+            "flow_form_field_name_primary_input_key",
+            {"field_index": 0, "field_name": "step_inputs"},
+        ),
+        (
             _metadata([{"name": "step_1", "type": "text"}]),
             "flow_form_field_name_step_alias",
             {"field_index": 0, "field_name": "step_1"},

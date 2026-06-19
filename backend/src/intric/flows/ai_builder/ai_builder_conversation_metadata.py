@@ -49,7 +49,7 @@ from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
 from intric.flows.ai_builder.question_catalog import legal_slot_values
-from intric.flows.flow_authoring_spec import JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
 REQUIREMENTS_CONFIRMED_METADATA_KEY = "requirements_confirmed"
@@ -222,7 +222,7 @@ class PersistedAssistantToolCall(BaseModel):
 
     id: str
     name: str
-    arguments: JsonObject = Field(default_factory=dict)
+    arguments: FlowPersistedJsonObject = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -291,7 +291,7 @@ def _model_or_mapping_data(value: AIBuilderQuestionAnswerInput) -> dict[str, Any
 
 def _question_answer_payload(
     answer: StructuredQuestionAnswerMetadata | Mapping[str, Any],
-) -> JsonObject:
+) -> FlowPersistedJsonObject:
     if isinstance(answer, StructuredQuestionAnswerMetadata):
         return answer.model_dump(mode="json", exclude_none=True)
     return normalize_question_answer(answer)
@@ -358,7 +358,7 @@ def question_answer_from_metadata(
 
 def question_answer_to_metadata(
     value: AIBuilderQuestionAnswerInput,
-) -> JsonObject:
+) -> FlowPersistedJsonObject:
     answer = structured_question_answer_from_input(value)
     if answer is None:
         return {}
@@ -372,7 +372,7 @@ def question_answer_to_metadata(
 
 def requirements_confirmation_to_metadata(
     value: AIBuilderQuestionAnswerInput,
-) -> JsonObject:
+) -> FlowPersistedJsonObject:
     confirmation = requirements_confirmation_from_question_answer(value)
     if confirmation is None:
         return {}
@@ -464,7 +464,7 @@ def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, str] | 
 
 def slot_classification_to_metadata(
     classification: SlotClassificationMetadata,
-) -> JsonObject:
+) -> FlowPersistedJsonObject:
     return {
         SLOT_CLASSIFICATION_METADATA_KEY: classification.model_dump(
             mode="json",
@@ -489,9 +489,9 @@ def slot_classification_from_metadata(
 
 
 def metadata_with_slot_classification(
-    metadata: JsonObject | None,
+    metadata: FlowPersistedJsonObject | None,
     classification: SlotClassificationMetadata | None,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     if classification is None:
         return metadata
     return {
@@ -500,7 +500,9 @@ def metadata_with_slot_classification(
     }
 
 
-def requirements_summary_to_metadata(payload: RequirementsSummaryPayload) -> JsonObject:
+def requirements_summary_to_metadata(
+    payload: RequirementsSummaryPayload,
+) -> FlowPersistedJsonObject:
     version = payload.requirements_version
     if not isinstance(version, str) or not version:
         raise ValueError("requirements_summary metadata requires requirements_version")
@@ -698,8 +700,8 @@ def metadata_for_user_message(
     ui_language: str | None = None,
     file_ids: Sequence[UUID] | None = None,
     edit_context: AIBuilderPlanEditContext | None = None,
-) -> JsonObject | None:
-    metadata: JsonObject = {}
+) -> FlowPersistedJsonObject | None:
+    metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
         confirmation_metadata = requirements_confirmation_to_metadata(question_answer)
         metadata.update(
@@ -716,7 +718,7 @@ def metadata_for_user_message(
 
 def metadata_for_assistant_question(
     question_data: StructuredQuestionPayload,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     question_id = canonical_question_id(question_data.question_id)
     if not question_id:
         return None
@@ -725,7 +727,7 @@ def metadata_for_assistant_question(
 
 def structured_question_payload_from_tool_arguments(
     arguments: object,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     arguments_map = _mapping_value(arguments)
     if arguments_map is None:
         return None
@@ -809,7 +811,7 @@ def latest_tool_call_arguments(
     message: object,
     *,
     tool_name: str,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     for tool_call in reversed(tool_calls_from_message(message)):
         if tool_call.name == tool_name:
             return tool_call.arguments

@@ -9,7 +9,8 @@ from intric.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
 )
-from intric.flows.domain.flow import FlowRun, JsonObject
+from intric.flows.domain.flow import FlowPersistedJsonObject, FlowRun
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_run_evidence_bundle import (
     EvidenceBundle,
     RedactedEvidenceBundle,
@@ -20,9 +21,12 @@ from intric.flows.flow_run_evidence_export_manifest import EvidenceExportContext
 from intric.flows.flow_run_export_json import render_evidence_json_export
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
+from intric.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
+from intric.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.main.exceptions import (
-    BadRequestException,
     NotFoundException,
     ResourceGoneException,
     UnauthorizedException,
@@ -42,12 +46,16 @@ class FlowRunEvidenceService:
         user: UserInDB,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
+        flow_run_rerun_repo: FlowRunRerunRepository,
+        flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
-        file_repo: FileRepository | None = None,
+        file_repo: FileRepository,
         access_policy: FlowRunAccessPolicy | None = None,
     ):
         self.user = user
         self.flow_run_repo = flow_run_repo
+        self.flow_run_rerun_repo = flow_run_rerun_repo
+        self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
         self.access_policy = access_policy or FlowRunAccessPolicy(
@@ -60,7 +68,7 @@ class FlowRunEvidenceService:
     def _raise_artifact_content_unavailable(*, run_id: UUID, file_id: UUID) -> None:
         raise ResourceGoneException(
             "Artifact content has been purged by retention policy.",
-            code="flow_run_artifact_content_unavailable",
+            code=FlowApiErrorCode.RUN_ARTIFACT_CONTENT_UNAVAILABLE.value,
             context={"run_id": str(run_id), "file_id": str(file_id)},
         )
 
@@ -84,12 +92,6 @@ class FlowRunEvidenceService:
         flow_id: UUID,
         file_id: UUID,
     ) -> File:
-        if self.file_repo is None:
-            raise BadRequestException(
-                "Artifact download is not available in this context.",
-                code="file_repo_unavailable",
-            )
-
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
@@ -103,7 +105,7 @@ class FlowRunEvidenceService:
         if result_file is None:
             raise NotFoundException(
                 f"File {file_id} is not a downloadable artifact of run {run_id}.",
-                code="flow_run_artifact_not_found",
+                code=FlowApiErrorCode.RUN_ARTIFACT_NOT_FOUND.value,
             )
         if not result_file.content_available:
             self._raise_artifact_content_unavailable(run_id=run_id, file_id=file_id)
@@ -135,7 +137,7 @@ class FlowRunEvidenceService:
         detail: str = "redacted",
         run: FlowRun | None = None,
         export_reason: str = "support_debug",
-    ) -> JsonObject:
+    ) -> FlowPersistedJsonObject:
         if detail == "raw":
             bundle = await self._get_evidence_bundle(
                 run_id=run_id,
@@ -222,15 +224,15 @@ class FlowRunEvidenceService:
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
             ),
-            self.flow_run_repo.list_rerun_operations_for_run(
+            self.flow_run_rerun_repo.list_rerun_operations_for_run(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
             ),
-            self.flow_run_repo.list_rerun_invalidated_steps_for_run(
+            self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
             ),
-            self.flow_run_repo.list_review_checkpoints_for_run(
+            self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
                 run_id=resolved_run.id,
                 tenant_id=self.user.tenant_id,
             ),
@@ -239,6 +241,13 @@ class FlowRunEvidenceService:
                 tenant_id=self.user.tenant_id,
             ),
         )
+        runtime_input_file_metadata_by_step_result_id = {}
+        if step_results:
+            runtime_input_file_metadata_by_step_result_id = await self.flow_run_repo.list_current_step_input_file_metadata_by_step_result_id(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                step_results=step_results,
+            )
         return build_evidence_bundle(
             run=resolved_run,
             version=version,
@@ -248,4 +257,7 @@ class FlowRunEvidenceService:
             rerun_operations=rerun_operations,
             rerun_invalidated_steps=rerun_invalidated_steps,
             review_checkpoints=review_checkpoints,
+            runtime_input_file_metadata_by_step_result_id=(
+                runtime_input_file_metadata_by_step_result_id
+            ),
         )

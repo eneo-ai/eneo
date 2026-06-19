@@ -227,60 +227,19 @@ def _http_config_templates(
         url_kind = RerunDependencyKind.INPUT_CONFIG_URL
         headers_kind = RerunDependencyKind.INPUT_CONFIG_HEADERS
         body_template_kind = RerunDependencyKind.INPUT_CONFIG_BODY_TEMPLATE
-        body_json_kind = RerunDependencyKind.INPUT_CONFIG_BODY_JSON
     else:
         url_kind = RerunDependencyKind.OUTPUT_CONFIG_URL
         headers_kind = RerunDependencyKind.OUTPUT_CONFIG_HEADERS
         body_template_kind = RerunDependencyKind.OUTPUT_CONFIG_BODY_TEMPLATE
-        body_json_kind = RerunDependencyKind.OUTPUT_CONFIG_BODY_JSON
 
-    if is_authored_config(config_mapping):
-        return _authored_http_config_templates(
-            config_mapping=config_mapping,
-            url_kind=url_kind,
-            headers_kind=headers_kind,
-            body_template_kind=body_template_kind,
-        )
-
-    return _legacy_http_config_templates(
+    if not is_authored_config(config_mapping):
+        return []
+    return _authored_http_config_templates(
         config_mapping=config_mapping,
         url_kind=url_kind,
         headers_kind=headers_kind,
         body_template_kind=body_template_kind,
-        body_json_kind=body_json_kind,
     )
-
-
-def _legacy_http_config_templates(
-    *,
-    config_mapping: Mapping[str, object],
-    url_kind: RerunDependencyKind,
-    headers_kind: RerunDependencyKind,
-    body_template_kind: RerunDependencyKind,
-    body_json_kind: RerunDependencyKind,
-) -> list[tuple[str, RerunDependencyKind]]:
-    templates: list[tuple[str, RerunDependencyKind]] = []
-    url = config_mapping.get("url")
-    if isinstance(url, str):
-        templates.append((url, url_kind))
-
-    headers = _mapping(config_mapping.get("headers"))
-    if headers is not None:
-        templates.extend(
-            (header_value, headers_kind)
-            for header_value in headers.values()
-            if isinstance(header_value, str)
-        )
-
-    body_template = config_mapping.get("body_template")
-    if isinstance(body_template, str):
-        templates.append((body_template, body_template_kind))
-
-    body_json = config_mapping.get("body_json")
-    templates.extend(
-        (template, body_json_kind) for template in _iter_nested_strings(body_json)
-    )
-    return templates
 
 
 def _authored_http_config_templates(
@@ -463,22 +422,6 @@ def _build_rerun_step_ref_mapping(steps: Sequence[RuntimeStep]) -> dict[str, int
         if isinstance(user_description, str) and user_description.strip():
             mapping.setdefault(user_description.strip(), step.step_order)
     return mapping
-
-
-def _iter_nested_strings(value: object) -> tuple[str, ...]:
-    if isinstance(value, str):
-        return (value,)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        strings: list[str] = []
-        for item in cast(Sequence[object], value):
-            strings.extend(_iter_nested_strings(item))
-        return tuple(strings)
-    if isinstance(value, Mapping):
-        strings: list[str] = []
-        for item_value in cast(Mapping[object, object], value).values():
-            strings.extend(_iter_nested_strings(item_value))
-        return tuple(strings)
-    return ()
 
 
 def _mapping(value: object) -> Mapping[str, object] | None:

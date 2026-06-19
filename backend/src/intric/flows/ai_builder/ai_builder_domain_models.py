@@ -19,9 +19,9 @@ from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
 )
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
-    JsonObject,
 )
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,
@@ -113,7 +113,7 @@ class ConversationMessage(BaseModel):
         default=None,
         description="Planner-internal correlation id for a tool response turn.",
     )
-    tool_calls: list[JsonObject] | None = Field(
+    tool_calls: list[FlowPersistedJsonObject] | None = Field(
         default=None,
         description=(
             "Planner-internal tool trace metadata kept in the conversation history for debugging "
@@ -121,7 +121,7 @@ class ConversationMessage(BaseModel):
             "business contract."
         ),
     )
-    metadata: JsonObject | None = None
+    metadata: FlowPersistedJsonObject | None = None
     timestamp: datetime | None = None
 
     @classmethod

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, Self, TypeAlias
+from typing import Any, Optional, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import (
@@ -9,12 +11,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
+    StrictInt,
     field_validator,
     model_validator,
 )
 
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.principal_types import PrincipalType
+from intric.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -34,7 +39,26 @@ from intric.flows.enums import (
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.flow_run_error import FlowRunError
 
-JsonObject: TypeAlias = dict[str, Any]
+# Flow domain models load persisted JSONB rows before each writer path has a
+# strict serializer boundary. Tighten fields one by one at those chokepoints.
+FlowPersistedJsonObject: TypeAlias = dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class RerunStepInputOverride:
+    step_id: UUID
+    file_ids: tuple[UUID, ...]
+
+
+def clone_json_object(value: object) -> FlowPersistedJsonObject | None:
+    """Shallow-copy a mapping into a string-keyed JSON object."""
+    if not isinstance(value, Mapping):
+        return None
+    cloned: FlowPersistedJsonObject = {}
+    for key, item in cast(Mapping[object, object], value).items():
+        if isinstance(key, str):
+            cloned[key] = item
+    return cloned
 
 
 class FlowStep(BaseModel):
@@ -49,15 +73,15 @@ class FlowStep(BaseModel):
     user_description: Optional[str] = None
     input_source: FlowInputSource
     input_type: FlowInputType
-    input_contract: JsonObject | None = None
+    input_contract: FlowPersistedJsonObject | None = None
     output_mode: FlowOutputMode
     output_type: FlowOutputType
-    output_contract: JsonObject | None = None
-    input_bindings: JsonObject | None = None
+    output_contract: FlowPersistedJsonObject | None = None
+    input_bindings: FlowPersistedJsonObject | None = None
     output_classification_override: Optional[int] = None
     mcp_policy: FlowMcpPolicy
-    input_config: JsonObject | None = None
-    output_config: JsonObject | None = None
+    input_config: FlowPersistedJsonObject | None = None
+    output_config: FlowPersistedJsonObject | None = None
     review_policy: FlowStepReviewPolicy | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -75,9 +99,9 @@ class FlowStep(BaseModel):
 
 
 class FlowRuntimeInputConfig(BaseModel):
-    enabled: bool = False
-    required: bool = False
-    max_files: int | None = None
+    enabled: StrictBool = False
+    required: StrictBool = False
+    max_files: StrictInt | None = None
     input_format: FlowRuntimeInputFormat = FlowRuntimeInputFormat.DOCUMENT
     accepted_mimetypes_override: list[str] | None = None
     label: str | None = None
@@ -119,7 +143,7 @@ class FlowSparse(BaseModel):
     created_by_user_id: Optional[UUID] = None
     owner_user_id: Optional[UUID] = None
     published_version: Optional[int] = None
-    metadata_json: JsonObject | None = None
+    metadata_json: FlowPersistedJsonObject | None = None
     data_retention_days: Optional[int] = None
     draft_revision: int = 0
     created_at: datetime | None = None
@@ -128,6 +152,11 @@ class FlowSparse(BaseModel):
     @property
     def published(self) -> bool:
         return self.published_version is not None
+
+    def require_persisted_id(self) -> UUID:
+        if self.id is None:
+            raise FlowPersistedIdMissingError()
+        return self.id
 
 
 def _default_flow_steps() -> list[FlowStep]:
@@ -145,7 +174,7 @@ class FlowVersion(BaseModel):
     version: int
     tenant_id: UUID
     definition_checksum: str
-    definition_json: JsonObject
+    definition_json: FlowPersistedJsonObject
     created_at: datetime
     updated_at: datetime
 
@@ -168,8 +197,8 @@ class FlowRun(BaseModel):
     cancelled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    input_payload_json: JsonObject | None = None
-    output_payload_json: JsonObject | None = None
+    input_payload_json: FlowPersistedJsonObject | None = None
+    output_payload_json: FlowPersistedJsonObject | None = None
     error: FlowRunError | None = Field(
         default=None,
         validation_alias=AliasChoices("error", "error_json"),
@@ -218,13 +247,14 @@ class FlowStepResult(BaseModel):
     step_order: int
     assistant_id: Optional[UUID] = None
     current_attempt_no: Optional[int] = None
-    input_payload_json: JsonObject | None = None
+    input_payload_json: FlowPersistedJsonObject | None = None
     effective_prompt: Optional[str] = None
-    output_payload_json: JsonObject | None = None
-    model_parameters_json: JsonObject | None = None
+    output_payload_json: FlowPersistedJsonObject | None = None
+    model_parameters_json: FlowPersistedJsonObject | None = None
     num_tokens_input: Optional[int] = None
     num_tokens_output: Optional[int] = None
     status: FlowStepResultStatus
+    error_code: Optional[str] = None
     error_message: Optional[str] = None
     flow_step_execution_hash: Optional[str] = None
     started_at: Optional[datetime] = None
@@ -257,9 +287,9 @@ class FlowStepAttempt(BaseModel):
     provider_response_id: Optional[str] = None
     num_tokens_input: Optional[int] = None
     num_tokens_output: Optional[int] = None
-    provenance_json: JsonObject | None = None
-    input_payload_json: JsonObject | None = None
-    output_payload_json: JsonObject | None = None
+    provenance_json: FlowPersistedJsonObject | None = None
+    input_payload_json: FlowPersistedJsonObject | None = None
+    output_payload_json: FlowPersistedJsonObject | None = None
     flow_step_execution_hash: Optional[str] = None
     started_at: datetime
     finished_at: Optional[datetime] = None
@@ -283,8 +313,9 @@ class FlowRunRerunOperation(BaseModel):
     expected_run_revision: int
     accepted_run_revision: int
     reason: str
-    input_payload_json: JsonObject | None = None
-    step_inputs_json: JsonObject | None = None
+    input_payload_json: FlowPersistedJsonObject | None = None
+    root_step_input_override_requested: bool
+    root_step_input_override: RerunStepInputOverride | None
     requested_by_principal_type: PrincipalType
     requested_by_user_id: UUID | None = None
     requested_by_service_id: UUID | None = None
@@ -294,6 +325,24 @@ class FlowRunRerunOperation(BaseModel):
     finished_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _validate_root_step_input_override(self) -> Self:
+        if self.root_step_input_override_requested != (
+            self.root_step_input_override is not None
+        ):
+            raise ValueError(
+                "root_step_input_override must be present exactly when "
+                "root_step_input_override_requested is true."
+            )
+        if (
+            self.root_step_input_override is not None
+            and self.root_step_input_override.step_id != self.rerun_step_id
+        ):
+            raise ValueError(
+                "root_step_input_override.step_id must match rerun_step_id."
+            )
+        return self
 
 
 class FlowRunRerunInvalidatedStep(BaseModel):
@@ -330,8 +379,8 @@ class FlowRunReviewCheckpoint(BaseModel):
     state: FlowRunReviewCheckpointState
     revision: int = 1
     schema_version: int = 1
-    original_payload_json: JsonObject | None = None
-    current_payload_json: JsonObject | None = None
+    original_payload_json: FlowPersistedJsonObject | None = None
+    current_payload_json: FlowPersistedJsonObject | None = None
     step_label: str | None = Field(
         default=None,
         description="Snapshot of the reviewed step's user-facing label.",
@@ -342,7 +391,7 @@ class FlowRunReviewCheckpoint(BaseModel):
     output_type: FlowOutputType = Field(
         description="Snapshot of the reviewed step's output type.",
     )
-    output_contract_json: JsonObject | None = Field(
+    output_contract_json: FlowPersistedJsonObject | None = Field(
         default=None,
         description=(
             "Snapshot of FlowStep.output_contract at checkpoint creation. "

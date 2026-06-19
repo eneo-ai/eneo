@@ -18,6 +18,7 @@ _TABLE_MODULES = (
     "intric.database.tables.completion_model_migration_history_table",
     "intric.database.tables.feature_flag_table",
     "intric.database.tables.files_table",
+    "intric.database.tables.flow_classification_retention_policy_table",
     "intric.database.tables.flow_tables",
     "intric.database.tables.group_chats_table",
     "intric.database.tables.groups_spaces_table",

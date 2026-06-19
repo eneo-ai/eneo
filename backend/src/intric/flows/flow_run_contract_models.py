@@ -16,6 +16,7 @@ from intric.flows.flow_input_limits import (
     FlowRuntimeUploadPolicy,
     effective_runtime_upload_policy,
 )
+from intric.flows.flow_metadata import FlowFormFieldType
 from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
@@ -100,6 +101,8 @@ FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION = (
 
 
 class FlowRuntimeUploadPolicyPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     min_timeout_seconds: int = Field(
         gt=0,
         description="Minimum wall-clock timeout clients should allow for each runtime file upload.",
@@ -137,6 +140,8 @@ def default_runtime_upload_policy_public() -> FlowRuntimeUploadPolicyPublic:
 
 
 class FlowRuntimeInputContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     step_id: UUID
     step_order: int
     label: str | None = None
@@ -149,6 +154,8 @@ class FlowRuntimeInputContractPublic(BaseModel):
 
 
 class FlowReviewStepContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     step_id: UUID
     step_order: int
     label: str | None = Field(
@@ -186,6 +193,8 @@ class FlowOutputDelivery(str, Enum):
 
 
 class FlowFinalOutputContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     step_id: UUID = Field(
         description="Published step id that produces the run's terminal output.",
     )
@@ -229,6 +238,8 @@ class FlowFinalOutputContractPublic(BaseModel):
 
 
 class FlowTemplateReadinessPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     step_id: UUID
     template_asset_id: UUID | None = None
     template_file_id: UUID | None = None
@@ -242,7 +253,7 @@ class FlowTemplateReadinessPublic(BaseModel):
 
 
 class FormFieldPublic(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(
         description=(
@@ -250,8 +261,11 @@ class FormFieldPublic(BaseModel):
             "available to prompts as `{{flow_input.<name>}}`."
         ),
     )
-    type: str = Field(
-        description="Form control type clients should render, such as text, number, date, select, or multiselect.",
+    type: FlowFormFieldType = Field(
+        description=(
+            "Form control type clients should render. One of: text, number, "
+            "date, select, multiselect."
+        ),
     )
     label: str | None = Field(
         default=None,
@@ -273,7 +287,7 @@ class FormFieldPublic(BaseModel):
 
 class FlowRunContractPublic(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
+        extra="forbid", json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
     )
 
     flow_id: UUID

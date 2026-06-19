@@ -34,6 +34,74 @@ describe("settings flow policy endpoints", () => {
     });
   });
 
+  it("lists flow classification retention policies from canonical settings route", async () => {
+    const fetch = vi.fn(async () => ({
+      policies: [
+        {
+          security_classification_id: "6f982fa9-8f74-451f-b6fc-773f937af7ef",
+          data_retention_days: 7
+        }
+      ]
+    }));
+    const settings = initSettings({ fetch });
+
+    await settings.listFlowClassificationRetentionPolicies();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/settings/flow-classification-retention-policies");
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+  });
+
+  it("puts flow classification retention policy by classification id", async () => {
+    const fetch = vi.fn(async () => ({
+      security_classification_id: "6f982fa9-8f74-451f-b6fc-773f937af7ef",
+      data_retention_days: 14
+    }));
+    const settings = initSettings({ fetch });
+
+    await settings.putFlowClassificationRetentionPolicy("6f982fa9-8f74-451f-b6fc-773f937af7ef", {
+      data_retention_days: 14
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}"
+    );
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "put",
+      params: {
+        path: {
+          security_classification_id: "6f982fa9-8f74-451f-b6fc-773f937af7ef"
+        }
+      },
+      requestBody: {
+        "application/json": {
+          data_retention_days: 14
+        }
+      }
+    });
+  });
+
+  it("deletes flow classification retention policy by classification id", async () => {
+    const fetch = vi.fn(async () => undefined);
+    const settings = initSettings({ fetch });
+
+    await settings.deleteFlowClassificationRetentionPolicy("6f982fa9-8f74-451f-b6fc-773f937af7ef");
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}"
+    );
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "delete",
+      params: {
+        path: {
+          security_classification_id: "6f982fa9-8f74-451f-b6fc-773f937af7ef"
+        }
+      }
+    });
+  });
+
   it("gets flow evidence policy from canonical settings route", async () => {
     const fetch = vi.fn(async () => ({ allow_service_key_raw_export_class3: false }));
     const settings = initSettings({ fetch });

@@ -61,7 +61,7 @@ def _audio_uploads(limit: int = CUSTOM_AUDIO_LIMIT):
 
 TEST_NAME = "Test name"
 TEST_COMPLETION_MODEL = CompletionModel(
-    user=TEST_USER,
+    tenant=TEST_USER.tenant,
     id=TEST_UUID,
     name=TEST_NAME,
     nickname=TEST_NAME,
@@ -85,7 +85,7 @@ TEST_COMPLETION_MODEL = CompletionModel(
     deployment_name=None,
 )
 TEST_TRANSCRIPTION_MODEL = TranscriptionModel(
-    user=TEST_USER,
+    tenant=TEST_USER.tenant,
     id=TEST_UUID,
     name=TEST_NAME,
     nickname=TEST_NAME,

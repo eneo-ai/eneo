@@ -23,18 +23,15 @@ from intric.completion_models.domain.completion_model import CompletionModel
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
+from intric.tenants.tenant import TenantInDB
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-class _MockUser:
-    def __init__(self):
-        self.id = uuid4()
-        self.tenant_id = uuid4()
-        self.tenant = None
-        self.modules = []
+def _tenant() -> TenantInDB:
+    return TenantInDB.model_construct(id=uuid4(), name="Test Tenant")
 
 
 def _make_model(
@@ -51,9 +48,8 @@ def _make_model(
     model_id=None,
 ) -> CompletionModel:
     """Build a minimal CompletionModel domain object for testing."""
-    user = _MockUser()
     return CompletionModel(
-        user=user,
+        tenant=_tenant(),
         id=model_id or uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),

@@ -5,6 +5,8 @@ depends on the same runtime or contract surface.
 
 This document is the maintainer entry point for Flows. It names the current
 owners, runtime journeys, blocked policy decisions, and guard tests.
+Use [Flow Package Layout](./package-layout.md) before adding or moving
+top-level Flow modules.
 
 ## Mental Model
 
@@ -46,7 +48,7 @@ Use this split when changing code:
 | Runtime lifecycle audit outbox | `FlowRunAuditOutboxDeliveryService` | `backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py:43` | Lifecycle audit is committed runtime state and is delivered outside tenant audit feature flags. |
 | Evidence and artifacts | `FlowRunEvidenceService`, `flow_run_evidence.py`, `flow_run_export_json.py` | `backend/src/intric/flows/application/flow_run_evidence_service.py:33`, `backend/src/intric/flows/flow_run_evidence.py:74`, `backend/src/intric/flows/flow_run_export_json.py:218` | Evidence assembly, export, redaction, artifact availability, and retention summaries belong here. |
 | Retention tombstones | `flow_retention_tombstone.py` | `backend/src/intric/flows/flow_retention_tombstone.py:8`, `backend/src/intric/flows/flow_retention_tombstone.py:50` | The tombstone schema exists, but product/data decisions still block the full retention policy work. |
-| Review checkpoints | `FlowRunReviewCheckpointService` | `backend/src/intric/flows/application/flow_run_review_checkpoint_service.py:28` | Owns active checkpoint lookup, payload edit validation, approve/reject, resume, revision checks, and deadline behavior. |
+| Review checkpoints | `FlowRunReviewCheckpointService` and `FlowRunReviewCheckpointRepository` | `backend/src/intric/flows/application/flow_run_review_checkpoint_service.py:28`, `backend/src/intric/flows/infrastructure/flow_run_review_checkpoint_repo.py:115` | Service owns active checkpoint use cases and API translation. Repository owns checkpoint persistence, state transitions, audit outbox writes, expiry reconciliation, and run-first lock ordering. |
 | Step rerun | `FlowRunRerunService` | `backend/src/intric/flows/application/flow_run_rerun_service.py:52`, `backend/src/intric/database/tables/flow_tables.py:777` | Rerun remains user-principal-only in persistence and API policy. |
 | Frontend draft editing | `FlowEditor.ts` | `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:77`, `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:479` | Owns editable fields, step order mutations, active step selection, and metadata writes. |
 | Frontend draft form schema | `flowFormSchema.ts`, `FlowEditor.ts`, `FlowFormSchemaEditor.svelte` | `frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:73`, `frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:114`, `frontend/apps/web/src/lib/features/flows/FlowEditor.ts:517` | `flowFormSchema.ts` owns field normalization and metadata shape. `FlowEditor` writes metadata. The editor component owns transient local editing state. |
@@ -319,6 +321,7 @@ Run these when changing the named surface:
 
 | Surface | Guard or test |
 | --- | --- |
+| Flow root package layout and root-growth freeze | `backend/tests/unittests/flows/test_flow_package_layout.py::test_flow_root_layout_decision_matches_filesystem` |
 | No FastAPI exceptions from Flow application/runtime modules | `backend/tests/unittests/flows/test_flow_architecture_guards.py:476` |
 | `output_mode` dispatch remains in StepHandlers | `backend/tests/unittests/flows/test_flow_architecture_guards.py:497` and `backend/tests/unittests/flows/test_flow_runtime_step_handlers.py:161` |
 | `output_type` policy remains in OutputFormatSpecs | `backend/tests/unittests/flows/test_flow_architecture_guards.py:507` and `backend/tests/unittests/flows/test_flow_runtime_output_formats.py:25` |

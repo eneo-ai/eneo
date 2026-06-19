@@ -10,6 +10,7 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.api.flow_api_common import audit_actor_kwargs
 from intric.flows.domain.flow import FlowRun
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.main.logging import get_logger
@@ -71,7 +72,7 @@ async def log_flow_trace_audit_or_deny(
             content=build_flow_trace_error_payload(
                 message="Evidence audit logging is unavailable.",
                 intric_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
-                code="flow_evidence_audit_logging_failed",
+                code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value,
                 context={"audit_required": True},
             ),
         )

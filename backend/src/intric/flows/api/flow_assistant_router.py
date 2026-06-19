@@ -12,9 +12,13 @@ from intric.assistants.api.assistant_models import (
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.flows.api import flow_router_common as common
+from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import error_response
+from intric.flows.api.flow_assistant_update_adapter import (
+    to_flow_assistant_update_command,
+)
 from intric.flows.api.flow_models import FlowAssistantCreateRequest
+from intric.flows.flow_access_policy import FlowApiAction
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.server.dependencies.container import get_container
@@ -56,12 +60,12 @@ async def _require_flow_assistant_access(
     container: Container,
     *,
     flow_id: UUID,
-) -> common.FlowAccessContext:
-    access_context = await common.get_flow_access_context_for_request(
+) -> flow_access_context.FlowAccessContext:
+    access_context = await flow_access_context.resolve_flow_access_context(
         request,
         container,
         flow_id=flow_id,
-        required_access=common.FlowApiAction.EDIT,
+        required_access=FlowApiAction.EDIT,
     )
     if access_context.actor is None or not access_context.actor.can_edit_flows():
         raise UnauthorizedException(
@@ -258,7 +262,7 @@ async def update_flow_assistant(
     flow_service = container.flow_service()
     assistant_assembler = container.assistant_assembler()
     user = container.user()
-    update = common.extract_assistant_update_payload(assistant_in)
+    update = to_flow_assistant_update_command(assistant_in)
 
     updated_assistant, permissions = await flow_service.update_flow_assistant(
         flow_id=id,
@@ -342,3 +346,6 @@ async def delete_flow_assistant(
             extra={"flow_id": str(id), "origin": "flow_managed"},
         ),
     )
+
+
+__all__ = ["router"]

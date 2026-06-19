@@ -1,38 +1,30 @@
 from __future__ import annotations
 
-from typing import Any, cast
 from uuid import UUID
 
+from intric.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
 )
 
-JsonObject = dict[str, Any]
-
 
 def apply_audio_transcription_defaults(
     *,
-    metadata: JsonObject | None,
+    metadata: FlowPersistedJsonObject | None,
     spec: FlowDraftSpecCore,
     default_transcription_model_id: UUID | None,
-) -> JsonObject | None:
+) -> FlowPersistedJsonObject | None:
     if not _uses_audio_flow_input(spec):
         return _cleanup_transcription_metadata(metadata)
 
     updated_metadata = dict(metadata or {})
-    wizard = updated_metadata.get("wizard")
-    wizard_config: JsonObject = (
-        dict(cast(JsonObject, wizard)) if isinstance(wizard, dict) else {}
-    )
+    wizard_config = clone_json_object(updated_metadata.get("wizard")) or {}
 
     wizard_config["transcription_enabled"] = True
 
-    raw_model = wizard_config.get("transcription_model")
-    model_config: JsonObject = (
-        dict(cast(JsonObject, raw_model)) if isinstance(raw_model, dict) else {}
-    )
+    model_config = clone_json_object(wizard_config.get("transcription_model")) or {}
     model_id = model_config.get("id")
     if (
         model_id is None or str(model_id).strip() == ""
@@ -64,22 +56,26 @@ _TRANSCRIPTION_WIZARD_KEYS = {
 }
 
 
-def _cleanup_transcription_metadata(metadata: JsonObject | None) -> JsonObject | None:
+def _cleanup_transcription_metadata(
+    metadata: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
     if not isinstance(metadata, dict):
         return metadata
 
-    wizard = metadata.get("wizard")
-    if not isinstance(wizard, dict):
+    wizard_config = clone_json_object(metadata.get("wizard"))
+    if wizard_config is None:
         return metadata
 
-    has_transcription_keys = any(key in wizard for key in _TRANSCRIPTION_WIZARD_KEYS)
+    has_transcription_keys = any(
+        key in wizard_config for key in _TRANSCRIPTION_WIZARD_KEYS
+    )
     if not has_transcription_keys:
         return metadata
 
     updated_metadata = dict(metadata)
     updated_wizard = {
         key: value
-        for key, value in cast(JsonObject, wizard).items()
+        for key, value in wizard_config.items()
         if key not in _TRANSCRIPTION_WIZARD_KEYS
     }
 

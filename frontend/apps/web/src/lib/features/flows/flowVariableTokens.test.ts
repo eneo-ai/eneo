@@ -124,13 +124,20 @@ describe("analyzeTemplateTokens invalid tokens", () => {
   });
 
   it("keeps primary flow_input keys and JSON-shaped paths resolved", () => {
-    const input =
-      "{{flow_input.text}} {{flow_input.file_ids}} {{flow_input.customer.id}} {{flow_input.datm.foo}}";
+    const input = "{{flow_input.text}} {{flow_input.customer.id}} {{flow_input.datm.foo}}";
     const unresolved = collectInvalidTokens(input, context);
     expect(unresolved).toEqual([]);
     expect(classifyVariable("flow_input.text", context)).toBe("technical");
     expect(classifyVariable("flow_input.customer.id", context)).toBe("technical");
     expect(classifyVariable("flow_input.datm.foo", context)).toBe("technical");
+  });
+
+  it("flags removed top-level flow_input file ids", () => {
+    const input = "{{flow_input.file_ids}} {{flow_input.file_ids.0}}";
+    const unresolved = collectInvalidTokens(input, context);
+    expect(unresolved).toEqual(["flow_input.file_ids", "flow_input.file_ids.0"]);
+    expect(classifyVariable("flow_input.file_ids", context)).toBe("unknown");
+    expect(classifyVariable("flow_input.file_ids.0", context)).toBe("unknown");
   });
 
   it("flags bare or empty flow_input references as unresolved", () => {

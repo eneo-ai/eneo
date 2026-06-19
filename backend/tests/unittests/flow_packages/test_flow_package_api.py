@@ -56,7 +56,6 @@ from intric.flow_packages.domain.flow_package_import_record import (
 )
 from intric.flow_packages.domain.flow_package_manifest import (
     FlowPackageManifest,
-    JsonObject,
 )
 from intric.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
 from intric.flow_packages.domain.flow_package_requirements import (
@@ -68,7 +67,10 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
 )
 from intric.flow_packages.infrastructure import flow_package_zip_reader as reader
-from intric.flows.api.flow_api_common import FlowAccessContext, FlowSpaceAccessContext
+from intric.flows.api.flow_access_context import (
+    FlowAccessContext,
+    FlowSpaceAccessContext,
+)
 from intric.flows.domain.flow import Flow
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_authoring_spec import (
@@ -86,6 +88,7 @@ from intric.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from intric.json_types import JsonObject
 from intric.main.container.container import Container
 from intric.main.exceptions import (
     BadRequestException,
@@ -219,7 +222,7 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
         identity=FlowPackageModelIdentity(provider="openai", model="gpt-5.4-mini"),
     )
 
-    async def fake_get_space_access_context_for_request(
+    async def fake_resolve_space_access_context(
         request: Request,
         container: Container,
         *,
@@ -244,9 +247,9 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
         return FlowPackageImportPlannerCandidates(models=[candidate])
 
     monkeypatch.setattr(
-        flow_package_router.common,
-        "get_space_access_context_for_request",
-        fake_get_space_access_context_for_request,
+        flow_package_router.flow_access_context,
+        "resolve_space_access_context",
+        fake_resolve_space_access_context,
     )
     monkeypatch.setattr(
         flow_package_router,
@@ -273,7 +276,7 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
 async def test_create_flow_package_import_plan_rejects_space_without_flow_edit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_space_access_context_for_request(
+    async def fake_resolve_space_access_context(
         request: Request,
         container: Container,
         *,
@@ -294,9 +297,9 @@ async def test_create_flow_package_import_plan_rejects_space_without_flow_edit(
         )
 
     monkeypatch.setattr(
-        flow_package_router.common,
-        "get_space_access_context_for_request",
-        fake_get_space_access_context_for_request,
+        flow_package_router.flow_access_context,
+        "resolve_space_access_context",
+        fake_resolve_space_access_context,
     )
     monkeypatch.setattr(
         flow_package_router,
@@ -320,7 +323,7 @@ async def test_create_flow_package_import_plan_rejects_space_without_flow_edit(
 async def test_create_flow_package_import_plan_bubbles_scope_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_space_access_context_for_request(
+    async def fake_resolve_space_access_context(
         request: Request,
         container: Container,
         *,
@@ -344,9 +347,9 @@ async def test_create_flow_package_import_plan_bubbles_scope_mismatch(
         )
 
     monkeypatch.setattr(
-        flow_package_router.common,
-        "get_space_access_context_for_request",
-        fake_get_space_access_context_for_request,
+        flow_package_router.flow_access_context,
+        "resolve_space_access_context",
+        fake_resolve_space_access_context,
     )
     monkeypatch.setattr(
         flow_package_router,
@@ -685,7 +688,6 @@ async def test_export_flow_package_checks_access_before_exporting(
         container: Container,
         *,
         flow_id: UUID,
-        require_flow_lookup_without_scope: bool = False,
         allow_service_key_principals: bool = False,
     ) -> FlowAccessContext:
         access_calls.append(allow_service_key_principals)
@@ -943,7 +945,6 @@ def _patch_export_access(
         container: Container,
         *,
         flow_id: UUID,
-        require_flow_lookup_without_scope: bool = False,
         allow_service_key_principals: bool = False,
     ) -> FlowAccessContext:
         return FlowAccessContext(
@@ -965,7 +966,7 @@ def _patch_import_access(
     target_space_id: UUID,
     space: _FakeSpace,
 ) -> None:
-    async def fake_get_space_access_context_for_request(
+    async def fake_resolve_space_access_context(
         request: Request,
         container: Container,
         *,
@@ -986,9 +987,9 @@ def _patch_import_access(
         return FlowPackageImportPlannerCandidates(models=[_model_candidate()])
 
     monkeypatch.setattr(
-        flow_package_router.common,
-        "get_space_access_context_for_request",
-        fake_get_space_access_context_for_request,
+        flow_package_router.flow_access_context,
+        "resolve_space_access_context",
+        fake_resolve_space_access_context,
     )
     monkeypatch.setattr(
         flow_package_router,

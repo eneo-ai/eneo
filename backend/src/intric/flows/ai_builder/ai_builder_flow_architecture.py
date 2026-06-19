@@ -23,8 +23,7 @@ class FlowArchitectureSection:
     """One heading plus the ordered bullet-rule strings under it.
 
     Frozen + slotted: entries are canonical and must not mutate after
-    construction, mirroring the discipline applied to
-    `StepDesignSection` and `ValidationRepairExample`.
+    construction.
     """
 
     heading: str

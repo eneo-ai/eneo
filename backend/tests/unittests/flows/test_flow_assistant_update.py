@@ -7,7 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
-from intric.flows.api.flow_router_common import extract_assistant_update_payload
+from intric.flows.api.flow_assistant_update_adapter import (
+    to_flow_assistant_update_command,
+)
 from intric.flows.application.flow_assistant_update import (
     FlowAssistantUpdateCommand,
     FlowAssistantUpdateField,
@@ -60,9 +62,9 @@ def test_flow_assistant_update_command_reports_security_fields_only_when_set() -
     assert FlowAssistantUpdateCommand(groups=None).changed_security_field_names() == (
         frozenset({"groups"})
     )
-    assert FlowAssistantUpdateCommand(mcp_server_ids=[]).changed_security_field_names() == (
-        frozenset({"mcp_server_ids"})
-    )
+    assert FlowAssistantUpdateCommand(
+        mcp_server_ids=[]
+    ).changed_security_field_names() == (frozenset({"mcp_server_ids"}))
 
 
 @pytest.mark.parametrize(
@@ -84,8 +86,10 @@ def test_flow_assistant_update_command_reports_each_security_field(
     assert update.changed_security_field_names() == frozenset({field_name})
 
 
-def test_flow_assistant_update_mapper_preserves_current_data_retention_behavior() -> None:
-    update = extract_assistant_update_payload(AssistantUpdatePublic(name="Assistant"))
+def test_flow_assistant_update_mapper_preserves_current_data_retention_behavior() -> (
+    None
+):
+    update = to_flow_assistant_update_command(AssistantUpdatePublic(name="Assistant"))
 
     assert update.name == "Assistant"
     assert update.data_retention_days is None
@@ -95,7 +99,7 @@ def test_flow_assistant_update_mapper_preserves_current_data_retention_behavior(
 
 
 def test_flow_assistant_update_mapper_preserves_explicit_clear_values() -> None:
-    update = extract_assistant_update_payload(
+    update = to_flow_assistant_update_command(
         AssistantUpdatePublic(
             description=None,
             metadata_json=None,
@@ -123,7 +127,7 @@ def test_flow_assistant_update_mapper_converts_nested_ids_and_mcp_tools() -> Non
     mcp_tool_id = uuid4()
     completion_model_id = uuid4()
 
-    update = extract_assistant_update_payload(
+    update = to_flow_assistant_update_command(
         AssistantUpdatePublic(
             name="Assistant",
             attachments=[{"id": attachment_id}],

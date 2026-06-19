@@ -14,12 +14,20 @@ logger = get_logger(__name__)
 FLOW_RUNTIME_POLICY_SETTINGS_KEY: Final[str] = "runtime_policy"
 STEP_TIMEOUT_TASK_BUFFER_SECONDS: Final[int] = 60
 
+FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY: Final[str] = "version"
+FLOW_RUNTIME_POLICY_STORAGE_VERSION: Final[int] = 1
 FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY: Final[str] = "default_step_timeout_seconds"
 FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY: Final[str] = "max_step_timeout_seconds"
-FLOW_RUNTIME_POLICY_KEYS: Final[frozenset[str]] = frozenset(
+FLOW_RUNTIME_POLICY_BUSINESS_KEYS: Final[frozenset[str]] = frozenset(
     {
         FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
         FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
+    }
+)
+FLOW_RUNTIME_POLICY_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY,
+        *FLOW_RUNTIME_POLICY_BUSINESS_KEYS,
     }
 )
 
@@ -37,7 +45,9 @@ def flow_runtime_step_timeout_hard_ceiling_seconds(
 ) -> int:
     settings = defaults or get_settings()
     configured_ceiling = int(settings.flow_runtime_step_timeout_hard_ceiling_seconds)
-    task_ceiling = int(settings.flow_task_timeout_seconds) - STEP_TIMEOUT_TASK_BUFFER_SECONDS
+    task_ceiling = (
+        int(settings.flow_task_timeout_seconds) - STEP_TIMEOUT_TASK_BUFFER_SECONDS
+    )
     return max(1, min(configured_ceiling, task_ceiling))
 
 
@@ -62,7 +72,12 @@ def _extract_runtime_policy(
     policy = tenant_flow_settings.get(FLOW_RUNTIME_POLICY_SETTINGS_KEY)
     if not isinstance(policy, dict):
         return {}
-    return dict(cast(dict[str, Any], policy))
+    policy_dict = cast(dict[str, Any], policy)
+    if not _is_supported_storage_version(
+        policy_dict.get(FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY)
+    ):
+        return {}
+    return dict(policy_dict)
 
 
 def _parse_positive_timeout_seconds(value: Any, field_name: str) -> int:
@@ -97,6 +112,7 @@ def validate_flow_runtime_policy_object(
                 f"Unsupported flow runtime policy field: {key}.",
                 code="flow_runtime_policy_unknown_field",
             )
+    _validate_storage_version(policy_dict.get(FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY))
 
     hard_ceiling = flow_runtime_step_timeout_hard_ceiling_seconds(defaults=defaults)
     parsed: dict[str, Any] = {}
@@ -213,14 +229,18 @@ def apply_flow_runtime_policy_patch(
     next_policy = _extract_runtime_policy(result)
 
     if default_step_timeout_seconds is not None:
-        next_policy[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY] = _parse_positive_timeout_seconds(
-            default_step_timeout_seconds,
-            FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
+        next_policy[FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY] = (
+            _parse_positive_timeout_seconds(
+                default_step_timeout_seconds,
+                FLOW_RUNTIME_DEFAULT_STEP_TIMEOUT_KEY,
+            )
         )
     if max_step_timeout_seconds is not None:
-        next_policy[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY] = _parse_positive_timeout_seconds(
-            max_step_timeout_seconds,
-            FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
+        next_policy[FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY] = (
+            _parse_positive_timeout_seconds(
+                max_step_timeout_seconds,
+                FLOW_RUNTIME_MAX_STEP_TIMEOUT_KEY,
+            )
         )
 
     for key in remove_keys or ():
@@ -231,8 +251,16 @@ def apply_flow_runtime_policy_patch(
             )
         next_policy.pop(key, None)
 
+    has_business_fields = any(
+        key in next_policy for key in FLOW_RUNTIME_POLICY_BUSINESS_KEYS
+    )
+    if has_business_fields:
+        next_policy[FLOW_RUNTIME_POLICY_STORAGE_VERSION_KEY] = (
+            FLOW_RUNTIME_POLICY_STORAGE_VERSION
+        )
+
     validate_flow_runtime_policy_object(next_policy, defaults=defaults)
-    if next_policy:
+    if has_business_fields:
         result[FLOW_RUNTIME_POLICY_SETTINGS_KEY] = next_policy
     else:
         result.pop(FLOW_RUNTIME_POLICY_SETTINGS_KEY, None)
@@ -257,3 +285,18 @@ def resolve_step_timeout_seconds(
             },
         )
     return parsed
+
+
+def _is_supported_storage_version(value: Any) -> bool:
+    return value is None or (
+        type(value) is int and value == FLOW_RUNTIME_POLICY_STORAGE_VERSION
+    )
+
+
+def _validate_storage_version(value: Any) -> None:
+    if _is_supported_storage_version(value):
+        return
+    raise BadRequestException(
+        "flow_settings.runtime_policy.version must be 1",
+        code="flow_runtime_policy_version_unsupported",
+    )
