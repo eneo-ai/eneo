@@ -1,10 +1,16 @@
 """Unit tests for audit category mappings."""
 
+import json
+from pathlib import Path
+
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRONTEND_MESSAGES_DIR = REPO_ROOT / "frontend" / "apps" / "web" / "messages"
 
 
 class TestCategoryMappings:
@@ -224,3 +230,28 @@ class TestCategoryDistribution:
         for category in categories:
             count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == category)
             assert count > 0, f"Category '{category}' has no action types mapped to it"
+
+
+class TestActionMessageCatalog:
+    """Verify that every backend audit action has frontend display messages."""
+
+    def test_all_action_types_have_en_and_sv_messages(self):
+        locales = {
+            locale: json.loads((FRONTEND_MESSAGES_DIR / f"{locale}.json").read_text())
+            for locale in ("en", "sv")
+        }
+
+        missing_or_empty = []
+        for action in ActionType:
+            for locale, messages in locales.items():
+                for key in (
+                    f"audit_action_{action.value}",
+                    f"audit_action_{action.value}_description",
+                ):
+                    if not messages.get(key):
+                        missing_or_empty.append(f"{locale}:{key}")
+
+        assert not missing_or_empty, (
+            "Missing or empty audit action messages: "
+            f"{', '.join(sorted(missing_or_empty))}"
+        )

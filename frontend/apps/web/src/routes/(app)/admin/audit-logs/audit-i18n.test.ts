@@ -3,13 +3,12 @@ import en from "../../../../../messages/en.json";
 import sv from "../../../../../messages/sv.json";
 
 /**
- * Guards the audit i18n contract that complements the compile-time check in
- * audit-action-labels.ts / audit-category-labels.ts.
+ * Guards the audit i18n contract that complements the category compile-time
+ * check in audit-category-labels.ts.
  *
- * The `satisfies Record<ActionType | CategoryType, …>` in those modules already
- * forces every backend key to have messages (a new enum member fails
- * `bun run check`). These runtime checks add what the type system can't see:
- * en/sv parity, name↔description pairing, and non-empty values.
+ * Action completeness is checked from the backend ActionType enum. These
+ * runtime checks add what the type system can't see: en/sv parity,
+ * name↔description pairing, and non-empty values.
  */
 
 const EN = en as Record<string, string>;
