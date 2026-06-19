@@ -35,3 +35,21 @@ export function translateMigrationWarning(code: string): string {
 export function isSecurityBlockerCode(code: string): boolean {
   return code.startsWith("security_classification_insufficient");
 }
+
+/** Codes that are purely informational, not a compatibility issue. */
+export function isInfoCode(code: string): boolean {
+  return code === "kwargs_reset";
+}
+
+export type MigrationSeverity = "blocker" | "warning" | "info";
+
+/**
+ * Sort a warning code into its severity tier so the dialog can render
+ * blockers (errors), warnings and info notices in separate sections
+ * instead of lumping everything into one (red) box.
+ */
+export function classifyMigrationCode(code: string): MigrationSeverity {
+  if (isSecurityBlockerCode(code)) return "blocker";
+  if (isInfoCode(code)) return "info";
+  return "warning";
+}

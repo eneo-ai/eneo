@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from intric.audit.domain.action_types import ActionType
 from intric.audit.schemas.audit_config_schemas import (
     ActionConfigResponse,
     ActionConfigUpdateRequest,
@@ -14,6 +15,7 @@ from intric.audit.schemas.audit_config_schemas import (
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/config")
     response_model=AuditConfigResponse,
     summary="Get audit category configuration",
     description="Retrieve all audit category configurations for the current tenant.",
+    responses=responses.get_responses([403]),
 )
 async def get_audit_config(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -55,6 +58,7 @@ async def get_audit_config(
     response_model=AuditConfigResponse,
     summary="Update audit category configuration",
     description="Update one or more audit category configurations for the current tenant.",
+    responses=responses.get_responses([400, 403]),
 )
 async def update_audit_config(
     request: AuditConfigUpdateRequest,
@@ -86,7 +90,9 @@ async def update_audit_config(
 
     # Capture old configuration for audit log
     old_config = await audit_config_service.get_config(user.tenant_id)
-    old_config_dict = {c.category: c.enabled for c in old_config.categories}
+    old_config_dict: dict[str, bool] = {
+        c.category: c.enabled for c in old_config.categories
+    }
 
     # Update configuration
     updated_config = await audit_config_service.update_config(
@@ -124,7 +130,8 @@ async def update_audit_config(
     "/actions",
     response_model=ActionConfigResponse,
     summary="Get per-action audit configuration",
-    description="Retrieve all 65 actions with their enabled status for the modal UI.",
+    description=f"Retrieve all {len(ActionType)} actions with their enabled status for the modal UI.",
+    responses=responses.get_responses([403]),
 )
 async def get_action_config(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -132,7 +139,7 @@ async def get_action_config(
     """
     Get all actions with their enabled status (considering category + overrides).
 
-    Returns all 65 actions grouped by category with Swedish metadata.
+    Returns all actions grouped by category. Display text is translated by the frontend.
     Used for populating the audit configuration modal UI.
 
     Requires admin permission.
@@ -154,6 +161,7 @@ async def get_action_config(
     response_model=ActionConfigResponse,
     summary="Update per-action audit configuration",
     description="Update one or more action-level audit configurations.",
+    responses=responses.get_responses([400, 403]),
 )
 async def update_action_config(
     request: ActionConfigUpdateRequest,
@@ -167,7 +175,6 @@ async def update_action_config(
 
     Requires admin permission.
     """
-    from intric.audit.domain.action_types import ActionType
     from intric.audit.domain.entity_types import EntityType
 
     user = container.user()

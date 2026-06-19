@@ -26,7 +26,8 @@ router = APIRouter()
 @router.post(
     "/",
     response_model=ServicePublicWithUser,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
+    description="Create a service.",
 )
 async def create_service(
     service_model: ServiceCreatePublic,
@@ -47,7 +48,12 @@ async def create_service(
     return from_domain_service(service_in_db)
 
 
-@router.get("/", response_model=PaginatedResponse[ServicePublicWithUser])
+@router.get(
+    "/",
+    response_model=PaginatedResponse[ServicePublicWithUser],
+    responses=responses.get_responses([]),
+    description="List services, optionally filtered by name.",
+)
 async def get_services(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     name: str | None = None,
@@ -66,7 +72,7 @@ async def get_services(
 @router.get(
     "/{id}/",
     response_model=ServicePublicWithUser,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_service(
     id: UUID,
@@ -82,7 +88,8 @@ async def get_service(
 @router.post(
     "/{id}/",
     response_model=ServicePublicWithUser,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 403, 404]),
+    description="Update a service. Omitted fields are not updated.",
 )
 async def update_service(
     id: UUID,
@@ -103,6 +110,7 @@ async def update_service(
     "/{id}/",
     status_code=204,
     responses=responses.get_responses([403, 404]),
+    description="Delete a service.",
 )
 async def delete_service(
     id: UUID,
@@ -115,7 +123,8 @@ async def delete_service(
 @router.post(
     "/{id}/run/",
     response_model=ServiceOutput,
-    responses=responses.get_responses([404, 400]),
+    responses=responses.get_responses([400, 403, 404]),
+    description="Run a service. The output schema depends on the service's output validation.",
 )
 async def run_service(
     input: RunService,
@@ -130,7 +139,7 @@ async def run_service(
 @router.get(
     "/{id}/run/",
     response_model=PaginatedResponse[ServiceRun],
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_service_runs(
     id: UUID,
@@ -145,7 +154,12 @@ async def get_service_runs(
     }
 
 
-@router.post("/{id}/transfer/", status_code=204)
+@router.post(
+    "/{id}/transfer/",
+    status_code=204,
+    responses=responses.get_responses([400, 403, 404]),
+    description="Transfer a service to another space.",
+)
 async def transfer_service_to_space(
     id: UUID,
     transfer_req: TransferApplicationRequest,

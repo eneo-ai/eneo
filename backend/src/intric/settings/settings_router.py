@@ -14,7 +14,7 @@ from intric.main.logging import get_logger
 from intric.main.models import GeneralError, PaginatedResponse
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
-from intric.server.protocol import to_paginated_response
+from intric.server.protocol import responses, to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import (
     FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
@@ -139,7 +139,12 @@ def _flow_classification_retention_policy_public(
     )
 
 
-@router.get("/", response_model=SettingsPublic)
+@router.get(
+    "/",
+    response_model=SettingsPublic,
+    description="Get the current tenant settings.",
+    responses=responses.get_responses([]),
+)
 async def get_settings(
     service: Annotated[
         SettingService,
@@ -149,7 +154,12 @@ async def get_settings(
     return await service.get_settings()
 
 
-@settings_admin_router.post("/", response_model=SettingsPublic)
+@settings_admin_router.post(
+    "/",
+    response_model=SettingsPublic,
+    description="Update tenant settings; omitted fields are not updated.",
+    responses=responses.get_responses([403]),
+)
 async def upsert_settings(
     settings: SettingsPublic,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -160,7 +170,12 @@ async def upsert_settings(
     return await service.update_settings(settings)
 
 
-@router.get("/models/", response_model=GetModelsResponse)
+@router.get(
+    "/models/",
+    response_model=GetModelsResponse,
+    description="List available completion and embedding models.",
+    responses=responses.get_responses([]),
+)
 async def get_models(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
@@ -183,6 +198,8 @@ async def get_models(
 @router.get(
     "/formats/",
     response_model=PaginatedResponse[str],
+    description="List supported file format mime types.",
+    responses=responses.get_responses([]),
     dependencies=[Depends(auth_dependencies.get_current_active_user)],
 )
 def get_formats():
@@ -573,6 +590,7 @@ async def update_ai_builder_budget_settings(
 @settings_admin_router.patch(
     "/templates",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle template feature",
     description="""
 Enable or disable the template management feature for your tenant.
@@ -618,6 +636,7 @@ async def update_template_setting(
 @settings_admin_router.patch(
     "/audit-logging",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle global audit logging",
     description="""
 Enable or disable global audit logging for your tenant.
@@ -665,6 +684,7 @@ async def update_audit_logging_setting(
 @settings_admin_router.patch(
     "/provisioning",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle JIT user provisioning",
     description="""
 Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
@@ -706,6 +726,7 @@ async def update_provisioning_setting(
 @settings_admin_router.patch(
     "/api-key-expiry-notifications",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle API key expiry notifications",
     description="""
 Toggle API key expiry notifications for your tenant.

@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from intric.completion_models.presentation import CompletionModelPublic
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.container.container import Container
@@ -41,6 +44,7 @@ class TenantCompletionModelCreate(BaseModel):
     # manually by the admin. NULL = not tracked.
     input_cost_per_token: Decimal | None = None
     output_cost_per_token: Decimal | None = None
+    model_kwargs_capabilities: SupportedModelKwargs | None = None
     security_classification: ModelId | None = None
 
 
@@ -58,6 +62,7 @@ class TenantCompletionModelUpdate(BaseModel):
     stability: str | None = None
     input_cost_per_token: Decimal | None = None
     output_cost_per_token: Decimal | None = None
+    model_kwargs_capabilities: SupportedModelKwargs | None = None
     # Cross-cutting fields that used to live on the legacy /models/{id} update
     # endpoint. Folded in so the edit dialog can save everything in one round
     # trip — partial-success ("display name saved, classification didn't")
@@ -81,7 +86,8 @@ def _service(
 @router.post(
     "/",
     response_model=CompletionModelPublic,
-    responses=responses.get_responses([400, 404]),
+    description="Create a new tenant-specific completion model.",
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def create_tenant_completion_model(
     model_create: TenantCompletionModelCreate,
@@ -103,7 +109,8 @@ async def create_tenant_completion_model(
 @router.put(
     "/{model_id}/",
     response_model=CompletionModelPublic,
-    responses=responses.get_responses([403, 404]),
+    description="Update a tenant-specific completion model.",
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_tenant_completion_model(
     model_id: UUID,
@@ -125,6 +132,8 @@ async def update_tenant_completion_model(
 
 @router.delete(
     "/{model_id}/",
+    response_model=None,
+    description="Soft-delete a tenant-specific completion model.",
     responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_completion_model(

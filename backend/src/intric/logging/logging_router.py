@@ -11,13 +11,19 @@ from intric.questions.question import MessageLogging
 from intric.questions.question_protocol import to_question_logging
 from intric.questions.questions_factory import get_questions_repo
 from intric.questions.questions_repo import QuestionRepository
+from intric.server.protocol import responses
 
 router = APIRouter(dependencies=[Depends(get_current_active_user)])
 
 _QuestionRepo = Annotated[QuestionRepository, Depends(get_questions_repo)]
 
 
-@router.get("/{message_id}/", response_model=MessageLogging)
+@router.get(
+    "/{message_id}/",
+    response_model=MessageLogging,
+    description="Get the logging details for a single message by id.",
+    responses=responses.get_responses([400, 404]),
+)
 async def get_logging_details(
     message_id: UUID, question_repo: _QuestionRepo
 ) -> MessageLogging:

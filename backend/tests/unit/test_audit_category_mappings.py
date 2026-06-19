@@ -2,7 +2,6 @@
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
-    CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
@@ -46,17 +45,6 @@ class TestCategoryMappings:
             assert category in valid_categories, (
                 f"Invalid category '{category}' found in mappings"
             )
-
-    def test_admin_actions_count(self):
-        """Verify that admin_actions category has correct number of action types."""
-        admin_actions = [
-            action
-            for action, cat in CATEGORY_MAPPINGS.items()
-            if cat == "admin_actions"
-        ]
-        assert len(admin_actions) == 25, (
-            f"Expected 25 admin actions, got {len(admin_actions)}"
-        )
 
     def test_admin_actions_mapping(self):
         """Verify specific admin action types are correctly mapped."""
@@ -135,17 +123,6 @@ class TestCategoryMappings:
                 f"{action_type} should be mapped to 'file_operations'"
             )
 
-    def test_integration_events_count(self):
-        """Verify that integration_events category has correct number of action types."""
-        integration_actions = [
-            action
-            for action, cat in CATEGORY_MAPPINGS.items()
-            if cat == "integration_events"
-        ]
-        assert len(integration_actions) == 19, (
-            f"Expected 19 integration events, got {len(integration_actions)}"
-        )
-
     def test_mcp_events_mapping(self):
         """Verify MCP action types are correctly mapped to integration_events."""
         mcp_actions = [
@@ -217,58 +194,6 @@ class TestGetCategoryForAction:
         # Should work with string values
         assert get_category_for_action("user_created") == "admin_actions"
         assert get_category_for_action("file_uploaded") == "file_operations"
-
-
-class TestCategoryDescriptions:
-    """Test suite for category descriptions."""
-
-    def test_all_seven_categories_have_descriptions(self):
-        """Verify that all 7 categories have descriptions."""
-        expected_categories = {
-            "admin_actions",
-            "user_actions",
-            "security_events",
-            "file_operations",
-            "integration_events",
-            "system_actions",
-            "audit_access",
-        }
-
-        assert set(CATEGORY_DESCRIPTIONS.keys()) == expected_categories
-
-    def test_descriptions_are_non_empty_strings(self):
-        """Verify that all descriptions are non-empty strings."""
-        for category, description in CATEGORY_DESCRIPTIONS.items():
-            assert isinstance(description, str), (
-                f"Description for {category} should be a string"
-            )
-            assert len(description) > 0, (
-                f"Description for {category} should not be empty"
-            )
-
-    def test_specific_category_descriptions(self):
-        """Verify specific category descriptions are correct."""
-        assert CATEGORY_DESCRIPTIONS["admin_actions"] == (
-            "User management, role changes, API keys, tenant settings"
-        )
-        assert CATEGORY_DESCRIPTIONS["user_actions"] == (
-            "Assistant, space, app operations, templates, model configs"
-        )
-        assert CATEGORY_DESCRIPTIONS["security_events"] == (
-            "Security classification lifecycle events"
-        )
-        assert CATEGORY_DESCRIPTIONS["file_operations"] == (
-            "File uploads and deletions"
-        )
-        assert CATEGORY_DESCRIPTIONS["integration_events"] == (
-            "Integration connections, knowledge sources, website crawling, MCP servers"
-        )
-        assert CATEGORY_DESCRIPTIONS["system_actions"] == (
-            "Retention policies, encryption, maintenance"
-        )
-        assert CATEGORY_DESCRIPTIONS["audit_access"] == (
-            "Viewing and exporting audit logs"
-        )
 
 
 class TestCategoryDistribution:

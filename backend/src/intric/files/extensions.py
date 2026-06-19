@@ -29,4 +29,8 @@ MIMETYPE_EXTENSIONS_MAPPER = {
     # IMAGE
     ImageMimeTypes.PNG.value: [".png"],
     ImageMimeTypes.JPEG.value: [".jpeg", ".jpg", ".jpe"],
+    ImageMimeTypes.WEBP.value: [".webp"],
+    ImageMimeTypes.AVIF.value: [".avif"],
+    ImageMimeTypes.HEIC.value: [".heic"],
+    ImageMimeTypes.HEIF.value: [".heif"],
 }

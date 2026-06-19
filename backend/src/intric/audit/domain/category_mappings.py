@@ -2,21 +2,9 @@
 
 from intric.audit.domain.action_types import ActionType
 
-# Category descriptions for UI display
-CATEGORY_DESCRIPTIONS = {
-    "admin_actions": "User management, role changes, API keys, tenant settings",
-    "user_actions": "Assistant, space, app operations, templates, model configs",
-    "security_events": "Security classification lifecycle events",
-    "file_operations": "File uploads and deletions",
-    "integration_events": "Integration connections, knowledge sources, website crawling, MCP servers",
-    "system_actions": "Retention policies, encryption, maintenance",
-    "audit_access": "Viewing and exporting audit logs",
-}
-
-
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
-    # Admin Actions (23 actions)
+    # Admin Actions
     ActionType.USER_CREATED.value: "admin_actions",
     ActionType.USER_DELETED.value: "admin_actions",
     ActionType.USER_UPDATED.value: "admin_actions",
@@ -37,12 +25,28 @@ CATEGORY_MAPPINGS = {
     ActionType.API_KEY_USED.value: "admin_actions",
     ActionType.API_KEY_AUTH_FAILED.value: "admin_actions",
     ActionType.TENANT_POLICY_UPDATED.value: "admin_actions",
+    ActionType.GOVERNANCE_POLICY_UPDATED.value: "admin_actions",
+    ActionType.PROMPT_LIBRARY_ENTRY_CREATED.value: "admin_actions",
+    ActionType.PROMPT_LIBRARY_ENTRY_UPDATED.value: "admin_actions",
+    ActionType.PROMPT_LIBRARY_ENTRY_DELETED.value: "admin_actions",
     ActionType.TENANT_SETTINGS_UPDATED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions (29 actions)
+    # SCIM Provisioning Actions
+    ActionType.SCIM_USER_PROVISIONED.value: "admin_actions",
+    ActionType.SCIM_USER_RECONCILED.value: "admin_actions",
+    ActionType.SCIM_USER_REACTIVATED.value: "admin_actions",
+    ActionType.SCIM_USER_DEPROVISIONED.value: "admin_actions",
+    ActionType.SCIM_USER_UPDATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_CREATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_REACTIVATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_UPDATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
+    ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
+    ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
+    # User Actions
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -115,17 +119,18 @@ CATEGORY_MAPPINGS = {
     ActionType.AI_BUILDER_FLOW_APPLIED.value: "user_actions",
     ActionType.AI_BUILDER_SESSION_CANCELLED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
-    # Security Events (6 actions)
+    ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
+    # Security Events
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DELETED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_ENABLED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DISABLED.value: "security_events",
-    # File Operations (2 actions)
+    # File Operations
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
-    # Integration Events (12 actions)
+    # Integration Events
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",
@@ -145,11 +150,18 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
-    # System Actions (3 actions)
+    # Help Assistant Actions
+    ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_ENABLED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_INSTALLED.value: "admin_actions",
+    ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
+    # System Actions
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",
     ActionType.SYSTEM_MAINTENANCE.value: "system_actions",
-    # Audit Access (3 actions)
+    # Audit Access
     ActionType.AUDIT_SESSION_CREATED.value: "audit_access",
     ActionType.AUDIT_LOG_VIEWED.value: "audit_access",
     ActionType.AUDIT_LOG_EXPORTED.value: "audit_access",

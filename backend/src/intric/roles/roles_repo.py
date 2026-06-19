@@ -3,13 +3,18 @@
 from typing import List
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.roles_table import Roles
+from intric.main.exceptions import UniqueException
 from intric.roles.role import RoleCreate, RoleInDB, RoleUpdate
 
 
 class RolesRepository:
+    UNIQUE_EXCEPTION_MSG = "A role with this name already exists for the tenant."
+
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
         self.delegate: BaseRepositoryDelegate[RoleInDB] = BaseRepositoryDelegate(
@@ -21,10 +26,16 @@ class RolesRepository:
         return await self.delegate.get(id)
 
     async def create_role(self, role: RoleCreate) -> RoleInDB:
-        return await self.delegate.add(role)
+        try:
+            return await self.delegate.add(role)
+        except IntegrityError as e:
+            raise UniqueException(self.UNIQUE_EXCEPTION_MSG) from e
 
     async def update_role(self, role: RoleUpdate) -> RoleInDB | None:
-        return await self.delegate.update(role)
+        try:
+            return await self.delegate.update(role)
+        except IntegrityError as e:
+            raise UniqueException(self.UNIQUE_EXCEPTION_MSG) from e
 
     async def delete_role_by_id(self, id: UUID) -> RoleInDB | None:
         return await self.delegate.delete(id)

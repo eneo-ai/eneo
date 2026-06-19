@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { createEventDispatcher, untrack } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
@@ -49,13 +49,16 @@
     selectedMCPTools?: MCPToolSelection[];
     selectedModel?: { supports_tool_calling?: boolean } | null;
     serverCompatibilityById?: Record<string, ServerCompatibility>;
+    /** Optional policy-filtered server list for personal assistant governance */
+    allowedMCPServers?: { [key: string]: unknown }[] | undefined;
   };
 
   let {
     selectedMCPServers = $bindable([]),
     selectedMCPTools = $bindable([]),
     selectedModel = null,
-    serverCompatibilityById = {}
+    serverCompatibilityById = {},
+    allowedMCPServers = undefined
   }: Props = $props();
 
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
@@ -67,8 +70,19 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  let availableServers = $state<MCPServer[]>([]);
-  let loading = $state(true);
+  // Servers offered for selection: the space's enabled servers (with only their
+  // space-enabled tools), narrowed to the policy-allowed set for personal
+  // assistants. Pure derivation — never write it from an effect (a self-read +
+  // self-write effect re-schedules itself forever and freezes the page).
+  let availableServers = $derived.by(() => {
+    const spaceServers = (allowedMCPServers ??
+      $currentSpace.mcp_servers ??
+      []) as unknown as MCPServer[];
+    return spaceServers.map((server) => ({
+      ...server,
+      tools: server.tools?.filter((tool) => tool.is_enabled) || []
+    }));
+  });
 
   const expandedServers = new SvelteSet<string>();
 
@@ -84,21 +98,30 @@
     return server.tools ?? [];
   }
 
-  async function loadAvailableServers() {
-    loading = true;
-    try {
-      const spaceServers = ($currentSpace.mcp_servers || []) as unknown as MCPServer[];
-      availableServers = spaceServers.map((server) => ({
-        ...server,
-        tools: server.tools?.filter((tool) => tool.is_enabled) || []
-      }));
-    } catch (error) {
-      console.error("Failed to load MCP servers:", error);
-      availableServers = [];
-    } finally {
-      loading = false;
-    }
-  }
+  // When the allowed set changes (governance policy, or a server removed from
+  // the space), drop any selected server/tool that is no longer available.
+  // Keyed only on `availableServers`; the selection reads + writes are
+  // untracked so this never re-triggers on user toggles (which would churn the
+  // whole list) or loops on its own writes.
+  $effect(() => {
+    const availableServerIds = new Set(availableServers.map((server) => server.id));
+    const availableToolIds = new Set(
+      availableServers.flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
+    );
+    untrack(() => {
+      const filteredSelectedServers = servers.filter((server) => availableServerIds.has(server.id));
+      if (filteredSelectedServers.length !== servers.length) {
+        selectedMCPServers = filteredSelectedServers;
+      }
+
+      const filteredSelectedTools = selectedMCPTools.filter((tool) =>
+        availableToolIds.has(tool.tool_id)
+      );
+      if (filteredSelectedTools.length !== selectedMCPTools.length) {
+        selectedMCPTools = filteredSelectedTools;
+      }
+    });
+  });
 
   function withAllSelectedToolOverrides(
     selectedServers: MCPSelectionServer[],
@@ -116,10 +139,7 @@
     return [...toolsById.entries()].map(([tool_id, is_enabled]) => ({ tool_id, is_enabled }));
   }
 
-  function commitSelection(
-    nextServers: MCPSelectionServer[],
-    nextTools: MCPToolSelection[]
-  ): void {
+  function commitSelection(nextServers: MCPSelectionServer[], nextTools: MCPToolSelection[]): void {
     const sanitized = sanitizeMcpSelection({
       selectedServers: nextServers,
       selectedTools: nextTools,
@@ -134,10 +154,7 @@
     });
   }
 
-  onMount(() => {
-    loadAvailableServers();
-  });
-
+  // Check if a server is selected
   function isServerSelected(serverId: string): boolean {
     return servers.some((s) => s.id === serverId);
   }
@@ -260,27 +277,7 @@
       <span class="font-bold">{m.warning()}:&nbsp;</span>{m.model_does_not_support_tools()}
     </p>
   {/if}
-  {#if loading}
-    <div
-      class="border-dimmer bg-secondary/30 flex items-center gap-3 rounded-lg border border-dashed px-4 py-6"
-    >
-      <svg
-        class="text-muted h-5 w-5 animate-spin"
-        fill="none"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
-        ></circle>
-        <path
-          class="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        ></path>
-      </svg>
-      <span class="text-muted text-sm">{m.loading()}...</span>
-    </div>
-  {:else if availableServers.length === 0}
+  {#if availableServers.length === 0}
     <div
       class="border-dimmer bg-secondary/30 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-8 text-center"
     >
@@ -419,10 +416,7 @@
                           </Tooltip>
                         {/if}
                       </div>
-                      <Input.Switch
-                        value={toolEnabled}
-                        sideEffect={() => toggleTool(server, tool)}
-                      >
+                      <Input.Switch value={toolEnabled} sideEffect={() => toggleTool(server, tool)}>
                         <span class="sr-only">{tool.name}</span>
                       </Input.Switch>
                     </div>

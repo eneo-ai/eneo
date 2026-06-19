@@ -15,7 +15,7 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.database.tables.widget_table import Widgets
-from intric.main.exceptions import UniqueException
+from intric.main.exceptions import SystemUserProtected, UniqueException
 from intric.main.logging import get_logger
 from intric.main.models import ModelId
 from intric.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
@@ -63,12 +63,37 @@ class UsersRepository:
         return await self.delegate.get_model_from_query(query)
 
     async def _get_models_from_query(
-        self, query: sa.Select[tuple[Any]], with_deleted: bool = False
+        self,
+        query: sa.Select[tuple[Any]],
+        with_deleted: bool = False,
+        include_system_user: bool = False,
     ) -> list[UserInDB]:
         if not with_deleted:
             query = query.where(Users.deleted_at.is_(None))
+        # Per-tenant system users own seeded Help Assistant rows. They must
+        # not leak into admin lists, search, or any other multi-row return.
+        # See PRD §2; `is_system_user` is the single authoritative marker.
+        if not include_system_user:
+            query = query.where(Users.is_system_user.is_(False))
 
         return await self.delegate.get_models_from_query(query)
+
+    async def is_system_user(self, user_id: UUID) -> bool:
+        """Cheap SELECT for callers gating destructive or list operations."""
+        query = sa.select(Users.is_system_user).where(Users.id == user_id)
+        return bool(await self.session.scalar(query))
+
+    async def get_system_user_id_for_tenant(self, tenant_id: UUID) -> UUID | None:
+        # Returns the id only: the seeded ``system+<tenant>@eneo.local`` email
+        # is a reserved-TLD form that ``EmailStr`` validation rejects, so a
+        # full ``UserInDB`` round-trip is unsafe for system users.
+        query = (
+            sa.select(Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Users.is_system_user.is_(True))
+            .where(Users.deleted_at.is_(None))
+        )
+        return await self.session.scalar(query)
 
     async def get_user_by_email(
         self, email: EmailStr, with_deleted: bool = False
@@ -119,7 +144,11 @@ class UsersRepository:
         tenant_id: Optional[UUID] = None,
         filters: Optional[str] = None,
     ):
-        query = sa.select(sa.func.count(Users.id)).where(Users.deleted_at.is_(None))
+        query = (
+            sa.select(sa.func.count(Users.id))
+            .where(Users.deleted_at.is_(None))
+            .where(Users.is_system_user.is_(False))
+        )
 
         if tenant_id is not None:
             query = query.where(Users.tenant_id == tenant_id)
@@ -224,10 +253,19 @@ class UsersRepository:
 
         return UserInDB.model_validate(entry_in_db)
 
+    async def _raise_if_system_user(self, id: UUID) -> None:
+        if await self.is_system_user(id):
+            raise SystemUserProtected(
+                "This user is a per-tenant system account used by Help "
+                "Assistants and cannot be deleted."
+            )
+
     async def hard_delete(self, id: UUID):
+        await self._raise_if_system_user(id)
         return await self.delegate.delete(id)
 
     async def soft_delete(self, id: UUID):
+        await self._raise_if_system_user(id)
         preserved_space_ids: list[UUID] = []
         personal_space_ids = list(
             await self.session.scalars(sa.select(Spaces.id).where(Spaces.user_id == id))
@@ -300,6 +338,10 @@ class UsersRepository:
         # Add soft-delete filter
         query = query.where(Users.deleted_at.is_(None))
 
+        # System users are seeded per-tenant to own Help Assistant rows and
+        # must never appear in admin lists. `is_system_user` is authoritative.
+        query = query.where(Users.is_system_user.is_(False))
+
         # Add state filter if provided
         # "active" includes both ACTIVE and INVITED states (users who can log in)
         # "inactive" shows only INACTIVE state (temporary leave)
@@ -340,6 +382,7 @@ class UsersRepository:
             .select_from(Users)
             .where(Users.tenant_id == tenant_id)
             .where(Users.deleted_at.is_(None))
+            .where(Users.is_system_user.is_(False))
         )
 
         # Apply same search filters to counts for consistency
@@ -425,6 +468,7 @@ class UsersRepository:
             .join(Users.roles)
             .where(
                 Users.deleted_at.is_(None),
+                Users.is_system_user.is_(False),
                 Users.state.in_(["active", "invited"]),
                 Users.tenant_id == tenant_id,
                 Roles.permissions.contains(["admin"]),

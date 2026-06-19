@@ -94,10 +94,11 @@ export function initModels(client) {
      * @param {string} params.toId Target model ID
      * @param {string[]} [params.entityTypes] Optional list of entity types to migrate
      * @param {boolean} [params.confirmMigration] Proceed even if compatibility warnings exist
+     * @param {boolean} [params.forceOverride] Bypass hard blockers (e.g. insufficient security classification)
      * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
      * @throws {IntricError}
      * */
-    migrateCompletion: async ({ fromId, toId, entityTypes, confirmMigration }) => {
+    migrateCompletion: async ({ fromId, toId, entityTypes, confirmMigration, forceOverride }) => {
       const res = await client.fetch("/api/v1/completion-models/{model_id}/migrate", {
         method: "post",
         params: { path: { model_id: fromId } },
@@ -105,7 +106,8 @@ export function initModels(client) {
           "application/json": {
             to_model_id: toId,
             entity_types: entityTypes,
-            confirm_migration: confirmMigration
+            confirm_migration: confirmMigration,
+            force_override: forceOverride
           }
         }
       });
@@ -193,6 +195,129 @@ export function initModels(client) {
         // they don't appear in the OpenAPI schema's params type.
         // @ts-expect-error see comment above
         params: { query: { limit, offset } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Validate transcription migration compatibility without executing.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ValidationResult"]>}
+     * @throws {IntricError}
+     * */
+    validateTranscriptionMigration: async ({ fromId, toId }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/migration-validate", {
+        method: "get",
+        params: {
+          path: { model_id: fromId },
+          query: { to_model_id: toId }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Migrate transcription model usage to another model.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @param {string[]} [params.entityTypes] Optional list of entity types to migrate
+     * @param {boolean} [params.confirmMigration] Proceed even if compatibility warnings exist
+     * @param {boolean} [params.forceOverride] Bypass hard blockers (e.g. insufficient security classification)
+     * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
+     * @throws {IntricError}
+     * */
+    migrateTranscription: async ({
+      fromId,
+      toId,
+      entityTypes,
+      confirmMigration,
+      forceOverride
+    }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/migrate", {
+        method: "post",
+        params: { path: { model_id: fromId } },
+        requestBody: {
+          "application/json": {
+            to_model_id: toId,
+            entity_types: entityTypes,
+            confirm_migration: confirmMigration,
+            force_override: forceOverride
+          }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get migration history for a specific transcription model.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getTranscriptionMigrationHistory: async ({ modelId, limit = 50, offset = 0 }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/migration-history", {
+        method: "get",
+        params: { path: { model_id: modelId }, query: { limit, offset } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get all transcription migration history for the tenant.
+     * @param {Object} [params]
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getAllTranscriptionMigrationHistory: async ({ limit = 50, offset = 0 } = {}) => {
+      const res = await client.fetch("/api/v1/transcription-models/migration-history", {
+        method: "get",
+        params: { query: { limit, offset } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get migration impact counts (apps + spaces) for a transcription model.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["TranscriptionModelUsageStats"]>}
+     * @throws {IntricError}
+     * */
+    getTranscriptionUsageStats: async ({ modelId }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/usage", {
+        method: "get",
+        params: { path: { model_id: modelId } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get detailed usage (apps) for a transcription model. Mirrors
+     * getUsageDetails so the migrate dialog renders both with one component.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {number} [params.limit=100] Number of results
+     * @returns {Promise<import("../types/schema").components["schemas"]["TranscriptionModelUsageDetails"]>}
+     * @throws {IntricError}
+     * */
+    getTranscriptionUsageDetails: async ({ modelId, limit = 100 }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/usage/details", {
+        method: "get",
+        params: { path: { model_id: modelId }, query: { limit } }
       });
 
       return res;

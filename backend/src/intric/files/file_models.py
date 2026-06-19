@@ -73,6 +73,7 @@ class FileCreate(FileBaseWithContent):
     owner_user_id: UUID | None = None
     owner_service_id: UUID | None = None
     tenant_id: UUID
+    parent_file_id: Optional[UUID] = None
 
 
 class File(InDB, FileCreate):

@@ -19,6 +19,7 @@ from intric.authentication import auth
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 # Extract specs for cleaner Field definitions
@@ -29,6 +30,7 @@ router = APIRouter(
     dependencies=[
         Depends(auth.authenticate_super_api_key),
     ],
+    responses=responses.get_responses([401]),
 )
 
 
@@ -277,6 +279,7 @@ class DeleteSettingsResponse(BaseModel):
     "Only provided fields are updated; missing fields retain previous values. "
     "Settings persist across server restarts and override environment defaults. "
     "System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def update_crawler_settings(
     tenant_id: UUID,
@@ -299,7 +302,7 @@ async def update_crawler_settings(
 
     Raises:
         HTTPException 404: Tenant not found
-        HTTPException 422: Validation error
+        RequestValidationError: Invalid settings are rejected before the handler
     """
     tenant_service = container.tenant_service()
 
@@ -323,11 +326,6 @@ async def update_crawler_settings(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
-        )
 
 
 @router.get(
@@ -338,6 +336,7 @@ async def update_crawler_settings(
     description="Get current crawler settings for a tenant. "
     "Returns effective settings (tenant overrides merged with environment defaults). "
     "System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def get_crawler_settings(
     tenant_id: UUID,
@@ -383,6 +382,7 @@ async def get_crawler_settings(
     summary="Reset tenant crawler settings",
     description="Delete all tenant-specific crawler settings, reverting to environment defaults. "
     "System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def delete_crawler_settings(
     tenant_id: UUID,

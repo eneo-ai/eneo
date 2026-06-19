@@ -17,6 +17,7 @@ from intric.database.tables.sessions_table import Sessions
 from intric.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:
+    from intric.database.tables.mcp_tool_references_table import McpToolReference
     from intric.database.tables.web_search_results_table import WebSearchResult
 
 
@@ -26,6 +27,7 @@ class Questions(BasePublic):
     num_tokens_question: Mapped[int] = mapped_column()
     num_tokens_answer: Mapped[int] = mapped_column()
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
+    reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
 
     # Foreign keys
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
@@ -65,6 +67,9 @@ class Questions(BasePublic):
     )
     web_search_results: Mapped[list["WebSearchResult"]] = relationship(
         order_by="WebSearchResult.score.desc()"
+    )
+    mcp_tool_references: Mapped[list["McpToolReference"]] = relationship(
+        order_by="[McpToolReference.tool_call_id, McpToolReference.order]"
     )
 
 

@@ -34,6 +34,11 @@ class Files(BasePublic):
     )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
 
+    # Set for files derived from another upload (for example extracted images).
+    parent_file_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+
     __table_args__ = (
         CheckConstraint(
             "owner_type IN ('user','service_key')",

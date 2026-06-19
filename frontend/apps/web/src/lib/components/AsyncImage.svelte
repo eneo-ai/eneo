@@ -2,6 +2,7 @@
   import placeholderImageUrl from "$lib/assets/GeneratedImagePlaceholder.svg";
   import { IconDownload } from "@intric/icons/download";
   import { Button } from "@intric/ui";
+  import { sanitizeImageSrc, sanitizeLinkHref } from "@intric/ui/components/markdown";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -10,6 +11,8 @@
   };
 
   const { url, fixedAspectRatio = "800 / 608" }: Props = $props();
+  const safeImageUrl = $derived(sanitizeImageSrc(url));
+  const safeDownloadUrl = $derived(sanitizeLinkHref(url));
 </script>
 
 <div
@@ -21,9 +24,9 @@
     class=" bg-secondary absolute m-0 animate-pulse p-0"
     alt={m.placeholder()}
   />
-  {#if url}
+  {#if safeImageUrl}
     <img
-      src={url}
+      src={safeImageUrl}
       class="relative m-0 p-0 transition-opacity duration-200"
       style="opacity: 0; "
       onload={(ev) => {
@@ -34,12 +37,14 @@
       }}
       alt={m.generated_file()}
     />
-    <Button
-      href={url}
-      unstyled
-      variant="outlined"
-      class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 hidden gap-1 rounded-md border px-2 py-1 no-underline shadow group-hover:flex"
-      ><IconDownload></IconDownload>{m.download_file()}</Button
-    >
+    {#if safeDownloadUrl}
+      <Button
+        href={safeDownloadUrl}
+        unstyled
+        variant="outlined"
+        class="border-stronger bg-secondary hover:bg-tertiary absolute top-2 right-2 hidden gap-1 rounded-md border px-2 py-1 no-underline shadow group-hover:flex"
+        ><IconDownload></IconDownload>{m.download_file()}</Button
+      >
+    {/if}
   {/if}
 </div>

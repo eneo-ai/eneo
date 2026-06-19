@@ -130,11 +130,9 @@ class AppRepository:
         await self.session.refresh(app_in_db)
 
     async def add(self, app: App) -> App:
-        model_kwargs = (
-            None
-            if app.completion_model_kwargs is None
-            else app.completion_model_kwargs.model_dump()
-        )
+        # Always write the dict — never None — so an INSERT cannot silently
+        # re-introduce a NULL kwargs row of the kind we just backfilled away.
+        model_kwargs = app.completion_model_kwargs.model_dump()
 
         transcription_model_id = (
             None if app.transcription_model is None else app.transcription_model.id
@@ -194,11 +192,8 @@ class AppRepository:
         )
 
     async def update(self, app: App) -> App:
-        model_kwargs = (
-            None
-            if app.completion_model_kwargs is None
-            else app.completion_model_kwargs.model_dump()
-        )
+        # See `add` — same reason: never write NULL back to the column.
+        model_kwargs = app.completion_model_kwargs.model_dump()
 
         transcription_model_id = (
             None if app.transcription_model is None else app.transcription_model.id

@@ -70,7 +70,9 @@ def get_pagination_query(request: Request) -> PaginationQuery:
 
 @router.get(
     "/",
+    description="List all completion models available to the organization.",
     response_model=PaginatedResponse[CompletionModelPublic],
+    responses=responses.get_responses([403]),
 )
 async def get_completion_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -88,8 +90,9 @@ async def get_completion_models(
 
 @router.post(
     "/{id}/",
+    description="Update org-level settings for a completion model.",
     response_model=CompletionModelPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def update_completion_model(
     id: UUID,
@@ -175,7 +178,7 @@ async def update_completion_model(
 @router.get(
     "/{model_id}/usage",
     response_model=ModelUsageStatistics,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_model_usage(
     model_id: UUID,
@@ -191,7 +194,7 @@ async def get_model_usage(
 @router.get(
     "/{model_id}/usage/details",
     response_model=ModelUsagePaginatedResponse,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_model_usage_details(
     model_id: UUID,
@@ -210,7 +213,7 @@ async def get_model_usage_details(
 @router.get(
     "/{model_id}/migration-validate",
     response_model=ValidationResult,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def validate_migration(
     model_id: UUID,
@@ -230,8 +233,9 @@ async def validate_migration(
 
 @router.post(
     "/{model_id}/migrate",
+    description="Migrate all usage from one completion model to another.",
     response_model=MigrationResult,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def migrate_model_usage(
     model_id: UUID,
@@ -263,6 +267,7 @@ async def migrate_model_usage(
                 entity_types=migration_request.entity_types,
                 user=user,
                 confirm_migration=migration_request.confirm_migration,
+                force_override=migration_request.force_override,
             )
         except ValidationException as exc:
             # The service records validation/security/database failures in
@@ -322,7 +327,9 @@ async def migrate_model_usage(
 
 @router.get(
     "/usage-summary",
+    description="Get a usage summary for all completion models in the tenant.",
     response_model=list[ModelUsageSummary],
+    responses=responses.get_responses([403]),
 )
 async def get_all_models_usage_summary(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -337,7 +344,7 @@ async def get_all_models_usage_summary(
 @router.get(
     "/{model_id}/migration-history",
     response_model=list[ModelMigrationHistory],
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_model_migration_history(
     model_id: UUID,
@@ -355,7 +362,9 @@ async def get_model_migration_history(
 
 @router.get(
     "/migration-history",
+    description="Get all completion model migration history for the tenant.",
     response_model=list[ModelMigrationHistory],
+    responses=responses.get_responses([403]),
 )
 async def get_all_migration_history(
     query: Annotated[PaginationQuery, Depends(get_pagination_query)],
@@ -373,7 +382,7 @@ async def get_all_migration_history(
 @router.get(
     "/migration-history/{migration_id}",
     response_model=ModelMigrationHistory,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_migration_history_by_id(
     migration_id: UUID,

@@ -10,14 +10,7 @@ from pathlib import Path
 ROUTE_START_RE = re.compile(
     r"^(\s*)@[A-Za-z_][A-Za-z0-9_]*\.(get|post|put|patch|delete)\("
 )
-ROUTER_FILE_RE = re.compile(
-    r"(?:^|/)backend/src/(?:.*/)?(?:routes|routes/.*|[^/]*router)\.py$"
-)
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-
-
-def is_router_file_path(raw_path: str) -> bool:
-    return bool(ROUTER_FILE_RE.search(raw_path.replace("\\", "/")))
 
 
 def iter_route_blocks(text: str) -> list[tuple[int, str, str]]:
@@ -44,6 +37,21 @@ def iter_route_blocks(text: str) -> list[tuple[int, str, str]]:
             i += 1
         blocks.append((start_line, method, "\n".join(block_lines)))
     return blocks
+
+
+def contains_route_decorator(path: Path) -> bool:
+    if path.suffix != ".py" or not path.is_file():
+        return False
+    return bool(iter_route_blocks(path.read_text(encoding="utf-8")))
+
+
+def discover_route_files(repo_root: Path) -> list[Path]:
+    source_root = repo_root / "backend" / "src"
+    return [
+        path
+        for path in sorted(source_root.rglob("*.py"))
+        if contains_route_decorator(path)
+    ]
 
 
 def is_allowed_without_response_model(block: str) -> bool:
@@ -108,17 +116,28 @@ def main() -> int:
     parser.add_argument("paths", nargs="*")
     parser.add_argument("--repo-root")
     parser.add_argument("--base")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Check every HTTP route decorator under backend/src.",
+    )
     args = parser.parse_args()
 
     failures: list[str] = []
-    repo_root = Path(args.repo_root).resolve() if args.repo_root else None
-    for raw in args.paths:
-        path = Path(raw)
-        normalized = path.as_posix()
-        if not is_router_file_path(normalized):
+    repo_root = Path(args.repo_root).resolve() if args.repo_root else Path.cwd()
+    if args.all and args.paths:
+        parser.error("--all cannot be combined with explicit paths")
+    paths = (
+        discover_route_files(repo_root)
+        if args.all
+        else [Path(raw) for raw in args.paths]
+    )
+
+    for path in paths:
+        if not contains_route_decorator(path):
             continue
         changed = None
-        if repo_root is not None and args.base:
+        if args.base:
             changed = changed_lines(repo_root, args.base, path.resolve())
             if not changed:
                 continue

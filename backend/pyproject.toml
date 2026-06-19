@@ -7,60 +7,56 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi>=0,<1",
     "uvicorn[standard]>=0.30.0,<1",
-    "python-dotenv==1.0.1",
+    "python-dotenv==1.2.2",
     "pydantic[email]>=2,<3",
     "tenacity>=8.2.1,<9",
     "tiktoken>=0,<1",
     "numpy>=1.24.2,<2",
     "python-pptx>=1.0.2,<2",
-    "arrow>=1.2.3,<2",
     "alembic>=1.10.2,<2",
     "asyncpg>=0.27.0,<0.28",
     "psycopg2-binary>=2.9.5,<3",
-    "pyjwt>=2.6.0,<3",
+    "pyjwt>=2.13.0,<3",
     "black>=24.3.0,<25",
     "python-docx>=1.2.0,<2",
     "docxtpl>=0.20.1,<1",
     "pycryptodome~=3.17",
     "sse-starlette>=1.6.1,<2",
     "gunicorn>=23.0.0,<24",
-    "psutil>=5.9.5,<6",
     "pdfplumber>=0.11,<1",
-    "langchain>=0.3.0,<0.4",
-    "jsonschema>=4.19.2,<5",
+    "pillow>=10,<13",  # image downscaling for vision input (also transitive via pdfplumber)
+    "pillow-heif>=0.18,<2",  # HEIC/HEIF decode (iPhone photos) -> converted to JPEG
+    "langchain-core>=1.2.22,<2",  # output parsers; >=1.2.22 fixes load_prompt path traversal
+    "langchain-text-splitters>=1.1.2,<2",  # RecursiveCharacterTextSplitter; >=1.1.2 clears GHSA-fv5p
     "pydantic-settings>=2.1.0,<3",
     "wrapt>=1.16.0,<2",
-    "python-multipart>=0.0.18,<1",
+    "python-multipart>=0.0.27,<1",
     "arq>=0.26,<1",  # v0.26+ required for allow_abort_jobs, lifecycle hooks
     "celery[redis]>=5.4,<6",
     "soundfile>=0.12.1,<0.13",
     "audioread>=3.0.1,<4",
-    "pydantic-extra-types>=2.6.0,<3",
     "bcrypt>=4.1.2,<5",
     "dependency-injector>=4.41.0,<5",
     "docx2python>=3.5.0,<4",
-    "jinja2>=3.1.5,<4",
-    "scrapy>=2.11.2,<3",
+    "scrapy>=2.14.2,<3",
     "html2text>=2024.2.26,<2025",
     "beautifulsoup4>=4.12.3,<5",
     "crochet>=2.1.1,<3",
     "pgvector>=0.2.5,<0.3",
     "sqlalchemy-mixins>=2.0.5,<3",
     "python-magic>=0.4.27,<0.5",
-    "aiocache>=0.12.2,<0.13",
     "redis>=5.0.8,<6",
     "sentry-sdk[fastapi]==2.8.0",
     "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.83.10",
+    "litellm==1.88.1",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
-    "cryptography>=43.0.0,<44", # For Fernet encryption of HTTP auth passwords
+    "cryptography>=46.0.5,<47", # For Fernet encryption of HTTP auth passwords
     "httpx~=0.28.0",
     "pandas>=2.2.3,<3",
     "orjson>=3.9,<4",
     "aiofiles>=23.0,<24",
     "python-calamine>=0.3.1,<1",  # Fast Excel reader engine for pandas
-    "rich>=14.2.0",
     "typing-extensions>=4.12.0,<5",
     "uuid-utils>=0.9,<1",  # UUIDv7 for stable ConversationMessage ids
     "weasyprint>=66,<67",
@@ -75,6 +71,7 @@ dependencies = [
 
 [project.scripts]
 start = "intric.server.main:start"
+worker = "intric.worker.cli:start"
 
 [dependency-groups]
 dev = [
@@ -95,6 +92,9 @@ dev = [
     "openpyxl>=3.1.5,<4",
     "pytest-xdist>=3.8.0",
     "import-linter>=2.11,<3",
+    "python-docx>=1.2.0,<2",  # test-only: builds .docx fixtures in test_text_extractor
+    "deptry>=0.25.1",
+    "vulture>=2.16",
 ]
 
 [build-system]
@@ -133,3 +133,81 @@ ignore = []
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+# Coverage of the shipped package only. Run via `uv run pytest --cov` (CI passes
+# the report flags); the xml report feeds diff-cover, html is the human artifact.
+[tool.coverage.run]
+source = ["src/intric"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/alembic/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+# Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)
+# and run via `task deadcode` or directly. They surface candidates for a human
+# to triage — neither auto-removes anything.
+
+[tool.deptry]
+# example_mcp_server.py is a standalone copy-paste sample (imports fastmcp, which
+# is intentionally not a project dependency), so it is excluded from the scan.
+extend_exclude = ["src/intric/server/example_mcp_server.py"]
+
+# DEP003 (transitive): imported directly but only resolve via transitive deps.
+# Promoting them to direct dependencies is a separate cleanup; ignored here so
+# the signal stays readable.
+# DEP002 (unused): deps that are never imported but are still required —
+# DB drivers, the WSGI server, migrations CLI, env loading, async glue, and
+# plugin/runtime-resolved packages (calamine is a pandas engine; tiktoken backs
+# litellm's token counting, which the code falls back on for token estimates).
+# sentry-sdk is declared for the planned Sentry integration but not yet wired up
+# (no sentry_sdk.init call) — kept available rather than dropping observability.
+[tool.deptry.per_rule_ignores]
+DEP003 = ["sqlalchemy", "starlette", "aiohttp", "twisted", "pdfminer", "pydantic_core", "yaml"]
+DEP002 = [
+    "alembic",
+    "asyncpg",
+    "psycopg2-binary",
+    "greenlet",
+    "gunicorn",
+    "python-multipart",
+    "python-dotenv",
+    "python-calamine",
+    "tiktoken",
+    "sentry-sdk",
+]
+
+[tool.vulture]
+min_confidence = 80
+paths = ["src/intric"]
+sort_by_size = true
+# base_adapter.py keeps an intentional `if False: yield` shim so its abstract
+# async-generator signature matches subclass overrides (see the comment there);
+# vulture flags the dead branch and can't ignore conditions by name, so the
+# whole (tiny, abstract) file is excluded.
+exclude = ["*/completion_models/infrastructure/adapters/base_adapter.py"]
+# Known false positives. vulture can't see names used only in string / future
+# annotations or in Protocol/dunder signatures; ruff F401/F841 already guard the
+# cases it *can* see, so these are safe to ignore by name.
+ignore_names = [
+    "exc_val",                     # __aexit__ context-manager protocol params
+    "exc_tb",
+    "max_results",                 # _TavilyClient.search mirrors Tavily's API
+    "priority",                    # accepted-but-not-yet-persisted API param (documented in code)
+    "BaseDBModel",                 # imports below are used only in string/future annotations
+    "DomainIntegrationKnowledge",
+    "EmbeddingModelDB",
+    "DomainSharePointSubscription",
+    "AssistantTemplateDBModel",
+    "DomainModelTokenUsage",
+    "DomainTokenUsageSummary",
+    "DomainUserTokenUsage",
+    "DomainUserTokenUsageSummary",
+    "TranscriptionModelsDB",
+    "Options",                     # jwt.types.Options; used only in a string cast: cast("Options", ...)
+]

@@ -41,7 +41,9 @@
     models.embeddingModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
   );
   let transcriptionModels = $derived(
-    models.transcriptionModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
+    models.transcriptionModels.filter(
+      (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
+    )
   );
 
   const spaces = getSpacesManager();

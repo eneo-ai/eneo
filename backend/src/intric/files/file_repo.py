@@ -77,6 +77,33 @@ class FileRepository:
             for file in files_in_db
         ]
 
+    async def get_by_parent_ids(
+        self,
+        *,
+        parent_ids: list[UUID],
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+    ) -> list[File]:
+        if not parent_ids:
+            return []
+
+        stmt = (
+            sa.select(Files)
+            .where(Files.parent_file_id.in_(parent_ids))
+            .where(Files.owner_type == owner_type)
+            .order_by(Files.created_at)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(Files.tenant_id == tenant_id)
+        if owner_user_id is not None:
+            stmt = stmt.where(Files.owner_user_id == owner_user_id)
+        if owner_service_id is not None:
+            stmt = stmt.where(Files.owner_service_id == owner_service_id)
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
+
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
         if file is None:
@@ -84,7 +111,14 @@ class FileRepository:
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return await self._delegate.filter_by(conditions={Files.owner_user_id: user_id})
+        stmt = (
+            sa.select(Files)
+            .where(Files.owner_user_id == user_id)
+            .where(Files.parent_file_id.is_(None))
+            .order_by(Files.created_at)
+        )
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
 
     async def get_list_by_owner_principal(
         self,
@@ -105,6 +139,7 @@ class FileRepository:
             stmt = stmt.where(Files.owner_user_id == owner_user_id)
         if owner_service_id is not None:
             stmt = stmt.where(Files.owner_service_id == owner_service_id)
+        stmt = stmt.where(Files.parent_file_id.is_(None))
         files_in_db = await self.session.scalars(stmt)
         return [File.model_validate(file) for file in files_in_db]
 
@@ -184,5 +219,6 @@ class FileRepository:
                 "owner_user_id": file.owner_user_id,
                 "owner_service_id": file.owner_service_id,
                 "tenant_id": file.tenant_id,
+                "parent_file_id": file.parent_file_id,
             }
         )

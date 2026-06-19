@@ -41,7 +41,7 @@ cd backend && uv run python init_db.py
 # Start development servers (3 terminals)
 cd backend && uv run start              # Terminal 1
 cd frontend && bun run dev                 # Terminal 2
-cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
+cd backend && uv run worker             # Terminal 3
 ```
 
 ### 2. Make Your First Contribution

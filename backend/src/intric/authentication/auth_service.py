@@ -3,7 +3,7 @@ import hashlib
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import bcrypt
@@ -33,6 +33,9 @@ from intric.main.config import get_settings
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
 from intric.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from jwt.types import Options
 
 logger = get_logger(__name__)
 
@@ -347,7 +350,7 @@ class AuthService:
                 key=key,
                 algorithms=signing_algos,
                 audience=client_id,
-                options=jwt_options,
+                options=cast("Options", jwt_options) or None,
                 leeway=clock_leeway,
             )
 

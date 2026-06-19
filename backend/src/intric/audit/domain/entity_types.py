@@ -11,6 +11,8 @@ class EntityType(str, Enum):
     FILE = "file"
     WEBSITE = "website"
     TENANT_SETTINGS = "tenant_settings"
+    GOVERNANCE_POLICY = "governance_policy"
+    PROMPT_LIBRARY_ENTRY = "prompt_library_entry"
     CREDENTIAL = "credential"
     FEDERATION_CONFIG = "federation_config"
     API_KEY = "api_key"
@@ -34,3 +36,4 @@ class EntityType(str, Enum):
     FLOW_RUN = "flow_run"
     FLOW_RUN_REVIEW_CHECKPOINT = "flow_run_review_checkpoint"
     AI_BUILDER_SESSION = "ai_builder_session"
+    USER_GROUP = "user_group"

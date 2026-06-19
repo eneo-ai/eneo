@@ -1,13 +1,18 @@
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import type { UploadedFile } from "@intric/intric-js";
+  import type {
+    GroupSparse,
+    IntegrationKnowledge,
+    UploadedFile,
+    WebsiteSparse
+  } from "@intric/intric-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconTrash } from "@intric/icons/trash";
   import { IconCancel } from "@intric/icons/cancel";
-  import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
@@ -21,7 +26,13 @@
     onKnowledgeChange,
     onRemoveAttachment
   }: {
-    assistant: any | null;
+    assistant: {
+      id?: string;
+      websites?: WebsiteSparse[];
+      groups?: GroupSparse[];
+      integration_knowledge_list?: IntegrationKnowledge[];
+      attachments?: UploadedFile[];
+    } | null;
     assistantLoading: boolean;
     runningUploads: Array<{
       id: string;
@@ -31,12 +42,72 @@
       remove: () => void;
     }>;
     onKnowledgeChange?: (detail: {
-      websites: any[];
-      groups: any[];
-      integrationKnowledgeList: any[];
+      websites: WebsiteSparse[];
+      groups: GroupSparse[];
+      integrationKnowledgeList: IntegrationKnowledge[];
     }) => void;
     onRemoveAttachment?: (detail: { file: { id: string } }) => void;
   } = $props();
+
+  let selectedWebsites = $state<WebsiteSparse[]>([]);
+  let selectedGroups = $state<GroupSparse[]>([]);
+  let selectedIntegrationKnowledge = $state<IntegrationKnowledge[]>([]);
+  let lastAssistantId = $state<string | null>(null);
+  let lastSourceSignature = $state("");
+  let lastEmittedSignature = $state("");
+
+  function knowledgeSignature(
+    websites: WebsiteSparse[] = [],
+    groups: GroupSparse[] = [],
+    integrationKnowledge: IntegrationKnowledge[] = []
+  ) {
+    return JSON.stringify({
+      websites: websites.map((item) => item.id),
+      groups: groups.map((item) => item.id),
+      integrationKnowledge: integrationKnowledge.map((item) => item.id)
+    });
+  }
+
+  $effect(() => {
+    const assistantId = assistant?.id ?? null;
+    const sourceSignature = assistant
+      ? knowledgeSignature(
+          assistant.websites ?? [],
+          assistant.groups ?? [],
+          assistant.integration_knowledge_list ?? []
+        )
+      : "";
+
+    if (
+      assistantId !== lastAssistantId ||
+      (sourceSignature !== lastSourceSignature && sourceSignature !== lastEmittedSignature)
+    ) {
+      lastAssistantId = assistantId;
+      lastSourceSignature = sourceSignature;
+      lastEmittedSignature = sourceSignature;
+      selectedWebsites = assistant?.websites ?? [];
+      selectedGroups = assistant?.groups ?? [];
+      selectedIntegrationKnowledge = assistant?.integration_knowledge_list ?? [];
+    }
+  });
+
+  $effect(() => {
+    if (!assistant) return;
+    const signature = knowledgeSignature(
+      selectedWebsites,
+      selectedGroups,
+      selectedIntegrationKnowledge
+    );
+    if (signature === lastEmittedSignature) return;
+
+    lastEmittedSignature = signature;
+    lastSourceSignature = signature;
+    onKnowledgeChange?.({
+      websites: selectedWebsites,
+      groups: selectedGroups,
+      integrationKnowledgeList: selectedIntegrationKnowledge
+    });
+  });
 </script>
 
 <Settings.Group title={m.flow_step_section_context()}>
@@ -46,7 +117,6 @@
       {m.flow_step_assistant_loading()}
     </div>
   {:else if assistant}
-    {@const currentAssistant = assistant}
     <Alert.Root class="border-accent-default/15 bg-accent-dimmer/50 mb-4 rounded-xl" role="status">
       <Alert.Title class="text-accent-stronger text-sm font-medium">
         {m.flow_step_context_runtime_files_title()}
@@ -56,31 +126,17 @@
       </Alert.Description>
     </Alert.Root>
     <Settings.Row title={m.knowledge()} description={m.flow_step_knowledge_desc()}>
-      <SelectKnowledgeV2
+      <SelectKnowledge
         originMode="personal"
-        bind:selectedWebsites={currentAssistant.websites}
-        bind:selectedCollections={currentAssistant.groups}
-        bind:selectedIntegrationKnowledge={currentAssistant.integration_knowledge_list}
-        on:change={() => {
-          onKnowledgeChange?.({
-            websites: currentAssistant.websites,
-            groups: currentAssistant.groups,
-            integrationKnowledgeList: currentAssistant.integration_knowledge_list
-          });
-        }}
+        bind:selectedWebsites
+        bind:selectedCollections={selectedGroups}
+        bind:selectedIntegrationKnowledge
       />
-      <SelectKnowledgeV2
+      <SelectKnowledge
         originMode="organization"
-        bind:selectedWebsites={currentAssistant.websites}
-        bind:selectedCollections={currentAssistant.groups}
-        bind:selectedIntegrationKnowledge={currentAssistant.integration_knowledge_list}
-        on:change={() => {
-          onKnowledgeChange?.({
-            websites: currentAssistant.websites,
-            groups: currentAssistant.groups,
-            integrationKnowledgeList: currentAssistant.integration_knowledge_list
-          });
-        }}
+        bind:selectedWebsites
+        bind:selectedCollections={selectedGroups}
+        bind:selectedIntegrationKnowledge
       />
     </Settings.Row>
     <Settings.Row title={m.attachments()} description={m.flow_step_attachments_desc()}>

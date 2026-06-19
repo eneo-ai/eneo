@@ -62,6 +62,7 @@ from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse, DeleteResponse
 from intric.roles.role import RolePublic
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.tenants.tenant import TenantPublic
 from intric.users.user import (
     UserAddAdmin,
@@ -901,7 +902,12 @@ async def get_predefined_roles(container: AdminContainer):
     return [role for role in all_roles if role.predefined_source]
 
 
-@router.post("/privacy-policy/", response_model=TenantPublic)
+@router.post(
+    "/privacy-policy/",
+    response_model=TenantPublic,
+    description="Update the tenant's privacy policy URL (admin only).",
+    responses=responses.get_responses([400, 401, 403]),
+)
 async def update_privacy_policy(url: PrivacyPolicy, container: AdminContainer):
     service = container.admin_service()
     user = container.user()
@@ -1636,6 +1642,7 @@ async def update_api_key_admin(
     "/api-keys/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     tags=["Admin API Keys"],
     summary="Revoke API key (deprecated alias)",
     responses={
@@ -1851,6 +1858,7 @@ async def extend_api_key_expiration_admin(
     "/api-keys/{id}/purge",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     tags=["Admin API Keys"],
     summary="Permanently delete tenant API key",
     description=(

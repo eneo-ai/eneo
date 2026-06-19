@@ -27,6 +27,7 @@ from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.observability import init_observability, instrument_fastapi
 from intric.main.request_context import get_request_context
+from intric.scim.app import scim_app
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
@@ -334,6 +335,7 @@ def get_application():
     instrument_fastapi(app)
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
+    app.mount("/scim/v2", scim_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
@@ -592,7 +594,15 @@ def get_application():
 
         return response
 
-    @app.get("/api/healthz")
+    @app.get(
+        "/api/healthz",
+        description="Report backend and worker health for deployment probes.",
+        responses={
+            200: {"description": "Backend and worker are healthy"},
+            503: {"description": "Worker health check failed"},
+        },
+        response_model=None,
+    )
     async def get_healthz():
         from datetime import datetime, timezone
 
@@ -692,7 +702,12 @@ def get_application():
             ),
         )
 
-    @app.get("/api/healthz/crawler", response_model=CrawlerHealthResponse)
+    @app.get(
+        "/api/healthz/crawler",
+        response_model=CrawlerHealthResponse,
+        description="Get detailed crawler queue and worker diagnostics.",
+        responses={200: {"description": "Crawler diagnostics"}},
+    )
     async def crawler_health(include_all: bool = False) -> CrawlerHealthResponse:
         """Detailed crawler diagnostics. NOT for K8s probes.
 
@@ -978,7 +993,12 @@ def get_application():
             ),
         )
 
-    @app.get("/version")
+    @app.get(
+        "/version",
+        description="Get the running backend version.",
+        responses={200: {"description": "Backend version"}},
+        response_model=None,
+    )
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
 

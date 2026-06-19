@@ -18,6 +18,58 @@ from intric.database.tables.ai_models_table import CompletionModels, EmbeddingMo
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_duplicate_display_name_race_returns_409(
+    client, super_admin_token, monkeypatch
+):
+    """The display-name pre-check normally returns a 409 before the DB. If a
+    concurrent request slips past it (the validate-then-insert race), the active
+    nickname unique index fires at flush; that IntegrityError must surface as the
+    same clean 409 NAME_COLLISION, not a 500. Bypass the pre-check to reach it.
+    """
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "intric.sysadmin.sysadmin_router.validate_unique_display_name", _noop
+    )
+
+    payload = {
+        "name": "race-collision-model",
+        "nickname": "Race Collision Display Name",
+        "family": "openai",
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
+        "is_deprecated": False,
+        "stability": "stable",
+        "hosting": "usa",
+        "open_source": False,
+        "description": "Race test model",
+        "org": "OpenAI",
+        "vision": False,
+        "reasoning": False,
+        "base_url": "https://api.openai.com/v1",
+        "litellm_model_name": "gpt-4",
+    }
+
+    first = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json=payload,
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json=payload,
+    )
+    assert second.status_code == 409
+    assert second.json().get("intric_error_code") == 9017
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_create_completion_model_success(client, super_admin_token, db_container):
     """Test creating a new completion model with valid data."""
     model_data = {
@@ -607,14 +659,17 @@ async def test_delete_embedding_model(client, super_admin_token, db_container):
 
     assert response.status_code == 200
 
-    # Verify model was deleted from database
+    # The normal sysadmin delete soft-deletes (parity with completion): the row
+    # is kept as a tombstone with deleted_at set so historical info_blob
+    # attribution survives. Use force=true for a hard delete.
     async with db_container() as container:
         session = container.session()
         stmt = sa.select(EmbeddingModels).where(EmbeddingModels.id == model_id)
         result = await session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
-        assert db_model is None
+        assert db_model is not None
+        assert db_model.deleted_at is not None
 
 
 @pytest.mark.integration

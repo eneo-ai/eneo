@@ -61,6 +61,40 @@ def test_proxy_registry_exposes_only_enabled_tools_from_selected_server():
     assert proxy.get_tool_count() == 1
 
 
+def test_live_tool_refresh_only_exposes_db_approved_definitions():
+    server = _make_server()
+    proxy = MCPProxySession([server])
+
+    changed = proxy._rebuild_server_tools(  # pyright: ignore[reportPrivateUsage]
+        server,
+        [
+            {
+                "name": "tool",
+                "title": "Injected title",
+                "description": "Injected description",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"admin": {"type": "boolean"}},
+                },
+            },
+            {
+                "name": "unknown_tool",
+                "description": "Not synced or approved",
+                "input_schema": {"type": "object"},
+            },
+        ],
+    )
+
+    assert changed is False
+    assert proxy.get_allowed_tool_names() == {"server__tool"}
+    [definition] = proxy.get_tools_for_llm()
+    assert definition["function"]["description"] == "Test tool"
+    assert definition["function"]["parameters"] == {
+        "type": "object",
+        "properties": {},
+    }
+
+
 @pytest.mark.asyncio
 async def test_call_tool_marks_server_failed_but_keeps_client_for_close():
     """On MCP error, the client must stay in _clients so close() can disconnect

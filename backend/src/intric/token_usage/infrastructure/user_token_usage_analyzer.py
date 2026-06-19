@@ -1,10 +1,11 @@
 import logging
 from typing import TYPE_CHECKING
 
-from sqlalchemy import asc, desc, func, select, union_all
+from sqlalchemy import asc, desc, exists, func, select, union_all
 
 from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import AppRuns
+from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.questions_table import Questions
 from intric.database.tables.sessions_table import Sessions
@@ -75,6 +76,17 @@ class UserTokenUsageAnalyzer:
                 & (Questions.created_at <= end_date),
             )
             .where(Users.tenant_id == tenant_id)
+            # Helper-assistant runs (e.g. Prompt Guide) live in the regular
+            # sessions/questions tables but must never surface in per-user
+            # analytics — they are a platform helper, not user content. Same
+            # exclusion as sessions_repo / analysis_repo (PRD §4).
+            .where(
+                ~exists(
+                    select(HelpAssistantRuns.id).where(
+                        HelpAssistantRuns.session_id == Sessions.id
+                    )
+                )
+            )
         )
 
         if user_id:
@@ -405,6 +417,14 @@ class UserTokenUsageAnalyzer:
             .where(Sessions.user_id == user_id)
             .where(Questions.created_at >= start_date)
             .where(Questions.created_at <= end_date)
+            # Exclude helper-assistant runs from per-user model breakdown too.
+            .where(
+                ~exists(
+                    select(HelpAssistantRuns.id).where(
+                        HelpAssistantRuns.session_id == Sessions.id
+                    )
+                )
+            )
             .group_by(
                 Questions.completion_model_id,
                 CompletionModels.name,

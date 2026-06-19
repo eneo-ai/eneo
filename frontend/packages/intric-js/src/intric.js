@@ -26,6 +26,8 @@ import { initIntegrations } from "./endpoints/integrations";
 import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
 import { initMCPServers } from "./endpoints/mcp-servers";
+import { initPromptLibrary } from "./endpoints/prompt-library";
+import { initGovernancePolicy } from "./endpoints/governance-policy";
 import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
 import { initAudit } from "./endpoints/audit";
@@ -34,6 +36,7 @@ import { initModelProviders } from "./endpoints/model-providers";
 import { initTenantModels } from "./endpoints/tenant-models";
 import { initApiKeys } from "./endpoints/api-keys";
 import { initFlows } from "./endpoints/flows";
+import { initHelpAssistants } from "./endpoints/helpAssistants";
 
 /**
  * Create an Intric.js object to interact with the intric backend.
@@ -74,6 +77,8 @@ export function createIntric(args) {
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
     mcpServers: initMCPServers(client),
+    promptLibrary: initPromptLibrary(client),
+    governancePolicy: initGovernancePolicy(client),
     settings: initSettings(client),
     credentials: initCredentials(client),
     audit: initAudit(client),
@@ -82,6 +87,7 @@ export function createIntric(args) {
     tenantModels: initTenantModels(client),
     apiKeys: initApiKeys(client),
     flows: initFlows(client),
+    helpAssistants: initHelpAssistants(client),
     client
   };
 }

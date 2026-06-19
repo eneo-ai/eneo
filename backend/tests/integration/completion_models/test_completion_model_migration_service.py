@@ -676,6 +676,108 @@ class TestCompletionModelMigration:
             updated_assistant = (await session.execute(stmt)).scalar_one()
             assert updated_assistant.completion_model_id == target_model.id
 
+    async def test_reject_migration_when_security_classification_insufficient(
+        self,
+        db_container,
+        completion_model_factory,
+        space_factory,
+        admin_user,
+    ):
+        """A target with a lower security classification is a hard blocker that
+        confirm_migration cannot override."""
+        from intric.database.tables.security_classifications_table import (
+            SecurityClassification,
+        )
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Same family so the security classification is the only issue.
+            source_model = await completion_model_factory(
+                session, "gpt-4", provider="openai", family="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4o", provider="openai", family="openai"
+            )
+
+            classification = SecurityClassification(
+                tenant_id=admin_user.tenant_id,
+                name="confidential",
+                security_level=1,
+            )
+            session.add(classification)
+            await session.flush()
+
+            # A classified space that still uses the source model.
+            await space_factory(
+                session,
+                "Classified Space",
+                [source_model.id],
+                security_classification_id=classification.id,
+            )
+
+            migration_service = container.completion_model_migration_service()
+
+            # confirm_migration alone must NOT bypass the blocker.
+            with pytest.raises(ValidationException) as exc_info:
+                await migration_service.migrate_model_usage(
+                    from_model_id=source_model.id,
+                    to_model_id=target_model.id,
+                    user=admin_user,
+                    confirm_migration=True,
+                    force_override=False,
+                )
+
+            assert "security classification" in str(exc_info.value).lower()
+
+    async def test_force_override_bypasses_security_classification_blocker(
+        self,
+        db_container,
+        completion_model_factory,
+        space_factory,
+        admin_user,
+    ):
+        """force_override is the explicit escape hatch for the security blocker."""
+        from intric.database.tables.security_classifications_table import (
+            SecurityClassification,
+        )
+
+        async with db_container() as container:
+            session = container.session()
+
+            source_model = await completion_model_factory(
+                session, "gpt-4", provider="openai", family="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4o", provider="openai", family="openai"
+            )
+
+            classification = SecurityClassification(
+                tenant_id=admin_user.tenant_id,
+                name="confidential",
+                security_level=1,
+            )
+            session.add(classification)
+            await session.flush()
+
+            await space_factory(
+                session,
+                "Classified Space",
+                [source_model.id],
+                security_classification_id=classification.id,
+            )
+
+            migration_service = container.completion_model_migration_service()
+            result = await migration_service.migrate_model_usage(
+                from_model_id=source_model.id,
+                to_model_id=target_model.id,
+                user=admin_user,
+                confirm_migration=True,
+                force_override=True,
+            )
+
+            assert result.success is True
+
     async def test_warn_about_different_model_families(
         self,
         db_container,

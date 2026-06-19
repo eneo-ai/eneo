@@ -2,29 +2,59 @@ import * as m from "$lib/paraglide/messages";
 import type { components } from "@intric/intric-js";
 
 type ActionType = components["schemas"]["ActionType"];
-type LocaleString = string;
-type MessageFn = (inputs?: Record<string, never>, options?: { locale?: string }) => LocaleString;
+type MessageFn = () => string;
 
-const ACTION_KEY_PREFIX = "audit_action_";
+const MESSAGE_CATALOG: Record<string, MessageFn | undefined> = {};
 
-// "audit_action_type" is the column header "Action Type", not an action label.
-const NON_ACTION_KEYS = new Set(["audit_action_type"]);
+for (const [key, value] of Object.entries(m)) {
+  if (typeof value === "function") {
+    MESSAGE_CATALOG[key] = value as MessageFn;
+  }
+}
 
-const messages = m as unknown as Record<string, MessageFn>;
+function getMessage(key: string): MessageFn | undefined {
+  const message = MESSAGE_CATALOG[key];
+  return typeof message === "function" ? message : undefined;
+}
 
-const actionLabelFns: Map<ActionType, MessageFn> = new Map(
-  Object.keys(messages)
-    .filter((key) => key.startsWith(ACTION_KEY_PREFIX) && !NON_ACTION_KEYS.has(key))
-    .map((key) => [key.slice(ACTION_KEY_PREFIX.length) as ActionType, messages[key]])
-);
+function actionLabelKey(action: ActionType): string {
+  return `audit_action_${action}`;
+}
+
+function actionDescriptionKey(action: ActionType): string {
+  return `audit_action_${action}_description`;
+}
+
+function isActionLabelMessageKey(key: string): boolean {
+  return (
+    key.startsWith("audit_action_") && !key.endsWith("_description") && key !== "audit_action_type"
+  );
+}
 
 export function getActionLabel(action: ActionType | "all"): string {
   if (action === "all") return m.audit_all_actions();
-  return actionLabelFns.get(action)?.() ?? action;
+  return getMessage(actionLabelKey(action))?.() ?? action;
+}
+
+export function getActionDescription(action: ActionType): string {
+  return getMessage(actionDescriptionKey(action))?.() ?? "";
 }
 
 export function getActionOptions(): Array<{ value: ActionType | "all"; label: string }> {
-  const options = Array.from(actionLabelFns, ([value, fn]) => ({ value, label: fn() }));
+  const seen = new Set<string>();
+  const options = Object.keys(MESSAGE_CATALOG)
+    .filter(isActionLabelMessageKey)
+    .map((key) => key.replace("audit_action_", ""))
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .map((value) => ({
+      value: value as ActionType,
+      label: getActionLabel(value as ActionType)
+    }));
+
   options.sort((a, b) => a.label.localeCompare(b.label));
   return [{ value: "all", label: m.audit_all_actions() }, ...options];
 }

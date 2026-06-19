@@ -41,11 +41,15 @@ class FileService:
         self, upload_file: UploadFile, max_size: int | None = None
     ) -> File:
         if max_size is None:
-            file = await self.protocol.to_domain(upload_file)
+            file, derived_images = await self.protocol.to_domain_with_derivatives(
+                upload_file
+            )
         else:
-            file = await self.protocol.to_domain(upload_file, max_size=max_size)
+            file, derived_images = await self.protocol.to_domain_with_derivatives(
+                upload_file, max_size=max_size
+            )
 
-        return await self.save_file_content(file)
+        return await self.save_file_content(file, derived_files=derived_images)
 
     async def document_from_upload(
         self,
@@ -56,10 +60,16 @@ class FileService:
             return await self.protocol.document_to_domain(upload_file)
         return await self.protocol.document_to_domain(upload_file, max_size=max_size)
 
-    async def save_file_content(self, file: FileBaseWithContent) -> File:
-        return await self._save_file_record(file)
+    async def save_file_content(
+        self,
+        file: FileBaseWithContent,
+        derived_files: list[FileBaseWithContent] | None = None,
+    ) -> File:
+        return await self._save_file_record(file, derived_files or [])
 
-    async def _save_file_record(self, file: FileBaseWithContent) -> File:
+    async def _save_file_record(
+        self, file: FileBaseWithContent, derived_files: list[FileBaseWithContent]
+    ) -> File:
         async with self._write_transaction():
             saved_file = await self.repo.add(
                 FileCreate.model_validate(
@@ -70,6 +80,17 @@ class FileService:
                     }
                 )
             )
+            for derived in derived_files:
+                await self.repo.add(
+                    FileCreate.model_validate(
+                        {
+                            **derived.model_dump(mode="python"),
+                            **self._owner_fields(),
+                            "tenant_id": self.user.tenant_id,
+                            "parent_file_id": saved_file.id,
+                        }
+                    )
+                )
 
         # Don't calculate token count here - we don't know which model will be used
         # Token counting will happen when the file is used in an assistant context
@@ -141,6 +162,31 @@ class FileService:
             owner_service_id=self._owner_service_id(),
             tenant_id=self.user.tenant_id,
         )
+
+    async def get_derived_images(self, parent_ids: list[UUID]) -> list[File]:
+        """Get image files derived from the given files (e.g. PDF-extracted)."""
+        files = await self.repo.get_by_parent_ids(
+            parent_ids=parent_ids,
+            owner_type=self._owner_type().value,
+            owner_user_id=self._owner_user_id(),
+            owner_service_id=self._owner_service_id(),
+            tenant_id=self.user.tenant_id,
+        )
+        return [file for file in files if file.file_type == FileType.IMAGE]
+
+    async def with_derived_images(self, files: list[File]) -> list[File]:
+        """The given files plus the stored images derived from them.
+
+        Callers gate on model vision support — derived images exist solely
+        as vision input for the completion payload.
+        """
+        parent_ids = [file.id for file in files if file.file_type == FileType.TEXT]
+        if not parent_ids:
+            return files
+
+        derived = await self.get_derived_images(parent_ids=parent_ids)
+        present = {file.id for file in files}
+        return files + [file for file in derived if file.id not in present]
 
     async def get_file_infos(self, file_ids: list[UUID]):
         files = await self.repo.get_file_infos(file_ids)

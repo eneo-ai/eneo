@@ -445,6 +445,26 @@ async def test_put_federation_still_requires_full_payload(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_patch_federation_rejects_null_required_field(
+    client: AsyncClient,
+    super_admin_token: str,
+    mock_transcription_models,
+):
+    slug = f"federation-null-{uuid4().hex[:6]}"
+    tenant = await _create_tenant(client, super_admin_token, slug)
+
+    response = await client.patch(
+        f"/api/v1/sysadmin/tenants/{tenant['id']}/federation",
+        json={"client_id": None},
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert response.status_code == 422
+    assert "PATCH does not allow null for: client_id" in response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_federation_initiate_requires_valid_tenant(
     client: AsyncClient,
     super_admin_token: str,
