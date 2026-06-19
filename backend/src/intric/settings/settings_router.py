@@ -507,6 +507,7 @@ async def put_flow_classification_retention_policy(
 
 @settings_admin_router.delete(
     "/flow-classification-retention-policies/{security_classification_id}",
+    response_model=None,
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_flow_classification_retention_policy",
     summary="Delete flow classification retention policy",

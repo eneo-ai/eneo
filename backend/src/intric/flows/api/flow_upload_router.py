@@ -279,6 +279,7 @@ async def upload_flow_runtime_file(
 
 @router.delete(
     DELETE_RUNTIME_FILE_PATH,
+    response_model=None,
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     operation_id="delete_flow_runtime_file",

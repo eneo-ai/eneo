@@ -154,6 +154,7 @@ async def get_flow_run_evidence(
 
 @router.get(
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
+    response_model=None,
     status_code=status.HTTP_200_OK,
     operation_id="export_flow_run_evidence",
     summary="Export flow run evidence bundle",
