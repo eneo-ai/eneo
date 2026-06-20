@@ -133,14 +133,12 @@ async def repair_compiled_edit_description_if_needed(
     litellm_kwargs: dict[str, Any],
     max_output_tokens: int,
 ) -> CompiledProposal:
-    if flow is None or compiled.edit_result is None:
+    if flow is None or compiled.edit is None:
         return compiled
-    edit_result = compiled.edit_result.compiled_edit
-    if edit_result is None:
-        return compiled
+    edit = compiled.edit
     current_provenance = extract_description_provenance(flow.metadata_json)
     if not should_attempt_description_repair(
-        advisories=edit_result.advisories,
+        advisories=edit.advisories,
         current_description=flow.description,
         current_provenance=current_provenance,
     ):
@@ -156,12 +154,12 @@ async def repair_compiled_edit_description_if_needed(
     if repaired_spec is None:
         return compiled
 
-    repaired_edit = edit_result.model_copy(
+    repaired_edit = edit.model_copy(
         update={
             "compiled_spec": repaired_spec,
             "advisories": [
                 advisory
-                for advisory in edit_result.advisories
+                for advisory in edit.advisories
                 if advisory.code != "flow_description_update_required"
             ],
         }
@@ -169,7 +167,5 @@ async def repair_compiled_edit_description_if_needed(
     return replace(
         compiled,
         spec=repaired_spec,
-        edit_result=compiled.edit_result.model_copy(
-            update={"compiled_edit": repaired_edit}
-        ),
+        edit=repaired_edit,
     )

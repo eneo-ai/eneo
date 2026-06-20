@@ -12,7 +12,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+from intric.flows.ai_builder.ai_builder_edit_models import CompiledEditResult
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -110,7 +110,7 @@ class CompiledProposal:
     reasoning: str | None
     validation: SpecValidationResult
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple()
-    edit_result: BuilderPlanEditResult | None = None
+    edit: CompiledEditResult | None = None
     aggregation_intent: AggregationIntent = "linear"
 
 

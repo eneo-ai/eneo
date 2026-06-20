@@ -17,7 +17,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     LintWarning,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
     CompiledEditResult,
     FlowEditDraft,
 )
@@ -123,24 +122,21 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
         net_steps_removed=1,
         flow_property_changes={"flow_description": ("old", "new")},
     )
-    edit_result = BuilderPlanEditResult(
-        compiled_edit=CompiledEditResult(
-            compiled_spec=_make_turn_spec(),
-            diff=edit_diff,
-            original_draft=FlowEditDraft(operations=[]),
-            base_flow_revision=7,
-            warnings=["Review before applying."],
-            advisories=[
-                EditAdvisory(
-                    code="flow_description_update_required",
-                    message="Review the flow description.",
-                    severity="warning",
-                )
-            ],
-            risk_flags=["type_downgrade"],
-            confidence="needs_review",
-        ),
-        description_override_manual=True,
+    edit = CompiledEditResult(
+        compiled_spec=_make_turn_spec(),
+        diff=edit_diff,
+        original_draft=FlowEditDraft(operations=[]),
+        base_flow_revision=7,
+        warnings=["Review before applying."],
+        advisories=[
+            EditAdvisory(
+                code="flow_description_update_required",
+                message="Review the flow description.",
+                severity="warning",
+            )
+        ],
+        risk_flags=["type_downgrade"],
+        confidence="needs_review",
     )
     compiled = CompiledProposal(
         spec=_make_turn_spec(),
@@ -149,7 +145,7 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
         reasoning="Internal reasoning.",
         validation=validation,
         resource_bindings=(binding,),
-        edit_result=edit_result,
+        edit=edit,
     )
 
     proposal = build_flow_builder_proposal(compiled)
@@ -160,7 +156,7 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
     assert proposal.reasoning == "Internal reasoning."
     assert proposal.resource_bindings == (binding,)
     assert not hasattr(proposal, "edit_result")
-    assert proposal.content.description_override_manual is True
+    assert proposal.content.description_override_manual is False
     assert proposal.content.edit is not None
     assert proposal.content.edit.base_flow_revision == 7
     assert proposal.content.edit.removed_existing_step_refs == frozenset(

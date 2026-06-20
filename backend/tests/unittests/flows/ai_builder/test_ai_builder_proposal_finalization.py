@@ -14,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposalContent,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
     CompiledEditResult,
     FlowEditDraft,
 )
@@ -105,7 +104,7 @@ def _compiled_outline_proposal_with_validation(
         reasoning=compiled.reasoning,
         validation=validation,
         resource_bindings=compiled.resource_bindings,
-        edit_result=compiled.edit_result,
+        edit=compiled.edit,
         aggregation_intent=compiled.aggregation_intent,
     )
 
@@ -133,7 +132,7 @@ def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProp
         plan_rationale="Update the flow.",
         reasoning=None,
         validation=SpecValidationResult(),
-        edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit),
+        edit=compiled_edit,
     )
 
 
@@ -375,15 +374,15 @@ async def test_finalize_compiled_proposal_persists_mcp_clarification_without_pla
 
 
 @pytest.mark.asyncio
-async def test_finalize_compiled_proposal_persists_edit_result_without_description_repair() -> (
+async def test_finalize_compiled_proposal_keeps_compiled_edit_without_description_repair() -> (
     None
 ):
     finalizer = _make_finalizer()
     original_spec = _make_flow_spec()
-    captured_edit_results: list[BuilderPlanEditResult | None] = []
+    captured_edits: list[CompiledEditResult | None] = []
 
     async def store_plan(**kwargs):
-        captured_edit_results.append(kwargs["compiled"].edit_result)
+        captured_edits.append(kwargs["compiled"].edit)
         return await _store_compiled_plan(**kwargs)
 
     with patch(
@@ -403,8 +402,7 @@ async def test_finalize_compiled_proposal_persists_edit_result_without_descripti
         )
 
     assert result.event is not None
-    assert captured_edit_results[0] is not None
-    captured_edit = captured_edit_results[0].compiled_edit
+    captured_edit = captured_edits[0]
     assert captured_edit is not None
     assert (
         captured_edit.compiled_spec.flow_description == original_spec.flow_description

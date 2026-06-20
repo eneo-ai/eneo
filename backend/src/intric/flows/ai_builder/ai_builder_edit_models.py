@@ -16,7 +16,6 @@ from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
     field_validator,
 )
@@ -290,20 +289,6 @@ class CompiledEditResult(BaseModel):
     advisories: list[EditAdvisory] = Field(default_factory=_default_edit_advisories)
     risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
     confidence: EditConfidence = "ready"
-
-
-class BuilderPlanEditResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_default=True)
-
-    compiled_edit: CompiledEditResult | None = None
-    description_override_manual: bool = False
-
-    @field_validator("description_override_manual", mode="before")
-    @classmethod
-    def _validate_description_override_manual(cls, value: object) -> bool:
-        if not isinstance(value, bool):
-            raise ValueError("description_override_manual must be a boolean")
-        return value
 
 
 AddStepPayload = NewStepDraft

@@ -15,10 +15,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 )
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_mechanics
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    FlowEditDraft,
-)
+from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
 from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     canonicalize_duplicate_modify_operations,
     format_duplicate_modify_conflicts,
@@ -222,7 +219,6 @@ async def process_edit_arguments(
         )
 
     assumptions = list(draft.assumptions) if draft.assumptions else []
-    plan_edit_result = BuilderPlanEditResult(compiled_edit=edit_result)
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
             spec=compiled_spec,
@@ -237,6 +233,6 @@ async def process_edit_arguments(
                 if resource_catalog is not None
                 else tuple()
             ),
-            edit_result=plan_edit_result,
+            edit=edit_result,
         ),
     )

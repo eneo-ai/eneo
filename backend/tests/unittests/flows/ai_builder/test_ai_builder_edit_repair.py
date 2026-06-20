@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
     CompiledEditResult,
     FlowEditDraft,
 )
@@ -79,7 +78,7 @@ def _compiled_edit_proposal(
         plan_rationale="Update the flow.",
         reasoning=None,
         validation=SpecValidationResult(),
-        edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit),
+        edit=compiled_edit,
     )
 
 
@@ -316,10 +315,9 @@ async def test_repair_compiled_edit_description_repairs_builder_managed_stale_de
 
     assert result is not compiled
     assert result.spec.flow_description == "New generated description"
-    assert result.edit_result is not None
-    assert result.edit_result.compiled_edit is not None
-    assert result.edit_result.compiled_edit.compiled_spec is result.spec
-    assert result.edit_result.compiled_edit.advisories == []
+    assert result.edit is not None
+    assert result.edit.compiled_spec is result.spec
+    assert result.edit.advisories == []
     repair.assert_awaited_once()
     assert repair.await_args.kwargs["max_output_tokens"] == 256
 

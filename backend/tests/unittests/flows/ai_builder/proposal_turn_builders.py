@@ -11,7 +11,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
     CompiledEditResult,
     FlowEditDraft,
 )
@@ -143,7 +142,7 @@ def _compiled_outline_proposal_with_validation(
         reasoning=compiled.reasoning,
         validation=validation,
         resource_bindings=compiled.resource_bindings,
-        edit_result=compiled.edit_result,
+        edit=compiled.edit,
         aggregation_intent=compiled.aggregation_intent,
     )
 
@@ -169,7 +168,7 @@ def _compiled_edit_proposal(
         plan_rationale="Update the flow.",
         reasoning=None,
         validation=SpecValidationResult(),
-        edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit),
+        edit=compiled_edit,
     )
 
 

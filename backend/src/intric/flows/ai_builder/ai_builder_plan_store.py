@@ -74,11 +74,6 @@ def build_flow_builder_proposal(
             assumptions=list(compiled.assumptions),
             plan_rationale=compiled.plan_rationale,
             lint_warnings=build_lint_warnings(compiled.validation),
-            description_override_manual=(
-                compiled.edit_result.description_override_manual
-                if compiled.edit_result is not None
-                else False
-            ),
             edit=edit,
         ),
         reasoning=compiled.reasoning,
@@ -89,9 +84,7 @@ def build_flow_builder_proposal(
 def _edit_approval_from_compiled_proposal(
     compiled: CompiledProposal,
 ) -> FlowBuilderEditApproval | None:
-    compiled_edit = (
-        compiled.edit_result.compiled_edit if compiled.edit_result is not None else None
-    )
+    compiled_edit = compiled.edit
     if compiled_edit is None:
         return None
 

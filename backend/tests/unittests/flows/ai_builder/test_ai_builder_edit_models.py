@@ -2,14 +2,8 @@
 
 from __future__ import annotations
 
-import json
-
-import pytest
-from pydantic import ValidationError
-
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
-    BuilderPlanEditResult,
     CompiledEditResult,
     FlowEditDraft,
     FlowMetadataPatch,
@@ -382,37 +376,3 @@ class TestCompiledEditResult:
         restored = CompiledEditResult.model_validate_json(serialized)
         assert restored.base_flow_revision == 3
         assert restored.diff.net_steps_added == 1
-
-
-class TestBuilderPlanEditResult:
-    def test_flag_only_manual_description_override_roundtrips(self):
-        result = BuilderPlanEditResult(description_override_manual=True)
-
-        serialized = result.model_dump(mode="json", exclude_none=True)
-        assert serialized == {"description_override_manual": True}
-        restored = BuilderPlanEditResult.model_validate(serialized)
-        assert restored.compiled_edit is None
-        assert restored.description_override_manual is True
-
-    def test_flat_compiled_edit_shape_is_rejected_after_migration(self):
-        compiled = _make_compiled_edit_result()
-
-        with pytest.raises(ValidationError):
-            BuilderPlanEditResult.model_validate(compiled.model_dump(mode="json"))
-
-    def test_populated_compiled_edit_result_json_roundtrips(self):
-        compiled = _make_compiled_edit_result()
-        result = BuilderPlanEditResult(compiled_edit=compiled)
-
-        serialized = result.model_dump(mode="json", exclude_none=True)
-        json.dumps(serialized)
-        restored = BuilderPlanEditResult.model_validate(serialized)
-
-        assert restored.compiled_edit == compiled
-        assert restored.description_override_manual is False
-
-    def test_rejects_string_manual_description_override_flag(self):
-        with pytest.raises(ValidationError):
-            BuilderPlanEditResult.model_validate(
-                {"description_override_manual": "true"}
-            )
