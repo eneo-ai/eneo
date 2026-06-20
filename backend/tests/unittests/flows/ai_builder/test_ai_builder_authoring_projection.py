@@ -106,6 +106,69 @@ def test_edit_overlay_explicit_resource_detach_and_mcp_selection() -> None:
     assert mcp_selected.steps[0].assistant_spec.mcp_server_refs == ["server-a"]
 
 
+def test_edit_overlay_omitted_review_mode_preserves_existing_policy() -> None:
+    review_policy = FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW)
+
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(_step_with_review_policy(review_policy)),
+        proposal=OrderedEditProposal(
+            steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
+        ),
+    )
+
+    assert result.steps[0].review_policy == review_policy
+
+
+def test_edit_overlay_explicit_null_review_mode_clears_existing_policy() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step_with_review_policy(FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW))
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {
+                        "existing_step_ref": "existing_step_1",
+                        "review_mode": None,
+                    }
+                )
+            ],
+        ),
+    )
+
+    assert result.steps[0].review_policy is None
+
+
+def test_edit_overlay_review_mode_replaces_existing_policy() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step_with_review_policy(FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW))
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep(
+                    existing_step_ref="existing_step_1",
+                    review_mode=FlowStepReviewMode.EDIT,
+                )
+            ],
+        ),
+    )
+
+    assert result.steps[0].review_policy == FlowStepReviewPolicy(
+        mode=FlowStepReviewMode.EDIT
+    )
+
+
+def test_edit_overlay_rejects_raw_review_policy_patch() -> None:
+    with pytest.raises(ValueError):
+        ModifyExistingStep.model_validate(
+            {
+                "existing_step_ref": "existing_step_1",
+                "review_policy": {"mode": "view"},
+            }
+        )
+
+
 def test_edit_overlay_requires_step_coverage_or_removal() -> None:
     base = _base_spec(
         _step("step_a", "existing_step_1", "First"),
@@ -413,6 +476,7 @@ def _step(
     *,
     output_type: OutputType = OutputType.TEXT,
     output_contract: dict[str, object] | None = None,
+    review_policy: FlowStepReviewPolicy | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_ref,
@@ -428,6 +492,16 @@ def _step(
         output_mode=OutputMode.PASS_THROUGH,
         output_type=output_type,
         output_contract=output_contract,
+        review_policy=review_policy,
+    )
+
+
+def _step_with_review_policy(review_policy: FlowStepReviewPolicy) -> StepSpec:
+    return _step(
+        "step_a",
+        "existing_step_1",
+        "First",
+        review_policy=review_policy,
     )
 
 

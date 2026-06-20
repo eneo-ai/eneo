@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
+    compile_review_policy,
     make_plan_step_ref,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
@@ -27,7 +28,7 @@ from intric.flows.flow_authoring_spec import (
     StepSpec,
     strip_inapplicable_completion_model,
 )
-from intric.flows.flow_review_policy import FlowStepReviewPolicy
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
 class AssistantSpecPatch(BaseModel):
@@ -57,7 +58,7 @@ class ModifyExistingStep(BaseModel):
     output_contract: FlowPersistedJsonObject | None = None
     input_config: FlowPersistedJsonObject | None = None
     output_config: FlowPersistedJsonObject | None = None
-    review_policy: FlowStepReviewPolicy | None = None
+    review_mode: FlowStepReviewMode | None = None
 
 
 class AddStep(BaseModel):
@@ -201,10 +202,11 @@ def apply_existing_step_patch(
         "output_contract",
         "input_config",
         "output_config",
-        "review_policy",
     ):
         if field_name in fields:
             updates[field_name] = getattr(patch, field_name)
+    if "review_mode" in fields:
+        updates["review_policy"] = compile_review_policy(patch.review_mode)
     if "assistant_spec" in fields:
         if patch.assistant_spec is None:
             raise ValueError("Assistant spec cannot be cleared.")
