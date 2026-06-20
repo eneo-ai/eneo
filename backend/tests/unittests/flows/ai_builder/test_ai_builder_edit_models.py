@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     CompiledEditResult,
     FlowEditDraft,
     FormFieldOperation,
@@ -17,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -32,8 +32,8 @@ def _make_add_payload(
     instructions: str,
     input_source: InputSource = InputSource.PREVIOUS_STEP,
     input_type: InputType = InputType.TEXT,
-) -> AddStepPayload:
-    return AddStepPayload(
+) -> NewStepDraft:
+    return NewStepDraft(
         name=name,
         instructions=instructions,
         input_source=input_source,

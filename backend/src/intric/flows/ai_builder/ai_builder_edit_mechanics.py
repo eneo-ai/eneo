@@ -6,10 +6,10 @@ from intric.flows.ai_builder.ai_builder_edit_effective_steps import (
     resolve_insert_index,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     StepEditOperation,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     InputSource,
@@ -56,10 +56,10 @@ def fill_edit_draft_mechanics(
 
 
 def _fill_add_payload_mechanics(
-    payload: AddStepPayload,
+    payload: NewStepDraft,
     *,
     insert_index: int,
-) -> AddStepPayload:
+) -> NewStepDraft:
     updates: dict[str, object] = {}
     input_source = payload.input_source
     if insert_index == 0 and input_source != InputSource.FLOW_INPUT:

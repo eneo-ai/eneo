@@ -11,12 +11,12 @@ from intric.database.tables.spaces_table import SpacesTranscriptionModels
 from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
     StepPlacement,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -206,7 +206,7 @@ async def test_authoring_command_clears_stale_runtime_input_after_transcription_
                     placement=StepPlacement(
                         position="before", anchor_ref="existing_step_1"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Transkribera ljudfil",
                         assistant_spec=AssistantSpec(
                             instructions="Transkribera ljudfilen ordagrant till svensk text.",

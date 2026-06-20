@@ -16,7 +16,6 @@ from intric.flows.ai_builder.ai_builder_edit_effective_steps import (
     resolve_insert_index,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
@@ -28,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_mechanical_refs import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
+    NewStepDraft,
     PreviousFieldRef,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
@@ -445,13 +445,13 @@ def _normalize_loose_add_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_add_payload_refs(
-    payload: AddStepPayload,
+    payload: NewStepDraft,
     *,
     available_form_fields: set[str],
     max_prior_order: int,
     effective_steps: list[EffectiveStepState],
     removed_step_orders: set[int],
-) -> AddStepPayload:
+) -> NewStepDraft:
     safe_previous_refs = _safe_previous_field_refs(
         refs=payload.uses_previous_fields,
         max_prior_order=max_prior_order,

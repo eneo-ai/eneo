@@ -265,6 +265,3 @@ class CompiledEditResult(BaseModel):
     advisories: list[EditAdvisory] = Field(default_factory=_default_edit_advisories)
     risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
     confidence: EditConfidence = "ready"
-
-
-AddStepPayload = NewStepDraft

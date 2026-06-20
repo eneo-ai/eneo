@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     StepEditOperation,
     StepPatch,
 )
 from intric.flows.ai_builder.ai_builder_new_step_compiler import compile_output_contract
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     OutputType,
@@ -75,7 +75,7 @@ def apply_effective_step_operation(
         )
 
 
-def preview_add_effective_step(add_payload: AddStepPayload) -> EffectiveStepState:
+def preview_add_effective_step(add_payload: NewStepDraft) -> EffectiveStepState:
     return EffectiveStepState(
         ref=None,
         output_type=add_payload.output_type.value,

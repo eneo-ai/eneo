@@ -15,7 +15,6 @@ from intric.flows.ai_builder.ai_builder_edit_effective_steps import (
     resolve_insert_index,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
@@ -27,7 +26,10 @@ from intric.flows.ai_builder.ai_builder_form_fields import (
 from intric.flows.ai_builder.ai_builder_new_step_mechanics import (
     validate_new_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    PreviousFieldRef,
+)
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
     supports_step_io_mode_combo,
 )
@@ -396,7 +398,7 @@ def _validate_patch_previous_field_references(
 
 def _validate_add_previous_field_references(
     *,
-    step: AddStepPayload,
+    step: NewStepDraft,
     max_prior_order: int,
     effective_steps: list[EffectiveStepState],
     step_ref: str | None,

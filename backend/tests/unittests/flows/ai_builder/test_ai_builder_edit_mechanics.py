@@ -4,11 +4,11 @@ from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_mechanics
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     StepEditOperation,
     StepPlacement,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     InputSource,
@@ -40,7 +40,7 @@ def test_fill_edit_draft_mechanics_defaults_first_file_flow_input() -> None:
                 placement=StepPlacement(
                     position="before", anchor_ref="existing_step_1"
                 ),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Transkribera ljud",
                     instructions="Transkribera ljudfilen.",
                     input_source=InputSource.FLOW_INPUT,
@@ -67,7 +67,7 @@ def test_fill_edit_draft_mechanics_repairs_invalid_first_audio_step_mechanics() 
             StepEditOperation(
                 op="add",
                 placement=StepPlacement(position="append"),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Transkribera ljud",
                     instructions="Transkribera ljudfilen.",
                     input_source=InputSource.PREVIOUS_STEP,
@@ -123,7 +123,7 @@ def test_fill_edit_draft_mechanics_preserves_explicit_runtime_choices() -> None:
                 placement=StepPlacement(
                     position="before", anchor_ref="existing_step_1"
                 ),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Ladda upp dokument",
                     instructions="Läs dokumentet.",
                     input_source=InputSource.FLOW_INPUT,
@@ -154,7 +154,7 @@ def test_fill_edit_draft_mechanics_does_not_default_non_first_file_step() -> Non
             StepEditOperation(
                 op="add",
                 placement=StepPlacement(position="append"),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Extra ljudsteg",
                     instructions="Bearbeta ljud.",
                     input_source=InputSource.FLOW_INPUT,

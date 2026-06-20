@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     FormFieldOperation,
     FormFieldSpec,
@@ -14,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPlacement,
 )
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     InputSource,
@@ -66,7 +66,7 @@ def _add_op(
         op="add",
         target_ref=target_ref,
         placement=StepPlacement(position=position, anchor_ref=anchor_ref),
-        add_payload=AddStepPayload(
+        add_payload=NewStepDraft(
             name=name,
             instructions="Do something.",
             input_source=InputSource.PREVIOUS_STEP,
@@ -150,7 +150,7 @@ class TestValidAddOperations:
                     placement=StepPlacement(
                         position="before", anchor_ref="existing_step_1"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -187,7 +187,7 @@ class TestValidAddOperations:
                     placement=StepPlacement(
                         position="after", anchor_ref="existing_step_2"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -223,7 +223,7 @@ class TestValidAddOperations:
                     placement=StepPlacement(
                         position="after", anchor_ref="existing_step_99"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -260,7 +260,7 @@ class TestValidAddOperations:
                     placement=StepPlacement(
                         position="after", anchor_ref="existing_step_1"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -293,7 +293,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -323,7 +323,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -352,7 +352,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Nytt steg",
                         instructions="Bygg nytt steg.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -390,7 +390,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Extra indata",
                         instructions="Ta emot en extra fil.",
                         input_source=InputSource.FLOW_INPUT,
@@ -420,7 +420,7 @@ class TestValidAddOperations:
                     placement=StepPlacement(
                         position="before", anchor_ref="existing_step_1"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Ladda upp ljud",
                         instructions="Transkribera ljudet.",
                         input_source=InputSource.FLOW_INPUT,
@@ -448,7 +448,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Textsteg",
                         instructions="Skriv text.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -476,7 +476,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Ljudanalys",
                         instructions="Analysera ljudet.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -505,7 +505,7 @@ class TestValidAddOperations:
                     placement=StepPlacement(
                         position="before", anchor_ref="existing_step_1"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Transkribera ljud",
                         instructions="Transkribera ljudet.",
                         input_source=InputSource.FLOW_INPUT,
@@ -534,7 +534,7 @@ class TestValidAddOperations:
                 StepEditOperation(
                     op="add",
                     placement=StepPlacement(position="append"),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="PDF",
                         instructions="Skapa PDF.",
                         input_source=InputSource.PREVIOUS_STEP,
@@ -897,7 +897,7 @@ class TestValidModifyOperations:
                     placement=StepPlacement(
                         position="before", anchor_ref="existing_step_1"
                     ),
-                    add_payload=AddStepPayload(
+                    add_payload=NewStepDraft(
                         name="Extrahera risk",
                         instructions="Extrahera risk.",
                         input_source=InputSource.FLOW_INPUT,

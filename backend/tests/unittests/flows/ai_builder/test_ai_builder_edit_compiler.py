@@ -8,7 +8,6 @@ import pytest
 
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     FormFieldOperation,
     StepEditOperation,
@@ -18,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FormFieldSpec as EditFormFieldSpec,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
@@ -191,8 +191,8 @@ def _make_add_payload(
     output_type: OutputType = OutputType.TEXT,
     runtime_upload: bool = False,
     runtime_required: bool = False,
-) -> AddStepPayload:
-    return AddStepPayload(
+) -> NewStepDraft:
+    return NewStepDraft(
         name=name,
         instructions=instructions,
         input_source=input_source,

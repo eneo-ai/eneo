@@ -7,7 +7,6 @@ import pytest
 from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    AddStepPayload,
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
@@ -19,7 +18,10 @@ from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_loose_edit_arguments,
 )
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
-from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -449,7 +451,7 @@ def test_normalize_edit_draft_mechanics_prunes_invalid_nested_refs() -> None:
             StepEditOperation(
                 op="add",
                 placement=StepPlacement(position="after", anchor_ref="existing_step_2"),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Added step",
                     instructions="Use available context.",
                     input_source=InputSource.PREVIOUS_STEP,
@@ -535,7 +537,7 @@ def test_normalize_edit_draft_mechanics_honors_operation_order() -> None:
                 placement=StepPlacement(
                     position="before", anchor_ref="existing_step_1"
                 ),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Extract",
                     instructions="Extract structured fields.",
                     input_source=InputSource.FLOW_INPUT,
@@ -799,7 +801,7 @@ def test_canonicalize_duplicate_modify_operations_preserves_add_order() -> None:
             StepEditOperation(
                 op="add",
                 placement=StepPlacement(position="after", anchor_ref="existing_step_2"),
-                add_payload=AddStepPayload(
+                add_payload=NewStepDraft(
                     name="Use structured result",
                     instructions="Use the reviewed structured output.",
                     input_source=InputSource.PREVIOUS_STEP,
