@@ -6,6 +6,7 @@ import pytest
 
 from intric.assistants.assistant_service import AssistantService
 from intric.main.exceptions import BadRequestException
+from intric.main.models import NOT_PROVIDED
 from intric.services.service import DatastoreResult
 from intric.sessions.session import SessionInDB
 from tests.fixtures import TEST_MODEL_CHATGPT, TEST_MODEL_GPT4, TEST_USER
@@ -393,6 +394,129 @@ async def test_update_guard_rejects_disallowed_model_on_personal_default_assista
             completion_model_id=uuid4(),
             mcp_server_ids=None,
         )
+
+
+def _personal_default_update_subject(effective_config):
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = effective_config
+    service = _service_with_effective_config(effective_config_service)
+
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    assistant.is_default = True
+    assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.integration_knowledge_list = []
+
+    space = MagicMock()
+    space.is_personal.return_value = True
+    space.default_assistant = assistant
+    space.get_assistant.return_value = assistant
+    space.is_completion_model_available.return_value = True
+    space.is_completion_model_in_space.return_value = True
+    service.space_repo.get_space_by_assistant.return_value = space
+    service.space_repo.update.return_value = space
+
+    actor = MagicMock()
+    actor.can_edit_default_assistant.return_value = True
+    actor.can_edit_assistants.return_value = False
+    service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    return service, effective_config_service, assistant, space
+
+
+async def test_update_assistant_omitted_model_is_not_a_model_change():
+    """An omitted completion model must not be read as a model update."""
+    service, effective_config_service, assistant, _ = _personal_default_update_subject(
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=[TEST_MODEL_GPT4],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+        )
+    )
+
+    await service.update_assistant(assistant_id=assistant.id)
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
+    effective_config_service.resolve_for.assert_not_awaited()
+
+
+async def test_update_assistant_allows_allowed_model_change():
+    service, effective_config_service, assistant, space = (
+        _personal_default_update_subject(
+            SimpleNamespace(
+                models_enforced=True,
+                available_models=[TEST_MODEL_GPT4],
+                mcp_enforced=False,
+                available_mcp_servers=[],
+                prompt_enforced=False,
+            )
+        )
+    )
+    space.get_completion_model.return_value = TEST_MODEL_GPT4
+
+    await service.update_assistant(
+        assistant_id=assistant.id,
+        completion_model_id=TEST_MODEL_GPT4.id,
+    )
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] is TEST_MODEL_GPT4
+    effective_config_service.resolve_for.assert_awaited_once_with(
+        assistant, space_is_personal=True
+    )
+
+
+async def test_update_assistant_rejects_disallowed_model_change():
+    """A real requested model change must still be governed."""
+    disallowed_model_id = uuid4()
+    service, effective_config_service, assistant, _ = _personal_default_update_subject(
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=[TEST_MODEL_GPT4],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+        )
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Model not allowed by personal assistant governance policy",
+    ):
+        await service.update_assistant(
+            assistant_id=assistant.id,
+            completion_model_id=disallowed_model_id,
+        )
+
+    assistant.update.assert_not_called()
+    effective_config_service.resolve_for.assert_awaited_once_with(
+        assistant, space_is_personal=True
+    )
+
+
+async def test_update_assistant_explicit_none_clears_model_without_policy_lookup():
+    """Explicit None means clear the stored model; omission means no model update."""
+    service, effective_config_service, assistant, _ = _personal_default_update_subject(
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=[TEST_MODEL_GPT4],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+        )
+    )
+
+    await service.update_assistant(
+        assistant_id=assistant.id,
+        completion_model_id=None,
+    )
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] is None
+    effective_config_service.resolve_for.assert_not_awaited()
 
 
 async def test_update_guard_rejects_prompt_change_when_prompt_enforced():
