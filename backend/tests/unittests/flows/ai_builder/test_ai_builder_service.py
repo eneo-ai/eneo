@@ -50,6 +50,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     ConversationMessage,
+    FlowBuilderProposal,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
@@ -190,11 +191,12 @@ def _make_plan(
         session_id=session_id or uuid4(),
         tenant_id=tenant_id or uuid4(),
         status=status,
-        spec=spec,
-        spec_hash=spec.spec_hash(),
-        envelope=envelope,
-        resource_bindings=resource_bindings,
-        edit_result=edit_result,
+        proposal=FlowBuilderProposal(
+            spec=spec,
+            assumptions=envelope.assumptions,
+            resource_bindings=resource_bindings,
+            edit_result=edit_result,
+        ),
     )
 
 

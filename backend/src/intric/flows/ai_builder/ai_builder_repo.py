@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     ConversationMessage,
+    FlowBuilderProposal,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
@@ -843,26 +844,22 @@ class AIBuilderRepository:
         *,
         session_id: UUID,
         tenant_id: UUID,
-        spec: FlowDraftSpecCore,
-        envelope: PlannerPlanEnvelope,
-        resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-        edit_result: BuilderPlanEditResult | None = None,
+        proposal: FlowBuilderProposal,
     ) -> BuilderPlan:
         async with self._transaction():
-            spec_hash = spec.spec_hash()
             values: dict[str, object] = {
                 "session_id": session_id,
                 "tenant_id": tenant_id,
                 "status": PlanStatus.PROPOSED.value,
-                "spec_json": spec.model_dump(mode="json"),
-                "spec_hash": spec_hash,
-                "envelope_json": _envelope_json_for_storage(envelope),
+                "spec_json": proposal.spec.model_dump(mode="json"),
+                "spec_hash": proposal.spec_hash,
+                "envelope_json": _envelope_json_for_storage(proposal.envelope),
                 "resource_bindings_json": _resource_bindings_json_for_storage(
-                    resource_bindings
+                    proposal.resource_bindings
                 ),
             }
-            if edit_result is not None:
-                values["edit_result_json"] = edit_result.model_dump(
+            if proposal.edit_result is not None:
+                values["edit_result_json"] = proposal.edit_result.model_dump(
                     mode="json", exclude_none=True
                 )
             stmt = insert(BuilderPlans).values(**values).returning(BuilderPlans)
@@ -1318,13 +1315,20 @@ def _plan_from_row(row: Any) -> BuilderPlan:
     data = _plan_row_data(row)
 
     spec = FlowDraftSpecCore.model_validate(data["spec_json"])
-    envelope_data = {k: v for k, v in data["envelope_json"].items() if k != "spec"}
-    envelope_data["spec"] = data["spec_json"]
-    envelope = PlannerPlanEnvelope.model_validate(envelope_data)
     edit_result = (
         BuilderPlanEditResult.model_validate(data["edit_result_json"])
         if data["edit_result_json"] is not None
         else None
+    )
+    proposal_data = {k: v for k, v in data["envelope_json"].items() if k != "spec"}
+    proposal_data.update(
+        {
+            "spec": spec,
+            "resource_bindings": _resource_bindings_from_json(
+                data["resource_bindings_json"]
+            ),
+            "edit_result": edit_result,
+        }
     )
 
     return BuilderPlan(
@@ -1332,11 +1336,7 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         session_id=data["session_id"],
         tenant_id=data["tenant_id"],
         status=PlanStatus(data["status"]),
-        spec=spec,
-        spec_hash=data["spec_hash"],
-        envelope=envelope,
-        resource_bindings=_resource_bindings_from_json(data["resource_bindings_json"]),
-        edit_result=edit_result,
+        proposal=FlowBuilderProposal.model_validate(proposal_data),
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )

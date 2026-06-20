@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthori
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    FlowBuilderProposal,
     LintSeverity,
     LintWarning,
     PlannerPlanEnvelope,
@@ -158,16 +159,22 @@ def _make_plan(
     envelope: PlannerPlanEnvelope | None = None,
 ) -> BuilderPlan:
     used_spec = spec or _make_spec()
+    used_envelope = envelope or PlannerPlanEnvelope(spec=used_spec)
     return BuilderPlan(
         id=uuid4(),
         session_id=session_id,
         tenant_id=tenant_id,
         status=status,
-        spec=used_spec,
-        spec_hash=used_spec.spec_hash(),
-        envelope=envelope or PlannerPlanEnvelope(spec=used_spec),
-        resource_bindings=resource_bindings,
-        edit_result=edit_result,
+        proposal=FlowBuilderProposal(
+            spec=used_spec,
+            assumptions=used_envelope.assumptions,
+            lint_warnings=used_envelope.lint_warnings,
+            risk_acknowledgments=used_envelope.risk_acknowledgments,
+            reasoning=used_envelope.reasoning,
+            plan_rationale=used_envelope.plan_rationale,
+            resource_bindings=resource_bindings,
+            edit_result=edit_result,
+        ),
     )
 
 
@@ -341,11 +348,12 @@ class TestAIBuilderPlanLifecycle:
         create_kwargs = repo.create_plan.await_args.kwargs
         assert create_kwargs["session_id"] == plan.session_id
         assert create_kwargs["tenant_id"] == user.tenant_id
-        assert create_kwargs["spec"] == plan.spec
-        assert create_kwargs["envelope"].lint_warnings == plan.envelope.lint_warnings
-        assert create_kwargs["envelope"].reasoning is None
-        assert create_kwargs["resource_bindings"] == (binding,)
-        assert create_kwargs["edit_result"] == BuilderPlanEditResult(
+        proposal = create_kwargs["proposal"]
+        assert proposal.spec == plan.spec
+        assert proposal.lint_warnings == plan.envelope.lint_warnings
+        assert proposal.reasoning is None
+        assert proposal.resource_bindings == (binding,)
+        assert proposal.edit_result == BuilderPlanEditResult(
             compiled_edit=compiled_edit_result, description_override_manual=True
         )
         repo.update_session_latest_plan_without_send_lease.assert_awaited_once_with(

@@ -67,15 +67,7 @@ class LintWarning(BaseModel):
 
 
 class PlannerPlanEnvelope(BaseModel):
-    """Wraps FlowDraftSpecCore with AI session metadata.
-
-    At the consumer / API / frontend layer this envelope carries the full
-    spec. At the storage boundary (`builder_plans.envelope_json`) the spec is
-    stripped before write and re-injected on read from `builder_plans.spec_json`
-    — `spec_json` is the single source of truth, and envelope_json is
-    metadata-only. Alembic migration `20260421_builder_envelope_slim` scrubs
-    older duplicated spec copies out of persisted rows.
-    """
+    """Public proposal view for the current AI Builder API and SSE contract."""
 
     spec: FlowDraftSpecCore
     assumptions: list[str] = Field(default_factory=list)
@@ -160,6 +152,38 @@ class BuilderSession(BaseModel):
     updated_at: datetime | None = None
 
 
+class FlowBuilderProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    spec: FlowDraftSpecCore
+    assumptions: list[str] = Field(default_factory=list)
+    lint_warnings: list[LintWarning] = Field(default_factory=_default_lint_warnings)
+    risk_acknowledgments: list[str] = Field(default_factory=list)
+    reasoning: str | None = None
+    plan_rationale: str | None = None
+    resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
+    edit_result: BuilderPlanEditResult | None = None
+
+    @property
+    def spec_hash(self) -> str:
+        return self.spec.spec_hash()
+
+    @property
+    def envelope(self) -> PlannerPlanEnvelope:
+        return PlannerPlanEnvelope(
+            spec=self.spec,
+            assumptions=self.assumptions,
+            lint_warnings=self.lint_warnings,
+            risk_acknowledgments=self.risk_acknowledgments,
+            reasoning=self.reasoning,
+            plan_rationale=self.plan_rationale,
+        )
+
+    @property
+    def public_envelope(self) -> PlannerPlanEnvelope:
+        return self.envelope.model_copy(update={"reasoning": None}, deep=True)
+
+
 class BuilderPlan(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -167,19 +191,36 @@ class BuilderPlan(BaseModel):
     session_id: UUID
     tenant_id: UUID
     status: PlanStatus = PlanStatus.PROPOSED
-    spec: FlowDraftSpecCore
-    spec_hash: str
-    envelope: PlannerPlanEnvelope
-    resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
-    edit_result: BuilderPlanEditResult | None = None
+    proposal: FlowBuilderProposal
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @property
+    def spec(self) -> FlowDraftSpecCore:
+        return self.proposal.spec
+
+    @property
+    def spec_hash(self) -> str:
+        return self.proposal.spec_hash
+
+    @property
+    def envelope(self) -> PlannerPlanEnvelope:
+        return self.proposal.envelope
+
+    @property
+    def resource_bindings(self) -> tuple[LocalResourceBinding, ...]:
+        return self.proposal.resource_bindings
+
+    @property
+    def edit_result(self) -> BuilderPlanEditResult | None:
+        return self.proposal.edit_result
 
 
 __all__ = [
     "BuilderPlan",
     "BuilderSession",
     "ConversationMessage",
+    "FlowBuilderProposal",
     "LintSeverity",
     "LintWarning",
     "PlanStatus",

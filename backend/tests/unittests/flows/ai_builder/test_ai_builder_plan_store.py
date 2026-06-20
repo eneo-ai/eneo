@@ -11,9 +11,9 @@ import pytest
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    FlowBuilderProposal,
     LintSeverity,
     LintWarning,
-    PlannerPlanEnvelope,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
@@ -226,7 +226,9 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
     )
 
     assert repo.create_plan.await_args is not None
-    assert repo.create_plan.await_args.kwargs["resource_bindings"] == (binding,)
+    assert repo.create_plan.await_args.kwargs["proposal"].resource_bindings == (
+        binding,
+    )
 
 
 @pytest.mark.asyncio
@@ -241,20 +243,22 @@ async def test_active_send_plan_proposal_uses_only_bindings_for_current_plan() -
     await _persist_active_send_plan_proposal(
         repo=repo,
         turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
-        spec=spec,
-        envelope=PlannerPlanEnvelope(spec=spec),
-        resource_bindings=(first_binding,),
+        proposal=FlowBuilderProposal(
+            spec=spec,
+            resource_bindings=(first_binding,),
+        ),
     )
     await _persist_active_send_plan_proposal(
         repo=repo,
         turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
-        spec=spec,
-        envelope=PlannerPlanEnvelope(spec=spec),
-        resource_bindings=(second_binding,),
+        proposal=FlowBuilderProposal(
+            spec=spec,
+            resource_bindings=(second_binding,),
+        ),
     )
 
     first_call, second_call = repo.create_plan.await_args_list
-    assert first_call.kwargs["resource_bindings"] == (first_binding,)
-    assert second_call.kwargs["resource_bindings"] == (second_binding,)
-    assert first_binding not in second_call.kwargs["resource_bindings"]
+    assert first_call.kwargs["proposal"].resource_bindings == (first_binding,)
+    assert second_call.kwargs["proposal"].resource_bindings == (second_binding,)
+    assert first_binding not in second_call.kwargs["proposal"].resource_bindings
     assert repo.supersede_existing_plans.await_count == 2

@@ -14,6 +14,9 @@ from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_api_models import PlanResponse
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowBuilderProposal,
+    LintSeverity,
+    LintWarning,
     PlannerPlanEnvelope,
     PlanStatus,
 )
@@ -140,6 +143,54 @@ def test_plan_from_row_rehydrates_spec_from_spec_json() -> None:
     assert plan.envelope.spec.flow_name == "Canonical from spec_json"
     assert plan.spec.flow_name == "Canonical from spec_json"
     assert plan.spec.spec_hash() == plan.envelope.spec.spec_hash()
+
+
+def test_plan_from_row_rehydrates_complete_proposal_from_columns() -> None:
+    spec = _make_spec("Proposal roundtrip")
+    binding = _binding()
+    compiled = _compiled_edit_result(spec)
+    warning = LintWarning(
+        step_ref="step_a",
+        code="needs_review",
+        message="Review the generated step.",
+        severity=LintSeverity.WARNING,
+    )
+    stored_edit_result = BuilderPlanEditResult(compiled_edit=compiled).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+
+    plan = _plan_from_row(
+        _row(
+            spec=spec,
+            envelope_json={
+                "assumptions": ["The input is plain text."],
+                "lint_warnings": [warning.model_dump(mode="json")],
+                "risk_acknowledgments": ["Generated summaries need review."],
+                "reasoning": "Internal planning note.",
+                "plan_rationale": "One-step summary flow.",
+            },
+            resource_bindings_json=_resource_bindings_json_for_storage((binding,)),
+            edit_result_json=stored_edit_result,
+        )
+    )
+
+    expected = FlowBuilderProposal(
+        spec=spec,
+        assumptions=["The input is plain text."],
+        lint_warnings=[warning],
+        risk_acknowledgments=["Generated summaries need review."],
+        reasoning="Internal planning note.",
+        plan_rationale="One-step summary flow.",
+        resource_bindings=(binding,),
+        edit_result=BuilderPlanEditResult(compiled_edit=compiled),
+    )
+    assert plan.proposal == expected
+    assert plan.spec == expected.spec
+    assert plan.spec_hash == expected.spec_hash
+    assert plan.envelope == expected.envelope
+    assert plan.resource_bindings == (binding,)
+    assert plan.edit_result == expected.edit_result
 
 
 def test_plan_from_row_rehydrates_resource_bindings() -> None:

@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    PlannerPlanEnvelope,
+    FlowBuilderProposal,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -78,8 +78,7 @@ async def test_create_plan_roundtrips_spec_json_and_envelope_metadata(
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            spec=spec,
-            envelope=PlannerPlanEnvelope(
+            proposal=FlowBuilderProposal(
                 spec=spec,
                 assumptions=["Runtime input is plain text."],
                 risk_acknowledgments=["Summary is not fact-checked."],
@@ -100,11 +99,15 @@ async def test_create_plan_roundtrips_spec_json_and_envelope_metadata(
     assert fetched.id == plan.id
     assert fetched.resource_bindings == tuple()
     assert fetched.spec.model_dump(mode="json") == expected_spec_json
+    assert fetched.proposal.spec.model_dump(mode="json") == expected_spec_json
     assert fetched.envelope.assumptions == ["Runtime input is plain text."]
     assert fetched.envelope.risk_acknowledgments == ["Summary is not fact-checked."]
     assert fetched.envelope.reasoning == "Use a single text step."
     assert fetched.envelope.plan_rationale == "Direct repository round-trip."
     assert fetched.envelope.spec.model_dump(mode="json") == expected_spec_json
+    assert fetched.proposal.envelope.model_dump(
+        mode="json"
+    ) == fetched.envelope.model_dump(mode="json")
 
 
 @pytest.mark.asyncio
@@ -147,8 +150,7 @@ async def test_create_plan_roundtrips_document_body_writer_refs(
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            spec=spec,
-            envelope=PlannerPlanEnvelope(spec=spec),
+            proposal=FlowBuilderProposal(spec=spec),
         )
 
     async with db_container() as container:
@@ -205,9 +207,10 @@ async def test_create_plan_roundtrips_resource_bindings_json(db_container) -> No
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            spec=spec,
-            envelope=PlannerPlanEnvelope(spec=spec),
-            resource_bindings=(binding,),
+            proposal=FlowBuilderProposal(
+                spec=spec,
+                resource_bindings=(binding,),
+            ),
         )
 
     async with db_container() as container:

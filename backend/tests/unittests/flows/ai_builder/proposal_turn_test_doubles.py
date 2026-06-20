@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
+from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposal
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
@@ -47,10 +47,10 @@ def _make_submission(**overrides: object) -> ProposalSubmissionOwner:
     return ProposalSubmissionOwner(**defaults)
 
 
-def _stored_plan_result(*, plan: object | None = None, envelope: object | None = None):
+def _stored_plan_result(*, plan: object | None = None, proposal: object | None = None):
     return SimpleNamespace(
         plan=plan or MagicMock(id=uuid4()),
-        envelope=envelope or MagicMock(),
+        proposal=proposal or MagicMock(),
         new_planning_state_version=1,
     )
 
@@ -71,7 +71,7 @@ def _flow_with_builder_description(description: str) -> SimpleNamespace:
 
 async def _store_compiled_plan(**kwargs: object):
     return _stored_plan_result(
-        envelope=PlannerPlanEnvelope(spec=kwargs["spec"]),
+        proposal=FlowBuilderProposal(spec=kwargs["spec"]),
     )
 
 

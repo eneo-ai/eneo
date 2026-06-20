@@ -32,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     ConversationMessage,
+    FlowBuilderProposal,
     PlanStatus,
     SessionStatus,
     TargetKind,
@@ -360,7 +361,9 @@ def _make_apply_plan_client(container: MagicMock) -> TestClient:
                 if dependency.name == "container":
                     app.dependency_overrides[dependency.call] = override_container
                     return TestClient(app)
-            raise AssertionError("AI Builder apply-plan container dependency was missing.")
+            raise AssertionError(
+                "AI Builder apply-plan container dependency was missing."
+            )
 
     raise AssertionError("AI Builder apply-plan route was not registered.")
 
@@ -456,9 +459,6 @@ def _make_plan_domain(
     session_id=None,
     status=PlanStatus.APPROVED,
 ) -> BuilderPlan:
-    from intric.flows.ai_builder.ai_builder_domain_models import (
-        PlannerPlanEnvelope,
-    )
     from intric.flows.flow_authoring_spec import (
         AssistantSpec,
         FlowDraftSpecCore,
@@ -482,9 +482,7 @@ def _make_plan_domain(
         session_id=session_id or uuid4(),
         tenant_id=uuid4(),
         status=status,
-        spec=spec,
-        spec_hash=spec.spec_hash(),
-        envelope=PlannerPlanEnvelope(spec=spec),
+        proposal=FlowBuilderProposal(spec=spec),
     )
 
 
@@ -1189,7 +1187,7 @@ class TestPlanRecoveryEndpoints:
     async def test_get_plan_hides_reasoning(self):
         container = _make_container()
         plan = _make_plan_domain()
-        plan.envelope.reasoning = "Hidden"
+        plan.proposal.reasoning = "Hidden"
         session = _make_session_domain(
             session_id=plan.session_id,
             actor_user_id=container.user.return_value.id,

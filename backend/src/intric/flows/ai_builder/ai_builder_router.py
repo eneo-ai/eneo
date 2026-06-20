@@ -315,13 +315,12 @@ def _get_tenant_repo(container: Container) -> "TenantRepository":
 
 
 def _to_plan_response(plan: BuilderPlan) -> PlanResponse:
-    public_envelope = plan.envelope.model_copy(update={"reasoning": None}, deep=True)
     return PlanResponse(
         plan_id=plan.id,
         session_id=plan.session_id,
         status=plan.status,
         spec_hash=plan.spec_hash,
-        envelope=public_envelope,
+        envelope=plan.proposal.public_envelope,
         edit_result_json=plan.edit_result,
         created_at=plan.created_at,
         updated_at=plan.updated_at,

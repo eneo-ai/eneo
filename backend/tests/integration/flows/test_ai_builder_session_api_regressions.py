@@ -27,10 +27,17 @@ from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysi
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    PlannerPlanEnvelope,
+    FlowBuilderProposal,
     PlanStatus,
     SessionStatus,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+    CompiledEditResult,
+    FlowEditDiff,
+    FlowEditDraft,
+    StepChange,
 )
 from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -451,6 +458,30 @@ def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCo
                 output_type=OutputType.TEXT,
             )
         ],
+    )
+
+
+def _make_builder_edit_result(
+    *,
+    spec: FlowDraftSpecCore,
+    base_flow_revision: int,
+) -> BuilderPlanEditResult:
+    step = spec.steps[0]
+    return BuilderPlanEditResult(
+        compiled_edit=CompiledEditResult(
+            compiled_spec=spec,
+            diff=FlowEditDiff(
+                step_changes=[
+                    StepChange(
+                        kind="unchanged",
+                        step_name=step.name,
+                        step_ref=step.existing_step_ref,
+                    )
+                ]
+            ),
+            original_draft=FlowEditDraft(operations=[]),
+            base_flow_revision=base_flow_revision,
+        )
     )
 
 
@@ -1254,8 +1285,7 @@ async def test_ai_builder_repo_create_plan_rejects_cross_tenant_session_referenc
             await repo.create_plan(
                 session_id=session.id,
                 tenant_id=other_tenant_id,
-                spec=spec,
-                envelope=_make_plan_envelope(spec),
+                proposal=FlowBuilderProposal(spec=spec),
             )
 
 
@@ -3284,16 +3314,6 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
     ]
 
 
-def _make_plan_envelope(spec: FlowDraftSpecCore) -> PlannerPlanEnvelope:
-    return PlannerPlanEnvelope(
-        spec=spec,
-        assumptions=[],
-        plan_rationale=None,
-        reasoning=None,
-        lint_warnings=[],
-    )
-
-
 async def _get_latest_plan_id(*, client, bearer_token: str, session_id: str) -> str:
     response = await client.get(
         f"/api/v1/flows/ai-builder/sessions/{session_id}/plans",
@@ -3305,7 +3325,7 @@ async def _get_latest_plan_id(*, client, bearer_token: str, session_id: str) -> 
     return plans[0]["plan_id"]
 
 
-async def _progress_edit_session_to_plan(
+async def _progress_builder_session_to_plan(
     *,
     client,
     bearer_token: str,
@@ -3317,7 +3337,7 @@ async def _progress_edit_session_to_plan(
     question_answer: dict[str, object] | None = None
     answers = structured_answers or {}
 
-    for _ in range(4):
+    for _ in range(6):
         events = await _send_builder_message(
             client=client,
             bearer_token=bearer_token,
@@ -3347,6 +3367,7 @@ async def _progress_edit_session_to_plan(
             (event for event in events if event["event"] == "question"), None
         )
         assert question_event is not None, events
+
         question_id = question_event["data"]["question_id"]
         selected_option_id = answers.get(question_id)
         assert selected_option_id is not None, events
@@ -3370,7 +3391,7 @@ async def _progress_edit_session_to_plan(
         }
 
     raise AssertionError(
-        "Edit session did not reach a plan within the expected number of turns."
+        "AI Builder session did not reach a plan within the expected number of turns."
     )
 
 
@@ -3850,49 +3871,23 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 bearer_token=bearer_token,
                 space_id=space_id,
             )
-            first_events = await _send_builder_message(
+            plan_events = await _progress_builder_session_to_plan(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
-                message=(
+                initial_message=(
                     "Skapa ett flöde som tar en ljudfil, transkriberar den och "
                     "sammanfattar innehållet för en mänsklig läsare."
                 ),
-            )
-            second_events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="PDF-dokument",
-                question_answer={
-                    "question_id": "final_output_mode",
-                    "selected_option_ids": ["pdf_document"],
-                    "selected_values": ["pdf_document"],
-                    "ui_language": "sv",
-                },
-            )
-            requirements_event = next(
-                event
-                for event in second_events
-                if event["event"] == "requirements_summary"
-            )
-            third_events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="Ja, det stämmer. Bygg planen.",
-                question_answer={
-                    "requirements_confirmed": True,
-                    "requirements_version": requirements_event["data"][
-                        "requirements_version"
-                    ],
-                    "ui_language": "sv",
+                structured_answers={
+                    "input_material_mode": "audio",
+                    "flow_input_architecture": "audio_primary_input",
+                    "final_output_mode": "pdf_document",
+                    "post_processing_goal": "summarize_or_overview",
                 },
             )
 
-    assert any(event["event"] == "question" for event in first_events)
-    assert any(event["event"] == "requirements_summary" for event in second_events)
-    assert any(event["event"] == "plan" for event in third_events), third_events
+    assert any(event["event"] == "plan" for event in plan_events), plan_events
 
     plan_id = await _get_latest_plan_id(
         client=client,
@@ -4028,7 +4023,7 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
                 target_kind="edit",
                 flow_id=str(flow_id),
             )
-            plan_events = await _progress_edit_session_to_plan(
+            plan_events = await _progress_builder_session_to_plan(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
@@ -4131,13 +4126,23 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
         plan = await repo.create_plan(
             session_id=builder_session.id,
             tenant_id=builder_session.tenant_id,
-            spec=spec,
-            envelope=_make_plan_envelope(spec),
+            proposal=FlowBuilderProposal(
+                spec=spec,
+                edit_result=_make_builder_edit_result(
+                    spec=spec,
+                    base_flow_revision=flow_revision,
+                ),
+            ),
         )
         await repo.update_plan_status(
             plan_id=plan.id,
             tenant_id=builder_session.tenant_id,
             status=PlanStatus.APPROVED,
+        )
+        await repo.update_session_status_without_send_lease(
+            session_id=builder_session.id,
+            tenant_id=builder_session.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
         )
 
     apply_response = await client.post(
@@ -4262,7 +4267,7 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                 target_kind="edit",
                 flow_id=str(flow_id),
             )
-            plan_events = await _progress_edit_session_to_plan(
+            plan_events = await _progress_builder_session_to_plan(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
@@ -4385,48 +4390,21 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                 bearer_token=bearer_token,
                 space_id=space_id,
             )
-            first_events = await _send_builder_message(
+            events = await _progress_builder_session_to_plan(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
-                message=(
+                initial_message=(
                     "Skapa ett flöde som tar en ljudfil, transkriberar den och "
                     "sammanfattar innehållet för en mänsklig läsare."
                 ),
-            )
-            second_events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="PDF-dokument",
-                question_answer={
-                    "question_id": "final_output_mode",
-                    "selected_option_ids": ["pdf_document"],
-                    "selected_values": ["pdf_document"],
-                    "ui_language": "sv",
+                structured_answers={
+                    "input_material_mode": "audio",
+                    "flow_input_architecture": "audio_primary_input",
+                    "final_output_mode": "pdf_document",
+                    "post_processing_goal": "summarize_or_overview",
                 },
             )
-            requirements_event = next(
-                event
-                for event in second_events
-                if event["event"] == "requirements_summary"
-            )
-            events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="Ja, det stämmer. Bygg planen.",
-                question_answer={
-                    "requirements_confirmed": True,
-                    "requirements_version": requirements_event["data"][
-                        "requirements_version"
-                    ],
-                    "ui_language": "sv",
-                },
-            )
-
-    assert any(event["event"] == "question" for event in first_events)
-    assert any(event["event"] == "requirements_summary" for event in second_events)
 
     plan_event = next((event for event in events if event["event"] == "plan"), None)
     assert plan_event is not None, events
@@ -4457,7 +4435,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_create_mode_strips_invalid_existing_step_ref_and_applies(
+async def test_ai_builder_api_create_mode_invalid_existing_step_ref_returns_typed_bad_request(
     client,
     bearer_token,
     completion_model_factory,
@@ -4488,8 +4466,7 @@ async def test_ai_builder_api_create_mode_strips_invalid_existing_step_ref_and_a
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            spec=spec,
-            envelope=_make_plan_envelope(spec),
+            proposal=FlowBuilderProposal(spec=spec),
         )
         await repo.update_plan_status(
             plan_id=plan.id,
@@ -4507,20 +4484,10 @@ async def test_ai_builder_api_create_mode_strips_invalid_existing_step_ref_and_a
         json={},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
-    assert apply_response.status_code == 200, apply_response.text
+    assert apply_response.status_code == 400, apply_response.text
     payload = apply_response.json()
-    assert payload["steps_created"] == 1
-    assert payload["steps_updated"] == 0
-    assert payload["steps_removed"] == 0
-
-    flow_response = await client.get(
-        f"/api/v1/flows/{payload['flow_id']}/",
-        headers={"Authorization": f"Bearer {bearer_token}"},
-    )
-    assert flow_response.status_code == 200, flow_response.text
-    flow_payload = flow_response.json()
-    assert len(flow_payload["steps"]) == 1
-    assert flow_payload["steps"][0]["step_order"] == 1
+    assert payload["code"] == "invalid_existing_step_ref"
+    assert payload["intric_error_code"] == 9007
 
 
 @pytest.mark.asyncio

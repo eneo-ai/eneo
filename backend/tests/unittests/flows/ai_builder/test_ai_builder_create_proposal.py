@@ -21,7 +21,7 @@ from intric.flows.ai_builder.ai_builder_create_proposal import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
-    PlannerPlanEnvelope,
+    FlowBuilderProposal,
     PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
@@ -150,9 +150,7 @@ def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
         session_id=uuid4(),
         tenant_id=uuid4(),
         status=PlanStatus.PROPOSED,
-        spec=spec,
-        spec_hash=spec.spec_hash(),
-        envelope=PlannerPlanEnvelope(spec=spec),
+        proposal=FlowBuilderProposal(spec=spec),
     )
 
 

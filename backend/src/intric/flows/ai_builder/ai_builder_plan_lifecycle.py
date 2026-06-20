@@ -239,7 +239,12 @@ class AIBuilderPlanLifecycle:
         revised_edit_result = (plan.edit_result or BuilderPlanEditResult()).model_copy(
             update={"description_override_manual": True}
         )
-        envelope = plan.envelope.model_copy(update={"reasoning": None})
+        revised_proposal = plan.proposal.model_copy(
+            update={
+                "edit_result": revised_edit_result,
+                "reasoning": None,
+            }
+        )
 
         async with self.repo.savepoint():
             await self.repo.supersede_existing_plans(
@@ -249,10 +254,7 @@ class AIBuilderPlanLifecycle:
             new_plan = await self.repo.create_plan(
                 session_id=plan.session_id,
                 tenant_id=self.user.tenant_id,
-                spec=plan.spec,
-                envelope=envelope,
-                resource_bindings=plan.resource_bindings,
-                edit_result=revised_edit_result,
+                proposal=revised_proposal,
             )
             await self.repo.update_session_latest_plan_without_send_lease(
                 session_id=plan.session_id,

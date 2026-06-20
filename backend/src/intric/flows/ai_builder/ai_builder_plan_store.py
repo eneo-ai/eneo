@@ -9,9 +9,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
+    FlowBuilderProposal,
     LintSeverity,
     LintWarning,
-    PlannerPlanEnvelope,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class StoredPlanResult:
     plan: BuilderPlan
-    envelope: PlannerPlanEnvelope
+    proposal: FlowBuilderProposal
     new_planning_state_version: int
 
 
@@ -65,20 +65,24 @@ def _is_user_visible_lint_warning(warning: LintWarning) -> bool:
     return warning.severity == LintSeverity.WARNING
 
 
-def build_plan_envelope(
+def build_flow_builder_proposal(
     *,
     spec: FlowDraftSpecCore,
     assumptions: list[str],
     plan_rationale: str | None,
     reasoning: str | None,
     validation: SpecValidationResult,
-) -> PlannerPlanEnvelope:
-    return PlannerPlanEnvelope(
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
+    edit_result: BuilderPlanEditResult | None = None,
+) -> FlowBuilderProposal:
+    return FlowBuilderProposal(
         spec=spec,
         assumptions=assumptions,
         plan_rationale=plan_rationale,
         reasoning=reasoning,
         lint_warnings=build_lint_warnings(validation),
+        resource_bindings=resource_bindings,
+        edit_result=edit_result,
     )
 
 
@@ -102,12 +106,14 @@ async def store_plan_and_update_conversation(
     edit_result: BuilderPlanEditResult | None = None,
     flow: "Flow | None" = None,
 ) -> StoredPlanResult:
-    envelope = build_plan_envelope(
+    proposal = build_flow_builder_proposal(
         spec=spec,
         assumptions=assumptions,
         plan_rationale=plan_rationale,
         reasoning=reasoning,
         validation=validation,
+        resource_bindings=resource_bindings,
+        edit_result=edit_result,
     )
     append_plan_messages(
         conversation=conversation,
@@ -126,10 +132,7 @@ async def store_plan_and_update_conversation(
         plan = await _persist_active_send_plan_proposal(
             repo=repo,
             turn=turn,
-            spec=spec,
-            envelope=envelope,
-            resource_bindings=resource_bindings,
-            edit_result=edit_result,
+            proposal=proposal,
         )
         persisted = await append_session_messages(
             repo=repo,
@@ -149,7 +152,7 @@ async def store_plan_and_update_conversation(
         )
     return StoredPlanResult(
         plan=plan,
-        envelope=envelope,
+        proposal=proposal,
         new_planning_state_version=new_version,
     )
 
@@ -158,10 +161,7 @@ async def _persist_active_send_plan_proposal(
     *,
     repo: AIBuilderRepository,
     turn: SessionSendTurn,
-    spec: FlowDraftSpecCore,
-    envelope: PlannerPlanEnvelope,
-    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result: BuilderPlanEditResult | None = None,
+    proposal: FlowBuilderProposal,
 ) -> BuilderPlan:
     await repo.supersede_existing_plans(
         session_id=turn.session_id,
@@ -170,10 +170,7 @@ async def _persist_active_send_plan_proposal(
     plan = await repo.create_plan(
         session_id=turn.session_id,
         tenant_id=turn.tenant_id,
-        spec=spec,
-        envelope=envelope,
-        resource_bindings=resource_bindings,
-        edit_result=edit_result,
+        proposal=proposal,
     )
     await repo.update_session_latest_plan(
         session_id=turn.session_id,
