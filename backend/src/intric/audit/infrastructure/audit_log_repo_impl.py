@@ -8,7 +8,6 @@ from typing import Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
@@ -361,7 +360,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         result = await self.session.execute(query)
-        return cast("CursorResult[Any]", result).rowcount
+        return result.rowcount
 
     @override
     async def hard_delete_old_logs(
@@ -398,7 +397,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             batch_subquery = base_subquery.limit(RETENTION_BATCH_SIZE)
             query = sa.delete(AuditLogTable).where(AuditLogTable.id.in_(batch_subquery))
             result = await self.session.execute(query)
-            batch_deleted = cast("CursorResult[Any]", result).rowcount
+            batch_deleted = result.rowcount
 
             if batch_deleted == 0:
                 break

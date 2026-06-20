@@ -153,7 +153,7 @@ def add_exception_handlers(app: FastAPI):
         if not is_active_display_name_violation(integrity_exc):
             raise exc
 
-        request_id = _extract_request_id(request)
+        request_id = extract_request_id(request)
         logger.warning(
             "%s %s → 409: display name collision (DB index)",
             request.method,

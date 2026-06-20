@@ -1,8 +1,7 @@
-from typing import TYPE_CHECKING, Any, Generic, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Type, TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult
 from sqlalchemy.future import select
 from sqlalchemy.sql.base import ExecutableOption
 
@@ -93,7 +92,7 @@ class BaseRepoImpl(Generic[T, DB, M]):
     async def delete(self, id: "UUID") -> bool:
         stmt = sa.delete(self._db_model).where(self._db_model.id == id)
         result = await self.session.execute(stmt)
-        return (cast("CursorResult[Any]", result).rowcount or 0) > 0
+        return (result.rowcount or 0) > 0
 
     async def lookup(self, keys: list[UUID]) -> list[Entity]:
         if not keys:

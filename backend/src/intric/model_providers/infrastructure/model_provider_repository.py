@@ -1,8 +1,7 @@
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult
 
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.exceptions import NotFoundException
@@ -116,7 +115,7 @@ class ModelProviderRepository:
 
         result = await self.session.execute(stmt)
 
-        if cast("CursorResult[Any]", result).rowcount == 0:
+        if result.rowcount == 0:
             raise NotFoundException(f"ModelProvider {provider_id} not found")
 
     async def count_models_for_provider(self, provider_id: UUID) -> int:

@@ -11,7 +11,6 @@ import redis.asyncio as aioredis
 import sqlalchemy as sa
 from arq import Retry
 from dependency_injector import providers
-from sqlalchemy import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.model_providers_table import ModelProviders
@@ -616,7 +615,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         )
                     )
                     result = await session.execute(stmt)
-                    if cast("CursorResult[Any]", result).rowcount == 0:
+                    if result.rowcount == 0:
                         logger.debug(
                             "Duplicate crawl skip ignored; job status already changed",
                             extra={

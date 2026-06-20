@@ -1,8 +1,7 @@
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult
 from typing_extensions import override
 
 from intric.database.tables.tenant_sharepoint_app_table import (
@@ -94,4 +93,4 @@ class TenantSharePointAppRepositoryImpl(
         result = await self.session.execute(stmt)
         await self.session.commit()
 
-        return cast("CursorResult[Any]", result).rowcount > 0
+        return result.rowcount > 0

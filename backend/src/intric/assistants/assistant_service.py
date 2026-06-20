@@ -623,7 +623,9 @@ class AssistantService:
             )
 
         completion_model = NOT_PROVIDED
+        requested_completion_model_id: UUID | None = None
         if is_provided(completion_model_id):
+            requested_completion_model_id = completion_model_id
             if completion_model_id is not None:
                 if not space.is_completion_model_available(completion_model_id):
                     raise BadRequestException(
@@ -729,7 +731,7 @@ class AssistantService:
         await self._ensure_governance_policy_allows_update(
             space=space,
             assistant=assistant,
-            completion_model_id=completion_model_id,
+            completion_model_id=requested_completion_model_id,
             mcp_server_ids=mcp_server_ids,
             prompt_changing=False,
             effective_config=mcp_effective_config,

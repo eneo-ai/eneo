@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult, func, or_, update
+from sqlalchemy import func, or_, update
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
@@ -273,7 +273,7 @@ class AppTemplateRepository:
         result = await self.session.execute(stmt)
         await self.session.flush()
 
-        return cast("CursorResult[Any]", result).rowcount > 0
+        return result.rowcount > 0
 
     async def get_deleted_for_tenant(self, tenant_id: "UUID") -> list["AppTemplate"]:
         """Get soft-deleted templates for audit trail view.

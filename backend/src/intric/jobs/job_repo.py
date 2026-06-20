@@ -1,9 +1,7 @@
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
@@ -80,7 +78,7 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return cast("CursorResult[Any]", result).rowcount > 0
+        return result.rowcount > 0
 
     async def mark_job_failed_if_running(self, id: UUID, error_message: str) -> int:
         """Atomically mark a job as FAILED only if it's currently IN_PROGRESS or QUEUED.
@@ -108,7 +106,7 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return cast("CursorResult[Any]", result).rowcount
+        return result.rowcount
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)

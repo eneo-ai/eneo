@@ -1,8 +1,7 @@
-from typing import Any, List, cast
+from typing import Any, List
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CursorResult
 from sqlalchemy.orm import defer, selectinload
 
 from intric.database.database import AsyncSession
@@ -627,7 +626,7 @@ class InfoBlobRepository:
         )
 
         result = await self.session.execute(stmt)
-        return cast("CursorResult[Any]", result).rowcount
+        return result.rowcount
 
     async def get_content_hash(self, website_id: UUID, title: str) -> bytes | None:
         """Get content hash for a specific page.
