@@ -76,11 +76,19 @@ def test_flow_jsonb_owner_registry_has_explicit_deferred_inventory_rows() -> Non
     }
 
     assert deferred_rows == {
-        ("builder_plans", "edit_result_json"),
-        ("builder_plans", "envelope_json"),
-        ("builder_plans", "resource_bindings_json"),
-        ("builder_plans", "spec_json"),
         ("builder_sessions", "conversation"),
         ("builder_sessions", "planning_state_jsonb"),
         ("module_registry", "metadata_json"),
     }
+
+
+def test_builder_plan_proposal_json_has_typed_owner() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[("builder_plans", "proposal_json")]
+
+    assert owner.envelope_name == "FlowBuilderProposal"
+    assert owner.storage_category is FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT
+    assert (
+        owner.schema_version_policy
+        is FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE
+    )
+    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE

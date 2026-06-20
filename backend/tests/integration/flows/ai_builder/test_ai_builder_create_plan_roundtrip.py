@@ -4,6 +4,7 @@ from uuid import UUID
 
 import pytest
 
+from intric.database.tables.flow_tables import BuilderPlans
 from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     TargetKind,
@@ -55,7 +56,7 @@ def _make_spec(flow_name: str = "Create plan roundtrip") -> FlowDraftSpecCore:
 
 
 @pytest.mark.asyncio
-async def test_create_plan_roundtrips_spec_json_and_envelope_metadata(
+async def test_create_plan_roundtrips_proposal_json(
     db_container,
 ) -> None:
     space_id = await _create_space(
@@ -63,7 +64,15 @@ async def test_create_plan_roundtrips_spec_json_and_envelope_metadata(
         space_name="AI Builder create_plan roundtrip",
     )
     spec = _make_spec("Canonical create_plan spec")
+    proposal = FlowBuilderProposal(
+        spec=spec,
+        assumptions=["Runtime input is plain text."],
+        risk_acknowledgments=["Summary is not fact-checked."],
+        reasoning="Use a single text step.",
+        plan_rationale="Direct repository round-trip.",
+    )
     expected_spec_json = spec.model_dump(mode="json")
+    expected_stored_spec_json = proposal.storage_json()["spec"]
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -78,18 +87,22 @@ async def test_create_plan_roundtrips_spec_json_and_envelope_metadata(
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            proposal=FlowBuilderProposal(
-                spec=spec,
-                assumptions=["Runtime input is plain text."],
-                risk_acknowledgments=["Summary is not fact-checked."],
-                reasoning="Use a single text step.",
-                plan_rationale="Direct repository round-trip.",
-            ),
+            proposal=proposal,
         )
+        stored_plan = await container.session().get(BuilderPlans, plan.id)
+        assert stored_plan is not None
+        stored_proposal_json = stored_plan.proposal_json
 
     assert plan.session_id == session.id
     assert plan.tenant_id == user.tenant_id
     assert plan.status.value == "proposed"
+    assert stored_proposal_json["spec"] == expected_stored_spec_json
+    assert stored_proposal_json["assumptions"] == ["Runtime input is plain text."]
+    assert stored_proposal_json["risk_acknowledgments"] == [
+        "Summary is not fact-checked."
+    ]
+    assert stored_proposal_json["reasoning"] == "Use a single text step."
+    assert stored_proposal_json["plan_rationale"] == "Direct repository round-trip."
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -164,7 +177,9 @@ async def test_create_plan_roundtrips_document_body_writer_refs(
 
 
 @pytest.mark.asyncio
-async def test_create_plan_roundtrips_resource_bindings_json(db_container) -> None:
+async def test_create_plan_roundtrips_resource_bindings_in_proposal_json(
+    db_container,
+) -> None:
     space_id = await _create_space(
         db_container=db_container,
         space_name="AI Builder resource binding roundtrip",
@@ -193,6 +208,10 @@ async def test_create_plan_roundtrips_resource_bindings_json(db_container) -> No
             )
         ],
     )
+    expected_proposal_json = FlowBuilderProposal(
+        spec=spec,
+        resource_bindings=(binding,),
+    ).storage_json()
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -207,15 +226,19 @@ async def test_create_plan_roundtrips_resource_bindings_json(db_container) -> No
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            proposal=FlowBuilderProposal(
-                spec=spec,
-                resource_bindings=(binding,),
-            ),
+            proposal=FlowBuilderProposal(spec=spec, resource_bindings=(binding,)),
         )
+        stored_plan = await container.session().get(BuilderPlans, plan.id)
+        assert stored_plan is not None
+        stored_proposal_json = stored_plan.proposal_json
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         user = container.user()
         fetched = await repo.get_plan(plan_id=plan.id, tenant_id=user.tenant_id)
 
+    assert (
+        stored_proposal_json["resource_bindings"]
+        == expected_proposal_json["resource_bindings"]
+    )
     assert fetched.resource_bindings == (binding,)

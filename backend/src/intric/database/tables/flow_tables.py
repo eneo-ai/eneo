@@ -2213,7 +2213,7 @@ class BuilderSessionFiles(BaseCrossReference):
 
 
 class BuilderPlans(BasePublic):
-    """Stores Flow AI Builder proposed plans. Writer: Flow AI Builder planner. Purpose: preserve generated specs, resource bindings, envelopes, and edit results."""
+    """Stores Flow AI Builder proposed plans. Writer: Flow AI Builder planner. Purpose: preserve one canonical proposal snapshot."""
 
     session_id: Mapped[UUID] = mapped_column(
         ForeignKey("builder_sessions.id", ondelete="CASCADE"),
@@ -2230,21 +2230,12 @@ class BuilderPlans(BasePublic):
         nullable=False,
         server_default="proposed",
     )
-    spec_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    envelope_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    resource_bindings_json: Mapped[list[dict[str, Any]]] = mapped_column(
+    proposal_json: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
-        server_default=sa.text("'[]'::jsonb"),
-        comment=(
-            "Plan-scoped binding snapshot taken at proposal; transferred to "
-            "FlowResourceBindings on apply."
-        ),
+        comment="Serialized FlowBuilderProposal.",
     )
-    edit_result_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=True
-    )
+    spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("id", "tenant_id", name="uq_builder_plans_id_tenant_id"),

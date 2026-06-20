@@ -483,54 +483,15 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
     ),
     _owner(
         "builder_plans",
-        "spec_json",
+        "proposal_json",
         owner_module="intric.flows.ai_builder.ai_builder_repo",
-        envelope_name="AiBuilderPlanSpec",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
+        envelope_name="FlowBuilderProposal",
+        storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
         rationale=(
-            "AI Builder plan specs are deferred from Flow-proper refactoring but "
-            "remain explicit inventory because they share the table module."
-        ),
-    ),
-    _owner(
-        "builder_plans",
-        "envelope_json",
-        owner_module="intric.flows.ai_builder.ai_builder_repo",
-        envelope_name="AiBuilderPlanEnvelope",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
-        rationale=(
-            "AI Builder envelopes are outside this slice yet must be visible to "
-            "future data-model review instead of hidden in tests."
-        ),
-    ),
-    _owner(
-        "builder_plans",
-        "resource_bindings_json",
-        owner_module="intric.flows.ai_builder.ai_builder_repo",
-        envelope_name="AiBuilderPlanResourceBindings",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
-        rationale=(
-            "Plan resource bindings are copied into Flow resource bindings on "
-            "apply, so this deferred row flags a future consolidation review."
-        ),
-    ),
-    _owner(
-        "builder_plans",
-        "edit_result_json",
-        owner_module="intric.flows.ai_builder.ai_builder_repo",
-        envelope_name="AiBuilderEditResult",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
-        rationale=(
-            "Edit result snapshots are AI Builder-specific but deliberately kept "
-            "in the same no-exclusion JSONB inventory."
+            "Builder plans persist one immutable proposal snapshot validated "
+            "through FlowBuilderProposal; spec_hash rejects silent row drift."
         ),
     ),
 )

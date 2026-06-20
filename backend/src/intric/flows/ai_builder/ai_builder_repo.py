@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from pydantic import TypeAdapter
 from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,13 +30,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     ConversationMessage,
     FlowBuilderProposal,
-    PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
     TargetKind,
-)
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -62,12 +57,10 @@ from intric.flows.ai_builder.planning_state_builder import (
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
-from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
-_LOCAL_RESOURCE_BINDING_ADAPTER = TypeAdapter(LocalResourceBinding)
 _FLOW_DRAFT_SPEC_FLOW_NAME_FIELD = "flow_name"
 _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY = (
     FlowDraftSpecCore.model_fields[_FLOW_DRAFT_SPEC_FLOW_NAME_FIELD].serialization_alias
@@ -187,7 +180,7 @@ class AIBuilderRepository:
         limit: int = 20,
     ) -> list[tuple[BuilderSession, str | None]]:
         async with self._transaction():
-            draft_title_label = BuilderPlans.spec_json[
+            draft_title_label = BuilderPlans.proposal_json["spec"][
                 _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY
             ].astext.label("draft_title")
             stmt = (
@@ -851,17 +844,9 @@ class AIBuilderRepository:
                 "session_id": session_id,
                 "tenant_id": tenant_id,
                 "status": PlanStatus.PROPOSED.value,
-                "spec_json": proposal.spec.model_dump(mode="json"),
+                "proposal_json": proposal.storage_json(),
                 "spec_hash": proposal.spec_hash,
-                "envelope_json": _envelope_json_for_storage(proposal.envelope),
-                "resource_bindings_json": _resource_bindings_json_for_storage(
-                    proposal.resource_bindings
-                ),
             }
-            if proposal.edit_result is not None:
-                values["edit_result_json"] = proposal.edit_result.model_dump(
-                    mode="json", exclude_none=True
-                )
             stmt = insert(BuilderPlans).values(**values).returning(BuilderPlans)
             row = (await self.session.execute(stmt)).scalar_one()
             return _plan_from_row(row)
@@ -1169,11 +1154,8 @@ class _PlanRowData(TypedDict):
     session_id: UUID
     tenant_id: UUID
     status: str
-    spec_json: dict[str, object]
+    proposal_json: dict[str, object]
     spec_hash: str
-    envelope_json: dict[str, object]
-    resource_bindings_json: list[dict[str, object]]
-    edit_result_json: object | None
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -1227,13 +1209,8 @@ def _plan_row_data(row: Any) -> _PlanRowData:
             "session_id": cast(UUID, mapping["session_id"]),
             "tenant_id": cast(UUID, mapping["tenant_id"]),
             "status": cast(str, mapping["status"]),
-            "spec_json": cast(dict[str, object], mapping["spec_json"]),
+            "proposal_json": cast(dict[str, object], mapping["proposal_json"]),
             "spec_hash": cast(str, mapping["spec_hash"]),
-            "envelope_json": cast(dict[str, object], mapping["envelope_json"]),
-            "resource_bindings_json": cast(
-                list[dict[str, object]], mapping["resource_bindings_json"]
-            ),
-            "edit_result_json": mapping.get("edit_result_json"),
             "created_at": cast(datetime | None, mapping.get("created_at")),
             "updated_at": cast(datetime | None, mapping.get("updated_at")),
         }
@@ -1243,13 +1220,8 @@ def _plan_row_data(row: Any) -> _PlanRowData:
         "session_id": cast(UUID, row.session_id),
         "tenant_id": cast(UUID, row.tenant_id),
         "status": cast(str, row.status),
-        "spec_json": cast(dict[str, object], row.spec_json),
+        "proposal_json": cast(dict[str, object], row.proposal_json),
         "spec_hash": cast(str, row.spec_hash),
-        "envelope_json": cast(dict[str, object], row.envelope_json),
-        "resource_bindings_json": cast(
-            list[dict[str, object]], row.resource_bindings_json
-        ),
-        "edit_result_json": getattr(row, "edit_result_json", None),
         "created_at": cast(datetime | None, row.created_at),
         "updated_at": cast(datetime | None, row.updated_at),
     }
@@ -1284,59 +1256,21 @@ def _session_from_row(row: Any) -> BuilderSession:
     )
 
 
-def _envelope_json_for_storage(envelope: PlannerPlanEnvelope) -> dict[str, object]:
-    """Serialize envelope for `builder_plans.envelope_json`.
-
-    The spec duplicate is stripped so `spec_json` stays the single source of
-    truth. `_plan_from_row` re-hydrates the spec on read.
-    """
-    return envelope.model_dump(mode="json", exclude={"spec"})
-
-
-def _resource_bindings_json_for_storage(
-    bindings: tuple[LocalResourceBinding, ...],
-) -> list[dict[str, object]]:
-    return [binding.model_dump(mode="json", round_trip=True) for binding in bindings]
-
-
-def _resource_bindings_from_json(
-    resource_bindings_json: list[dict[str, object]],
-) -> tuple[LocalResourceBinding, ...]:
-    return tuple(
-        # JSONB rehydrates UUIDs/enums as JSON primitives; validation returns
-        # the strict domain model before the value leaves the repository.
-        _LOCAL_RESOURCE_BINDING_ADAPTER.validate_python(binding_json, strict=False)
-        for binding_json in resource_bindings_json
-    )
-
-
 def _plan_from_row(row: Any) -> BuilderPlan:
     """Convert a DB row/mapping to a BuilderPlan domain model."""
     data = _plan_row_data(row)
-
-    spec = FlowDraftSpecCore.model_validate(data["spec_json"])
-    edit_result = (
-        BuilderPlanEditResult.model_validate(data["edit_result_json"])
-        if data["edit_result_json"] is not None
-        else None
-    )
-    proposal_data = {k: v for k, v in data["envelope_json"].items() if k != "spec"}
-    proposal_data.update(
-        {
-            "spec": spec,
-            "resource_bindings": _resource_bindings_from_json(
-                data["resource_bindings_json"]
-            ),
-            "edit_result": edit_result,
-        }
-    )
+    proposal = FlowBuilderProposal.model_validate(data["proposal_json"], strict=False)
+    if proposal.spec_hash != data["spec_hash"]:
+        raise ValueError(
+            "Persisted builder plan spec_hash does not match proposal_json"
+        )
 
     return BuilderPlan(
         id=data["id"],
         session_id=data["session_id"],
         tenant_id=data["tenant_id"],
         status=PlanStatus(data["status"]),
-        proposal=FlowBuilderProposal.model_validate(proposal_data),
+        proposal=proposal,
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )

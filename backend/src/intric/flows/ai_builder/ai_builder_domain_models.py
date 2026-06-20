@@ -168,6 +168,9 @@ class FlowBuilderProposal(BaseModel):
     def spec_hash(self) -> str:
         return self.spec.spec_hash()
 
+    def storage_json(self) -> FlowPersistedJsonObject:
+        return self.model_dump(mode="json", exclude_none=True, round_trip=True)
+
     @property
     def envelope(self) -> PlannerPlanEnvelope:
         return PlannerPlanEnvelope(

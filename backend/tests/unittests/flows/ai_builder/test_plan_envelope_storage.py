@@ -1,10 +1,4 @@
-"""Storage-boundary tests for PlannerPlanEnvelope / builder_plans rows.
-
-The envelope carries a `spec` at the API layer, but the stored JSONB shape is
-metadata-only — spec lives in `spec_json`, not `envelope_json`. These tests
-pin the slim-on-write / rehydrate-on-read contract that prevents silent drift
-between the two columns.
-"""
+"""Storage-boundary tests for FlowBuilderProposal / builder_plans rows."""
 
 from __future__ import annotations
 
@@ -12,12 +6,14 @@ from datetime import datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from intric.flows.ai_builder.ai_builder_api_models import PlanResponse
 from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     LintSeverity,
     LintWarning,
-    PlannerPlanEnvelope,
     PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
@@ -28,9 +24,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_repo import (
-    _envelope_json_for_storage,
     _plan_from_row,
-    _resource_bindings_json_for_storage,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -71,21 +65,16 @@ def _make_spec(flow_name: str = "Spec A") -> FlowDraftSpecCore:
 
 def _row(
     *,
-    spec: FlowDraftSpecCore,
-    envelope_json: dict[str, object],
-    resource_bindings_json: list[dict[str, object]] | None = None,
-    edit_result_json: dict[str, object] | None = None,
+    proposal: FlowBuilderProposal,
+    spec_hash: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
         session_id=uuid4(),
         tenant_id=uuid4(),
         status=PlanStatus.PROPOSED.value,
-        spec_json=spec.model_dump(mode="json"),
-        spec_hash=spec.spec_hash(),
-        envelope_json=envelope_json,
-        resource_bindings_json=resource_bindings_json or [],
-        edit_result_json=edit_result_json,
+        proposal_json=proposal.storage_json(),
+        spec_hash=spec_hash or proposal.spec_hash,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -114,38 +103,21 @@ def _compiled_edit_result(spec: FlowDraftSpecCore) -> CompiledEditResult:
     )
 
 
-def test_envelope_json_for_storage_drops_spec() -> None:
-    spec = _make_spec()
-    envelope = PlannerPlanEnvelope(spec=spec, assumptions=["A1"], plan_rationale="why")
-    stored = _envelope_json_for_storage(envelope)
-    assert "spec" not in stored
-    assert stored["assumptions"] == ["A1"]
-    assert stored["plan_rationale"] == "why"
-    assert "resource_bindings" not in stored
-    assert "resource_bindings_json" not in stored
-
-
 def test_plan_response_does_not_expose_resource_bindings() -> None:
     assert "resource_bindings" not in PlanResponse.model_fields
     assert "resource_bindings_json" not in PlanResponse.model_fields
 
 
-def test_plan_from_row_rehydrates_spec_from_spec_json() -> None:
-    spec = _make_spec("Canonical from spec_json")
-    envelope_json = {
-        "assumptions": ["user wants text"],
-        "lint_warnings": [],
-        "risk_acknowledgments": [],
-        "reasoning": None,
-        "plan_rationale": None,
-    }
-    plan = _plan_from_row(_row(spec=spec, envelope_json=envelope_json))
-    assert plan.envelope.spec.flow_name == "Canonical from spec_json"
-    assert plan.spec.flow_name == "Canonical from spec_json"
+def test_plan_from_row_rehydrates_spec_from_proposal_json() -> None:
+    spec = _make_spec("Canonical from proposal_json")
+    proposal = FlowBuilderProposal(spec=spec, assumptions=["user wants text"])
+    plan = _plan_from_row(_row(proposal=proposal))
+    assert plan.envelope.spec.flow_name == "Canonical from proposal_json"
+    assert plan.spec.flow_name == "Canonical from proposal_json"
     assert plan.spec.spec_hash() == plan.envelope.spec.spec_hash()
 
 
-def test_plan_from_row_rehydrates_complete_proposal_from_columns() -> None:
+def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None:
     spec = _make_spec("Proposal roundtrip")
     binding = _binding()
     compiled = _compiled_edit_result(spec)
@@ -155,26 +127,6 @@ def test_plan_from_row_rehydrates_complete_proposal_from_columns() -> None:
         message="Review the generated step.",
         severity=LintSeverity.WARNING,
     )
-    stored_edit_result = BuilderPlanEditResult(compiled_edit=compiled).model_dump(
-        mode="json",
-        exclude_none=True,
-    )
-
-    plan = _plan_from_row(
-        _row(
-            spec=spec,
-            envelope_json={
-                "assumptions": ["The input is plain text."],
-                "lint_warnings": [warning.model_dump(mode="json")],
-                "risk_acknowledgments": ["Generated summaries need review."],
-                "reasoning": "Internal planning note.",
-                "plan_rationale": "One-step summary flow.",
-            },
-            resource_bindings_json=_resource_bindings_json_for_storage((binding,)),
-            edit_result_json=stored_edit_result,
-        )
-    )
-
     expected = FlowBuilderProposal(
         spec=spec,
         assumptions=["The input is plain text."],
@@ -185,6 +137,13 @@ def test_plan_from_row_rehydrates_complete_proposal_from_columns() -> None:
         resource_bindings=(binding,),
         edit_result=BuilderPlanEditResult(compiled_edit=compiled),
     )
+
+    plan = _plan_from_row(
+        _row(
+            proposal=expected,
+        )
+    )
+
     assert plan.proposal == expected
     assert plan.spec == expected.spec
     assert plan.spec_hash == expected.spec_hash
@@ -198,15 +157,7 @@ def test_plan_from_row_rehydrates_resource_bindings() -> None:
     binding = _binding()
     plan = _plan_from_row(
         _row(
-            spec=spec,
-            envelope_json={
-                "assumptions": [],
-                "lint_warnings": [],
-                "risk_acknowledgments": [],
-                "reasoning": None,
-                "plan_rationale": None,
-            },
-            resource_bindings_json=_resource_bindings_json_for_storage((binding,)),
+            proposal=FlowBuilderProposal(spec=spec, resource_bindings=(binding,)),
         )
     )
 
@@ -217,44 +168,31 @@ def test_plan_from_row_rehydrates_resource_bindings() -> None:
 def test_plan_from_row_rehydrates_populated_edit_result() -> None:
     spec = _make_spec("Edit result roundtrip")
     compiled = _compiled_edit_result(spec)
-    stored_edit_result = BuilderPlanEditResult(compiled_edit=compiled).model_dump(
-        mode="json",
-        exclude_none=True,
-    )
+    edit_result = BuilderPlanEditResult(compiled_edit=compiled)
 
     plan = _plan_from_row(
         _row(
-            spec=spec,
-            envelope_json={
-                "assumptions": [],
-                "lint_warnings": [],
-                "risk_acknowledgments": [],
-                "reasoning": None,
-                "plan_rationale": None,
-            },
-            edit_result_json=stored_edit_result,
+            proposal=FlowBuilderProposal(spec=spec, edit_result=edit_result),
         )
     )
 
-    assert plan.edit_result == BuilderPlanEditResult(compiled_edit=compiled)
+    assert plan.edit_result == edit_result
 
 
-def test_plan_from_row_ignores_legacy_envelope_spec_copy() -> None:
-    """Legacy rows may still carry a stale `spec` inside envelope_json.
+def test_plan_from_row_rejects_unknown_proposal_json_fields() -> None:
+    proposal = FlowBuilderProposal(spec=_make_spec())
+    row = _row(proposal=proposal)
+    row.proposal_json["legacy_extra"] = True
 
-    `spec_json` is the single source of truth — the envelope.spec that the
-    consumer sees must match spec_json, never the stale duplicate.
-    """
-    canonical = _make_spec("Canonical")
-    stale = _make_spec("Stale duplicate")
-    envelope_json = {
-        "spec": stale.model_dump(mode="json"),
-        "assumptions": [],
-        "lint_warnings": [],
-        "risk_acknowledgments": [],
-        "reasoning": None,
-        "plan_rationale": None,
-    }
-    plan = _plan_from_row(_row(spec=canonical, envelope_json=envelope_json))
-    assert plan.envelope.spec.flow_name == "Canonical"
-    assert plan.spec.flow_name == "Canonical"
+    with pytest.raises(ValidationError, match="legacy_extra"):
+        _plan_from_row(row)
+
+
+def test_plan_from_row_rejects_mismatched_stored_spec_hash() -> None:
+    proposal = FlowBuilderProposal(spec=_make_spec())
+
+    with pytest.raises(
+        ValueError,
+        match="Persisted builder plan spec_hash does not match proposal_json",
+    ):
+        _plan_from_row(_row(proposal=proposal, spec_hash="stale"))
