@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
     flow_step_to_authoring_spec,
+    flow_steps_to_authoring_specs,
     merge_assistant_specs,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
@@ -776,7 +777,9 @@ def _build_description_advisories(
     if not current_steps or not compiled_steps or not current_description:
         return []
 
-    old_sig = FlowSemanticSignature.from_steps(_flow_steps_to_step_specs(current_steps))
+    old_sig = FlowSemanticSignature.from_steps(
+        flow_steps_to_authoring_specs(current_steps)
+    )
     new_sig = FlowSemanticSignature.from_steps(compiled_steps)
 
     if not old_sig.has_semantic_change(new_sig):
@@ -815,22 +818,6 @@ def _build_primary_input_shadow_advisories(
             severity="info",
             field="form_fields",
         )
-    ]
-
-
-def _flow_steps_to_step_specs(steps: list[FlowStep]) -> list[StepSpec]:
-    """Convert FlowSteps to minimal StepSpecs for signature extraction."""
-    return [
-        StepSpec(
-            plan_step_ref=f"existing_step_{s.step_order}",
-            name=s.user_description or f"Step {s.step_order}",
-            assistant_spec=AssistantSpec(instructions=""),
-            input_source=InputSource(s.input_source),
-            input_type=InputType(s.input_type),
-            output_mode=OutputMode(s.output_mode),
-            output_type=OutputType(s.output_type),
-        )
-        for s in steps
     ]
 
 

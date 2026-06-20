@@ -105,6 +105,17 @@ def flow_step_to_authoring_spec(
     )
 
 
+def flow_steps_to_authoring_specs(steps: list[FlowStep]) -> list[StepSpec]:
+    # Use builder StepSpec vocabulary for current-flow signature comparison.
+    return [
+        flow_step_to_authoring_spec(
+            step,
+            plan_ref=f"existing_step_{step.step_order}",
+        )
+        for step in steps
+    ]
+
+
 def compile_ordered_edit_proposal(
     *,
     base_spec: FlowDraftSpecCore,
@@ -348,6 +359,7 @@ __all__ = [
     "apply_existing_step_patch",
     "compile_ordered_edit_proposal",
     "flow_step_to_authoring_spec",
+    "flow_steps_to_authoring_specs",
     "merge_assistant_spec_patch",
     "merge_assistant_specs",
 ]

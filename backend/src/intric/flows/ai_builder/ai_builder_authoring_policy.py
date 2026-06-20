@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import re
 
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    flow_steps_to_authoring_specs,
+)
 from intric.flows.application.flow_authoring_command import AIBuilderFlowAuthoringOrigin
 from intric.flows.application.flow_authoring_description_semantics import (
     DescriptionProvenance,
@@ -12,17 +15,10 @@ from intric.flows.application.flow_draft_materialization import FlowDraftChangeS
 from intric.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
-    FlowStep,
     clone_json_object,
 )
 from intric.flows.flow_authoring_spec import (
-    AssistantSpec,
     FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-    StepSpec,
 )
 
 
@@ -74,7 +70,7 @@ def _resolve_flow_description(
 
     try:
         old_sig = FlowSemanticSignature.from_steps(
-            _flow_steps_to_step_specs(current_flow.steps)
+            flow_steps_to_authoring_specs(current_flow.steps)
         )
     except ValueError:
         return spec.flow_description
@@ -87,27 +83,6 @@ def _resolve_flow_description(
         old_output_type=old_sig.terminal_output_type,
         new_output_type=new_sig.terminal_output_type,
     )
-
-
-def _flow_steps_to_step_specs(steps: list[FlowStep]) -> list[StepSpec]:
-    return [
-        StepSpec(
-            plan_step_ref=f"existing_step_{step.step_order}",
-            name=step.user_description or f"Step {step.step_order}",
-            assistant_spec=AssistantSpec(instructions=""),
-            input_source=InputSource(step.input_source.value),
-            input_type=InputType(step.input_type.value),
-            output_mode=OutputMode(step.output_mode.value),
-            output_type=OutputType(step.output_type.value),
-            input_bindings=step.input_bindings,
-            input_contract=step.input_contract,
-            output_contract=step.output_contract,
-            input_config=step.input_config,
-            output_config=step.output_config,
-            mcp_policy=step.mcp_policy,
-        )
-        for step in steps
-    ]
 
 
 def _rewrite_terminal_output_phrase(

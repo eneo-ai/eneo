@@ -129,6 +129,38 @@ async def test_manual_description_override_keeps_current_description() -> None:
     assert description_metadata["last_generated_hash"] is None
 
 
+@pytest.mark.anyio
+async def test_unsupported_current_flow_signature_leaves_description_unchanged() -> (
+    None
+):
+    current_flow = _flow(
+        description="Calls an HTTP source and returns text.",
+        draft_revision=1,
+        steps=[_flow_step(input_source="http_get", output_type="text")],
+    )
+    spec = _spec(
+        flow_description=current_flow.description or "",
+        existing_step_ref="existing_step_1",
+        output_type=OutputType.DOCX,
+    )
+    origin = _origin(spec_hash=spec.spec_hash())
+
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=EditFlowAuthoringCommand(
+            space_id=current_flow.space_id,
+            flow_id=current_flow.id,
+            expected_revision=1,
+            spec=spec,
+            removed_existing_step_refs=frozenset(),
+            origin=origin,
+        ),
+        flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+
+    assert prepared.spec.flow_description == current_flow.description
+
+
 def _spec(
     *,
     flow_description: str = "",
@@ -170,7 +202,11 @@ def _flow(
     )
 
 
-def _flow_step(*, output_type: str) -> FlowStep:
+def _flow_step(
+    *,
+    output_type: str,
+    input_source: str = "flow_input",
+) -> FlowStep:
     return FlowStep(
         id=uuid4(),
         flow_id=uuid4(),
@@ -178,7 +214,7 @@ def _flow_step(*, output_type: str) -> FlowStep:
         assistant_id=uuid4(),
         step_order=1,
         user_description="Step A",
-        input_source="flow_input",
+        input_source=input_source,
         input_type="text",
         output_mode="pass_through",
         output_type=output_type,

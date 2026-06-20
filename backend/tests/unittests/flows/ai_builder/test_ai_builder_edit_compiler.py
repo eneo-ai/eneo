@@ -2282,3 +2282,19 @@ class TestFlowDescriptionSemantics:
         assert any(
             a.code == "flow_description_update_required" for a in result.advisories
         )
+
+    def test_unsupported_current_flow_input_source_still_raises(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                input_source="http_get",
+            ),
+        ]
+
+        with pytest.raises(ValueError):
+            compile_edit_draft(
+                FlowEditDraft(),
+                existing,
+                base_flow_revision=1,
+                flow_description="Calls an HTTP source.",
+            )

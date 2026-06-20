@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     OrderedEditProposal,
     compile_ordered_edit_proposal,
     flow_step_to_authoring_spec,
+    flow_steps_to_authoring_specs,
 )
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.domain.flow import FlowStep
@@ -236,6 +237,48 @@ def test_flow_to_authoring_projection_preserves_authoring_fields() -> None:
     assert projected.input_config == flow_step.input_config
     assert projected.output_config == flow_step.output_config
     assert projected.review_policy == review_policy
+
+
+def test_flow_steps_to_authoring_specs_preserves_signature_vocabulary() -> None:
+    result = flow_steps_to_authoring_specs(
+        [
+            FlowStep(
+                id=uuid4(),
+                flow_id=uuid4(),
+                tenant_id=uuid4(),
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Read input",
+                input_source="all_previous_steps",
+                input_type="json",
+                output_mode="pass_through",
+                output_type="text",
+                mcp_policy="inherit",
+            ),
+            FlowStep(
+                id=uuid4(),
+                flow_id=uuid4(),
+                tenant_id=uuid4(),
+                assistant_id=uuid4(),
+                step_order=2,
+                user_description="Write report",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="template_fill",
+                output_type="docx",
+                mcp_policy="inherit",
+            ),
+        ]
+    )
+
+    assert [step.plan_step_ref for step in result] == [
+        "existing_step_1",
+        "existing_step_2",
+    ]
+    assert result[0].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert result[0].input_type == InputType.JSON
+    assert result[-1].output_mode == OutputMode.TEMPLATE_FILL
+    assert result[-1].output_type == OutputType.DOCX
 
 
 def _base_spec(
