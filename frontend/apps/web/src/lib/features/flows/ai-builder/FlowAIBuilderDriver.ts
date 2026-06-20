@@ -326,13 +326,10 @@ export class FlowAIBuilderDriver {
     if (!this.#state.session) return;
 
     try {
-      const result = (await this.#transport.fetch(
-        FLOW_AI_BUILDER_ROUTES.session,
-        {
-          method: "get",
-          params: { path: { session_id: this.#state.session.session_id } }
-        }
-      )) as AIBuilderSession;
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
+        method: "get",
+        params: { path: { session_id: this.#state.session.session_id } }
+      })) as AIBuilderSession;
       this.#state.session = result;
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
       this.#notify();
@@ -521,13 +518,10 @@ export class FlowAIBuilderDriver {
     this.#notify();
 
     try {
-      await this.#transport.fetch(
-        FLOW_AI_BUILDER_ROUTES.planApprove,
-        {
-          method: "post",
-          params: { path: { plan_id: this.#state.currentPlan.plan_id } }
-        }
-      );
+      await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planApprove, {
+        method: "post",
+        params: { path: { plan_id: this.#state.currentPlan.plan_id } }
+      });
       this.#state.currentPlan = { ...this.#state.currentPlan, status: "approved" };
       this.#notify();
     } catch (e) {
@@ -553,18 +547,15 @@ export class FlowAIBuilderDriver {
     this.#notify();
 
     try {
-      const result = (await this.#transport.fetch(
-        FLOW_AI_BUILDER_ROUTES.planApply,
-        {
-          method: "post",
-          params: { path: { plan_id: this.#state.currentPlan.plan_id } },
-          requestBody: {
-            "application/json": {
-              expected_revision: expectedRevision ?? null
-            }
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planApply, {
+        method: "post",
+        params: { path: { plan_id: this.#state.currentPlan.plan_id } },
+        requestBody: {
+          "application/json": {
+            expected_revision: expectedRevision ?? null
           }
         }
-      )) as ApplyResult;
+      })) as ApplyResult;
       this.#flowId = result.flow_id;
       this.#state.applyResult = result;
       this.#state.applyError = null;
@@ -641,13 +632,10 @@ export class FlowAIBuilderDriver {
   async removeAttachment(fileId: string): Promise<void> {
     if (!this.#state.session) return;
 
-    await this.#transport.fetch(
-      FLOW_AI_BUILDER_ROUTES.sessionAttachments,
-      {
-        method: "delete",
-        params: { path: { session_id: this.#state.session.session_id, file_id: fileId } }
-      }
-    );
+    await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionAttachments, {
+      method: "delete",
+      params: { path: { session_id: this.#state.session.session_id, file_id: fileId } }
+    });
 
     if (this.#state.session.attachments) {
       this.#state.session.attachments = this.#state.session.attachments.filter(
@@ -680,16 +668,13 @@ export class FlowAIBuilderDriver {
     if (!this.#state.currentPlan) return;
 
     try {
-      const result = (await this.#transport.fetch(
-        FLOW_AI_BUILDER_ROUTES.planRevise,
-        {
-          method: "post",
-          params: { path: { plan_id: this.#state.currentPlan.plan_id } },
-          requestBody: {
-            "application/json": { type }
-          }
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.planRevise, {
+        method: "post",
+        params: { path: { plan_id: this.#state.currentPlan.plan_id } },
+        requestBody: {
+          "application/json": { type }
         }
-      )) as IncomingProposedPlan;
+      })) as IncomingProposedPlan;
 
       this.#state.currentPlan = this.#normalizePlan(result);
       this.#notify();
@@ -828,13 +813,10 @@ export class FlowAIBuilderDriver {
     if (!this.#state.session) return;
 
     try {
-      const result = (await this.#transport.fetch(
-        FLOW_AI_BUILDER_ROUTES.sessionModels,
-        {
-          method: "get",
-          params: { path: { session_id: this.#state.session.session_id } }
-        }
-      )) as { models: AIBuilderModel[]; default_model_id: string | null };
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
+        method: "get",
+        params: { path: { session_id: this.#state.session.session_id } }
+      })) as { models: AIBuilderModel[]; default_model_id: string | null };
       this.#state.availableModels = result.models;
       this.#state.selectedModelId = result.default_model_id;
       this.#state.modelsLoaded = true;
@@ -1056,7 +1038,7 @@ export class FlowAIBuilderDriver {
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {
-    const compiledEdit = plan.edit_result_json?.compiled_edit ?? null;
+    const compiledEdit = plan.proposal.edit_result?.compiled_edit ?? null;
     return {
       ...plan,
       status: plan.status ?? "proposed",

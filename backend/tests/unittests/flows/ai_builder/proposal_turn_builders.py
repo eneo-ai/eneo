@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
@@ -125,7 +126,7 @@ def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
         session_id=uuid4(),
         tenant_id=uuid4(),
         status=PlanStatus.PROPOSED,
-        proposal=FlowBuilderProposal(spec=spec),
+        proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec)),
     )
 
 

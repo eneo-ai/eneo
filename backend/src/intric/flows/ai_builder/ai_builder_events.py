@@ -4,8 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
-from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
 from intric.flows.ai_builder.ai_builder_event_models import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
@@ -78,15 +77,13 @@ def build_requirements_summary_event(
 def build_plan_event(
     *,
     plan_id: UUID,
-    envelope: PlannerPlanEnvelope,
-    edit_result: BuilderPlanEditResult | None = None,
+    proposal: FlowBuilderProposalContent,
 ) -> dict[str, str]:
     return _to_wire_event(
         AIBuilderPlanEvent(
             data=AIBuilderPlanEventData(
                 plan_id=plan_id,
-                envelope=envelope.model_copy(update={"reasoning": None}, deep=True),
-                edit_result_json=edit_result,
+                proposal=proposal,
             )
         )
     )

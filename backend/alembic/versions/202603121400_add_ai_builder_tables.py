@@ -204,7 +204,7 @@ def upgrade() -> None:
             "envelope_json",
             postgresql.JSONB(),
             nullable=False,
-            comment="Full PlannerPlanEnvelope including assumptions, lint warnings.",
+            comment="Plan proposal metadata including assumptions and lint warnings.",
         ),
         sa.Column(
             "created_at",

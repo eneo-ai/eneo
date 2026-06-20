@@ -7,7 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposal
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowBuilderProposal,
+    FlowBuilderProposalContent,
+)
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
@@ -76,7 +79,9 @@ async def _store_compiled_plan(**kwargs: object):
     compiled = kwargs["compiled"]
     assert isinstance(compiled, CompiledProposal)
     return _stored_plan_result(
-        proposal=FlowBuilderProposal(spec=compiled.spec),
+        proposal=FlowBuilderProposal(
+            content=FlowBuilderProposalContent(spec=compiled.spec),
+        ),
     )
 
 

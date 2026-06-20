@@ -41,6 +41,7 @@ REQUIRED_SCHEMAS = {
     "ApplyResultResponse",
     "CreateSessionRequest",
     "FlowEditDiff",
+    "FlowBuilderProposalContent",
     "PlanApprovalResponse",
     "PlanResponse",
     "RevisePlanRequest",
@@ -168,19 +169,27 @@ def test_openapi_ai_builder_required_schemas_present(openapi_spec: dict) -> None
     assert not missing, f"Missing AI Builder schemas: {sorted(missing)}"
 
 
-def test_openapi_plan_response_and_plan_event_share_edit_result_schema(
+def test_openapi_plan_response_and_plan_event_share_proposal_schema(
     openapi_spec: dict,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     plan_response = schemas["PlanResponse"]
     plan_event = schemas["AIBuilderPlanEventData"]
 
+    plan_proposal_refs = _schema_refs(plan_response["properties"]["proposal"])
+    event_proposal_refs = _schema_refs(plan_event["properties"]["proposal"])
+    assert plan_proposal_refs == event_proposal_refs
+    assert "#/components/schemas/FlowBuilderProposalContent" in plan_proposal_refs
+
+    public_proposal = schemas["FlowBuilderProposalContent"]
     assert "#/components/schemas/BuilderPlanEditResult" in _schema_refs(
-        plan_response["properties"]["edit_result_json"]
+        public_proposal["properties"]["edit_result"]
     )
-    assert "#/components/schemas/BuilderPlanEditResult" in _schema_refs(
-        plan_event["properties"]["edit_result_json"]
-    )
+    assert "reasoning" not in public_proposal["properties"]
+    assert "resource_bindings" not in public_proposal["properties"]
+    assert "resource_bindings_json" not in public_proposal["properties"]
+    assert "edit_result_json" not in plan_response["properties"]
+    assert "edit_result_json" not in plan_event["properties"]
     assert not {
         "edit_diff",
         "edit_confidence",

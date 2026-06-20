@@ -12,12 +12,11 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    PlannerPlanEnvelope,
+    FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -103,7 +102,7 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
     "session_id": "00000000-0000-0000-0000-000000000701",
     "status": "proposed",
     "spec_hash": "abc123def456",
-    "envelope": {
+    "proposal": {
         "spec": {
             "flow_name": "Employee Review Summary",
             "flow_description": "Transcribe a review conversation and generate a PDF summary.",
@@ -320,8 +319,7 @@ class PlanResponse(BaseModel):
     session_id: UUID
     status: PlanStatus
     spec_hash: str
-    envelope: PlannerPlanEnvelope
-    edit_result_json: BuilderPlanEditResult | None = None
+    proposal: FlowBuilderProposalContent
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

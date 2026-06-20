@@ -43,7 +43,7 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   return {
     plan_id: "plan-1",
     status: "proposed",
-    envelope: {
+    proposal: {
       spec: {
         flow_name: "Flow",
         flow_description: "",

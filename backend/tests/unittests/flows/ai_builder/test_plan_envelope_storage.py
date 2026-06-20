@@ -9,9 +9,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_api_models import PlanResponse
 from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
     PlanStatus,
@@ -104,17 +104,23 @@ def _compiled_edit_result(spec: FlowDraftSpecCore) -> CompiledEditResult:
 
 
 def test_plan_response_does_not_expose_resource_bindings() -> None:
-    assert "resource_bindings" not in PlanResponse.model_fields
-    assert "resource_bindings_json" not in PlanResponse.model_fields
+    assert "resource_bindings" not in FlowBuilderProposalContent.model_fields
+    assert "resource_bindings_json" not in FlowBuilderProposalContent.model_fields
+    assert "reasoning" not in FlowBuilderProposalContent.model_fields
 
 
 def test_plan_from_row_rehydrates_spec_from_proposal_json() -> None:
     spec = _make_spec("Canonical from proposal_json")
-    proposal = FlowBuilderProposal(spec=spec, assumptions=["user wants text"])
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(
+            spec=spec,
+            assumptions=["user wants text"],
+        )
+    )
     plan = _plan_from_row(_row(proposal=proposal))
-    assert plan.envelope.spec.flow_name == "Canonical from proposal_json"
+    assert plan.proposal.content.spec.flow_name == "Canonical from proposal_json"
     assert plan.spec.flow_name == "Canonical from proposal_json"
-    assert plan.spec.spec_hash() == plan.envelope.spec.spec_hash()
+    assert plan.spec.spec_hash() == plan.proposal.content.spec.spec_hash()
 
 
 def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None:
@@ -128,14 +134,16 @@ def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None
         severity=LintSeverity.WARNING,
     )
     expected = FlowBuilderProposal(
-        spec=spec,
-        assumptions=["The input is plain text."],
-        lint_warnings=[warning],
-        risk_acknowledgments=["Generated summaries need review."],
+        content=FlowBuilderProposalContent(
+            spec=spec,
+            assumptions=["The input is plain text."],
+            lint_warnings=[warning],
+            risk_acknowledgments=["Generated summaries need review."],
+            plan_rationale="One-step summary flow.",
+            edit_result=BuilderPlanEditResult(compiled_edit=compiled),
+        ),
         reasoning="Internal planning note.",
-        plan_rationale="One-step summary flow.",
         resource_bindings=(binding,),
-        edit_result=BuilderPlanEditResult(compiled_edit=compiled),
     )
 
     plan = _plan_from_row(
@@ -147,7 +155,7 @@ def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None
     assert plan.proposal == expected
     assert plan.spec == expected.spec
     assert plan.spec_hash == expected.spec_hash
-    assert plan.envelope == expected.envelope
+    assert plan.proposal.content == expected.content
     assert plan.resource_bindings == (binding,)
     assert plan.edit_result == expected.edit_result
 
@@ -157,7 +165,10 @@ def test_plan_from_row_rehydrates_resource_bindings() -> None:
     binding = _binding()
     plan = _plan_from_row(
         _row(
-            proposal=FlowBuilderProposal(spec=spec, resource_bindings=(binding,)),
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(spec=spec),
+                resource_bindings=(binding,),
+            ),
         )
     )
 
@@ -172,7 +183,12 @@ def test_plan_from_row_rehydrates_populated_edit_result() -> None:
 
     plan = _plan_from_row(
         _row(
-            proposal=FlowBuilderProposal(spec=spec, edit_result=edit_result),
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(
+                    spec=spec,
+                    edit_result=edit_result,
+                ),
+            ),
         )
     )
 
@@ -180,7 +196,9 @@ def test_plan_from_row_rehydrates_populated_edit_result() -> None:
 
 
 def test_plan_from_row_rejects_unknown_proposal_json_fields() -> None:
-    proposal = FlowBuilderProposal(spec=_make_spec())
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
     row = _row(proposal=proposal)
     row.proposal_json["legacy_extra"] = True
 
@@ -189,7 +207,9 @@ def test_plan_from_row_rejects_unknown_proposal_json_fields() -> None:
 
 
 def test_plan_from_row_rejects_mismatched_stored_spec_hash() -> None:
-    proposal = FlowBuilderProposal(spec=_make_spec())
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
 
     with pytest.raises(
         ValueError,

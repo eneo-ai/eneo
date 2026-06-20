@@ -33,6 +33,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     ConversationMessage,
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
@@ -482,7 +483,7 @@ def _make_plan_domain(
         session_id=session_id or uuid4(),
         tenant_id=uuid4(),
         status=status,
-        proposal=FlowBuilderProposal(spec=spec),
+        proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec)),
     )
 
 
@@ -1202,7 +1203,7 @@ class TestPlanRecoveryEndpoints:
             container=container,
         )
 
-        assert result.envelope.reasoning is None
+        assert "reasoning" not in type(result.proposal).model_fields
 
     @pytest.mark.anyio
     async def test_get_plan_rejects_scoped_key_for_other_space(self):

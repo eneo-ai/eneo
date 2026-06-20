@@ -66,17 +66,6 @@ class LintWarning(BaseModel):
     severity: LintSeverity = LintSeverity.WARNING
 
 
-class PlannerPlanEnvelope(BaseModel):
-    """Public proposal view for the current AI Builder API and SSE contract."""
-
-    spec: FlowDraftSpecCore
-    assumptions: list[str] = Field(default_factory=list)
-    lint_warnings: list[LintWarning] = Field(default_factory=_default_lint_warnings)
-    risk_acknowledgments: list[str] = Field(default_factory=list)
-    reasoning: str | None = None
-    plan_rationale: str | None = None
-
-
 def _new_message_id() -> str:
     """UUIDv7 message id (time-sortable, stable across DB round-trips)."""
     return str(uuid_utils.uuid7())
@@ -152,17 +141,29 @@ class BuilderSession(BaseModel):
     updated_at: datetime | None = None
 
 
-class FlowBuilderProposal(BaseModel):
+class FlowBuilderProposalContent(BaseModel):
+    """Typed proposal content reused by storage, HTTP responses, and SSE."""
+
     model_config = ConfigDict(extra="forbid")
 
     spec: FlowDraftSpecCore
     assumptions: list[str] = Field(default_factory=list)
     lint_warnings: list[LintWarning] = Field(default_factory=_default_lint_warnings)
     risk_acknowledgments: list[str] = Field(default_factory=list)
-    reasoning: str | None = None
     plan_rationale: str | None = None
-    resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
     edit_result: BuilderPlanEditResult | None = None
+
+
+class FlowBuilderProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: FlowBuilderProposalContent
+    reasoning: str | None = None
+    resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
+
+    @property
+    def spec(self) -> FlowDraftSpecCore:
+        return self.content.spec
 
     @property
     def spec_hash(self) -> str:
@@ -172,19 +173,8 @@ class FlowBuilderProposal(BaseModel):
         return self.model_dump(mode="json", exclude_none=True, round_trip=True)
 
     @property
-    def envelope(self) -> PlannerPlanEnvelope:
-        return PlannerPlanEnvelope(
-            spec=self.spec,
-            assumptions=self.assumptions,
-            lint_warnings=self.lint_warnings,
-            risk_acknowledgments=self.risk_acknowledgments,
-            reasoning=self.reasoning,
-            plan_rationale=self.plan_rationale,
-        )
-
-    @property
-    def public_envelope(self) -> PlannerPlanEnvelope:
-        return self.envelope.model_copy(update={"reasoning": None}, deep=True)
+    def edit_result(self) -> BuilderPlanEditResult | None:
+        return self.content.edit_result
 
 
 class BuilderPlan(BaseModel):
@@ -207,10 +197,6 @@ class BuilderPlan(BaseModel):
         return self.proposal.spec_hash
 
     @property
-    def envelope(self) -> PlannerPlanEnvelope:
-        return self.proposal.envelope
-
-    @property
     def resource_bindings(self) -> tuple[LocalResourceBinding, ...]:
         return self.proposal.resource_bindings
 
@@ -224,10 +210,10 @@ __all__ = [
     "BuilderSession",
     "ConversationMessage",
     "FlowBuilderProposal",
+    "FlowBuilderProposalContent",
     "LintSeverity",
     "LintWarning",
     "PlanStatus",
-    "PlannerPlanEnvelope",
     "SessionStatus",
     "TargetKind",
 ]

@@ -5,10 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
-    PlannerPlanEnvelope,
-)
-from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposalContent
 from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorEvent
 from intric.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
@@ -74,9 +71,10 @@ class RequirementsSummaryPayload(BaseModel):
 
 
 class AIBuilderPlanEventData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     plan_id: UUID
-    envelope: PlannerPlanEnvelope
-    edit_result_json: BuilderPlanEditResult | None = None
+    proposal: FlowBuilderProposalContent
 
 
 class AIBuilderTextEvent(BaseModel):

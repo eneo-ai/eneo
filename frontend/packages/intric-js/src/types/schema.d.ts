@@ -13404,6 +13404,22 @@ export interface components {
       name: string;
     };
     /**
+     * FlowBuilderProposalContent
+     * @description Typed proposal content reused by storage, HTTP responses, and SSE.
+     */
+    FlowBuilderProposalContent: {
+      spec: components["schemas"]["FlowDraftSpecCore"];
+      /** Assumptions */
+      assumptions?: string[];
+      /** Lint Warnings */
+      lint_warnings?: components["schemas"]["LintWarning"][];
+      /** Risk Acknowledgments */
+      risk_acknowledgments?: string[];
+      /** Plan Rationale */
+      plan_rationale?: string | null;
+      edit_result?: components["schemas"]["BuilderPlanEditResult"] | null;
+    };
+    /**
      * FlowClassificationRetentionPoliciesPublic
      * @example {
      *       "policies": [
@@ -21532,7 +21548,8 @@ export interface components {
      * PlanResponse
      * @example {
      *       "created_at": "2026-03-17T10:02:00Z",
-     *       "envelope": {
+     *       "plan_id": "00000000-0000-0000-0000-000000000702",
+     *       "proposal": {
      *         "assumptions": [
      *           "Uploaded audio is clear enough to transcribe."
      *         ],
@@ -21586,7 +21603,6 @@ export interface components {
      *           ]
      *         }
      *       },
-     *       "plan_id": "00000000-0000-0000-0000-000000000702",
      *       "session_id": "00000000-0000-0000-0000-000000000701",
      *       "spec_hash": "abc123def456",
      *       "status": "proposed",
@@ -21607,8 +21623,7 @@ export interface components {
       status: components["schemas"]["PlanStatus"];
       /** Spec Hash */
       spec_hash: string;
-      envelope: components["schemas"]["PlannerPlanEnvelope"];
-      edit_result_json?: components["schemas"]["BuilderPlanEditResult"] | null;
+      proposal: components["schemas"]["FlowBuilderProposalContent"];
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -21619,30 +21634,6 @@ export interface components {
      * @enum {string}
      */
     PlanStatus: "proposed" | "approved" | "applied" | "rejected" | "superseded";
-    /**
-     * PlannerPlanEnvelope
-     * @description Wraps FlowDraftSpecCore with AI session metadata.
-     *
-     *     At the consumer / API / frontend layer this envelope carries the full
-     *     spec. At the storage boundary (`builder_plans.envelope_json`) the spec is
-     *     stripped before write and re-injected on read from `builder_plans.spec_json`
-     *     — `spec_json` is the single source of truth, and envelope_json is
-     *     metadata-only. Alembic migration `20260421_builder_envelope_slim` scrubs
-     *     older duplicated spec copies out of persisted rows.
-     */
-    PlannerPlanEnvelope: {
-      spec: components["schemas"]["FlowDraftSpecCore"];
-      /** Assumptions */
-      assumptions?: string[];
-      /** Lint Warnings */
-      lint_warnings?: components["schemas"]["LintWarning"][];
-      /** Risk Acknowledgments */
-      risk_acknowledgments?: string[];
-      /** Reasoning */
-      reasoning?: string | null;
-      /** Plan Rationale */
-      plan_rationale?: string | null;
-    };
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -22823,7 +22814,8 @@ export interface components {
      *       "plans": [
      *         {
      *           "created_at": "2026-03-17T10:02:00Z",
-     *           "envelope": {
+     *           "plan_id": "00000000-0000-0000-0000-000000000702",
+     *           "proposal": {
      *             "assumptions": [
      *               "Uploaded audio is clear enough to transcribe."
      *             ],
@@ -22877,7 +22869,6 @@ export interface components {
      *               ]
      *             }
      *           },
-     *           "plan_id": "00000000-0000-0000-0000-000000000702",
      *           "session_id": "00000000-0000-0000-0000-000000000701",
      *           "spec_hash": "abc123def456",
      *           "status": "proposed",
@@ -26687,9 +26678,7 @@ export interface components {
        * Format: uuid
        */
       plan_id: string;
-      envelope: components["schemas"]["PlannerPlanEnvelope"];
-      /** @default null */
-      edit_result_json?: components["schemas"]["BuilderPlanEditResult"] | null;
+      proposal: components["schemas"]["FlowBuilderProposalContent"];
     };
     /** AIBuilderTextEvent */
     AIBuilderTextEvent: {

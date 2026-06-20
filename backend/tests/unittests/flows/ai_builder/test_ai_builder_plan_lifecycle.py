@@ -13,9 +13,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
-    PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
     TargetKind,
@@ -156,24 +156,23 @@ def _make_plan(
     edit_result: BuilderPlanEditResult | None = None,
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    envelope: PlannerPlanEnvelope | None = None,
+    lint_warnings: list[LintWarning] | None = None,
+    reasoning: str | None = None,
 ) -> BuilderPlan:
     used_spec = spec or _make_spec()
-    used_envelope = envelope or PlannerPlanEnvelope(spec=used_spec)
     return BuilderPlan(
         id=uuid4(),
         session_id=session_id,
         tenant_id=tenant_id,
         status=status,
         proposal=FlowBuilderProposal(
-            spec=used_spec,
-            assumptions=used_envelope.assumptions,
-            lint_warnings=used_envelope.lint_warnings,
-            risk_acknowledgments=used_envelope.risk_acknowledgments,
-            reasoning=used_envelope.reasoning,
-            plan_rationale=used_envelope.plan_rationale,
+            content=FlowBuilderProposalContent(
+                spec=used_spec,
+                lint_warnings=lint_warnings or [],
+                edit_result=edit_result,
+            ),
+            reasoning=reasoning,
             resource_bindings=resource_bindings,
-            edit_result=edit_result,
         ),
     )
 
@@ -294,17 +293,14 @@ class TestAIBuilderPlanLifecycle:
             spec=plan_spec,
             resource_bindings=(binding,),
             edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit_result),
-            envelope=PlannerPlanEnvelope(
-                spec=plan_spec,
-                lint_warnings=[
-                    LintWarning(
-                        code="needs_model",
-                        message="Select a model before applying.",
-                        severity=LintSeverity.WARNING,
-                    )
-                ],
-                reasoning="prior proposal reasoning",
-            ),
+            lint_warnings=[
+                LintWarning(
+                    code="needs_model",
+                    message="Select a model before applying.",
+                    severity=LintSeverity.WARNING,
+                )
+            ],
+            reasoning="prior proposal reasoning",
         )
         session = _make_session(
             tenant_id=user.tenant_id,
@@ -350,7 +346,7 @@ class TestAIBuilderPlanLifecycle:
         assert create_kwargs["tenant_id"] == user.tenant_id
         proposal = create_kwargs["proposal"]
         assert proposal.spec == plan.spec
-        assert proposal.lint_warnings == plan.envelope.lint_warnings
+        assert proposal.content.lint_warnings == plan.proposal.content.lint_warnings
         assert proposal.reasoning is None
         assert proposal.resource_bindings == (binding,)
         assert proposal.edit_result == BuilderPlanEditResult(

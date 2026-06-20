@@ -10,6 +10,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
 )
@@ -66,13 +67,15 @@ def build_flow_builder_proposal(
     compiled: CompiledProposal,
 ) -> FlowBuilderProposal:
     return FlowBuilderProposal(
-        spec=compiled.spec,
-        assumptions=list(compiled.assumptions),
-        plan_rationale=compiled.plan_rationale,
+        content=FlowBuilderProposalContent(
+            spec=compiled.spec,
+            assumptions=list(compiled.assumptions),
+            plan_rationale=compiled.plan_rationale,
+            lint_warnings=build_lint_warnings(compiled.validation),
+            edit_result=compiled.edit_result,
+        ),
         reasoning=compiled.reasoning,
-        lint_warnings=build_lint_warnings(compiled.validation),
         resource_bindings=compiled.resource_bindings,
-        edit_result=compiled.edit_result,
     )
 
 

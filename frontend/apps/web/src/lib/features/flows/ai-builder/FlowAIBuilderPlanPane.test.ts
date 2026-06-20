@@ -54,7 +54,7 @@ function makeApprovedCreatePlanState({ step }: { step: Partial<StepSpec> }) {
     }),
     currentPlan: makePlan({
       status: "approved",
-      envelope: {
+      proposal: {
         spec: {
           flow_name: "Audio intake",
           flow_description: "Transcribe uploaded audio.",
@@ -85,7 +85,7 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   return {
     plan_id: "plan-1",
     status: "proposed",
-    envelope: {
+    proposal: {
       spec: {
         flow_name: "Flow",
         flow_description: "",

@@ -13,7 +13,7 @@ type TranscriptionModelAvailability = Pick<TranscriptionModel, "can_access">;
 type PlanApplyPrerequisitesStep = Pick<StepSpec, "input_source" | "input_type">;
 
 type PlanApplyPrerequisitesPlan = {
-  envelope: {
+  proposal: {
     spec: {
       steps: readonly PlanApplyPrerequisitesStep[];
     };
@@ -38,7 +38,7 @@ export function getAIBuilderApplyPrerequisites({
 }: ApplyPrerequisitesInput): AIBuilderApplyPrerequisites {
   const requiresTranscriptionModel =
     targetKind === "create" &&
-    (plan?.envelope.spec.steps.some(
+    (plan?.proposal.spec.steps.some(
       (step) => step.input_source === "flow_input" && step.input_type === "audio"
     ) ??
       false);

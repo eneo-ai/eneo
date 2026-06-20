@@ -180,7 +180,7 @@ class AIBuilderRepository:
         limit: int = 20,
     ) -> list[tuple[BuilderSession, str | None]]:
         async with self._transaction():
-            draft_title_label = BuilderPlans.proposal_json["spec"][
+            draft_title_label = BuilderPlans.proposal_json["content"]["spec"][
                 _FLOW_DRAFT_SPEC_FLOW_NAME_JSON_KEY
             ].astext.label("draft_title")
             stmt = (

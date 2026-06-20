@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntim
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
@@ -699,7 +700,9 @@ async def test_revise_plan_api_creates_replacement_without_active_send(
     assert response.status_code == 200, response.text
     new_plan_id = UUID(response.json()["plan_id"])
     assert new_plan_id != old_plan_id
-    assert response.json()["edit_result_json"] == {"description_override_manual": True}
+    assert response.json()["proposal"]["edit_result"] == {
+        "description_override_manual": True
+    }
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -1296,7 +1299,9 @@ async def test_ai_builder_repo_create_plan_rejects_cross_tenant_session_referenc
             await repo.create_plan(
                 session_id=session.id,
                 tenant_id=other_tenant_id,
-                proposal=FlowBuilderProposal(spec=spec),
+                proposal=FlowBuilderProposal(
+                    content=FlowBuilderProposalContent(spec=spec),
+                ),
             )
 
 
@@ -4112,10 +4117,12 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
             session_id=builder_session.id,
             tenant_id=builder_session.tenant_id,
             proposal=FlowBuilderProposal(
-                spec=spec,
-                edit_result=_make_builder_edit_result(
+                content=FlowBuilderProposalContent(
                     spec=spec,
-                    base_flow_revision=flow_revision,
+                    edit_result=_make_builder_edit_result(
+                        spec=spec,
+                        base_flow_revision=flow_revision,
+                    ),
                 ),
             ),
         )
@@ -4451,7 +4458,7 @@ async def test_ai_builder_api_create_mode_invalid_existing_step_ref_returns_type
         plan = await repo.create_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            proposal=FlowBuilderProposal(spec=spec),
+            proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec)),
         )
         await repo.update_plan_status(
             plan_id=plan.id,

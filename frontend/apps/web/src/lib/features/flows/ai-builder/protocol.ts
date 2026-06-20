@@ -7,7 +7,6 @@ import type {
   AIBuilderLintWarning as GeneratedAIBuilderLintWarning,
   AIBuilderModel as GeneratedAIBuilderModel,
   AIBuilderPlanResponse as GeneratedAIBuilderPlanResponse,
-  AIBuilderPlannerPlanEnvelope as GeneratedAIBuilderPlannerPlanEnvelope,
   AIBuilderSessionResponse as GeneratedAIBuilderSessionResponse,
   AIBuilderSessionTelemetrySummary as GeneratedAIBuilderSessionTelemetrySummary,
   AIBuilderStepSpec as GeneratedAIBuilderStepSpec,
@@ -87,7 +86,7 @@ export type FlowDraftSpecCore = GeneratedAIBuilderFlowDraftSpecCore;
 
 export type LintWarning = GeneratedAIBuilderLintWarning;
 
-export type PlannerPlanEnvelope = GeneratedAIBuilderPlannerPlanEnvelope;
+export type FlowBuilderProposalContent = components["schemas"]["FlowBuilderProposalContent"];
 
 export type BuilderPlanEditResult = components["schemas"]["BuilderPlanEditResult"];
 
@@ -107,7 +106,7 @@ export type AIBuilderPlanEventData = components["schemas"]["AIBuilderPlanEventDa
 
 type GeneratedPlanHttpFields = Pick<
   GeneratedAIBuilderPlanResponse,
-  "session_id" | "spec_hash" | "created_at" | "updated_at" | "edit_result_json"
+  "session_id" | "spec_hash" | "created_at" | "updated_at"
 >;
 
 export type ProposedPlan = Omit<GeneratedAIBuilderPlanResponse, keyof GeneratedPlanHttpFields> &

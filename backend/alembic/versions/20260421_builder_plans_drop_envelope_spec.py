@@ -8,7 +8,7 @@ Create Date: 2026-04-21 00:00:00.000000
 stored in `builder_plans.spec_json`. Two sources of truth for the same data,
 drifting silently in tests and backfills. Strip the `spec` key from every
 existing envelope_json. Writes going forward store only the metadata; the
-repo re-hydrates `envelope.spec` from `spec_json` on read.
+repo re-hydrates the proposal spec from `spec_json` on read.
 
 The migration refuses to run if any row has a NULL or non-object `spec_json`
 or `envelope_json` — there is no production data to preserve, so failing

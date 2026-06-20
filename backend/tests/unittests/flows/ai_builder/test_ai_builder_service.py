@@ -51,7 +51,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     ConversationMessage,
     FlowBuilderProposal,
-    PlannerPlanEnvelope,
+    FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
@@ -185,17 +185,18 @@ def _make_plan(
                 )
             ],
         )
-    envelope = PlannerPlanEnvelope(spec=spec, assumptions=["Test assumption"])
     return BuilderPlan(
         id=plan_id or uuid4(),
         session_id=session_id or uuid4(),
         tenant_id=tenant_id or uuid4(),
         status=status,
         proposal=FlowBuilderProposal(
-            spec=spec,
-            assumptions=envelope.assumptions,
+            content=FlowBuilderProposalContent(
+                spec=spec,
+                assumptions=["Test assumption"],
+                edit_result=edit_result,
+            ),
             resource_bindings=resource_bindings,
-            edit_result=edit_result,
         ),
     )
 
@@ -2120,16 +2121,15 @@ class TestReasoningLeakRegression:
                 )
             ],
         )
-        envelope = PlannerPlanEnvelope(
-            spec=spec,
-            assumptions=["Test"],
+        proposal = FlowBuilderProposal(
+            content=FlowBuilderProposalContent(spec=spec, assumptions=["Test"]),
             reasoning="SECRET REASONING THAT SHOULD NOT LEAK",
         )
 
-        event = build_plan_event(plan_id=uuid4(), envelope=envelope)
+        event = build_plan_event(plan_id=uuid4(), proposal=proposal.content)
         assert "SECRET REASONING" not in event["data"]
         parsed = json.loads(event["data"])
-        assert parsed.get("envelope", {}).get("reasoning") is None
+        assert "reasoning" not in parsed["proposal"]
 
     def test_append_plan_messages_strips_reasoning_from_conversation(self):
         """append_plan_messages must strip reasoning and store only a compact

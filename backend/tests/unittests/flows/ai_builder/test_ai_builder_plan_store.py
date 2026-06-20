@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
 )
@@ -114,12 +115,12 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
     proposal = build_flow_builder_proposal(compiled)
 
     assert proposal.spec == compiled.spec
-    assert proposal.assumptions == ["Assumption"]
-    assert proposal.plan_rationale == "Use one step."
+    assert proposal.content.assumptions == ["Assumption"]
+    assert proposal.content.plan_rationale == "Use one step."
     assert proposal.reasoning == "Internal reasoning."
     assert proposal.resource_bindings == (binding,)
     assert proposal.edit_result == edit_result
-    assert proposal.lint_warnings == [
+    assert proposal.content.lint_warnings == [
         LintWarning(
             step_ref="step_a",
             code="visible_warning",
@@ -299,7 +300,7 @@ async def test_active_send_plan_proposal_uses_only_bindings_for_current_plan() -
         repo=repo,
         turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
         proposal=FlowBuilderProposal(
-            spec=spec,
+            content=FlowBuilderProposalContent(spec=spec),
             resource_bindings=(first_binding,),
         ),
     )
@@ -307,7 +308,7 @@ async def test_active_send_plan_proposal_uses_only_bindings_for_current_plan() -
         repo=repo,
         turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
         proposal=FlowBuilderProposal(
-            spec=spec,
+            content=FlowBuilderProposalContent(spec=spec),
             resource_bindings=(second_binding,),
         ),
     )

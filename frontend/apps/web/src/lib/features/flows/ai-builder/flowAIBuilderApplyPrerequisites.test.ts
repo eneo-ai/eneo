@@ -63,7 +63,7 @@ describe("flowAIBuilderApplyPrerequisites", () => {
 
 function makePlan(stepOverrides: Partial<StepSpec> = {}) {
   return {
-    envelope: {
+    proposal: {
       spec: makeSpec(stepOverrides)
     }
   };

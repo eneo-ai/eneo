@@ -36,14 +36,22 @@ def upgrade() -> None:
         """
         UPDATE builder_plans
         SET proposal_json =
-            (envelope_json - 'spec')
-            || jsonb_build_object(
-                'spec', spec_json,
-                'resource_bindings', COALESCE(resource_bindings_json, '[]'::jsonb)
+            jsonb_build_object(
+                'content',
+                (envelope_json - 'spec' - 'reasoning')
+                || jsonb_build_object('spec', spec_json)
+                || CASE
+                    WHEN edit_result_json IS NULL THEN '{}'::jsonb
+                    ELSE jsonb_build_object('edit_result', edit_result_json)
+                END,
+                'resource_bindings',
+                COALESCE(resource_bindings_json, '[]'::jsonb)
             )
             || CASE
-                WHEN edit_result_json IS NULL THEN '{}'::jsonb
-                ELSE jsonb_build_object('edit_result', edit_result_json)
+                WHEN envelope_json ? 'reasoning'
+                     AND envelope_json -> 'reasoning' <> 'null'::jsonb
+                    THEN jsonb_build_object('reasoning', envelope_json -> 'reasoning')
+                ELSE '{}'::jsonb
             END
         """
     )
@@ -92,13 +100,19 @@ def downgrade() -> None:
         """
         UPDATE builder_plans
         SET
-            spec_json = proposal_json -> 'spec',
-            envelope_json = proposal_json - 'spec' - 'resource_bindings' - 'edit_result',
+            spec_json = proposal_json -> 'content' -> 'spec',
+            envelope_json =
+                (proposal_json -> 'content') - 'spec' - 'edit_result'
+                || CASE
+                    WHEN proposal_json ? 'reasoning'
+                        THEN jsonb_build_object('reasoning', proposal_json -> 'reasoning')
+                    ELSE '{}'::jsonb
+                END,
             resource_bindings_json = COALESCE(
                 proposal_json -> 'resource_bindings',
                 '[]'::jsonb
             ),
-            edit_result_json = proposal_json -> 'edit_result'
+            edit_result_json = proposal_json -> 'content' -> 'edit_result'
         """
     )
 
@@ -157,13 +171,21 @@ def _assert_new_column_is_valid() -> None:
                 FROM builder_plans
                 WHERE proposal_json IS NULL
                    OR jsonb_typeof(proposal_json) <> 'object'
-                   OR NOT (proposal_json ? 'spec')
-                   OR jsonb_typeof(proposal_json -> 'spec') <> 'object'
+                   OR NOT (proposal_json ? 'content')
+                   OR jsonb_typeof(proposal_json -> 'content') <> 'object'
+                   OR NOT ((proposal_json -> 'content') ? 'spec')
+                   OR jsonb_typeof(proposal_json -> 'content' -> 'spec') <> 'object'
                    OR NOT (proposal_json ? 'resource_bindings')
                    OR jsonb_typeof(proposal_json -> 'resource_bindings') <> 'array'
                    OR (
-                        proposal_json ? 'edit_result'
-                        AND jsonb_typeof(proposal_json -> 'edit_result') <> 'object'
+                        (proposal_json -> 'content') ? 'edit_result'
+                        AND jsonb_typeof(
+                            proposal_json -> 'content' -> 'edit_result'
+                        ) <> 'object'
+                   )
+                   OR (
+                        proposal_json ? 'reasoning'
+                        AND jsonb_typeof(proposal_json -> 'reasoning') <> 'string'
                    )
             ) THEN
                 RAISE EXCEPTION
@@ -175,18 +197,32 @@ def _assert_new_column_is_valid() -> None:
                 FROM builder_plans bp
                 CROSS JOIN LATERAL jsonb_object_keys(bp.proposal_json) AS key(name)
                 WHERE key.name NOT IN (
-                    'spec',
-                    'assumptions',
-                    'lint_warnings',
-                    'risk_acknowledgments',
-                    'reasoning',
-                    'plan_rationale',
+                    'content',
                     'resource_bindings',
-                    'edit_result'
+                    'reasoning'
                 )
             ) THEN
                 RAISE EXCEPTION
                     'Cannot migrate builder_plans proposal storage: proposal_json has unknown keys';
+            END IF;
+
+            IF EXISTS (
+                SELECT 1
+                FROM builder_plans bp
+                CROSS JOIN LATERAL jsonb_object_keys(
+                    bp.proposal_json -> 'content'
+                ) AS key(name)
+                WHERE key.name NOT IN (
+                    'spec',
+                    'assumptions',
+                    'lint_warnings',
+                    'risk_acknowledgments',
+                    'plan_rationale',
+                    'edit_result'
+                )
+            ) THEN
+                RAISE EXCEPTION
+                    'Cannot migrate builder_plans proposal storage: proposal_json.content has unknown keys';
             END IF;
         END $$;
         """

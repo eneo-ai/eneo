@@ -170,8 +170,7 @@ class CompiledProposalFinalizer:
         return ToolProcessingResult(
             event=build_plan_event(
                 plan_id=stored_plan.plan.id,
-                envelope=stored_plan.proposal.public_envelope,
-                edit_result=stored_plan.proposal.edit_result,
+                proposal=stored_plan.proposal.content,
             ),
             new_planning_state_version=stored_plan.new_planning_state_version,
         )

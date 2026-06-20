@@ -326,8 +326,8 @@ def _plan_status(plan: JsonObject | None) -> str | None:
 
 
 def _spec(plan: JsonObject | None) -> JsonObject:
-    envelope = _object(None if plan is None else plan.get("envelope"))
-    return _object(envelope.get("spec"))
+    proposal = _object(None if plan is None else plan.get("proposal"))
+    return _object(proposal.get("spec"))
 
 
 def _steps(plan: JsonObject | None) -> list[JsonObject]:

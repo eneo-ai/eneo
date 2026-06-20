@@ -16,7 +16,10 @@ from psycopg2.extras import Json
 
 from alembic import command
 from alembic.config import Config
-from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderProposal
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowBuilderProposal,
+    FlowBuilderProposalContent,
+)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
     CompiledEditResult,
@@ -92,6 +95,7 @@ def _make_proposal(
     *,
     flow_name: str,
     include_edit_result: bool = False,
+    reasoning: str | None = "Use one step.",
 ) -> FlowBuilderProposal:
     model_id = uuid4()
     binding = LocalResourceBinding(
@@ -131,13 +135,15 @@ def _make_proposal(
             )
         )
     return FlowBuilderProposal(
-        spec=spec,
-        assumptions=["Text input"],
-        risk_acknowledgments=["Review output"],
-        reasoning="Use one step.",
-        plan_rationale="Smallest valid migrated proposal.",
+        content=FlowBuilderProposalContent(
+            spec=spec,
+            assumptions=["Text input"],
+            risk_acknowledgments=["Review output"],
+            plan_rationale="Smallest valid migrated proposal.",
+            edit_result=edit_result,
+        ),
+        reasoning=reasoning,
         resource_bindings=(binding,),
-        edit_result=edit_result,
     )
 
 
@@ -147,20 +153,31 @@ def _expected_plan_row(
     proposal: FlowBuilderProposal,
 ) -> _ExpectedPlanRow:
     spec_json = proposal.spec.model_dump(mode="json")
-    envelope_json = proposal.envelope.model_dump(mode="json", exclude={"spec"})
+    envelope_json = proposal.content.model_dump(
+        mode="json",
+        exclude={"spec", "edit_result"},
+        exclude_none=True,
+    )
+    if proposal.reasoning is not None:
+        envelope_json["reasoning"] = proposal.reasoning
     resource_bindings_json = proposal.storage_json()["resource_bindings"]
     edit_result_json = (
         proposal.edit_result.model_dump(mode="json", exclude_none=True)
         if proposal.edit_result is not None
         else None
     )
+    content_json = {
+        key: value for key, value in envelope_json.items() if key != "reasoning"
+    }
+    content_json["spec"] = spec_json
+    if edit_result_json is not None:
+        content_json["edit_result"] = edit_result_json
     proposal_json = {
-        **envelope_json,
-        "spec": spec_json,
+        "content": content_json,
         "resource_bindings": resource_bindings_json,
     }
-    if edit_result_json is not None:
-        proposal_json["edit_result"] = edit_result_json
+    if proposal.reasoning is not None:
+        proposal_json["reasoning"] = proposal.reasoning
 
     return _ExpectedPlanRow(
         plan_id=plan_id,
@@ -290,6 +307,7 @@ def migration_round_trip(test_settings):
     proposals = (
         _make_proposal(flow_name="Migrated proposal"),
         _make_proposal(flow_name="Migrated edit proposal", include_edit_result=True),
+        _make_proposal(flow_name="Migrated proposal without reasoning", reasoning=None),
     )
 
     try:

@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
+    FlowBuilderProposalContent,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
@@ -137,14 +138,19 @@ def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProp
 def _stored_plan_result(*, plan=None, proposal=None):
     return SimpleNamespace(
         plan=plan or MagicMock(id=uuid4()),
-        proposal=proposal or FlowBuilderProposal(spec=_make_flow_spec()),
+        proposal=proposal
+        or FlowBuilderProposal(
+            content=FlowBuilderProposalContent(spec=_make_flow_spec())
+        ),
         new_planning_state_version=1,
     )
 
 
 async def _store_compiled_plan(**kwargs):
     return _stored_plan_result(
-        proposal=FlowBuilderProposal(spec=kwargs["compiled"].spec),
+        proposal=FlowBuilderProposal(
+            content=FlowBuilderProposalContent(spec=kwargs["compiled"].spec),
+        ),
     )
 
 

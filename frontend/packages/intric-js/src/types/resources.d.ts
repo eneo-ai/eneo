@@ -195,7 +195,8 @@ export type AIBuilderDraftSession = components["schemas"]["SessionListItemRespon
 export type AIBuilderStepSpec = components["schemas"]["StepSpec"];
 export type AIBuilderFlowDraftSpecCore = components["schemas"]["FlowDraftSpecCore"];
 export type AIBuilderLintWarning = components["schemas"]["LintWarning"];
-export type AIBuilderPlannerPlanEnvelope = components["schemas"]["PlannerPlanEnvelope"];
+export type AIBuilderFlowBuilderProposalContent =
+  components["schemas"]["FlowBuilderProposalContent"];
 export type AIBuilderPlanResponse = components["schemas"]["PlanResponse"];
 export type AIBuilderApplyResult = components["schemas"]["ApplyResultResponse"];
 export type AIBuilderModel = components["schemas"]["SessionModelOption"];

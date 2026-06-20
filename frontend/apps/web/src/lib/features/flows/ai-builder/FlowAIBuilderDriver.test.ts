@@ -27,7 +27,7 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   return {
     plan_id: "plan-1",
     status: "proposed",
-    envelope: {
+    proposal: {
       spec: {
         flow_name: "Flow",
         flow_description: "",
@@ -42,8 +42,8 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   };
 }
 
-function makeEditResult(): NonNullable<ProposedPlan["edit_result_json"]> {
-  const spec = makePlan().envelope.spec;
+function makeEditResult(): NonNullable<ProposedPlan["proposal"]["edit_result"]> {
+  const spec = makePlan().proposal.spec;
   return {
     compiled_edit: {
       compiled_spec: spec,
@@ -1008,11 +1008,9 @@ describe("FlowAIBuilderDriver", () => {
 
   it("revises a plan with keep_current_description and refreshes current plan state", async () => {
     const editResult = makeEditResult();
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        makePlan({ plan_id: "plan-2", status: "proposed", edit_result_json: editResult })
-      );
+    const revisedPlan = makePlan({ plan_id: "plan-2", status: "proposed" });
+    revisedPlan.proposal.edit_result = editResult;
+    const fetch = vi.fn().mockResolvedValueOnce(revisedPlan);
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
       session: makeSession({ latest_plan_id: "plan-1", status: "awaiting_approval" }),
@@ -1031,7 +1029,7 @@ describe("FlowAIBuilderDriver", () => {
       }
     });
     expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
-    expect(driver.state.currentPlan?.edit_result_json).toEqual(editResult);
+    expect(driver.state.currentPlan?.proposal.edit_result).toEqual(editResult);
     expect(driver.state.currentPlan?.edit_diff?.step_changes[0]?.kind).toBe("modified");
     expect(driver.state.currentPlan?.edit_confidence).toBe("needs_review");
     expect(driver.state.currentPlan?.edit_advisories?.[0]?.code).toBe(

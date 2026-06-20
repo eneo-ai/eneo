@@ -145,16 +145,16 @@
   const focusStepIndex = $derived.by(() => {
     const plan = service.currentPlan;
     if (!plan) return null;
-    return getFirstChangedStepIndex(plan.envelope.spec.steps, plan.edit_diff ?? null);
+    return getFirstChangedStepIndex(plan.proposal.spec.steps, plan.edit_diff ?? null);
   });
 
   const attachments = $derived(service.session?.attachments ?? []);
   const attachmentWarnings = $derived(service.session?.attachment_warnings ?? []);
   const hasAttachments = $derived(attachments.length > 0);
 
-  const stepCount = $derived(service.currentPlan?.envelope.spec.steps.length ?? 0);
-  const planAssumptions = $derived(service.currentPlan?.envelope.assumptions ?? []);
-  const planLintWarnings = $derived(service.currentPlan?.envelope.lint_warnings ?? []);
+  const stepCount = $derived(service.currentPlan?.proposal.spec.steps.length ?? 0);
+  const planAssumptions = $derived(service.currentPlan?.proposal.assumptions ?? []);
+  const planLintWarnings = $derived(service.currentPlan?.proposal.lint_warnings ?? []);
   const planQualityDiagnosticReport = $derived.by(() =>
     service.currentPlan && planLintWarnings.length > 0
       ? buildAIBuilderDiagnosticReport({
@@ -243,7 +243,7 @@
 <div class="bg-secondary/40 flex flex-col md:min-h-0 md:flex-1">
   {#if service.currentPlan}
     {@const plan = service.currentPlan}
-    {@const spec = plan.envelope.spec}
+    {@const spec = plan.proposal.spec}
 
     <!-- Scrollable on md+, natural flow on mobile (page scroll handles it) -->
     <div class="md:flex-1 md:overflow-y-auto">
@@ -457,7 +457,7 @@
           {/if}
 
           <!-- Plan rationale -->
-          {#if plan.envelope.plan_rationale}
+          {#if plan.proposal.plan_rationale}
             <section class="border-default border-t px-5 py-4 md:px-6">
               <h3 class="text-muted mb-1.5 text-[11px] font-semibold tracking-[0.06em] uppercase">
                 {m.ai_builder_plan_rationale()}
@@ -465,7 +465,7 @@
               <p
                 class="border-default bg-secondary/35 text-secondary rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed"
               >
-                {plan.envelope.plan_rationale}
+                {plan.proposal.plan_rationale}
               </p>
             </section>
           {/if}
@@ -981,11 +981,11 @@
 
   /* Diff strikethrough uses a muted decoration color that works in both themes. */
   .description-diff-old {
-    text-decoration-color: oklch(from var(--text-muted) l c h / 0.45);
+    text-decoration-color: var(--border-stronger);
   }
 
   .progress-ring {
-    border-color: oklch(from var(--accent-default) l c h / 0.15);
+    border-color: var(--border-default);
     border-top-color: var(--accent-default);
     animation: spin-slow 1s linear infinite;
   }

@@ -320,8 +320,7 @@ def _to_plan_response(plan: BuilderPlan) -> PlanResponse:
         session_id=plan.session_id,
         status=plan.status,
         spec_hash=plan.spec_hash,
-        envelope=plan.proposal.public_envelope,
-        edit_result_json=plan.edit_result,
+        proposal=plan.proposal.content,
         created_at=plan.created_at,
         updated_at=plan.updated_at,
     )

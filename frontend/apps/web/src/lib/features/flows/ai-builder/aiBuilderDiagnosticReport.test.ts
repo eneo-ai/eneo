@@ -153,7 +153,7 @@ describe("aiBuilderDiagnosticReport", () => {
           plan_id: "plan-1",
           status: "proposed",
           // @ts-expect-error full plan JSON is not a diagnostic-report input.
-          envelope: { spec: { steps: [] } }
+          proposal: { spec: { steps: [] } }
         }
       });
     }

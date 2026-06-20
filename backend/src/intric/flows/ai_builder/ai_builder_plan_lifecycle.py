@@ -239,9 +239,12 @@ class AIBuilderPlanLifecycle:
         revised_edit_result = (plan.edit_result or BuilderPlanEditResult()).model_copy(
             update={"description_override_manual": True}
         )
+        revised_content = plan.proposal.content.model_copy(
+            update={"edit_result": revised_edit_result}
+        )
         revised_proposal = plan.proposal.model_copy(
             update={
-                "edit_result": revised_edit_result,
+                "content": revised_content,
                 "reasoning": None,
             }
         )

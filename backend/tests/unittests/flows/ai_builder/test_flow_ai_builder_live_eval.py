@@ -12,7 +12,7 @@ def _plan_with_question(question: str) -> JsonObject:
     return {
         "plan_id": "plan-1",
         "status": "draft",
-        "envelope": {
+        "proposal": {
             "spec": {
                 "steps": [
                     {
@@ -97,7 +97,7 @@ def test_live_eval_rejects_broad_structured_blob_for_underlag() -> None:
 
 def test_live_eval_requires_underlag_refs_on_same_target_step() -> None:
     plan = _plan_with_question("Källmaterial: {{ step_a.output.text }}")
-    steps = plan["envelope"]["spec"]["steps"]
+    steps = plan["proposal"]["spec"]["steps"]
     assert isinstance(steps, list)
     final_step = steps[-1]
     assert isinstance(final_step, dict)

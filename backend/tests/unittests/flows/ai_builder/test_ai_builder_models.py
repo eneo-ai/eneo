@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    PlannerPlanEnvelope,
+    FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
@@ -209,27 +209,27 @@ class TestFlowDraftSpecCore:
 
 
 # ---------------------------------------------------------------------------
-# PlannerPlanEnvelope
+# FlowBuilderProposalContent
 # ---------------------------------------------------------------------------
 
 
-class TestPlannerPlanEnvelope:
+class TestFlowBuilderProposalContent:
     def test_wraps_spec(self) -> None:
         spec = _make_spec()
-        envelope = PlannerPlanEnvelope(
+        proposal = FlowBuilderProposalContent(
             spec=spec,
             assumptions=["User wants text output"],
             risk_acknowledgments=[],
         )
-        assert envelope.spec.flow_name == "Test flow"
-        assert len(envelope.assumptions) == 1
+        assert proposal.spec.flow_name == "Test flow"
+        assert len(proposal.assumptions) == 1
 
-    def test_empty_envelope(self) -> None:
+    def test_empty_content(self) -> None:
         spec = _make_spec()
-        envelope = PlannerPlanEnvelope(spec=spec)
-        assert envelope.assumptions == []
-        assert envelope.lint_warnings == []
-        assert envelope.risk_acknowledgments == []
+        proposal = FlowBuilderProposalContent(spec=spec)
+        assert proposal.assumptions == []
+        assert proposal.lint_warnings == []
+        assert proposal.risk_acknowledgments == []
 
 
 # ---------------------------------------------------------------------------
