@@ -202,29 +202,6 @@ class FormFieldOperation(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Typed metadata patches (NOT generic key paths)
-# ---------------------------------------------------------------------------
-
-
-class TranscriptionPatch(BaseModel):
-    enabled: bool | None = None
-    model_id: str | None = None
-    language: str | None = None
-
-
-class RuntimeInputPatch(BaseModel):
-    enabled: bool | None = None
-    required: bool | None = None
-    max_files: int | None = None
-    input_format: str | None = None
-
-
-class FlowMetadataPatch(BaseModel):
-    transcription: TranscriptionPatch | None = None
-    runtime_input: RuntimeInputPatch | None = None
-
-
-# ---------------------------------------------------------------------------
 # Edit draft — the LLM's output
 # ---------------------------------------------------------------------------
 
@@ -250,7 +227,6 @@ class FlowEditDraft(BaseModel):
     form_operations: list[FormFieldOperation] = Field(
         default_factory=_default_form_operations
     )
-    metadata_patch: FlowMetadataPatch | None = None
     assumptions: list[str] = Field(default_factory=list)
     plan_rationale: str = ""
 

@@ -108,13 +108,7 @@ type GeneratedPlanHttpFields = Pick<
 >;
 
 export type ProposedPlan = Omit<GeneratedAIBuilderPlanResponse, keyof GeneratedPlanHttpFields> &
-  Partial<GeneratedPlanHttpFields> & {
-    edit_diff?: FlowEditDiff | null;
-    edit_confidence?: EditConfidence | null;
-    edit_warnings?: string[] | null;
-    edit_advisories?: EditAdvisory[] | null;
-    edit_risk_flags?: string[] | null;
-  };
+  Partial<GeneratedPlanHttpFields>;
 
 export type IncomingProposedPlan = Omit<ProposedPlan, "status"> & { status?: PlanStatus };
 

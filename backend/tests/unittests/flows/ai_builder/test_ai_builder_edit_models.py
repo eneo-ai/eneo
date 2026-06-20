@@ -6,14 +6,11 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     CompiledEditResult,
     FlowEditDraft,
-    FlowMetadataPatch,
     FormFieldOperation,
     FormFieldSpec,
-    RuntimeInputPatch,
     StepEditOperation,
     StepPatch,
     StepPlacement,
-    TranscriptionPatch,
     validate_step_operation_shape,
 )
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
@@ -325,10 +322,6 @@ class TestFlowEditDraft:
                     ),
                 ),
             ],
-            metadata_patch=FlowMetadataPatch(
-                transcription=TranscriptionPatch(enabled=True),
-                runtime_input=RuntimeInputPatch(enabled=True, max_files=5),
-            ),
             assumptions=["Audio files are WAV or MP3"],
             plan_rationale="Adding transcription before analysis.",
         )
@@ -336,8 +329,6 @@ class TestFlowEditDraft:
         assert draft.operations[0].op == "add"
         assert draft.operations[1].op == "modify"
         assert len(draft.form_operations) == 1
-        assert draft.metadata_patch is not None
-        assert draft.metadata_patch.transcription.enabled is True
 
 
 class TestFlowEditDiff:

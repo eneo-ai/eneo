@@ -50,14 +50,14 @@
   // ---- Derivations ---------------------------------------------------------
 
   const descriptionDiff = $derived.by(() => {
-    const plan = service.currentPlan;
-    if (!plan?.edit_diff?.flow_property_changes) return null;
-    const change = plan.edit_diff.flow_property_changes["flow_description"];
+    const editDiff = service.currentPlan?.proposal.edit?.diff;
+    if (!editDiff?.flow_property_changes) return null;
+    const change = editDiff.flow_property_changes["flow_description"];
     if (!change) return null;
     return { previous: String(change[0] ?? ""), proposed: String(change[1] ?? "") };
   });
 
-  const advisories = $derived<EditAdvisory[]>(service.currentPlan?.edit_advisories ?? []);
+  const advisories = $derived<EditAdvisory[]>(service.currentPlan?.proposal.edit?.advisories ?? []);
   const hasDescriptionAdvisory = $derived(
     advisories.some((a) => a.code === "flow_description_update_required")
   );
@@ -140,12 +140,12 @@
   let isUnpublishingAndApplying = $state(false);
 
   const removedStepChanges = $derived(
-    getRemovedStepChanges(service.currentPlan?.edit_diff ?? null)
+    getRemovedStepChanges(service.currentPlan?.proposal.edit?.diff ?? null)
   );
   const focusStepIndex = $derived.by(() => {
     const plan = service.currentPlan;
     if (!plan) return null;
-    return getFirstChangedStepIndex(plan.proposal.spec.steps, plan.edit_diff ?? null);
+    return getFirstChangedStepIndex(plan.proposal.spec.steps, plan.proposal.edit?.diff ?? null);
   });
 
   const attachments = $derived(service.session?.attachments ?? []);
@@ -634,7 +634,7 @@
                       {step}
                       stepNumber={i + 1}
                       planId={plan.plan_id}
-                      changeKind={getStepChangeKind(step, plan.edit_diff ?? null)}
+                      changeKind={getStepChangeKind(step, plan.proposal.edit?.diff ?? null)}
                       {resolveModelName}
                       {resolveMcpServerName}
                       {resolveMcpToolName}

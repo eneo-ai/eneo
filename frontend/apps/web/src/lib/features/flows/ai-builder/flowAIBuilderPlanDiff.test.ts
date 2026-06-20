@@ -39,7 +39,7 @@ function makeEditDiff(stepChanges: FlowEditDiff["step_changes"]): FlowEditDiff {
 }
 
 describe("flowAIBuilderPlanDiff", () => {
-  it("uses edit_diff to distinguish unchanged existing steps from modified ones", () => {
+  it("uses the edit diff to distinguish unchanged existing steps from modified ones", () => {
     const unchanged = makeStep({
       plan_step_ref: "step_a",
       existing_step_ref: "existing_step_1",

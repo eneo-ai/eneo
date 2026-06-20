@@ -191,13 +191,15 @@ def test_openapi_plan_response_and_plan_event_share_proposal_schema(
     assert "resource_bindings_json" not in public_proposal["properties"]
     assert "edit_result_json" not in plan_response["properties"]
     assert "edit_result_json" not in plan_event["properties"]
-    assert not {
+    flattened_edit_fields = {
         "edit_diff",
         "edit_confidence",
         "edit_warnings",
         "edit_advisories",
         "edit_risk_flags",
-    }.intersection(plan_event["properties"])
+    }
+    assert not flattened_edit_fields.intersection(plan_response["properties"])
+    assert not flattened_edit_fields.intersection(plan_event["properties"])
 
 
 def test_openapi_flow_draft_spec_exposes_writer_refs_not_step_spec(

@@ -1028,12 +1028,14 @@ describe("FlowAIBuilderDriver", () => {
     });
     expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
     expect(driver.state.currentPlan?.proposal.description_override_manual).toBe(true);
-    expect(driver.state.currentPlan?.proposal.edit).toEqual(editApproval);
-    expect(driver.state.currentPlan?.edit_diff?.step_changes[0]?.kind).toBe("modified");
-    expect(driver.state.currentPlan?.edit_confidence).toBe("needs_review");
-    expect(driver.state.currentPlan?.edit_advisories?.[0]?.code).toBe(
-      "flow_description_update_required"
-    );
+    const currentEdit = driver.state.currentPlan?.proposal.edit;
+    if (!currentEdit) {
+      throw new Error("Expected revised plan to include nested edit approval metadata");
+    }
+    expect(currentEdit).toEqual(editApproval);
+    expect(currentEdit.diff.step_changes[0]?.kind).toBe("modified");
+    expect(currentEdit.confidence).toBe("needs_review");
+    expect(currentEdit.advisories?.[0]?.code).toBe("flow_description_update_required");
   });
 
   it("starts a fresh edit session when continuing after apply", async () => {

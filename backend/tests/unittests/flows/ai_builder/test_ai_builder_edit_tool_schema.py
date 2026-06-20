@@ -66,6 +66,16 @@ class TestBuildEditFlowToolSchema:
         assert "form_operations" in schema["function"]["description"]
         assert "uses_form_fields" in schema["function"]["description"]
 
+    def test_schema_exposes_direct_flow_metadata_fields_not_metadata_patch(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
+
+        properties = schema["function"]["parameters"]["properties"]
+        assert "flow_name" in properties
+        assert "flow_description" in properties
+        assert "metadata_patch" not in properties
+
     def test_target_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
         schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
