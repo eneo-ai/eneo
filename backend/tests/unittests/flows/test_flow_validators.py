@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.domain.flow import FlowStep
+from intric.flows.domain.flow_step_validation import FlowStepValidationError
 from intric.flows.enums import FlowOutputMode, FlowOutputType
 from intric.flows.flow_metadata import normalize_flow_metadata_for_write
 from intric.flows.flow_review_policy import (
@@ -46,9 +47,232 @@ def _audio_metadata() -> dict:
     }
 
 
+def _assert_validate_steps_rejects(
+    steps: list[FlowStep],
+    *,
+    expected_type: type[BadRequestException],
+    match: str,
+    code: str | None = None,
+    step_order: int | None = None,
+    metadata_json: dict | None = None,
+    require_complete_template_fill_config: bool = False,
+) -> BadRequestException:
+    with pytest.raises(BadRequestException, match=match) as exc_info:
+        validate_steps(
+            steps,
+            metadata_json=metadata_json,
+            require_complete_template_fill_config=require_complete_template_fill_config,
+        )
+
+    exc = exc_info.value
+    assert type(exc) is expected_type
+    assert exc.code == code
+    if step_order is not None:
+        assert isinstance(exc, FlowStepValidationError)
+        assert exc.step_order == step_order
+    return exc
+
+
 def test_validate_steps_rejects_unsupported_enum_values():
     with pytest.raises(BadRequestException, match="unsupported input_type 'banana'"):
         validate_steps([_step(input_type="banana")])
+
+
+def test_validate_steps_fail_fast_rejects_duplicate_step_order() -> None:
+    _assert_validate_steps_rejects(
+        [_step(1), _step(1)],
+        expected_type=BadRequestException,
+        match="Duplicate step_order detected.",
+    )
+
+
+def test_validate_steps_fail_fast_rejects_non_contiguous_step_order() -> None:
+    _assert_validate_steps_rejects(
+        [_step(1), _step(3)],
+        expected_type=BadRequestException,
+        match="Step order must be contiguous and start at 1.",
+    )
+
+
+def test_validate_steps_fail_fast_rejects_duplicate_step_names() -> None:
+    _assert_validate_steps_rejects(
+        [
+            _step(1, user_description="Summarize"),
+            _step(2, user_description=" summarize "),
+        ],
+        expected_type=BadRequestException,
+        match="Step names must be unique",
+    )
+
+
+def test_validate_steps_fail_fast_prefers_duplicate_name_before_chain_violation() -> (
+    None
+):
+    _assert_validate_steps_rejects(
+        [
+            _step(1, user_description="Same"),
+            _step(
+                2,
+                user_description=" same ",
+                input_source="all_previous_steps",
+                input_type="json",
+            ),
+        ],
+        expected_type=BadRequestException,
+        match="Step names must be unique",
+    )
+
+
+@pytest.mark.parametrize(
+    ("steps", "match", "step_order"),
+    [
+        (
+            [_step(1, input_source="previous_step")],
+            "Step 1 cannot use previous_step/all_previous_steps",
+            1,
+        ),
+        (
+            [_step(1), _step(2, input_source="flow_input")],
+            "Only one step may use input_source 'flow_input'.",
+            2,
+        ),
+        (
+            [
+                _step(1, input_source="previous_step"),
+                _step(2, input_source="flow_input"),
+            ],
+            "input_source 'flow_input' must be step 1 if present.",
+            2,
+        ),
+        (
+            [_step(1), _step(2, input_source="previous_step", input_type="document")],
+            "input_type 'document' is only supported with input_source 'flow_input'",
+            2,
+        ),
+        (
+            [_step(1), _step(2, input_source="all_previous_steps", input_type="json")],
+            "input_type 'json' is incompatible with input_source 'all_previous_steps'",
+            2,
+        ),
+        (
+            [_step(1, output_type="docx"), _step(2, input_type="json")],
+            "incompatible type chain",
+            2,
+        ),
+    ],
+)
+def test_validate_steps_fail_fast_preserves_first_chain_violation(
+    steps: list[FlowStep], match: str, step_order: int
+) -> None:
+    _assert_validate_steps_rejects(
+        steps,
+        expected_type=FlowStepValidationError,
+        match=match,
+        step_order=step_order,
+    )
+
+
+def test_validate_steps_fail_fast_prefers_global_chain_violation_before_type_pair() -> (
+    None
+):
+    _assert_validate_steps_rejects(
+        [
+            _step(1, output_type="docx"),
+            _step(2, input_source="flow_input", output_type="docx"),
+            _step(3, input_source="previous_step", input_type="json"),
+        ],
+        expected_type=FlowStepValidationError,
+        match="Only one step may use input_source 'flow_input'.",
+        step_order=2,
+    )
+
+
+@pytest.mark.parametrize(
+    ("step", "match"),
+    [
+        (
+            _step(output_mode="transcribe_only", input_type="text", output_type="text"),
+            "output_mode 'transcribe_only' requires input_type 'audio'",
+        ),
+        (
+            _step(
+                output_mode="transcribe_only", input_type="audio", output_type="docx"
+            ),
+            "output_mode 'transcribe_only' requires output_type 'text'",
+        ),
+        (
+            _step(
+                output_mode="template_fill",
+                output_type="pdf",
+                output_config={"template_file_id": str(uuid4()), "bindings": {}},
+            ),
+            "template_fill requires output_type 'docx'",
+        ),
+    ],
+)
+def test_validate_steps_fail_fast_preserves_output_mode_validation(
+    step: FlowStep, match: str
+) -> None:
+    _assert_validate_steps_rejects(
+        [step],
+        expected_type=FlowStepValidationError,
+        match=match,
+        step_order=1,
+    )
+
+
+@pytest.mark.parametrize(
+    ("step", "match"),
+    [
+        (
+            _step(input_contract={"type": "not-a-json-schema-type"}),
+            "input_contract is not a valid JSON Schema",
+        ),
+        (
+            _step(output_contract={"type": "not-a-json-schema-type"}),
+            "output_contract is not a valid JSON Schema",
+        ),
+        (
+            _step(
+                input_type="document",
+                input_contract={"type": "object", "properties": {}},
+            ),
+            "input_contract is not supported for input_type 'document'",
+        ),
+        (
+            _step(
+                output_type="text",
+                output_contract={"type": "object", "properties": {}},
+            ),
+            "output_contract is not supported for output_type 'text'",
+        ),
+        (
+            _step(
+                output_mode="template_fill",
+                output_type="docx",
+                output_contract={"type": "object", "properties": {}},
+            ),
+            "output_contract is not supported for output_mode 'template_fill'",
+        ),
+        (
+            _step(
+                1,
+                output_type="pdf",
+                output_contract={"type": "not-a-json-schema-type"},
+            ),
+            "output_contract is not a valid JSON Schema",
+        ),
+    ],
+)
+def test_validate_steps_fail_fast_preserves_contract_validation(
+    step: FlowStep, match: str
+) -> None:
+    _assert_validate_steps_rejects(
+        [step],
+        expected_type=FlowStepValidationError,
+        match=match,
+        step_order=1,
+    )
 
 
 def test_validate_steps_rejects_output_contract_for_text_output():

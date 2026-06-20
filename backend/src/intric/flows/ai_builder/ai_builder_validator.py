@@ -1,13 +1,6 @@
-"""Validation for AI Builder flow specs.
-
-Two-pass validation:
-1. Hard validation — blocks invalid plans (chaining rules, type compat, enums)
-2. Quality lint — flags weak plans as warnings (shown on plan card)
-"""
+"""Validation for AI Builder flow specs."""
 
 from __future__ import annotations
-
-import jsonschema
 
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.ai_builder_validation_quality import (
@@ -26,13 +19,12 @@ from intric.flows.ai_builder.ai_builder_validation_quality import (
 from intric.flows.ai_builder.ai_builder_validation_references import (
     validate_variable_references,
 )
-from intric.flows.domain.flow_step_validation import FlowStepValidationError
+from intric.flows.domain.flow_step_validation import (
+    FlowStepGraphIssue,
+    FlowStepValidationError,
+)
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
     metadata_json_from_authoring_form_fields,
 )
 from intric.flows.flow_authoring_variable_rewriting import (
@@ -41,35 +33,60 @@ from intric.flows.flow_authoring_variable_rewriting import (
 from intric.flows.flow_validators import (
     FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    collect_step_graph_issues,
     validate_form_schema,
-    validate_step_graph,
 )
 from intric.flows.flow_validators_form import (
     validate_variable_alias_collisions_for_step_graph,
 )
-from intric.flows.output_modes import transcribe_only_violation
-from intric.flows.step_chain_rules import find_first_step_chain_violation
 from intric.main.exceptions import BadRequestException
 
-# ---------------------------------------------------------------------------
-# Valid enum values (from DB constraints, excluding http_ which AI can't set)
-# ---------------------------------------------------------------------------
-
-_VALID_INPUT_SOURCES = {e.value for e in InputSource}
-_VALID_INPUT_TYPES = {e.value for e in InputType}
-_VALID_OUTPUT_MODES = {e.value for e in OutputMode}
-_VALID_OUTPUT_TYPES = {e.value for e in OutputType}
 _BUILDER_IGNORED_FLOW_VALIDATION_CODES = frozenset(
     {
         FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
         FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
     }
 )
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+_CANONICAL_GRAPH_CODE_TO_BUILDER_CODE: dict[str, str] = {
+    "audio_document_transcript_chain_invalid": (
+        "audio_document_transcript_chain_invalid"
+    ),
+    "duplicate_step_name": "duplicate_step_name",
+    "flow_audio_transcription_invalid": "flow_audio_transcription_invalid",
+    "flow_http_post_output_must_be_terminal": (
+        "flow_http_post_output_must_be_terminal"
+    ),
+    "flow_input_contract_inapplicable": "input_contract_type_mismatch",
+    "typed_io_invalid_input_source_position": "first_step_invalid_source",
+    "typed_io_multiple_flow_input_steps": "multiple_flow_input",
+    "typed_io_flow_input_position_invalid": "flow_input_not_first",
+    "typed_io_document_source_unsupported": "media_source_mismatch",
+    "typed_io_audio_source_unsupported": "media_source_mismatch",
+    "typed_io_file_source_unsupported": "media_source_mismatch",
+    "typed_io_invalid_input_source_combination": "json_all_previous_incompatible",
+    "typed_io_incompatible_type_chain": "incompatible_type_chain",
+    "transcribe_only_violation": "transcribe_only_violation",
+    "template_fill_requires_docx": "template_fill_requires_docx",
+    "invalid_input_contract_schema": "invalid_input_contract_schema",
+    "invalid_output_contract_schema": "invalid_output_contract_schema",
+    "input_contract_type_mismatch": "input_contract_type_mismatch",
+    "input_contract_source_mismatch": "input_contract_type_mismatch",
+    "output_contract_type_mismatch": "output_contract_type_mismatch",
+    "output_contract_template_fill_incompatible": (
+        "output_contract_template_fill_incompatible"
+    ),
+    "unsupported_input_type": "unsupported_input_type",
+}
+_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION = frozenset(
+    {
+        "duplicate_step_order",
+        "flow_input_binding_unsupported_key",
+        "flow_review_policy_invalid",
+        "flow_step_invalid",
+        "step_order_not_contiguous",
+        "typed_io_missing_previous_step",
+    }
+)
 
 
 def validate_spec(
@@ -99,14 +116,7 @@ def validate_spec(
         return result
 
     _validate_step_refs_unique(spec, result)
-    _validate_step_names_unique(spec, result)
-    _validate_chaining_rules(spec, result)
-    _validate_type_compatibility(spec, result)
-    _validate_enum_values(spec, result)
-    _validate_transcribe_only(spec, result)
-    _validate_template_fill(spec, result)
-    _validate_contract_syntax(spec, result)
-    _validate_contract_type_compat(spec, result)
+    _validate_step_names_present(spec, result)
     _validate_model_refs(spec, result, available_model_refs)
     _validate_kb_refs(spec, result, available_kb_refs)
     _validate_flow_service_rules(spec, result)
@@ -148,10 +158,9 @@ def _validate_step_refs_unique(
         seen.add(step.plan_step_ref)
 
 
-def _validate_step_names_unique(
+def _validate_step_names_present(
     spec: FlowDraftSpecCore, result: SpecValidationResult
 ) -> None:
-    seen: set[str] = set()
     for step in spec.steps:
         normalized = step.name.strip().casefold()
         if not normalized:
@@ -159,129 +168,6 @@ def _validate_step_names_unique(
                 step_ref=step.plan_step_ref,
                 code="empty_step_name",
                 message="Step name cannot be empty.",
-            )
-            continue
-        if normalized in seen:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="duplicate_step_name",
-                message=f"Duplicate step name '{step.name}' (case-insensitive).",
-            )
-        seen.add(normalized)
-
-
-def _validate_chaining_rules(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    violation = find_first_step_chain_violation(_chain_shapes(spec))
-    if violation is None:
-        return
-
-    step_ref = (
-        spec.steps[violation.step_order - 1].plan_step_ref
-        if violation.step_order <= len(spec.steps)
-        else None
-    )
-    result.add_error(
-        step_ref=step_ref,
-        code=_map_chain_violation_code(violation.code),
-        message=violation.message,
-    )
-
-
-def _validate_type_compatibility(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    steps = spec.steps
-    for index, step in enumerate(steps):
-        if step.input_source != InputSource.PREVIOUS_STEP or index == 0:
-            continue
-        previous = steps[index - 1]
-        if (
-            previous.output_type == OutputType.PDF
-            and step.input_type == InputType.AUDIO
-        ):
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="incompatible_type_chain",
-                message=(
-                    f"Incompatible type chain: previous step output '{previous.output_type.value}' "
-                    f"cannot feed input '{step.input_type.value}'."
-                ),
-            )
-        if (
-            previous.output_type == OutputType.DOCX
-            and step.input_type == InputType.JSON
-        ):
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="incompatible_type_chain",
-                message=(
-                    f"Incompatible type chain: previous step output '{previous.output_type.value}' "
-                    f"cannot feed input '{step.input_type.value}'."
-                ),
-            )
-
-
-def _validate_enum_values(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    for step in spec.steps:
-        if step.input_source.value not in _VALID_INPUT_SOURCES:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="invalid_input_source",
-                message=f"Unsupported input_source '{step.input_source.value}'.",
-            )
-        if step.input_type.value not in _VALID_INPUT_TYPES:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="invalid_input_type",
-                message=f"Unsupported input_type '{step.input_type.value}'.",
-            )
-        if step.output_mode.value not in _VALID_OUTPUT_MODES:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="invalid_output_mode",
-                message=f"Unsupported output_mode '{step.output_mode.value}'.",
-            )
-        if step.output_type.value not in _VALID_OUTPUT_TYPES:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="invalid_output_type",
-                message=f"Unsupported output_type '{step.output_type.value}'.",
-            )
-
-
-def _validate_transcribe_only(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    for i, step in enumerate(spec.steps):
-        error = transcribe_only_violation(
-            step_order=i + 1,
-            input_type=step.input_type.value,
-            output_type=step.output_type.value,
-            output_mode=step.output_mode.value,
-        )
-        if error is not None:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="transcribe_only_violation",
-                message=error,
-            )
-
-
-def _validate_template_fill(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    for step in spec.steps:
-        if step.output_mode != OutputMode.TEMPLATE_FILL:
-            continue
-        if step.output_type != OutputType.DOCX:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="template_fill_requires_docx",
-                message="output_mode 'template_fill' requires output_type 'docx'.",
             )
 
 
@@ -352,25 +238,19 @@ def _validate_flow_service_rules(
             message=str(exc),
         )
 
-    try:
-        validate_step_graph(
-            flow_steps,
-            metadata_json=metadata_json,
-            require_complete_template_fill_config=False,
-        )
-    except FlowStepValidationError as exc:
+    for issue in collect_step_graph_issues(
+        flow_steps,
+        metadata_json=metadata_json,
+        require_complete_template_fill_config=False,
+    ):
+        if _builder_ignores_graph_issue(issue):
+            continue
         result.add_error(
-            step_ref=_step_ref_from_order(spec, exc.step_order),
-            code="flow_step_invalid",
-            message=str(exc),
-        )
-    except BadRequestException as exc:
-        if exc.code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES:
-            return
-        result.add_error(
-            step_ref=None,
-            code="flow_step_invalid",
-            message=str(exc),
+            step_ref=_step_ref_from_order(spec, issue.step_order)
+            if issue.step_order is not None
+            else None,
+            code=_builder_code_from_graph_issue(issue),
+            message=_builder_message_from_graph_issue(issue),
         )
 
 
@@ -380,96 +260,23 @@ def _step_ref_from_order(spec: FlowDraftSpecCore, step_order: int) -> str | None
     return spec.steps[step_order - 1].plan_step_ref
 
 
-# ---------------------------------------------------------------------------
-# Hard validation: contract syntax and type compatibility
-# ---------------------------------------------------------------------------
+def _builder_ignores_graph_issue(issue: FlowStepGraphIssue) -> bool:
+    return (
+        issue.code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES
+        or issue.exception_code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES
+    )
 
 
-def _validate_contract_syntax(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    """Validate JSON Schema syntax of contracts at plan time."""
-    for step in spec.steps:
-        for field_name, contract in [
-            ("input_contract", step.input_contract),
-            ("output_contract", step.output_contract),
-        ]:
-            if contract is None:
-                continue
-            try:
-                jsonschema.Draft202012Validator.check_schema(contract)
-            except jsonschema.SchemaError as e:
-                result.add_error(
-                    step_ref=step.plan_step_ref,
-                    code=f"invalid_{field_name}_schema",
-                    message=f"Invalid {field_name} JSON Schema: {e.message}",
-                )
+def _builder_code_from_graph_issue(issue: FlowStepGraphIssue) -> str:
+    mapped = _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE.get(issue.code)
+    if mapped is not None:
+        return mapped
+    if issue.code in _CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION:
+        return "flow_step_invalid"
+    return "flow_step_invalid"
 
 
-def _validate_contract_type_compat(
-    spec: FlowDraftSpecCore, result: SpecValidationResult
-) -> None:
-    """Validate that contracts are compatible with step input/output types."""
-    for step in spec.steps:
-        if step.input_contract is not None and step.input_type not in (
-            InputType.TEXT,
-            InputType.JSON,
-        ):
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="input_contract_type_mismatch",
-                message=(
-                    f"input_contract is only valid for input_type 'text' or 'json', "
-                    f"not '{step.input_type.value}'."
-                ),
-            )
-        if step.output_contract is not None and step.output_type == OutputType.TEXT:
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="output_contract_type_mismatch",
-                message="output_contract is not valid for output_type 'text'. Use 'json' for structured output.",
-            )
-        if (
-            step.output_contract is not None
-            and step.output_mode == OutputMode.TEMPLATE_FILL
-        ):
-            result.add_error(
-                step_ref=step.plan_step_ref,
-                code="output_contract_template_fill_incompatible",
-                message="output_contract is not supported for output_mode 'template_fill'.",
-            )
-
-
-def _chain_shapes(spec: FlowDraftSpecCore) -> list[_StepChainShape]:
-    return [
-        _StepChainShape(
-            step_order=index + 1,
-            input_source=step.input_source.value,
-            input_type=step.input_type.value,
-            output_type=step.output_type.value,
-        )
-        for index, step in enumerate(spec.steps)
-    ]
-
-
-def _map_chain_violation_code(code: str) -> str:
-    return {
-        "typed_io_invalid_input_source_position": "first_step_invalid_source",
-        "typed_io_multiple_flow_input_steps": "multiple_flow_input",
-        "typed_io_flow_input_position_invalid": "flow_input_not_first",
-        "typed_io_document_source_unsupported": "media_source_mismatch",
-        "typed_io_audio_source_unsupported": "media_source_mismatch",
-        "typed_io_file_source_unsupported": "media_source_mismatch",
-        "typed_io_invalid_input_source_combination": "json_all_previous_incompatible",
-        "typed_io_incompatible_type_chain": "incompatible_type_chain",
-    }.get(code, "invalid_step_chain")
-
-
-class _StepChainShape:
-    def __init__(
-        self, *, step_order: int, input_source: str, input_type: str, output_type: str
-    ) -> None:
-        self.step_order = step_order
-        self.input_source = input_source
-        self.input_type = input_type
-        self.output_type = output_type
+def _builder_message_from_graph_issue(issue: FlowStepGraphIssue) -> str:
+    if issue.code == "duplicate_step_name":
+        return f"Duplicate step name. {issue.message}"
+    return issue.message

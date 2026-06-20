@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
 )
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.flows.ai_builder.ai_builder_validation_common import (
+    SpecValidationError,
+    SpecValidationResult,
+)
+from intric.flows.ai_builder.ai_builder_validator import (
+    _BUILDER_IGNORED_FLOW_VALIDATION_CODES,
+    _CANONICAL_GRAPH_CODE_TO_BUILDER_CODE,
+    _CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION,
+    validate_spec,
+)
+from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -15,6 +28,14 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+)
+from intric.flows.flow_review_policy import FLOW_REVIEW_POLICY_INVALID
+from intric.flows.flow_validators import (
+    FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
+    FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+)
+from intric.flows.input_binding_contract_rules import (
+    FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
 )
 
 # ---------------------------------------------------------------------------
@@ -46,6 +67,129 @@ def _step(
 
 def _spec(steps: list[StepSpec], flow_name: str = "Test") -> FlowDraftSpecCore:
     return FlowDraftSpecCore(flow_name=flow_name, steps=steps)
+
+
+def _errors_with_code(
+    result: SpecValidationResult, code: str
+) -> list[SpecValidationError]:
+    return [error for error in result.errors if error.code == code]
+
+
+def _assert_single_error(
+    result: SpecValidationResult, *, code: str, step_ref: str | None
+) -> None:
+    errors = _errors_with_code(result, code)
+    assert len(errors) == 1
+    assert errors[0].step_ref == step_ref
+
+
+_FLOW_SOURCE_ROOT = Path(__file__).resolve().parents[4] / "src" / "intric" / "flows"
+_GRAPH_ISSUE_HELPERS = {
+    "_bad_request_issue",
+    "_flow_step_issue",
+}
+_GRAPH_ISSUE_CAPTURE_HELPERS = {
+    "_capture_bad_request_validation",
+    "_capture_contract_syntax",
+    "_capture_flow_step_validation",
+}
+_CANONICAL_EXCEPTION_CODES = frozenset(
+    {
+        FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
+        FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        FLOW_REVIEW_POLICY_INVALID,
+        FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+    }
+)
+
+
+def _canonical_graph_issue_codes_from_source() -> set[str]:
+    return (
+        _graph_issue_codes_from_source(_FLOW_SOURCE_ROOT / "flow_validators.py")
+        | _graph_issue_codes_from_source(_FLOW_SOURCE_ROOT / "step_chain_rules.py")
+        | set(_CANONICAL_EXCEPTION_CODES)
+    )
+
+
+def _graph_issue_codes_from_source(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text())
+    codes: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            function_name = _function_name(node.func)
+            if function_name in _GRAPH_ISSUE_HELPERS:
+                codes |= _keyword_code_strings(node)
+            elif function_name in _GRAPH_ISSUE_CAPTURE_HELPERS:
+                codes |= _positional_code_strings(node)
+                codes |= _keyword_code_strings(node)
+            elif function_name == "StepChainViolation":
+                codes |= _keyword_code_strings(node)
+        elif (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "_output_contract_issue_code"
+        ):
+            for child in ast.walk(node):
+                if isinstance(child, ast.Return) and child.value is not None:
+                    codes |= _code_strings(child.value)
+    return codes
+
+
+def _function_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _keyword_code_strings(node: ast.Call) -> set[str]:
+    for keyword in node.keywords:
+        if keyword.arg == "code":
+            return _code_strings(keyword.value)
+    return set()
+
+
+def _positional_code_strings(node: ast.Call) -> set[str]:
+    if len(node.args) < 2:
+        return set()
+    return _code_strings(node.args[1])
+
+
+def _code_strings(node: ast.AST) -> set[str]:
+    return _literal_strings(node) | _flow_api_error_code_strings(node)
+
+
+def _literal_strings(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, ast.IfExp):
+        return _literal_strings(node.body) | _literal_strings(node.orelse)
+    return set()
+
+
+def _flow_api_error_code_strings(node: ast.AST) -> set[str]:
+    if not isinstance(node, ast.Attribute) or node.attr != "value":
+        return set()
+    enum_member = node.value
+    if not isinstance(enum_member, ast.Attribute):
+        return set()
+    enum_class = enum_member.value
+    if not isinstance(enum_class, ast.Name) or enum_class.id != "FlowApiErrorCode":
+        return set()
+    return {FlowApiErrorCode[enum_member.attr].value}
+
+
+class TestCanonicalGraphIssuePresentation:
+    def test_every_canonical_graph_issue_has_builder_presentation(self) -> None:
+        canonical_codes = _canonical_graph_issue_codes_from_source()
+        presented_codes = (
+            set(_CANONICAL_GRAPH_CODE_TO_BUILDER_CODE)
+            | set(_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION)
+            | set(_BUILDER_IGNORED_FLOW_VALIDATION_CODES)
+        )
+
+        assert canonical_codes <= presented_codes
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +346,7 @@ class TestDuplicates:
         )
         assert not result.valid
         assert any(e.code == "duplicate_step_name" for e in result.errors)
+        _assert_single_error(result, code="duplicate_step_name", step_ref="step_b")
 
     def test_empty_step_name_rejected(self) -> None:
         result = validate_spec(_spec([_step(name="   ")]))
@@ -219,6 +364,9 @@ class TestChainingRules:
         result = validate_spec(_spec([_step(input_source=InputSource.PREVIOUS_STEP)]))
         assert not result.valid
         assert any(e.code == "first_step_invalid_source" for e in result.errors)
+        _assert_single_error(
+            result, code="first_step_invalid_source", step_ref="step_a"
+        )
 
     def test_first_step_cannot_use_all_previous_steps(self) -> None:
         result = validate_spec(
@@ -242,6 +390,7 @@ class TestChainingRules:
         )
         assert not result.valid
         assert any(e.code == "multiple_flow_input" for e in result.errors)
+        _assert_single_error(result, code="multiple_flow_input", step_ref="step_b")
 
     def test_flow_input_must_be_first(self) -> None:
         # Can't really test this directly since we'd need a step before flow_input
@@ -278,6 +427,7 @@ class TestChainingRules:
         )
         assert not result.valid
         assert any(e.code == "media_source_mismatch" for e in result.errors)
+        _assert_single_error(result, code="media_source_mismatch", step_ref="step_b")
 
     def test_document_requires_flow_input(self) -> None:
         result = validate_spec(
@@ -295,6 +445,7 @@ class TestChainingRules:
         )
         assert not result.valid
         assert any(e.code == "media_source_mismatch" for e in result.errors)
+        _assert_single_error(result, code="media_source_mismatch", step_ref="step_b")
 
     def test_file_requires_flow_input(self) -> None:
         result = validate_spec(
@@ -312,6 +463,27 @@ class TestChainingRules:
         )
         assert not result.valid
         assert any(e.code == "media_source_mismatch" for e in result.errors)
+        _assert_single_error(result, code="media_source_mismatch", step_ref="step_b")
+
+    def test_json_all_previous_maps_once_to_authored_step(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="Collect"),
+                    _step(
+                        ref="step_b",
+                        name="Merge JSON",
+                        input_source=InputSource.ALL_PREVIOUS_STEPS,
+                        input_type=InputType.JSON,
+                    ),
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result, code="json_all_previous_incompatible", step_ref="step_b"
+        )
 
 
 class TestSemanticVariableValidation:
@@ -943,6 +1115,125 @@ class TestContractInstructionLint:
         assert any(e.code == "json_all_previous_incompatible" for e in result.errors)
 
 
+class TestContractDiagnostics:
+    def test_invalid_input_contract_schema_maps_once_to_authored_step(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Read input",
+                        input_contract={"type": "not-a-json-schema-type"},
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result, code="invalid_input_contract_schema", step_ref="step_a"
+        )
+
+    def test_invalid_output_contract_schema_maps_once_to_authored_step(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Return output",
+                        output_type=OutputType.JSON,
+                        output_contract={"type": "not-a-json-schema-type"},
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result, code="invalid_output_contract_schema", step_ref="step_a"
+        )
+
+    def test_invalid_output_contract_schema_gates_content_checks(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Create PDF",
+                        output_type=OutputType.PDF,
+                        output_contract={"type": "not-a-json-schema-type"},
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result, code="invalid_output_contract_schema", step_ref="step_a"
+        )
+        assert not _errors_with_code(result, "output_contract_type_mismatch")
+
+    def test_document_input_contract_maps_once_to_authored_step(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Read document",
+                        input_type=InputType.DOCUMENT,
+                        input_contract={"type": "object", "properties": {}},
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result, code="input_contract_type_mismatch", step_ref="step_a"
+        )
+
+    def test_text_output_contract_maps_once_to_authored_step(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Return text",
+                        output_type=OutputType.TEXT,
+                        output_contract={"type": "object", "properties": {}},
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result, code="output_contract_type_mismatch", step_ref="step_a"
+        )
+
+    def test_template_fill_output_contract_maps_once_to_authored_step(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Fill template",
+                        output_mode=OutputMode.TEMPLATE_FILL,
+                        output_type=OutputType.DOCX,
+                        output_contract={"type": "object", "properties": {}},
+                    )
+                ]
+            )
+        )
+
+        assert not result.valid
+        _assert_single_error(
+            result,
+            code="output_contract_template_fill_incompatible",
+            step_ref="step_a",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Type compatibility
 # ---------------------------------------------------------------------------
@@ -1013,6 +1304,7 @@ class TestTypeCompatibility:
         )
         assert not result.valid
         assert any(e.code == "incompatible_type_chain" for e in result.errors)
+        _assert_single_error(result, code="incompatible_type_chain", step_ref="step_b")
 
     def test_docx_to_json_incompatible(self) -> None:
         result = validate_spec(
@@ -1030,6 +1322,32 @@ class TestTypeCompatibility:
         )
         assert not result.valid
         assert any(e.code == "incompatible_type_chain" for e in result.errors)
+        _assert_single_error(result, code="incompatible_type_chain", step_ref="step_b")
+
+    def test_multiple_incompatible_pairs_are_reported_per_pair(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="A", output_type=OutputType.DOCX),
+                    _step(
+                        ref="step_b",
+                        name="B",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                        output_type=OutputType.DOCX,
+                    ),
+                    _step(
+                        ref="step_c",
+                        name="C",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_type=InputType.JSON,
+                    ),
+                ]
+            )
+        )
+
+        errors = _errors_with_code(result, "incompatible_type_chain")
+        assert [error.step_ref for error in errors] == ["step_b", "step_c"]
 
     def test_any_input_accepts_anything(self) -> None:
         result = validate_spec(
@@ -1067,6 +1385,9 @@ class TestTranscribeOnly:
         )
         assert not result.valid
         assert any(e.code == "transcribe_only_violation" for e in result.errors)
+        _assert_single_error(
+            result, code="transcribe_only_violation", step_ref="step_a"
+        )
 
     def test_transcribe_only_requires_text_output(self) -> None:
         result = validate_spec(
@@ -1081,6 +1402,9 @@ class TestTranscribeOnly:
             )
         )
         assert not result.valid
+        _assert_single_error(
+            result, code="transcribe_only_violation", step_ref="step_a"
+        )
 
     def test_valid_transcribe_only(self) -> None:
         result = validate_spec(
@@ -1094,6 +1418,21 @@ class TestTranscribeOnly:
                 ]
             )
         )
+        assert result.valid
+
+    def test_audio_transcription_publish_config_errors_stay_suppressed(self) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        input_type=InputType.AUDIO,
+                        output_mode=OutputMode.PASS_THROUGH,
+                        output_type=OutputType.TEXT,
+                    ),
+                ]
+            )
+        )
+
         assert result.valid
 
 
@@ -1116,6 +1455,9 @@ class TestTemplateFill:
         )
         assert not result.valid
         assert any(e.code == "template_fill_requires_docx" for e in result.errors)
+        _assert_single_error(
+            result, code="template_fill_requires_docx", step_ref="step_a"
+        )
 
     def test_template_fill_with_docx_valid(self) -> None:
         result = validate_spec(

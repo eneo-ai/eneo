@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from intric.flows.enums import (
@@ -26,6 +27,18 @@ class FlowStepValidationError(BadRequestException):
     ) -> None:
         super().__init__(message, code=code, context=context)
         self.step_order = step_order
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepGraphIssue:
+    # `code` is the canonical diagnostic consumed by Builder; `exception_code`
+    # preserves the legacy BadRequest/FlowStepValidationError `.code` surface.
+    step_order: int | None
+    code: str
+    message: str
+    exception_kind: Literal["bad_request", "flow_step"]
+    exception_code: str | None = None
+    context: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)

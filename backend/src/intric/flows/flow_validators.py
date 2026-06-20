@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import Any, cast
 
@@ -18,8 +18,13 @@ from intric.flows.citation_sidecar import (
     CITATION_MODE_OFF,
     resolve_citation_mode,
 )
-from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from intric.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowRuntimeInputConfig,
+    FlowStep,
+)
 from intric.flows.domain.flow_step_validation import (
+    FlowStepGraphIssue,
     FlowStepValidationError,
     FlowStepValidationView,
     flow_step_validation_views_from_flow_steps,
@@ -53,7 +58,7 @@ from intric.flows.output_processing import (
     validate_schema_syntax,
 )
 from intric.flows.runtime_input import build_runtime_input_config
-from intric.flows.step_chain_rules import find_first_step_chain_violation
+from intric.flows.step_chain_rules import iter_step_chain_violations
 from intric.flows.template_reference_analyzer import (
     analyze_template,
     consumes_runtime_input,
@@ -77,6 +82,7 @@ FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = "flow_audio_transcription_model_requir
 __all__ = [
     "FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED",
     "FLOW_AUDIO_TRANSCRIPTION_REQUIRED",
+    "collect_step_graph_issues",
     "validate_form_schema",
     "validate_step_graph",
     "validate_steps",
@@ -103,18 +109,44 @@ def validate_step_graph(
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
 ) -> None:
+    issues = collect_step_graph_issues(
+        steps,
+        metadata_json=metadata_json,
+        require_complete_template_fill_config=require_complete_template_fill_config,
+    )
+    if issues:
+        raise _to_exception(issues[0])
+
+
+def collect_step_graph_issues(
+    steps: Sequence[FlowStepValidationView],
+    *,
+    metadata_json: FlowPersistedJsonObject | None = None,
+    require_complete_template_fill_config: bool = False,
+) -> list[FlowStepGraphIssue]:
     if not steps:
-        return
+        return []
 
     sorted_steps = sorted(steps, key=lambda item: item.step_order)
     step_orders = [step.step_order for step in sorted_steps]
     if len(step_orders) != len(set(step_orders)):
-        raise BadRequestException("Duplicate step_order detected.")
+        return [
+            _bad_request_issue(
+                code="duplicate_step_order",
+                message="Duplicate step_order detected.",
+            )
+        ]
 
     expected_orders = list(range(1, len(sorted_steps) + 1))
     if step_orders != expected_orders:
-        raise BadRequestException("Step order must be contiguous and start at 1.")
+        return [
+            _bad_request_issue(
+                code="step_order_not_contiguous",
+                message="Step order must be contiguous and start at 1.",
+            )
+        ]
 
+    issues: list[FlowStepGraphIssue] = []
     normalized_names: set[str] = set()
     for step in sorted_steps:
         if step.user_description is None:
@@ -123,36 +155,70 @@ def validate_step_graph(
         if not normalized_name:
             continue
         if normalized_name in normalized_names:
-            raise BadRequestException(
-                "Step names must be unique (case-insensitive) for publishable flows."
+            issues.append(
+                _bad_request_issue(
+                    code="duplicate_step_name",
+                    message="Step names must be unique (case-insensitive) for publishable flows.",
+                    step_order=step.step_order,
+                )
             )
         normalized_names.add(normalized_name)
 
-    chain_violation = find_first_step_chain_violation(sorted_steps)
-    if chain_violation is not None:
-        raise FlowStepValidationError(
-            chain_violation.message,
-            step_order=chain_violation.step_order,
+    for chain_violation in iter_step_chain_violations(sorted_steps):
+        issues.append(
+            _flow_step_issue(
+                code=chain_violation.code,
+                message=chain_violation.message,
+                step_order=chain_violation.step_order,
+            )
         )
 
     terminal_step_order = sorted_steps[-1].step_order
     seen: set[int] = set()
     for step in sorted_steps:
         seen.add(step.step_order)
-        _validate_step_enum_values(step)
-        _validate_step_timeout(step)
-        _validate_review_policy(step)
-        _validate_citation_mode(step)
+        issue_count_before_enum = len(issues)
+        _capture_flow_step_validation(
+            issues, "flow_step_invalid", lambda: _validate_step_enum_values(step)
+        )
+        if len(issues) > issue_count_before_enum:
+            continue
+        _capture_flow_step_validation(
+            issues, "flow_step_invalid", lambda: _validate_step_timeout(step)
+        )
+        _capture_flow_step_validation(
+            issues, "flow_step_invalid", lambda: _validate_review_policy(step)
+        )
+        _capture_flow_step_validation(
+            issues, "flow_step_invalid", lambda: _validate_citation_mode(step)
+        )
         if step.input_source in ("http_get", "http_post"):
-            validate_http_input_config(step=step)
+            _capture_bad_request_validation(
+                issues,
+                "flow_step_invalid",
+                step_order=step.step_order,
+                validate=lambda: validate_http_input_config(step=step),
+            )
         if step.output_mode == "http_post":
             if step.step_order != terminal_step_order:
-                raise FlowStepValidationError(
-                    f"Step {step.step_order}: output_mode 'http_post' is only supported on the last step.",
-                    code="flow_http_post_output_must_be_terminal",
-                    step_order=step.step_order,
+                issues.append(
+                    _flow_step_issue(
+                        code="flow_http_post_output_must_be_terminal",
+                        message=(
+                            f"Step {step.step_order}: output_mode 'http_post' is only supported "
+                            "on the last step."
+                        ),
+                        step_order=step.step_order,
+                        exception_code="flow_http_post_output_must_be_terminal",
+                    )
                 )
-            validate_http_output_config(step=step)
+            else:
+                _capture_bad_request_validation(
+                    issues,
+                    "flow_step_invalid",
+                    step_order=step.step_order,
+                    validate=lambda: validate_http_output_config(step=step),
+                )
         transcribe_only_error = transcribe_only_violation(
             step_order=step.step_order,
             input_type=step.input_type,
@@ -160,73 +226,251 @@ def validate_step_graph(
             output_mode=step.output_mode,
         )
         if transcribe_only_error is not None:
-            raise FlowStepValidationError(
-                transcribe_only_error,
-                step_order=step.step_order,
+            issues.append(
+                _flow_step_issue(
+                    code="transcribe_only_violation",
+                    message=transcribe_only_error,
+                    step_order=step.step_order,
+                )
             )
         if step.output_mode == "template_fill":
-            validate_template_fill_output_config(
-                step=step,
-                available_orders=seen,
-                require_complete_config=require_complete_template_fill_config,
+            _capture_flow_step_validation(
+                issues,
+                "template_fill_requires_docx"
+                if step.output_type != "docx"
+                else "flow_step_invalid",
+                lambda: validate_template_fill_output_config(
+                    step=step,
+                    available_orders=seen,
+                    require_complete_config=require_complete_template_fill_config,
+                ),
             )
         input_policy = INPUT_TYPE_POLICIES.get(step.input_type)
         if input_policy and not input_policy.supported:
-            raise FlowStepValidationError(
-                f"Step {step.step_order}: {_enum_value(step.input_type)} is not yet supported.",
-                step_order=step.step_order,
+            issues.append(
+                _flow_step_issue(
+                    code="unsupported_input_type",
+                    message=(
+                        f"Step {step.step_order}: {_enum_value(step.input_type)} is not yet supported."
+                    ),
+                    step_order=step.step_order,
+                )
             )
         if (
             step.input_contract is not None
             and input_policy
             and not input_policy.contract_allowed
         ):
-            raise FlowStepValidationError(
-                f"Step {step.step_order}: input_contract is not supported for "
-                f"input_type '{_enum_value(step.input_type)}'.",
-                step_order=step.step_order,
+            issues.append(
+                _flow_step_issue(
+                    code="input_contract_type_mismatch",
+                    message=(
+                        f"Step {step.step_order}: input_contract is not supported for "
+                        f"input_type '{_enum_value(step.input_type)}'."
+                    ),
+                    step_order=step.step_order,
+                )
             )
         if step.input_contract is not None:
-            try:
-                validate_schema_syntax(
-                    step.input_contract,
-                    label=f"Step {step.step_order} input_contract",
+            input_contract_valid = _capture_contract_syntax(
+                issues,
+                code="invalid_input_contract_schema",
+                contract=step.input_contract,
+                label=f"Step {step.step_order} input_contract",
+                step_order=step.step_order,
+            )
+            if input_contract_valid:
+                _capture_flow_step_validation(
+                    issues,
+                    "flow_step_invalid",
+                    lambda: _validate_input_contract_binding_compatibility(step=step),
                 )
-            except TypedIOValidationException as exc:
-                raise FlowStepValidationError(
-                    str(exc),
-                    step_order=step.step_order,
-                ) from exc
-            _validate_input_contract_binding_compatibility(step=step)
-            _validate_input_contract_source_compatibility(step=step)
+                _capture_flow_step_validation(
+                    issues,
+                    "input_contract_source_mismatch",
+                    lambda: _validate_input_contract_source_compatibility(step=step),
+                )
         if step.output_contract is not None:
-            try:
-                validate_schema_syntax(
-                    step.output_contract,
-                    label=f"Step {step.step_order} output_contract",
+            output_contract_valid = _capture_contract_syntax(
+                issues,
+                code="invalid_output_contract_schema",
+                contract=step.output_contract,
+                label=f"Step {step.step_order} output_contract",
+                step_order=step.step_order,
+            )
+            if output_contract_valid:
+                _capture_flow_step_validation(
+                    issues,
+                    _output_contract_issue_code(step),
+                    lambda: _validate_output_contract_compatibility(step=step),
                 )
-            except TypedIOValidationException as exc:
-                raise FlowStepValidationError(
-                    str(exc),
-                    step_order=step.step_order,
-                ) from exc
-            _validate_output_contract_compatibility(step=step)
 
         if step.input_bindings is not None:
+            input_bindings = step.input_bindings
             if require_complete_template_fill_config:
-                _validate_supported_input_binding_keys(step=step)
-            _validate_binding_references(
-                input_bindings=step.input_bindings,
-                current_step_order=step.step_order,
-                available_orders=seen,
+                _capture_flow_step_validation(
+                    issues,
+                    "flow_step_invalid",
+                    lambda: _validate_supported_input_binding_keys(step=step),
+                )
+            _capture_flow_step_validation(
+                issues,
+                "flow_step_invalid",
+                lambda: _validate_binding_references(
+                    input_bindings=input_bindings,
+                    current_step_order=step.step_order,
+                    available_orders=seen,
+                ),
             )
-        _validate_runtime_input_publish_rules(step=step)
+        _capture_flow_step_validation(
+            issues,
+            "flow_step_invalid",
+            lambda: _validate_runtime_input_publish_rules(step=step),
+        )
 
-    _validate_audio_document_transcript_chain(steps=sorted_steps)
-    _validate_audio_transcription_settings(
-        steps=sorted_steps,
-        metadata_json=metadata_json,
+    _capture_bad_request_validation(
+        issues,
+        "audio_document_transcript_chain_invalid",
+        validate=lambda: _validate_audio_document_transcript_chain(steps=sorted_steps),
     )
+    _capture_bad_request_validation(
+        issues,
+        "flow_audio_transcription_invalid",
+        validate=lambda: _validate_audio_transcription_settings(
+            steps=sorted_steps,
+            metadata_json=metadata_json,
+        ),
+    )
+    return issues
+
+
+def _to_exception(issue: FlowStepGraphIssue) -> BadRequestException:
+    if issue.exception_kind == "flow_step" and issue.step_order is not None:
+        return FlowStepValidationError(
+            issue.message,
+            step_order=issue.step_order,
+            code=issue.exception_code,
+            context=issue.context,
+        )
+    return BadRequestException(
+        issue.message,
+        code=issue.exception_code,
+        context=issue.context,
+    )
+
+
+def _bad_request_issue(
+    *,
+    code: str,
+    message: str,
+    step_order: int | None = None,
+    exception_code: str | None = None,
+    context: dict[str, object] | None = None,
+) -> FlowStepGraphIssue:
+    return FlowStepGraphIssue(
+        step_order=step_order,
+        code=code,
+        message=message,
+        exception_kind="bad_request",
+        exception_code=exception_code,
+        context=context,
+    )
+
+
+def _flow_step_issue(
+    *,
+    code: str,
+    message: str,
+    step_order: int,
+    exception_code: str | None = None,
+    context: dict[str, object] | None = None,
+) -> FlowStepGraphIssue:
+    return FlowStepGraphIssue(
+        step_order=step_order,
+        code=code,
+        message=message,
+        exception_kind="flow_step",
+        exception_code=exception_code,
+        context=context,
+    )
+
+
+def _capture_flow_step_validation(
+    issues: list[FlowStepGraphIssue],
+    code: str,
+    validate: Callable[[], None],
+) -> None:
+    try:
+        validate()
+    except FlowStepValidationError as exc:
+        issues.append(
+            _flow_step_issue(
+                code=exc.code or code,
+                message=str(exc),
+                step_order=exc.step_order,
+                exception_code=exc.code,
+                context=exc.context,
+            )
+        )
+
+
+def _capture_bad_request_validation(
+    issues: list[FlowStepGraphIssue],
+    code: str,
+    *,
+    validate: Callable[[], None],
+    step_order: int | None = None,
+) -> None:
+    try:
+        validate()
+    except FlowStepValidationError as exc:
+        issues.append(
+            _flow_step_issue(
+                code=exc.code or code,
+                message=str(exc),
+                step_order=exc.step_order,
+                exception_code=exc.code,
+                context=exc.context,
+            )
+        )
+    except BadRequestException as exc:
+        issues.append(
+            _bad_request_issue(
+                code=exc.code or code,
+                message=str(exc),
+                step_order=step_order,
+                exception_code=exc.code,
+                context=exc.context,
+            )
+        )
+
+
+def _capture_contract_syntax(
+    issues: list[FlowStepGraphIssue],
+    *,
+    code: str,
+    contract: FlowPersistedJsonObject,
+    label: str,
+    step_order: int,
+) -> bool:
+    try:
+        validate_schema_syntax(contract, label=label)
+    except TypedIOValidationException as exc:
+        issues.append(
+            _flow_step_issue(
+                code=code,
+                message=str(exc),
+                step_order=step_order,
+            )
+        )
+        return False
+    return True
+
+
+def _output_contract_issue_code(step: FlowStepValidationView) -> str:
+    if step.output_mode == "template_fill":
+        return "output_contract_template_fill_incompatible"
+    return "output_contract_type_mismatch"
 
 
 def _validate_step_enum_values(step: FlowStepValidationView) -> None:
@@ -298,9 +542,10 @@ def _validate_citation_mode(step: FlowStepValidationView) -> None:
 
 
 def _validate_review_policy(step: FlowStepValidationView) -> None:
+    raw_policy: object = step.review_policy
     try:
         parse_flow_step_review_policy(
-            raw_policy=step.review_policy,
+            raw_policy=raw_policy,
             output_mode=FlowOutputMode(step.output_mode),
         )
     except BadRequestException as exc:
@@ -495,7 +740,9 @@ def _validate_binding_references(
 
 
 def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> None:
-    runtime_input = build_runtime_input_config(step.input_config)
+    runtime_input: FlowRuntimeInputConfig = build_runtime_input_config(
+        step.input_config
+    )
     if not runtime_input.enabled:
         return
 
