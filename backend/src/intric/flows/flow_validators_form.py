@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from intric.flows.domain.flow_step_validation import (
+    FlowStepValidationError,
+    FlowStepValidationView,
+    flow_step_validation_views_from_flow_steps,
+)
 from intric.flows.flow_metadata import (
     FlowFormSchemaParseMode,
     form_field_name_error,
@@ -12,7 +19,6 @@ from intric.flows.flow_variable_definitions import (
     is_reserved_runtime_variable,
     is_step_alias_variable,
 )
-from intric.main.exceptions import BadRequestException
 
 
 def validate_form_schema(metadata_json: FlowPersistedJsonObject | None) -> None:
@@ -21,7 +27,18 @@ def validate_form_schema(metadata_json: FlowPersistedJsonObject | None) -> None:
 
 def validate_variable_alias_collisions(
     *,
-    steps: list[FlowStep],
+    steps: Sequence[FlowStep],
+    metadata_json: FlowPersistedJsonObject | None,
+) -> None:
+    validate_variable_alias_collisions_for_step_graph(
+        steps=flow_step_validation_views_from_flow_steps(steps),
+        metadata_json=metadata_json,
+    )
+
+
+def validate_variable_alias_collisions_for_step_graph(
+    *,
+    steps: Sequence[FlowStepValidationView],
     metadata_json: FlowPersistedJsonObject | None,
 ) -> None:
     field_names: dict[str, str] = {}
@@ -54,7 +71,7 @@ def validate_variable_alias_collisions(
         if not normalized:
             continue
         if is_reserved_runtime_variable(normalized):
-            raise BadRequestException(
+            raise FlowStepValidationError(
                 f"Step {step.step_order} is named '{raw_name}', but that name is reserved "
                 "for Eneo runtime variables. Rename the step to describe what it does.",
                 code="flow_step_name_reserved_variable",
@@ -63,15 +80,18 @@ def validate_variable_alias_collisions(
                     "step_name": raw_name,
                     "reserved_aliases": sorted(RESERVED_RUNTIME_VARIABLES),
                 },
+                step_order=step.step_order,
             )
         if is_step_alias_variable(normalized):
-            raise BadRequestException(
+            raise FlowStepValidationError(
                 f"Step {step.step_order} is named '{raw_name}'. Names like step_1 are "
                 "reserved for automatic step variables. Rename the step to describe what it does.",
                 code="flow_step_name_step_alias",
                 context={"step_order": step.step_order, "step_name": raw_name},
+                step_order=step.step_order,
             )
         if normalized in field_names:
-            raise BadRequestException(
-                f"Step {step.step_order} name '{raw_name}' conflicts with form field name '{field_names[normalized]}'."
+            raise FlowStepValidationError(
+                f"Step {step.step_order} name '{raw_name}' conflicts with form field name '{field_names[normalized]}'.",
+                step_order=step.step_order,
             )

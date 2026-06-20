@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any, cast
 
@@ -18,6 +19,11 @@ from intric.flows.citation_sidecar import (
     resolve_citation_mode,
 )
 from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from intric.flows.domain.flow_step_validation import (
+    FlowStepValidationError,
+    FlowStepValidationView,
+    flow_step_validation_views_from_flow_steps,
+)
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_capability_manifest import (
     FlowOutputMode,
@@ -66,8 +72,13 @@ _ALLOWED_FLOW_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
 _ALLOWED_FLOW_OUTPUT_MODES = set(FLOW_STEP_OUTPUT_MODE_VALUES)
 _ALLOWED_FLOW_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
 _ALLOWED_FLOW_MCP_POLICIES = set(FLOW_STEP_MCP_POLICY_VALUES)
+FLOW_AUDIO_TRANSCRIPTION_REQUIRED = "flow_audio_transcription_required"
+FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = "flow_audio_transcription_model_required"
 __all__ = [
+    "FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED",
+    "FLOW_AUDIO_TRANSCRIPTION_REQUIRED",
     "validate_form_schema",
+    "validate_step_graph",
     "validate_steps",
     "validate_variable_alias_collisions",
 ]
@@ -75,6 +86,19 @@ __all__ = [
 
 def validate_steps(
     steps: list[FlowStep],
+    *,
+    metadata_json: FlowPersistedJsonObject | None = None,
+    require_complete_template_fill_config: bool = False,
+) -> None:
+    validate_step_graph(
+        flow_step_validation_views_from_flow_steps(steps),
+        metadata_json=metadata_json,
+        require_complete_template_fill_config=require_complete_template_fill_config,
+    )
+
+
+def validate_step_graph(
+    steps: Sequence[FlowStepValidationView],
     *,
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
@@ -106,7 +130,10 @@ def validate_steps(
 
     chain_violation = find_first_step_chain_violation(sorted_steps)
     if chain_violation is not None:
-        raise BadRequestException(chain_violation.message)
+        raise FlowStepValidationError(
+            chain_violation.message,
+            step_order=chain_violation.step_order,
+        )
 
     terminal_step_order = sorted_steps[-1].step_order
     seen: set[int] = set()
@@ -120,9 +147,10 @@ def validate_steps(
             validate_http_input_config(step=step)
         if step.output_mode == "http_post":
             if step.step_order != terminal_step_order:
-                raise BadRequestException(
+                raise FlowStepValidationError(
                     f"Step {step.step_order}: output_mode 'http_post' is only supported on the last step.",
                     code="flow_http_post_output_must_be_terminal",
+                    step_order=step.step_order,
                 )
             validate_http_output_config(step=step)
         transcribe_only_error = transcribe_only_violation(
@@ -132,7 +160,10 @@ def validate_steps(
             output_mode=step.output_mode,
         )
         if transcribe_only_error is not None:
-            raise BadRequestException(transcribe_only_error)
+            raise FlowStepValidationError(
+                transcribe_only_error,
+                step_order=step.step_order,
+            )
         if step.output_mode == "template_fill":
             validate_template_fill_output_config(
                 step=step,
@@ -141,17 +172,19 @@ def validate_steps(
             )
         input_policy = INPUT_TYPE_POLICIES.get(step.input_type)
         if input_policy and not input_policy.supported:
-            raise BadRequestException(
-                f"Step {step.step_order}: {_enum_value(step.input_type)} is not yet supported."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: {_enum_value(step.input_type)} is not yet supported.",
+                step_order=step.step_order,
             )
         if (
             step.input_contract is not None
             and input_policy
             and not input_policy.contract_allowed
         ):
-            raise BadRequestException(
+            raise FlowStepValidationError(
                 f"Step {step.step_order}: input_contract is not supported for "
-                f"input_type '{_enum_value(step.input_type)}'."
+                f"input_type '{_enum_value(step.input_type)}'.",
+                step_order=step.step_order,
             )
         if step.input_contract is not None:
             try:
@@ -160,7 +193,10 @@ def validate_steps(
                     label=f"Step {step.step_order} input_contract",
                 )
             except TypedIOValidationException as exc:
-                raise BadRequestException(str(exc)) from exc
+                raise FlowStepValidationError(
+                    str(exc),
+                    step_order=step.step_order,
+                ) from exc
             _validate_input_contract_binding_compatibility(step=step)
             _validate_input_contract_source_compatibility(step=step)
         if step.output_contract is not None:
@@ -170,7 +206,10 @@ def validate_steps(
                     label=f"Step {step.step_order} output_contract",
                 )
             except TypedIOValidationException as exc:
-                raise BadRequestException(str(exc)) from exc
+                raise FlowStepValidationError(
+                    str(exc),
+                    step_order=step.step_order,
+                ) from exc
             _validate_output_contract_compatibility(step=step)
 
         if step.input_bindings is not None:
@@ -190,93 +229,116 @@ def validate_steps(
     )
 
 
-def _validate_step_enum_values(step: FlowStep) -> None:
+def _validate_step_enum_values(step: FlowStepValidationView) -> None:
     if step.input_source not in _ALLOWED_FLOW_INPUT_SOURCES:
-        raise BadRequestException(
-            f"Step {step.step_order}: unsupported input_source '{_enum_value(step.input_source)}'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported input_source '{_enum_value(step.input_source)}'.",
+            step_order=step.step_order,
         )
     if step.input_type not in _ALLOWED_FLOW_INPUT_TYPES:
-        raise BadRequestException(
-            f"Step {step.step_order}: unsupported input_type '{_enum_value(step.input_type)}'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported input_type '{_enum_value(step.input_type)}'.",
+            step_order=step.step_order,
         )
     if step.output_mode not in _ALLOWED_FLOW_OUTPUT_MODES:
-        raise BadRequestException(
-            f"Step {step.step_order}: unsupported output_mode '{_enum_value(step.output_mode)}'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported output_mode '{_enum_value(step.output_mode)}'.",
+            step_order=step.step_order,
         )
     if step.output_type not in _ALLOWED_FLOW_OUTPUT_TYPES:
-        raise BadRequestException(
-            f"Step {step.step_order}: unsupported output_type '{_enum_value(step.output_type)}'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported output_type '{_enum_value(step.output_type)}'.",
+            step_order=step.step_order,
         )
     if step.mcp_policy not in _ALLOWED_FLOW_MCP_POLICIES:
-        raise BadRequestException(
-            f"Step {step.step_order}: unsupported mcp_policy '{_enum_value(step.mcp_policy)}'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported mcp_policy '{_enum_value(step.mcp_policy)}'.",
+            step_order=step.step_order,
         )
 
 
-def _validate_step_timeout(step: FlowStep) -> None:
+def _validate_step_timeout(step: FlowStepValidationView) -> None:
     if step.timeout_seconds is None:
         return
     if isinstance(step.timeout_seconds, bool):
-        raise BadRequestException(
-            f"Step {step.step_order}: timeout_seconds must be an integer."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: timeout_seconds must be an integer.",
+            step_order=step.step_order,
         )
     if step.timeout_seconds <= 0:
-        raise BadRequestException(
-            f"Step {step.step_order}: timeout_seconds must be greater than zero."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: timeout_seconds must be greater than zero.",
+            step_order=step.step_order,
         )
 
 
-def _validate_citation_mode(step: FlowStep) -> None:
+def _validate_citation_mode(step: FlowStepValidationView) -> None:
     citation_mode = resolve_citation_mode(step.output_config)
     if citation_mode == CITATION_MODE_OFF:
         return
     if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
-        raise BadRequestException(
-            f"Step {step.step_order}: unsupported output_config.citation_mode '{citation_mode}'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: unsupported output_config.citation_mode '{citation_mode}'.",
+            step_order=step.step_order,
         )
     if step.output_type != "text":
-        raise BadRequestException(
-            f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires output_type 'text'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires output_type 'text'.",
+            step_order=step.step_order,
         )
     if not is_citation_capable_step(
         output_type=FlowOutputType(step.output_type),
         output_mode=FlowOutputMode(step.output_mode),
         output_config=step.output_config,
     ):
-        raise BadRequestException(
-            f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires an LLM-backed text step."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: citation_mode 'inline_inref_sidecar' requires an LLM-backed text step.",
+            step_order=step.step_order,
         )
 
 
-def _validate_review_policy(step: FlowStep) -> None:
-    parse_flow_step_review_policy(
-        raw_policy=step.review_policy,
-        output_mode=FlowOutputMode(step.output_mode),
-    )
+def _validate_review_policy(step: FlowStepValidationView) -> None:
+    try:
+        parse_flow_step_review_policy(
+            raw_policy=step.review_policy,
+            output_mode=FlowOutputMode(step.output_mode),
+        )
+    except BadRequestException as exc:
+        raise FlowStepValidationError(
+            str(exc),
+            code=exc.code,
+            context=exc.context,
+            step_order=step.step_order,
+        ) from exc
 
 
-def _validate_output_contract_compatibility(*, step: FlowStep) -> None:
+def _validate_output_contract_compatibility(*, step: FlowStepValidationView) -> None:
     if step.output_contract is None:
         return
     if step.output_mode == "template_fill":
-        raise BadRequestException(
-            f"Step {step.step_order}: output_contract is not supported for output_mode 'template_fill'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_contract is not supported for output_mode 'template_fill'.",
+            step_order=step.step_order,
         )
     if step.output_type == "text":
-        raise BadRequestException(
-            f"Step {step.step_order}: output_contract is not supported for output_type 'text'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_contract is not supported for output_type 'text'.",
+            step_order=step.step_order,
         )
     if step.output_type in {"pdf", "docx"}:
         schema_type = _schema_type_hint(step.output_contract)
         if schema_type not in {"object", "array"}:
-            raise BadRequestException(
+            raise FlowStepValidationError(
                 f"Step {step.step_order}: output_contract for generated document "
                 f"output_type '{step.output_type}' must declare schema type "
-                "'object' or 'array'."
+                "'object' or 'array'.",
+                step_order=step.step_order,
             )
 
 
-def _validate_input_contract_source_compatibility(*, step: FlowStep) -> None:
+def _validate_input_contract_source_compatibility(
+    *, step: FlowStepValidationView
+) -> None:
     if step.input_contract is None:
         return
     if step.input_source != "all_previous_steps":
@@ -285,20 +347,23 @@ def _validate_input_contract_source_compatibility(*, step: FlowStep) -> None:
         return
     if not schema_expects_structured(step.input_contract):
         return
-    raise BadRequestException(
+    raise FlowStepValidationError(
         f"Step {step.step_order}: structured input_contract is not supported with "
         "input_source 'all_previous_steps' because concatenated prior step text "
-        "is not a single JSON value."
+        "is not a single JSON value.",
+        step_order=step.step_order,
     )
 
 
-def _validate_input_contract_binding_compatibility(*, step: FlowStep) -> None:
+def _validate_input_contract_binding_compatibility(
+    *, step: FlowStepValidationView
+) -> None:
     if not input_contract_conflicts_with_question_binding(
         input_bindings=step.input_bindings,
         input_contract=step.input_contract,
     ):
         return
-    raise BadRequestException(
+    raise FlowStepValidationError(
         f"Step {step.step_order}: input_contract cannot validate "
         "input_bindings.question because the question binding supplies the "
         "complete rendered step input. Remove input_contract or remove "
@@ -309,18 +374,20 @@ def _validate_input_contract_binding_compatibility(*, step: FlowStep) -> None:
             "field": "input_contract",
             "conflict": "input_bindings.question",
         },
+        step_order=step.step_order,
     )
 
 
-def _validate_supported_input_binding_keys(*, step: FlowStep) -> None:
+def _validate_supported_input_binding_keys(*, step: FlowStepValidationView) -> None:
     unsupported_key = unsupported_input_binding_key(step.input_bindings)
     if unsupported_key is None:
         return
-    raise BadRequestException(
+    raise FlowStepValidationError(
         f"Step {step.step_order}: unsupported input_bindings key '{unsupported_key}'. "
         "Only input_bindings.question is supported.",
         code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
         context={"field": "input_bindings", "key": unsupported_key},
+        step_order=step.step_order,
     )
 
 
@@ -351,7 +418,7 @@ def _enum_value(value: object) -> object:
 
 def _validate_audio_transcription_settings(
     *,
-    steps: list[FlowStep],
+    steps: Sequence[FlowStepValidationView],
     metadata_json: FlowPersistedJsonObject | None,
 ) -> None:
     if not any(step.input_type == "audio" for step in steps):
@@ -364,15 +431,19 @@ def _validate_audio_transcription_settings(
 
     if not config.enabled:
         raise BadRequestException(
-            "Transcription must be enabled when using audio input steps."
+            "Transcription must be enabled when using audio input steps.",
+            code=FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
         )
     if config.model_id is None:
         raise BadRequestException(
-            "A transcription model must be selected when using audio input steps."
+            "A transcription model must be selected when using audio input steps.",
+            code=FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
         )
 
 
-def _validate_audio_document_transcript_chain(*, steps: list[FlowStep]) -> None:
+def _validate_audio_document_transcript_chain(
+    *, steps: Sequence[FlowStepValidationView]
+) -> None:
     if not steps:
         return
     first_step = steps[0]
@@ -405,29 +476,33 @@ def _validate_binding_references(
         head = expression.split(".", maxsplit=1)[0]
         step_ref = _STEP_REFERENCE_PATTERN.match(head)
         if step_ref is None:
-            raise BadRequestException(
-                f"Invalid step reference '{head}' in input bindings."
+            raise FlowStepValidationError(
+                f"Invalid step reference '{head}' in input bindings.",
+                step_order=current_step_order,
             )
 
         referenced_order = int(step_ref.group(1))
         if referenced_order >= current_step_order:
-            raise BadRequestException(
-                "Input bindings may only reference outputs from earlier steps."
+            raise FlowStepValidationError(
+                "Input bindings may only reference outputs from earlier steps.",
+                step_order=current_step_order,
             )
         if referenced_order not in available_orders:
-            raise BadRequestException(
-                f"Input binding references unknown step order: {referenced_order}."
+            raise FlowStepValidationError(
+                f"Input binding references unknown step order: {referenced_order}.",
+                step_order=current_step_order,
             )
 
 
-def _validate_runtime_input_publish_rules(*, step: FlowStep) -> None:
+def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> None:
     runtime_input = build_runtime_input_config(step.input_config)
     if not runtime_input.enabled:
         return
 
     if step.output_mode == "transcribe_only" and runtime_input.input_format != "audio":
-        raise BadRequestException(
-            f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'.",
+            step_order=step.step_order,
         )
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
@@ -442,6 +517,7 @@ def _validate_runtime_input_publish_rules(*, step: FlowStep) -> None:
             form_field_names=set(),
         )
         if not consumes_runtime_input(references):
-            raise BadRequestException(
-                f"Step {step.step_order}: explicit question bindings must reference step_input.* when runtime input is enabled."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: explicit question bindings must reference step_input.* when runtime input is enabled.",
+                step_order=step.step_order,
             )

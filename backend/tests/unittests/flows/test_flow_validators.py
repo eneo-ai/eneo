@@ -12,7 +12,11 @@ from intric.flows.flow_review_policy import (
     FlowStepReviewMode,
     FlowStepReviewPolicy,
 )
-from intric.flows.flow_validators import validate_form_schema, validate_steps
+from intric.flows.flow_validators import (
+    FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    validate_form_schema,
+    validate_steps,
+)
 from intric.flows.flow_validators_form import validate_variable_alias_collisions
 from intric.main.exceptions import BadRequestException
 
@@ -289,6 +293,24 @@ def test_validate_steps_allows_audio_document_flow_with_transcript_step():
         ],
         metadata_json=_audio_metadata(),
     )
+
+
+def test_validate_steps_rejects_audio_input_without_transcription_metadata():
+    with pytest.raises(
+        BadRequestException,
+        match="Transcription must be enabled when using audio input steps",
+    ) as exc_info:
+        validate_steps(
+            [
+                _step(
+                    input_source="flow_input",
+                    input_type="audio",
+                    output_type="text",
+                    output_mode="transcribe_only",
+                )
+            ]
+        )
+    assert exc_info.value.code == FLOW_AUDIO_TRANSCRIPTION_REQUIRED
 
 
 def test_validate_steps_rejects_structured_contract_for_all_previous_text_input():

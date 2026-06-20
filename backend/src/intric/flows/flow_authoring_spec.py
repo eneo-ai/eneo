@@ -249,6 +249,27 @@ class FlowDraftSpecCore(BaseModel):
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def metadata_json_from_authoring_form_fields(
+    form_fields: list[FormFieldSpec] | None,
+) -> FlowPersistedJsonObject | None:
+    if form_fields is None:
+        return None
+    return {
+        "form_schema": {
+            "fields": [
+                {
+                    "name": field.name,
+                    "type": field.type,
+                    "label": field.label,
+                    "required": field.required,
+                    **({"options": field.options} if field.options is not None else {}),
+                }
+                for field in form_fields
+            ]
+        }
+    }
+
+
 __all__ = [
     "AssistantSpec",
     "AssistantSpecLocalRefNotPortableError",
@@ -262,5 +283,6 @@ __all__ = [
     "StepSpec",
     "completion_model_ref_strip_log_extra",
     "completion_model_ref_was_stripped",
+    "metadata_json_from_authoring_form_fields",
     "strip_inapplicable_completion_model",
 ]

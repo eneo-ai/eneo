@@ -4,8 +4,10 @@ import re
 from typing import cast
 from uuid import UUID
 
-from intric.flows.domain.flow import FlowStep
-from intric.main.exceptions import BadRequestException
+from intric.flows.domain.flow_step_validation import (
+    FlowStepValidationError,
+    FlowStepValidationView,
+)
 
 _STEP_REFERENCE_PATTERN = re.compile(r"^step_(\d+)$")
 _EXACT_TEMPLATE_EXPRESSION_PATTERN = re.compile(r"^\s*\{\{\s*([^{}]+)\s*\}\}\s*$")
@@ -22,19 +24,21 @@ def has_template_fill_resource_reference(output_config: object) -> bool:
 
 def validate_template_fill_output_config(
     *,
-    step: FlowStep,
+    step: FlowStepValidationView,
     available_orders: set[int],
     require_complete_config: bool,
 ) -> None:
     if step.output_type != "docx":
-        raise BadRequestException(
-            f"Step {step.step_order}: template_fill requires output_type 'docx'."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: template_fill requires output_type 'docx'.",
+            step_order=step.step_order,
         )
     output_config = step.output_config
     if output_config is None:
         if require_complete_config:
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: output_config must be an object for output_mode 'template_fill'.",
+                step_order=step.step_order,
             )
         return
 
@@ -42,52 +46,60 @@ def validate_template_fill_output_config(
     template_file_id = output_config.get("template_file_id")
     if template_asset_id in (None, "") and template_file_id in (None, ""):
         if require_complete_config:
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.template_asset_id or template_file_id must be a UUID."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: output_config.template_asset_id or template_file_id must be a UUID.",
+                step_order=step.step_order,
             )
     if template_asset_id not in (None, ""):
         try:
             UUID(str(template_asset_id))
         except Exception as exc:
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.template_asset_id must be a UUID."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: output_config.template_asset_id must be a UUID.",
+                step_order=step.step_order,
             ) from exc
     if template_file_id not in (None, ""):
         try:
             UUID(str(template_file_id))
         except Exception as exc:
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.template_file_id must be a UUID."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: output_config.template_file_id must be a UUID.",
+                step_order=step.step_order,
             ) from exc
 
     bindings_obj = output_config.get("bindings")
     if bindings_obj is None:
         if require_complete_config:
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.bindings must be an object."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: output_config.bindings must be an object.",
+                step_order=step.step_order,
             )
         return
     if not isinstance(bindings_obj, dict):
-        raise BadRequestException(
-            f"Step {step.step_order}: output_config.bindings must be an object."
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_config.bindings must be an object.",
+            step_order=step.step_order,
         )
     bindings = cast(dict[object, object], bindings_obj)
 
     for placeholder, binding in bindings.items():
         if not isinstance(placeholder, str) or not placeholder.strip():
-            raise BadRequestException(
-                f"Step {step.step_order}: output_config.bindings keys must be non-empty strings."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: output_config.bindings keys must be non-empty strings.",
+                step_order=step.step_order,
             )
         if not isinstance(binding, str):
-            raise BadRequestException(
-                f"Step {step.step_order}: binding '{placeholder}' must be a string template expression."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: binding '{placeholder}' must be a string template expression.",
+                step_order=step.step_order,
             )
         if not binding.strip():
             continue
         match = _EXACT_TEMPLATE_EXPRESSION_PATTERN.match(binding)
         if match is None:
-            raise BadRequestException(
-                f"Step {step.step_order}: binding '{placeholder}' must be a single template expression like {{{{step_1.output.text}}}}."
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: binding '{placeholder}' must be a single template expression like {{{{step_1.output.text}}}}.",
+                step_order=step.step_order,
             )
         validate_template_expression_reference(
             expression=match.group(1).strip(),
@@ -107,14 +119,19 @@ def validate_template_expression_reference(
     head = expression.split(".", maxsplit=1)[0]
     step_ref = _STEP_REFERENCE_PATTERN.match(head)
     if step_ref is None:
-        raise BadRequestException(f"Invalid step reference '{head}' in template bindings.")
+        raise FlowStepValidationError(
+            f"Invalid step reference '{head}' in template bindings.",
+            step_order=current_step_order,
+        )
 
     referenced_order = int(step_ref.group(1))
     if referenced_order >= current_step_order:
-        raise BadRequestException(
-            "Template bindings may only reference outputs from earlier steps."
+        raise FlowStepValidationError(
+            "Template bindings may only reference outputs from earlier steps.",
+            step_order=current_step_order,
         )
     if referenced_order not in available_orders:
-        raise BadRequestException(
-            f"Template binding references unknown step order: {referenced_order}."
+        raise FlowStepValidationError(
+            f"Template binding references unknown step order: {referenced_order}.",
+            step_order=current_step_order,
         )

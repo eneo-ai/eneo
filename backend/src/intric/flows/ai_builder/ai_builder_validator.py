@@ -10,9 +10,6 @@ from __future__ import annotations
 import jsonschema
 
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.ai_builder.ai_builder_validation_flow_parity import (
-    validate_flow_service_parity,
-)
 from intric.flows.ai_builder.ai_builder_validation_quality import (
     lint_all_previous_steps_overuse,
     lint_all_previous_with_specific_refs,
@@ -29,15 +26,30 @@ from intric.flows.ai_builder.ai_builder_validation_quality import (
 from intric.flows.ai_builder.ai_builder_validation_references import (
     validate_variable_references,
 )
+from intric.flows.domain.flow_step_validation import FlowStepValidationError
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputMode,
     OutputType,
+    metadata_json_from_authoring_form_fields,
+)
+from intric.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
+)
+from intric.flows.flow_validators import (
+    FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
+    FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    validate_form_schema,
+    validate_step_graph,
+)
+from intric.flows.flow_validators_form import (
+    validate_variable_alias_collisions_for_step_graph,
 )
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.step_chain_rules import find_first_step_chain_violation
+from intric.main.exceptions import BadRequestException
 
 # ---------------------------------------------------------------------------
 # Valid enum values (from DB constraints, excluding http_ which AI can't set)
@@ -47,6 +59,12 @@ _VALID_INPUT_SOURCES = {e.value for e in InputSource}
 _VALID_INPUT_TYPES = {e.value for e in InputType}
 _VALID_OUTPUT_MODES = {e.value for e in OutputMode}
 _VALID_OUTPUT_TYPES = {e.value for e in OutputType}
+_BUILDER_IGNORED_FLOW_VALIDATION_CODES = frozenset(
+    {
+        FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
+        FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +109,7 @@ def validate_spec(
     _validate_contract_type_compat(spec, result)
     _validate_model_refs(spec, result, available_model_refs)
     _validate_kb_refs(spec, result, available_kb_refs)
-    validate_flow_service_parity(spec, result)
+    _validate_flow_service_rules(spec, result)
     validate_variable_references(spec, result)
 
     # Quality lint (only if hard validation passes)
@@ -299,6 +317,67 @@ def _validate_kb_refs(
                     code="unknown_kb_ref",
                     message=f"Unknown knowledge base reference '{ref}'.",
                 )
+
+
+def _validate_flow_service_rules(
+    spec: FlowDraftSpecCore, result: SpecValidationResult
+) -> None:
+    flow_steps = flow_step_validation_views_from_draft_spec(spec.steps)
+    metadata_json = metadata_json_from_authoring_form_fields(spec.form_fields)
+
+    try:
+        validate_form_schema(metadata_json)
+    except BadRequestException as exc:
+        result.add_error(
+            step_ref=None,
+            code="form_schema_invalid",
+            message=str(exc),
+        )
+
+    try:
+        validate_variable_alias_collisions_for_step_graph(
+            steps=flow_steps,
+            metadata_json=metadata_json,
+        )
+    except FlowStepValidationError as exc:
+        result.add_error(
+            step_ref=_step_ref_from_order(spec, exc.step_order),
+            code="variable_alias_collision",
+            message=str(exc),
+        )
+    except BadRequestException as exc:
+        result.add_error(
+            step_ref=None,
+            code="variable_alias_collision",
+            message=str(exc),
+        )
+
+    try:
+        validate_step_graph(
+            flow_steps,
+            metadata_json=metadata_json,
+            require_complete_template_fill_config=False,
+        )
+    except FlowStepValidationError as exc:
+        result.add_error(
+            step_ref=_step_ref_from_order(spec, exc.step_order),
+            code="flow_step_invalid",
+            message=str(exc),
+        )
+    except BadRequestException as exc:
+        if exc.code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES:
+            return
+        result.add_error(
+            step_ref=None,
+            code="flow_step_invalid",
+            message=str(exc),
+        )
+
+
+def _step_ref_from_order(spec: FlowDraftSpecCore, step_order: int) -> str | None:
+    if step_order < 1 or step_order > len(spec.steps):
+        return None
+    return spec.steps[step_order - 1].plan_step_ref
 
 
 # ---------------------------------------------------------------------------

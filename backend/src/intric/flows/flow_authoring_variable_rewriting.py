@@ -3,6 +3,14 @@ from __future__ import annotations
 import re
 from typing import Any, cast
 
+from intric.flows.domain.flow_step_validation import FlowStepValidationView
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowMcpPolicy,
+    FlowOutputMode,
+    FlowOutputType,
+)
 from intric.flows.flow_authoring_spec import AssistantSpec, StepSpec
 
 _TEMPLATE_EXPRESSION_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -52,6 +60,34 @@ def rewrite_step_spec_variables(
     if updates:
         return step_spec.model_copy(update=updates)
     return step_spec
+
+
+def flow_step_validation_views_from_draft_spec(
+    step_specs: list[StepSpec],
+) -> list[FlowStepValidationView]:
+    ref_to_order = build_ref_to_order(step_specs)
+    rewritten_steps = [
+        rewrite_step_spec_variables(step, ref_to_order) for step in step_specs
+    ]
+    return [
+        FlowStepValidationView(
+            step_order=index + 1,
+            timeout_seconds=None,
+            user_description=step.name,
+            input_source=FlowInputSource(step.input_source.value),
+            input_type=FlowInputType(step.input_type.value),
+            input_contract=step.input_contract,
+            output_mode=FlowOutputMode(step.output_mode.value),
+            output_type=FlowOutputType(step.output_type.value),
+            output_contract=step.output_contract,
+            input_bindings=step.input_bindings,
+            mcp_policy=FlowMcpPolicy(step.mcp_policy.value),
+            input_config=step.input_config,
+            output_config=step.output_config,
+            review_policy=step.review_policy,
+        )
+        for index, step in enumerate(rewritten_steps)
+    ]
 
 
 def rewrite_variable_string(

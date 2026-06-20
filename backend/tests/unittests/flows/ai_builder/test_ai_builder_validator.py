@@ -551,6 +551,30 @@ class TestSemanticVariableValidation:
 
         assert result.valid
 
+    def test_flow_rule_errors_map_to_authored_step_ref_without_message_parsing(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(ref="step_a", name="Extract"),
+                    _step(
+                        ref="step_b",
+                        name="Use future value",
+                        input_source=InputSource.PREVIOUS_STEP,
+                        input_bindings={"question": "Use {{ step_b.output.text }}"},
+                    ),
+                ]
+            )
+        )
+
+        assert any(
+            error.code == "flow_step_invalid"
+            and error.step_ref == "step_b"
+            and "earlier steps" in error.message
+            for error in result.errors
+        )
+
     def test_structured_access_requires_json_output(self) -> None:
         result = validate_spec(
             _spec(
@@ -760,6 +784,33 @@ class TestProductionParityValidation:
         result = validate_spec(spec)
         assert not result.valid
         assert any("multiselect" in e.message.lower() for e in result.errors)
+
+    def test_step_name_form_field_collision_maps_to_authored_step_ref(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Form flow",
+            steps=[
+                _step(
+                    ref="extract_case",
+                    name="CaseId",
+                )
+            ],
+            form_fields=[
+                FormFieldSpec(
+                    name="caseid",
+                    type="text",
+                    label="Case ID",
+                )
+            ],
+        )
+
+        result = validate_spec(spec)
+
+        assert any(
+            error.code == "variable_alias_collision"
+            and error.step_ref == "extract_case"
+            and "conflicts with form field name" in error.message
+            for error in result.errors
+        )
 
     def test_runtime_input_question_must_reference_step_input(self) -> None:
         result = validate_spec(
