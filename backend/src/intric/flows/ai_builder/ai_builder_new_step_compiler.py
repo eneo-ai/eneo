@@ -6,10 +6,14 @@ from typing import Any
 
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
+    PreviousFieldRef,
+    PreviousOutputRef,
     StructuredFieldDraft,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
+    InputSource,
+    InputType,
     MCPPolicy,
     OutputMode,
     OutputType,
@@ -148,42 +152,71 @@ def compile_input_bindings(
     the compiler should leave bindings empty for normal chains and broad fan-in
     steps unless it must compose material from multiple sources.
     """
-    if step_draft.input_source.value == "all_previous_steps":
+    return compile_step_input_bindings(
+        input_source=step_draft.input_source,
+        input_type=step_draft.input_type,
+        uses_form_fields=step_draft.uses_form_fields,
+        uses_previous_fields=step_draft.uses_previous_fields,
+        uses_previous_outputs=step_draft.uses_previous_outputs,
+        prior_steps=prior_steps,
+    )
+
+
+def compile_step_input_bindings(
+    *,
+    input_source: InputSource,
+    input_type: InputType,
+    uses_form_fields: list[str],
+    uses_previous_fields: list[PreviousFieldRef],
+    uses_previous_outputs: list[PreviousOutputRef],
+    prior_steps: list[StepSpec],
+) -> dict[str, Any] | None:
+    """Compile explicit "Underlag till text" for a step in plan-ref order."""
+    if input_source.value == "all_previous_steps":
         return None
 
-    source_reference = _resolve_source_reference(step_draft, prior_steps)
-    explicit_previous_fields = _compile_previous_field_sections(step_draft, prior_steps)
+    source_reference = _resolve_source_reference(
+        input_source=input_source,
+        input_type=input_type,
+        prior_steps=prior_steps,
+    )
+    explicit_previous_fields = _compile_previous_field_sections(
+        uses_previous_fields,
+        prior_steps,
+    )
     explicit_previous_outputs = _compile_previous_output_sections(
-        step_draft,
+        uses_previous_outputs,
         prior_steps,
     )
     structured_previous_text_input = (
-        step_draft.input_source.value == "previous_step"
-        and step_draft.input_type.value == "text"
+        input_source.value == "previous_step"
+        and input_type.value == "text"
         and bool(prior_steps)
         and prior_steps[-1].output_type == OutputType.JSON
     )
     needs_explicit_underlag = bool(
         explicit_previous_fields
         or explicit_previous_outputs
-        or step_draft.uses_form_fields
+        or uses_form_fields
         or structured_previous_text_input
     )
 
-    if step_draft.input_source.value == "previous_step" and not needs_explicit_underlag:
+    if input_source.value == "previous_step" and not needs_explicit_underlag:
         return None
 
     if (
         source_reference is None
         and not explicit_previous_fields
         and not explicit_previous_outputs
+        and not uses_form_fields
     ):
         return None
 
     explicit_previous_sections = [*explicit_previous_fields, *explicit_previous_outputs]
     sections: list[str] = []
     if source_reference is not None and not _should_suppress_source_reference(
-        step_draft=step_draft,
+        input_source=input_source,
+        uses_previous_fields=uses_previous_fields,
         prior_steps=prior_steps,
         source_reference=source_reference,
         explicit_previous_sections=explicit_previous_sections,
@@ -191,10 +224,10 @@ def compile_input_bindings(
         sections.append(source_reference)
     sections.extend(explicit_previous_fields)
     sections.extend(explicit_previous_outputs)
-    if step_draft.uses_form_fields:
+    if uses_form_fields:
         form_field_lines = [
             f"{field_name}: {form_field_reference_expression(field_name)}"
-            for field_name in step_draft.uses_form_fields
+            for field_name in uses_form_fields
         ]
         sections.append("\n".join(form_field_lines))
     if not sections:
@@ -204,7 +237,8 @@ def compile_input_bindings(
 
 def _should_suppress_source_reference(
     *,
-    step_draft: NewStepDraft,
+    input_source: InputSource,
+    uses_previous_fields: list[PreviousFieldRef],
     prior_steps: list[StepSpec],
     source_reference: str,
     explicit_previous_sections: list[str],
@@ -212,7 +246,7 @@ def _should_suppress_source_reference(
     if not explicit_previous_sections:
         return False
     if not _is_immediate_structured_source_reference(
-        step_draft=step_draft,
+        input_source=input_source,
         prior_steps=prior_steps,
         source_reference=source_reference,
     ):
@@ -222,17 +256,17 @@ def _should_suppress_source_reference(
     # the broad structured source blob.
     return any(
         field_ref.from_step == immediate_previous_order
-        for field_ref in step_draft.uses_previous_fields
+        for field_ref in uses_previous_fields
     )
 
 
 def _is_immediate_structured_source_reference(
     *,
-    step_draft: NewStepDraft,
+    input_source: InputSource,
     prior_steps: list[StepSpec],
     source_reference: str,
 ) -> bool:
-    if step_draft.input_source.value != "previous_step":
+    if input_source.value != "previous_step":
         return False
     if not prior_steps:
         return False
@@ -250,32 +284,44 @@ def compile_assistant_instructions(
     input_bindings: dict[str, Any] | None,
 ) -> str:
     instructions = step_draft.instructions
-    if input_bindings is None and step_draft.uses_previous_fields:
-        field_lines = "\n".join(
-            f"- {field_ref.label or default_previous_field_label(field_ref.field_path)} "
-            f"(steg {field_ref.from_step}: {field_ref.field_path})"
-            for field_ref in step_draft.uses_previous_fields
+    if input_bindings is None:
+        hint = compile_input_reference_instruction_hint(
+            uses_previous_fields=step_draft.uses_previous_fields,
+            uses_form_fields=step_draft.uses_form_fields,
         )
-        instructions = (
-            f"{instructions}\n\n"
-            "Beakta särskilt följande strukturerade fält i underlaget:\n"
-            f"{field_lines}"
-        )
-    if input_bindings is None and step_draft.uses_form_fields:
-        form_lines = "\n".join(
-            f"- {field_name}: {form_field_reference_expression(field_name)}"
-            for field_name in step_draft.uses_form_fields
-        )
-        instructions = (
-            f"{instructions}\n\n"
-            "Beakta också följande formulärfält vid analysen:\n"
-            f"{form_lines}"
-        )
+        if hint:
+            instructions = f"{instructions}\n\n{hint}"
 
     return _append_output_field_guidance(
         instructions=instructions or "",
         output_fields=step_draft.output_fields,
     )
+
+
+def compile_input_reference_instruction_hint(
+    *,
+    uses_previous_fields: list[PreviousFieldRef],
+    uses_form_fields: list[str],
+) -> str:
+    sections: list[str] = []
+    if uses_previous_fields:
+        field_lines = "\n".join(
+            f"- {field_ref.label or default_previous_field_label(field_ref.field_path)} "
+            f"(steg {field_ref.from_step}: {field_ref.field_path})"
+            for field_ref in uses_previous_fields
+        )
+        sections.append(
+            f"Beakta särskilt följande strukturerade fält i underlaget:\n{field_lines}"
+        )
+    if uses_form_fields:
+        form_lines = "\n".join(
+            f"- {field_name}: {form_field_reference_expression(field_name)}"
+            for field_name in uses_form_fields
+        )
+        sections.append(
+            f"Beakta också följande formulärfält vid analysen:\n{form_lines}"
+        )
+    return "\n\n".join(sections)
 
 
 def compile_output_contract(
@@ -304,30 +350,32 @@ def _derive_input_contract(
 
 
 def _resolve_source_reference(
-    step_draft: NewStepDraft,
+    *,
+    input_source: InputSource,
+    input_type: InputType,
     prior_steps: list[StepSpec],
 ) -> str | None:
-    input_source = step_draft.input_source.value
-    input_type = step_draft.input_type.value
+    input_source_value = input_source.value
+    input_type_value = input_type.value
 
-    if input_source == "flow_input":
-        if input_type == "json":
+    if input_source_value == "flow_input":
+        if input_type_value == "json":
             return "{{ indata_json }}"
-        if input_type in {"document", "file", "audio"}:
+        if input_type_value in {"document", "file", "audio"}:
             return "{{ step_input.text }}"
         return "{{ indata_text }}"
 
-    if input_source == "previous_step":
+    if input_source_value == "previous_step":
         if not prior_steps:
             return None
         previous_step = prior_steps[-1]
-        if input_type == "json":
+        if input_type_value == "json":
             return f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}"
         if previous_step.output_type == OutputType.JSON:
             return f"{{{{ {previous_step.plan_step_ref}.output.structured }}}}"
         return f"{{{{ {previous_step.plan_step_ref}.output.text }}}}"
 
-    if input_source == "all_previous_steps":
+    if input_source_value == "all_previous_steps":
         references = [
             f"{{{{ {step.plan_step_ref}.output.text }}}}" for step in prior_steps
         ]
@@ -337,11 +385,11 @@ def _resolve_source_reference(
 
 
 def _compile_previous_field_sections(
-    step_draft: NewStepDraft,
+    uses_previous_fields: list[PreviousFieldRef],
     prior_steps: list[StepSpec],
 ) -> list[str]:
     sections: list[str] = []
-    for field_ref in step_draft.uses_previous_fields:
+    for field_ref in uses_previous_fields:
         if field_ref.from_step < 1 or field_ref.from_step > len(prior_steps):
             continue
         source_step = prior_steps[field_ref.from_step - 1]
@@ -353,11 +401,11 @@ def _compile_previous_field_sections(
 
 
 def _compile_previous_output_sections(
-    step_draft: NewStepDraft,
+    uses_previous_outputs: list[PreviousOutputRef],
     prior_steps: list[StepSpec],
 ) -> list[str]:
     sections: list[str] = []
-    for output_ref in step_draft.uses_previous_outputs:
+    for output_ref in uses_previous_outputs:
         if output_ref.from_step < 1 or output_ref.from_step > len(prior_steps):
             continue
         source_step = prior_steps[output_ref.from_step - 1]

@@ -5,11 +5,21 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_input_reference_instruction_hint,
     compile_new_step_draft,
     compile_review_policy,
+    compile_step_input_bindings,
+    derive_new_step_output_mode,
     make_plan_step_ref,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
+    NewStepDraft,
+    PreviousFieldRef,
+)
+from intric.flows.ai_builder.ai_builder_primary_input_fields import (
+    remove_primary_runtime_input_shadow_names,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
@@ -59,6 +69,9 @@ class ModifyExistingStep(BaseModel):
     input_config: FlowPersistedJsonObject | None = None
     output_config: FlowPersistedJsonObject | None = None
     review_mode: FlowStepReviewMode | None = None
+    uses_form_fields: list[str] | None = None
+    uses_previous_fields: list[PreviousFieldRef] | None = None
+    document_delivery_mode: DocumentDeliveryMode | None = None
 
 
 class AddStep(BaseModel):
@@ -152,11 +165,12 @@ def compile_ordered_edit_proposal(
             preserved_refs.append(item.existing_step_ref)
             continue
         preserved_refs.append(item.existing_step_ref)
-        compiled_steps.append(
-            apply_existing_step_patch(base_step, item).model_copy(
-                update={"plan_step_ref": plan_ref}
-            )
+        compiled = compile_existing_step_modification(
+            base_step,
+            item,
+            prior_steps=compiled_steps,
         )
+        compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
     validate_existing_step_ref_coverage(
         current_refs=set(base_by_ref),
@@ -216,6 +230,91 @@ def apply_existing_step_patch(
         )
 
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
+
+
+def compile_existing_step_modification(
+    existing: StepSpec,
+    patch: ModifyExistingStep,
+    *,
+    prior_steps: list[StepSpec],
+    primary_runtime_input_type: InputType | None = None,
+) -> StepSpec:
+    step = apply_existing_step_patch(existing, patch)
+    fields = patch.model_fields_set
+
+    if "uses_previous_fields" in fields or "uses_form_fields" in fields:
+        uses_form_fields = remove_primary_runtime_input_shadow_names(
+            field_names=patch.uses_form_fields or [],
+            runtime_input_type=primary_runtime_input_type,
+        )
+        uses_previous_fields = patch.uses_previous_fields or []
+        input_bindings = compile_step_input_bindings(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            uses_form_fields=uses_form_fields,
+            uses_previous_fields=uses_previous_fields,
+            uses_previous_outputs=[],
+            prior_steps=prior_steps,
+        )
+        updates: dict[str, object | None] = {}
+        if "input_bindings" not in fields:
+            updates["input_bindings"] = input_bindings
+        if input_bindings is None:
+            hint = compile_input_reference_instruction_hint(
+                uses_previous_fields=uses_previous_fields,
+                uses_form_fields=uses_form_fields,
+            )
+            if hint:
+                updates["assistant_spec"] = step.assistant_spec.model_copy(
+                    update={
+                        "instructions": f"{step.assistant_spec.instructions}\n\n{hint}"
+                    }
+                )
+        if updates:
+            step = step.model_copy(update=updates)
+
+    if "output_mode" not in fields:
+        output_mode = _derive_existing_step_output_mode(
+            step,
+            document_delivery_mode=patch.document_delivery_mode,
+        )
+        if output_mode != step.output_mode:
+            step = step.model_copy(update={"output_mode": output_mode})
+
+    return strip_inapplicable_completion_model(step)
+
+
+def _derive_existing_step_output_mode(
+    step: StepSpec,
+    *,
+    document_delivery_mode: DocumentDeliveryMode | None,
+) -> OutputMode:
+    output_mode_draft = NewStepDraft(
+        name=step.name or step.plan_step_ref,
+        instructions="Derive output mode.",
+        input_source=step.input_source,
+        input_type=step.input_type,
+        output_type=step.output_type,
+        document_delivery_mode=(
+            document_delivery_mode
+            if document_delivery_mode is not None
+            else _document_delivery_mode_for_existing_step(step)
+        ),
+    )
+    return derive_new_step_output_mode(output_mode_draft)
+
+
+def _document_delivery_mode_for_existing_step(
+    step: StepSpec,
+) -> DocumentDeliveryMode:
+    if (
+        step.output_mode == OutputMode.TEMPLATE_FILL
+        and step.output_type == OutputType.DOCX
+    ):
+        return "template_fill"
+    if step.output_type in {OutputType.DOCX, OutputType.PDF}:
+        return "generated"
+    return "not_applicable"
 
 
 def merge_assistant_specs(
@@ -358,7 +457,7 @@ __all__ = [
     "AssistantSpecPatch",
     "ModifyExistingStep",
     "OrderedEditProposal",
-    "apply_existing_step_patch",
+    "compile_existing_step_modification",
     "compile_ordered_edit_proposal",
     "flow_step_to_authoring_spec",
     "flow_steps_to_authoring_specs",

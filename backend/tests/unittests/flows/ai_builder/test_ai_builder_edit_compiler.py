@@ -225,6 +225,22 @@ def test_compile_edit_draft_rejects_uncanonicalized_duplicate_modifies() -> None
         compile_edit_draft(draft, existing, base_flow_revision=1)
 
 
+def test_compile_edit_draft_rejects_empty_step_name_patch() -> None:
+    existing = [_make_flow_step(step_order=1, user_description="Original")]
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="modify",
+                target_ref="existing_step_1",
+                patch=StepPatch(name=""),
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Step name cannot be cleared"):
+        compile_edit_draft(draft, existing, base_flow_revision=1)
+
+
 def test_compile_edit_draft_clears_all_previous_input_contract() -> None:
     stale_contract = {
         "type": "object",
@@ -1250,6 +1266,104 @@ class TestUntouchedStepsPreserved:
             result.compiled_spec.steps[1].input_bindings["question"]
             == "Sammanfattning: {{ step_a.output.structured.sammanfattning }}"
         )
+
+    def test_modify_step_translates_original_previous_field_ref_after_removal(self):
+        existing = [
+            _make_flow_step(step_order=1, user_description="Remove me"),
+            _make_flow_step(
+                step_order=2,
+                user_description="Extract",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                },
+            ),
+            _make_flow_step(
+                step_order=3,
+                user_description="Write",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                input_bindings={"question": "{{ old }}"},
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(op="remove", target_ref="existing_step_1"),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_3",
+                    patch=StepPatch(
+                        uses_previous_fields=[
+                            {
+                                "from_step": 2,
+                                "field_path": "answer",
+                            }
+                        ]
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=3)
+
+        assert result.compiled_spec.steps[1].input_bindings == {
+            "question": "answer: {{ step_a.output.structured.answer }}"
+        }
+
+    def test_modify_step_drops_previous_field_ref_to_removed_step(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Remove me",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"removed": {"type": "string"}},
+                },
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Extract",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                },
+            ),
+            _make_flow_step(
+                step_order=3,
+                user_description="Write",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                input_bindings={"question": "{{ old }}"},
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(op="remove", target_ref="existing_step_1"),
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_3",
+                    patch=StepPatch(
+                        uses_previous_fields=[
+                            {
+                                "from_step": 1,
+                                "field_path": "removed",
+                            }
+                        ]
+                    ),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(draft, existing, base_flow_revision=3)
+
+        assert result.compiled_spec.steps[1].input_bindings == {
+            "question": "{{ step_a.output.structured }}"
+        }
 
     def test_modify_step_form_fields_preserve_previous_source_in_underlag(self):
         existing = [

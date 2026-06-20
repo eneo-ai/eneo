@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    AssistantSpecPatch,
+    ModifyExistingStep,
+    compile_existing_step_modification,
     flow_step_to_authoring_spec,
     flow_steps_to_authoring_specs,
-    merge_assistant_specs,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
@@ -37,18 +39,14 @@ from intric.flows.ai_builder.ai_builder_form_fields import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
-    compile_review_policy,
-    default_previous_field_label,
-    derive_new_step_output_mode,
     make_plan_step_ref,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
-    DocumentDeliveryMode,
     NewStepDraft,
+    PreviousFieldRef,
 )
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
-    remove_primary_runtime_input_shadow_names,
     split_primary_runtime_input_shadow_names,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
@@ -63,18 +61,15 @@ from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_name import normalize_flow_name
 from intric.flows.flow_authoring_spec import (
-    AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
     InputType,
-    OutputMode,
     OutputType,
     StepSpec,
     completion_model_ref_strip_log_extra,
     strip_inapplicable_completion_model,
 )
-from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +164,8 @@ def compile_edit_draft(
                     patch,
                     assistant_snapshots=assistant_snapshots,
                     resource_catalog=resource_catalog,
-                    current_steps=current_steps,
                     primary_runtime_input_type=primary_runtime_input_type,
+                    prior_steps=compiled_steps,
                 )
             )
 
@@ -436,8 +431,8 @@ def _flow_step_to_spec(
     *,
     assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
-    current_steps: list[FlowStep] | None = None,
     primary_runtime_input_type: InputType | None = None,
+    prior_steps: list[StepSpec] | None = None,
 ) -> StepSpec:
     """Convert an existing FlowStep to a StepSpec, applying patch if present."""
     spec = flow_step_to_authoring_spec(
@@ -451,84 +446,20 @@ def _flow_step_to_spec(
     model_ref_source = "snapshot"
 
     if patch is not None:
-        updates: dict[str, Any] = {}
-        if patch.name is not None:
-            updates["name"] = patch.name
-        if patch.input_source is not None:
-            updates["input_source"] = patch.input_source
-        if patch.input_type is not None:
-            updates["input_type"] = patch.input_type
-        if patch.output_mode is not None:
-            updates["output_mode"] = patch.output_mode
-        if patch.output_type is not None:
-            updates["output_type"] = patch.output_type
-        if patch.mcp_policy is not None:
-            updates["mcp_policy"] = patch.mcp_policy
         if patch.assistant_spec is not None:
             if "model_ref" in patch.assistant_spec.model_fields_set:
                 supplied_model_ref = patch.assistant_spec.model_ref
                 model_ref_source = "patch"
-            updates["assistant_spec"] = merge_assistant_specs(
-                base_assistant_spec,
-                patch.assistant_spec,
-            )
-        if (
-            "uses_previous_fields" in patch.model_fields_set
-            or "uses_form_fields" in patch.model_fields_set
-        ):
-            uses_form_fields = remove_primary_runtime_input_shadow_names(
-                field_names=patch.uses_form_fields or [],
-                runtime_input_type=primary_runtime_input_type,
-            )
-            target_step = spec.model_copy(
-                update={
-                    "input_source": updates.get("input_source", spec.input_source),
-                    "input_type": updates.get("input_type", spec.input_type),
-                }
-            )
-            compiled_bindings = _compile_patch_input_bindings(
-                target_step=target_step,
-                uses_previous_fields=patch.uses_previous_fields or [],
-                uses_form_fields=uses_form_fields,
-                current_steps=current_steps or [],
-            )
-            updates["input_bindings"] = compiled_bindings
-            if compiled_bindings is None:
-                assistant_spec = cast(
-                    AssistantSpec,
-                    updates.get("assistant_spec", spec.assistant_spec),
-                )
-                hint = _compile_patch_input_instruction_hint(
-                    uses_previous_fields=patch.uses_previous_fields or [],
-                    uses_form_fields=uses_form_fields,
-                )
-                if hint:
-                    updates["assistant_spec"] = assistant_spec.model_copy(
-                        update={
-                            "instructions": (f"{assistant_spec.instructions}\n\n{hint}")
-                        }
-                    )
-        if "input_bindings" in patch.model_fields_set:
-            updates["input_bindings"] = patch.input_bindings
-        if "input_contract" in patch.model_fields_set:
-            updates["input_contract"] = patch.input_contract
-        if "output_contract" in patch.model_fields_set:
-            updates["output_contract"] = patch.output_contract
-        if "input_config" in patch.model_fields_set:
-            updates["input_config"] = patch.input_config
-        if "output_config" in patch.model_fields_set:
-            updates["output_config"] = patch.output_config
-        if "review_mode" in patch.model_fields_set:
-            updates["review_policy"] = compile_review_policy(patch.review_mode)
-        if updates:
-            spec = spec.model_copy(update=updates)
-        if "output_mode" not in patch.model_fields_set:
-            derived_output_mode = _derive_modify_patch_output_mode(
-                spec,
-                document_delivery_mode=patch.document_delivery_mode,
-            )
-            if derived_output_mode != spec.output_mode:
-                spec = spec.model_copy(update={"output_mode": derived_output_mode})
+        spec = compile_existing_step_modification(
+            spec,
+            _modify_step_from_patch(
+                existing_step_ref=spec.existing_step_ref or plan_ref,
+                patch=patch,
+                prior_steps=prior_steps or [],
+            ),
+            prior_steps=prior_steps or [],
+            primary_runtime_input_type=primary_runtime_input_type,
+        )
 
     spec = strip_inapplicable_completion_model(spec)
     _log_transcribe_only_model_ref_stripped(
@@ -537,6 +468,73 @@ def _flow_step_to_spec(
         source=model_ref_source,
     )
     return spec
+
+
+def _modify_step_from_patch(
+    *,
+    existing_step_ref: str,
+    patch: StepPatch,
+    prior_steps: list[StepSpec],
+) -> ModifyExistingStep:
+    payload: dict[str, object | None] = {
+        "existing_step_ref": existing_step_ref,
+    }
+    # Non-nullable StepSpec fields preserve old StepPatch omission semantics;
+    # nullable fields below use model_fields_set so explicit clears survive.
+    for field_name in (
+        "name",
+        "input_source",
+        "input_type",
+        "output_mode",
+        "output_type",
+        "mcp_policy",
+    ):
+        value = getattr(patch, field_name)
+        if value is not None:
+            payload[field_name] = value
+    if patch.assistant_spec is not None:
+        payload["assistant_spec"] = AssistantSpecPatch.model_validate(
+            patch.assistant_spec.model_dump(mode="python", exclude_unset=True)
+        )
+    for field_name in (
+        "uses_form_fields",
+        "document_delivery_mode",
+        "input_bindings",
+        "input_contract",
+        "output_contract",
+        "input_config",
+        "output_config",
+        "review_mode",
+    ):
+        if field_name in patch.model_fields_set:
+            payload[field_name] = getattr(patch, field_name)
+    if "uses_previous_fields" in patch.model_fields_set:
+        payload["uses_previous_fields"] = _translate_previous_field_refs(
+            field_refs=patch.uses_previous_fields or [],
+            prior_steps=prior_steps,
+        )
+    return ModifyExistingStep.model_validate(payload)
+
+
+def _translate_previous_field_refs(
+    *,
+    field_refs: list[PreviousFieldRef],
+    prior_steps: list[StepSpec],
+) -> list[PreviousFieldRef]:
+    # Legacy StepPatch refs are authored as original step_order values; the
+    # shared owner consumes indexes into the compiled prior-step list.
+    compiled_index_by_original_order = {
+        original_order: index
+        for index, step in enumerate(prior_steps, start=1)
+        if (original_order := _existing_step_order(step.existing_step_ref)) is not None
+    }
+    translated: list[PreviousFieldRef] = []
+    for field_ref in field_refs:
+        compiled_index = compiled_index_by_original_order.get(field_ref.from_step)
+        if compiled_index is None:
+            continue
+        translated.append(field_ref.model_copy(update={"from_step": compiled_index}))
+    return translated
 
 
 def _log_transcribe_only_model_ref_stripped(
@@ -553,37 +551,6 @@ def _log_transcribe_only_model_ref_stripped(
     if extra is None:
         return
     logger.info("ai_builder_transcribe_only_model_ref_stripped", extra=extra)
-
-
-def _derive_modify_patch_output_mode(
-    spec: StepSpec,
-    *,
-    document_delivery_mode: DocumentDeliveryMode | None = None,
-) -> OutputMode:
-    output_mode_draft = NewStepDraft(
-        name=spec.name or spec.plan_step_ref,
-        instructions="Derive output mode.",
-        input_source=spec.input_source,
-        input_type=spec.input_type,
-        output_type=spec.output_type,
-        document_delivery_mode=(
-            document_delivery_mode
-            if document_delivery_mode is not None
-            else _document_delivery_mode_for_effective_step(spec)
-        ),
-    )
-    return derive_new_step_output_mode(output_mode_draft)
-
-
-def _document_delivery_mode_for_effective_step(spec: StepSpec) -> DocumentDeliveryMode:
-    if (
-        spec.output_mode == OutputMode.TEMPLATE_FILL
-        and spec.output_type == OutputType.DOCX
-    ):
-        return "template_fill"
-    if spec.output_type in {OutputType.DOCX, OutputType.PDF}:
-        return "generated"
-    return "not_applicable"
 
 
 def _build_normalization_advisories(
@@ -626,7 +593,6 @@ def _build_step_changes(
             plan_ref,
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
-            current_steps=current_steps,
         )
         baseline_steps.append(
             _canonicalize_step_for_diff(baseline_spec, existing_order_to_plan_ref)
@@ -964,122 +930,6 @@ def _existing_step_order(existing_step_ref: str | None) -> int | None:
         return None
     raw_order = existing_step_ref.removeprefix("existing_step_")
     return int(raw_order) if raw_order.isdigit() else None
-
-
-def _compile_patch_input_bindings(
-    *,
-    target_step: StepSpec,
-    uses_previous_fields: list[Any],
-    uses_form_fields: list[str],
-    current_steps: list[FlowStep],
-) -> dict[str, Any] | None:
-    if target_step.input_source == InputSource.ALL_PREVIOUS_STEPS:
-        return None
-
-    sections: list[str] = []
-    source_reference = _patch_source_reference(
-        target_step=target_step,
-        current_steps=current_steps,
-    )
-    for field_ref in uses_previous_fields:
-        from_step = getattr(field_ref, "from_step", None)
-        field_path = getattr(field_ref, "field_path", None)
-        if (
-            not isinstance(from_step, int)
-            or from_step < 1
-            or from_step > len(current_steps)
-            or not isinstance(field_path, str)
-        ):
-            continue
-        label = getattr(field_ref, "label", None) or default_previous_field_label(
-            field_path
-        )
-        sections.append(
-            f"{label}: {{{{ step_{from_step}.output.structured.{field_path} }}}}"
-        )
-
-    if source_reference is not None and not (
-        sections and source_reference.endswith(".output.structured }}")
-    ):
-        sections.insert(0, source_reference)
-
-    if uses_form_fields:
-        sections.append(
-            "\n".join(
-                f"{field_name}: {form_field_reference_expression(field_name)}"
-                for field_name in uses_form_fields
-            )
-        )
-
-    if not sections:
-        return None
-    return {"question": "\n\n".join(sections)}
-
-
-def _patch_source_reference(
-    *,
-    target_step: StepSpec,
-    current_steps: list[FlowStep],
-) -> str | None:
-    if target_step.input_source == InputSource.FLOW_INPUT:
-        if target_step.input_type == InputType.JSON:
-            return "{{ indata_json }}"
-        if target_step.input_type in {
-            InputType.AUDIO,
-            InputType.DOCUMENT,
-            InputType.FILE,
-        }:
-            return "{{ step_input.text }}"
-        return "{{ indata_text }}"
-
-    if target_step.input_source == InputSource.PREVIOUS_STEP:
-        order = _existing_step_order(target_step.existing_step_ref)
-        if order is None or order <= 1:
-            return None
-        previous = next(
-            (step for step in current_steps if step.step_order == order - 1),
-            None,
-        )
-        if target_step.input_type == InputType.JSON:
-            return f"{{{{ step_{order - 1}.output.structured }}}}"
-        if previous is not None and previous.output_type == OutputType.JSON.value:
-            return f"{{{{ step_{order - 1}.output.structured }}}}"
-        return f"{{{{ step_{order - 1}.output.text }}}}"
-
-    return None
-
-
-def _compile_patch_input_instruction_hint(
-    *,
-    uses_previous_fields: list[Any],
-    uses_form_fields: list[str],
-) -> str:
-    sections: list[str] = []
-    if uses_previous_fields:
-        field_lines: list[str] = []
-        for field_ref in uses_previous_fields:
-            field_path = getattr(field_ref, "field_path", None)
-            from_step = getattr(field_ref, "from_step", None)
-            if not isinstance(field_path, str) or not isinstance(from_step, int):
-                continue
-            label = getattr(field_ref, "label", None) or default_previous_field_label(
-                field_path
-            )
-            field_lines.append(f"- {label} (steg {from_step}: {field_path})")
-        if field_lines:
-            sections.append(
-                "Beakta särskilt följande strukturerade fält i underlaget:\n"
-                + "\n".join(field_lines)
-            )
-    if uses_form_fields:
-        form_lines = [
-            f"- {field_name}: {form_field_reference_expression(field_name)}"
-            for field_name in uses_form_fields
-        ]
-        sections.append(
-            "Beakta också följande formulärfält vid analysen:\n" + "\n".join(form_lines)
-        )
-    return "\n\n".join(sections)
 
 
 def _rewrite_runtime_aliases_for_existing_step(

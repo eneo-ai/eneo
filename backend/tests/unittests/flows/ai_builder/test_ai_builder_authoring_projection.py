@@ -266,6 +266,70 @@ def test_edit_overlay_add_step_uses_form_field_with_shared_new_step_compiler() -
     }
 
 
+def test_edit_overlay_add_first_step_uses_form_field_without_source_reference() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step("step_a", "existing_step_1", "Remove"),
+            form_fields=[
+                FormFieldSpec(
+                    name="case_id",
+                    type="text",
+                    label="Case ID",
+                )
+            ],
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                AddStep(
+                    step=_new_step(
+                        "Use case id",
+                        uses_form_fields=["case_id"],
+                    )
+                )
+            ],
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        ),
+    )
+
+    assert result.steps[0].input_bindings == {
+        "question": "case_id: {{ flow_input.case_id }}"
+    }
+
+
+def test_edit_overlay_modify_step_uses_form_field_with_shared_input_compiler() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step(
+                "step_a",
+                "existing_step_1",
+                "Answer",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            form_fields=[
+                FormFieldSpec(
+                    name="case_id",
+                    type="text",
+                    label="Case ID",
+                )
+            ],
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {
+                        "existing_step_ref": "existing_step_1",
+                        "uses_form_fields": ["case_id"],
+                    }
+                )
+            ],
+        ),
+    )
+
+    assert result.steps[0].input_bindings == {
+        "question": "case_id: {{ flow_input.case_id }}"
+    }
+
+
 def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_step() -> (
     None
 ):
@@ -302,6 +366,50 @@ def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_ste
     }
 
 
+def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder() -> (
+    None
+):
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step("step_a", "existing_step_1", "First"),
+            _step(
+                "step_b",
+                "existing_step_2",
+                "Extract",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                },
+            ),
+            _step(
+                "step_c",
+                "existing_step_3",
+                "Write",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_2"),
+                ModifyExistingStep.model_validate(
+                    {
+                        "existing_step_ref": "existing_step_3",
+                        "uses_previous_fields": [
+                            {"from_step": 1, "field_path": "answer"}
+                        ],
+                    }
+                ),
+            ],
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        ),
+    )
+
+    assert result.steps[1].input_bindings == {
+        "question": "answer: {{ step_a.output.structured.answer }}"
+    }
+
+
 def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
@@ -321,6 +429,32 @@ def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() 
     )
 
     assert result.steps[0].output_mode == OutputMode.TRANSCRIBE_ONLY
+
+
+def test_edit_overlay_modify_step_uses_document_delivery_mode_derivation() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step(
+                "step_a",
+                "existing_step_1",
+                "Fill template",
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_type=OutputType.DOCX,
+            )
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {
+                        "existing_step_ref": "existing_step_1",
+                        "document_delivery_mode": "generated",
+                    }
+                )
+            ],
+        ),
+    )
+
+    assert result.steps[0].output_mode == OutputMode.PASS_THROUGH
 
 
 def test_edit_overlay_drops_document_body_writer_ref_when_writer_step_is_removed() -> (
@@ -474,6 +608,9 @@ def _step(
     existing_ref: str | None,
     name: str,
     *,
+    input_source: InputSource = InputSource.FLOW_INPUT,
+    input_type: InputType = InputType.TEXT,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
     output_type: OutputType = OutputType.TEXT,
     output_contract: dict[str, object] | None = None,
     review_policy: FlowStepReviewPolicy | None = None,
@@ -487,9 +624,9 @@ def _step(
             model_ref="model-a",
             knowledge_refs=["kb-a"],
         ),
-        input_source=InputSource.FLOW_INPUT,
-        input_type=InputType.TEXT,
-        output_mode=OutputMode.PASS_THROUGH,
+        input_source=input_source,
+        input_type=input_type,
+        output_mode=output_mode,
         output_type=output_type,
         output_contract=output_contract,
         review_policy=review_policy,
