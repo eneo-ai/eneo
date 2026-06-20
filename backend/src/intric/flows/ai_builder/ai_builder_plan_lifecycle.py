@@ -16,13 +16,10 @@ from intric.flows.ai_builder.ai_builder_context import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    FlowBuilderEditApproval,
     PlanStatus,
     SessionStatus,
     TargetKind,
-)
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    CompiledEditResult,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -125,24 +122,22 @@ def _removed_existing_step_refs_for_apply(
 ) -> frozenset[str]:
     if session.target_kind != TargetKind.EDIT:
         return frozenset()
-    compiled_edit = _compiled_edit_for_apply(session=session, plan=plan)
-    return frozenset(
-        operation.target_ref
-        for operation in compiled_edit.original_draft.operations
-        if operation.op == "remove" and operation.target_ref is not None
-    )
+    return _edit_approval_for_apply(
+        session=session,
+        plan=plan,
+    ).removed_existing_step_refs
 
 
-def _compiled_edit_for_apply(
+def _edit_approval_for_apply(
     *,
     session: BuilderSession,
     plan: BuilderPlan,
-) -> CompiledEditResult:
-    compiled_edit = plan.edit_result.compiled_edit if plan.edit_result else None
-    if compiled_edit is not None:
-        return compiled_edit
+) -> FlowBuilderEditApproval:
+    edit = plan.proposal.content.edit
+    if edit is not None:
+        return edit
     raise AIBuilderBadRequestException(
-        "Approved edit plan is missing the compiled edit artifact.",
+        "Approved edit plan is missing edit approval metadata.",
         code=AIBuilderErrorCode.BAD_REQUEST,
         context={
             "plan_id": str(plan.id),
@@ -160,8 +155,8 @@ def _expected_revision_for_apply(
 ) -> int | None:
     if session.target_kind != TargetKind.EDIT:
         return None
-    compiled_edit = _compiled_edit_for_apply(session=session, plan=plan)
-    expected_revision = compiled_edit.base_flow_revision
+    edit = _edit_approval_for_apply(session=session, plan=plan)
+    expected_revision = edit.base_flow_revision
     if (
         requested_expected_revision is not None
         and requested_expected_revision != expected_revision
@@ -236,11 +231,8 @@ class AIBuilderPlanLifecycle:
                 code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
             )
 
-        revised_edit_result = (plan.edit_result or BuilderPlanEditResult()).model_copy(
-            update={"description_override_manual": True}
-        )
         revised_content = plan.proposal.content.model_copy(
-            update={"edit_result": revised_edit_result}
+            update={"description_override_manual": True}
         )
         revised_proposal = plan.proposal.model_copy(
             update={
@@ -418,11 +410,7 @@ class AIBuilderPlanLifecycle:
             plan_id=plan.id,
             spec_hash=plan.spec_hash,
             applied_at=datetime.now(timezone.utc),
-            description_override_manual=(
-                plan.edit_result.description_override_manual
-                if plan.edit_result is not None
-                else False
-            ),
+            description_override_manual=plan.proposal.content.description_override_manual,
         )
         if session.target_kind == TargetKind.CREATE:
             return CreateFlowAuthoringCommand(

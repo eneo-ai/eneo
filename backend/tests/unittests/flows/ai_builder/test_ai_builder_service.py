@@ -56,9 +56,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-)
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
@@ -171,7 +168,7 @@ def _make_plan(
     status: PlanStatus = PlanStatus.PROPOSED,
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result: BuilderPlanEditResult | None = None,
+    description_override_manual: bool = False,
 ) -> BuilderPlan:
     if spec is None:
         spec = FlowDraftSpecCore(
@@ -194,7 +191,7 @@ def _make_plan(
             content=FlowBuilderProposalContent(
                 spec=spec,
                 assumptions=["Test assumption"],
-                edit_result=edit_result,
+                description_override_manual=description_override_manual,
             ),
             resource_bindings=resource_bindings,
         ),
@@ -1737,7 +1734,7 @@ class TestRevisePlan:
         repo = AsyncMock()
         revised_plan = _make_plan(
             tenant_id=user.tenant_id,
-            edit_result=BuilderPlanEditResult(description_override_manual=True),
+            description_override_manual=True,
         )
 
         service = _make_service(user=user, repo=repo)

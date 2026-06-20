@@ -47,6 +47,16 @@ This split keeps generated plans maintainable. The model describes what each ste
 
 The review step matters. A plan can be valid but still not be the best workflow for your organization. Check the input contract, final output, external tool access, and evidence requirements before publishing.
 
+## Plan proposal contract
+
+AI Builder plan endpoints return one proposal object. Treat `proposal.spec` as the draft Flow that will be applied after approval. Supporting fields such as `assumptions`, `lint_warnings`, `risk_acknowledgments`, and `plan_rationale` explain why that draft was proposed.
+
+Edit sessions may also include `proposal.edit`. This is the approval metadata for the edit, not a second Flow spec. It contains the base draft revision, the explicit existing step refs that will be removed, the preview diff, warnings, advisories, risk flags, and confidence. Use it to render edit review UI and stale-revision checks.
+
+The `description_override_manual` flag records that the reviewer chose to keep the current Flow description. It applies to create and edit plans.
+
+Do not depend on compiled edit internals or legacy `edit_result` fields. The public contract is the proposal content plus optional `proposal.edit`; the backend owns compilation, validation, and application details.
+
 ## Inputs, outputs, and contracts
 
 AI Builder can propose the same core capabilities used by manually authored Flows:

@@ -16,9 +16,11 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
     CompiledEditResult,
+    FlowEditDraft,
+)
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
-    FlowEditDraft,
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME

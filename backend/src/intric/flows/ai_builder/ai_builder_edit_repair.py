@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
-from intric.flows.ai_builder.ai_builder_edit_models import EditAdvisory
+from intric.flows.ai_builder.ai_builder_edit_preview_models import EditAdvisory
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ProposalCompletionFn,

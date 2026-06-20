@@ -35,12 +35,11 @@ REQUIRED_SCHEMAS = {
     "AIBuilderStatusEvent",
     "AIBuilderTextEvent",
     "AIBuilderUsageEvent",
-    "BuilderPlanEditResult",
-    "CompiledEditResult",
     "ApplyPlanRequest",
     "ApplyResultResponse",
     "CreateSessionRequest",
     "FlowEditDiff",
+    "FlowBuilderEditApproval",
     "FlowBuilderProposalContent",
     "PlanApprovalResponse",
     "PlanResponse",
@@ -182,9 +181,11 @@ def test_openapi_plan_response_and_plan_event_share_proposal_schema(
     assert "#/components/schemas/FlowBuilderProposalContent" in plan_proposal_refs
 
     public_proposal = schemas["FlowBuilderProposalContent"]
-    assert "#/components/schemas/BuilderPlanEditResult" in _schema_refs(
-        public_proposal["properties"]["edit_result"]
+    assert "#/components/schemas/FlowBuilderEditApproval" in _schema_refs(
+        public_proposal["properties"]["edit"]
     )
+    assert "description_override_manual" in public_proposal["properties"]
+    assert "edit_result" not in public_proposal["properties"]
     assert "reasoning" not in public_proposal["properties"]
     assert "resource_bindings" not in public_proposal["properties"]
     assert "resource_bindings_json" not in public_proposal["properties"]

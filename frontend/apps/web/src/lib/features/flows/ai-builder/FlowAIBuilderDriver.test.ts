@@ -36,45 +36,42 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
       },
       assumptions: [],
       lint_warnings: [],
-      risk_acknowledgments: []
+      risk_acknowledgments: [],
+      description_override_manual: false,
+      edit: null
     },
     ...overrides
   };
 }
 
-function makeEditResult(): NonNullable<ProposedPlan["proposal"]["edit_result"]> {
-  const spec = makePlan().proposal.spec;
+function makeEditApproval(): NonNullable<ProposedPlan["proposal"]["edit"]> {
   return {
-    compiled_edit: {
-      compiled_spec: spec,
-      diff: {
-        step_changes: [
-          {
-            kind: "modified",
-            step_name: "Step A",
-            step_ref: "existing_step_1",
-            details: "output_type -> pdf"
-          }
-        ],
-        net_steps_added: 0,
-        net_steps_removed: 0,
-        flow_property_changes: {}
-      },
-      original_draft: { operations: [] },
-      base_flow_revision: 7,
-      warnings: ["Review before applying."],
-      advisories: [
+    base_flow_revision: 7,
+    removed_existing_step_refs: [],
+    diff: {
+      step_changes: [
         {
-          code: "flow_description_update_required",
-          message: "The flow description should be checked.",
-          severity: "warning",
-          field: null
+          kind: "modified",
+          step_name: "Step A",
+          step_ref: "existing_step_1",
+          details: "output_type -> pdf"
         }
       ],
-      risk_flags: ["type_downgrade"],
-      confidence: "needs_review"
+      net_steps_added: 0,
+      net_steps_removed: 0,
+      flow_property_changes: {}
     },
-    description_override_manual: true
+    warnings: ["Review before applying."],
+    advisories: [
+      {
+        code: "flow_description_update_required",
+        message: "The flow description should be checked.",
+        severity: "warning",
+        field: null
+      }
+    ],
+    risk_flags: ["type_downgrade"],
+    confidence: "needs_review"
   };
 }
 
@@ -1007,9 +1004,10 @@ describe("FlowAIBuilderDriver", () => {
   });
 
   it("revises a plan with keep_current_description and refreshes current plan state", async () => {
-    const editResult = makeEditResult();
+    const editApproval = makeEditApproval();
     const revisedPlan = makePlan({ plan_id: "plan-2", status: "proposed" });
-    revisedPlan.proposal.edit_result = editResult;
+    revisedPlan.proposal.description_override_manual = true;
+    revisedPlan.proposal.edit = editApproval;
     const fetch = vi.fn().mockResolvedValueOnce(revisedPlan);
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
@@ -1029,7 +1027,8 @@ describe("FlowAIBuilderDriver", () => {
       }
     });
     expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
-    expect(driver.state.currentPlan?.proposal.edit_result).toEqual(editResult);
+    expect(driver.state.currentPlan?.proposal.description_override_manual).toBe(true);
+    expect(driver.state.currentPlan?.proposal.edit).toEqual(editApproval);
     expect(driver.state.currentPlan?.edit_diff?.step_changes[0]?.kind).toBe("modified");
     expect(driver.state.currentPlan?.edit_confidence).toBe("needs_review");
     expect(driver.state.currentPlan?.edit_advisories?.[0]?.code).toBe(

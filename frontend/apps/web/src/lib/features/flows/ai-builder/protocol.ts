@@ -88,9 +88,7 @@ export type LintWarning = GeneratedAIBuilderLintWarning;
 
 export type FlowBuilderProposalContent = components["schemas"]["FlowBuilderProposalContent"];
 
-export type BuilderPlanEditResult = components["schemas"]["BuilderPlanEditResult"];
-
-export type CompiledEditResult = components["schemas"]["CompiledEditResult"];
+export type FlowBuilderEditApproval = components["schemas"]["FlowBuilderEditApproval"];
 
 export type StepChange = components["schemas"]["StepChange"];
 
@@ -98,7 +96,7 @@ export type StepChangeKind = StepChange["kind"];
 
 export type FlowEditDiff = components["schemas"]["FlowEditDiff"];
 
-export type EditConfidence = NonNullable<CompiledEditResult["confidence"]>;
+export type EditConfidence = NonNullable<FlowBuilderEditApproval["confidence"]>;
 
 export type EditAdvisory = components["schemas"]["EditAdvisory"];
 

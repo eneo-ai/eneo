@@ -20,13 +20,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposal,
     FlowBuilderProposalContent,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    CompiledEditResult,
-    FlowEditDiff,
-    FlowEditDraft,
-    StepChange,
-)
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -65,6 +58,12 @@ class _ExpectedPlanRow:
     spec_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class _SeedProposal:
+    proposal: FlowBuilderProposal
+    legacy_edit_result_json: dict[str, object] | None
+
+
 def _alembic_config(database_url: str) -> Config:
     backend_dir = Path(__file__).parent.parent.parent.parent.parent
     cfg = Config(str(backend_dir / "alembic.ini"))
@@ -96,7 +95,7 @@ def _make_proposal(
     flow_name: str,
     include_edit_result: bool = False,
     reasoning: str | None = "Use one step.",
-) -> FlowBuilderProposal:
+) -> _SeedProposal:
     model_id = uuid4()
     binding = LocalResourceBinding(
         slot_ref=ResourceSlotRef(
@@ -122,56 +121,122 @@ def _make_proposal(
             )
         ],
     )
-    edit_result = None
+    legacy_edit_result_json = None
     if include_edit_result:
-        edit_result = BuilderPlanEditResult(
-            compiled_edit=CompiledEditResult(
-                compiled_spec=spec,
-                diff=FlowEditDiff(
-                    step_changes=[StepChange(kind="unchanged", step_name="Summarize")]
-                ),
-                original_draft=FlowEditDraft(operations=[]),
-                base_flow_revision=1,
-            )
-        )
-    return FlowBuilderProposal(
-        content=FlowBuilderProposalContent(
-            spec=spec,
-            assumptions=["Text input"],
-            risk_acknowledgments=["Review output"],
-            plan_rationale="Smallest valid migrated proposal.",
-            edit_result=edit_result,
+        legacy_edit_result_json = _legacy_edit_result_json(spec)
+    return _SeedProposal(
+        proposal=FlowBuilderProposal(
+            content=FlowBuilderProposalContent(
+                spec=spec,
+                assumptions=["Text input"],
+                risk_acknowledgments=["Review output"],
+                plan_rationale="Smallest valid migrated proposal.",
+            ),
+            reasoning=reasoning,
+            resource_bindings=(binding,),
         ),
-        reasoning=reasoning,
-        resource_bindings=(binding,),
+        legacy_edit_result_json=legacy_edit_result_json,
     )
+
+
+def _legacy_edit_result_json(spec: FlowDraftSpecCore) -> dict[str, object]:
+    diff = {
+        "step_changes": [
+            {
+                "kind": "unchanged",
+                "step_name": "Summarize",
+            },
+            # Keep removals out of sorted order so the migration must normalize them.
+            {
+                "kind": "removed",
+                "step_name": "Legacy removed step B",
+                "step_ref": "existing_step_2",
+            },
+            {
+                "kind": "removed",
+                "step_name": "Legacy removed step A",
+                "step_ref": "existing_step_1",
+            },
+        ],
+        "form_changes": [],
+        "metadata_changes": [],
+        "flow_property_changes": {},
+        "net_steps_added": 0,
+        "net_steps_removed": 2,
+    }
+    return {
+        "description_override_manual": True,
+        "compiled_edit": {
+            "compiled_spec": spec.model_dump(mode="json"),
+            "diff": diff,
+            "original_draft": {
+                "operations": [
+                    {
+                        "op": "remove",
+                        "target_ref": "existing_step_1",
+                    },
+                    {
+                        "op": "remove",
+                        "target_ref": "existing_step_2",
+                    },
+                ]
+            },
+            "base_flow_revision": 1,
+            "warnings": [],
+            "advisories": [],
+            "risk_flags": [],
+            "confidence": "ready",
+        },
+    }
 
 
 def _expected_plan_row(
     *,
     plan_id: str,
-    proposal: FlowBuilderProposal,
+    seed: _SeedProposal,
 ) -> _ExpectedPlanRow:
+    proposal = seed.proposal
     spec_json = proposal.spec.model_dump(mode="json")
     envelope_json = proposal.content.model_dump(
         mode="json",
-        exclude={"spec", "edit_result"},
+        exclude={"spec", "description_override_manual", "edit"},
         exclude_none=True,
     )
     if proposal.reasoning is not None:
         envelope_json["reasoning"] = proposal.reasoning
     resource_bindings_json = proposal.storage_json()["resource_bindings"]
-    edit_result_json = (
-        proposal.edit_result.model_dump(mode="json", exclude_none=True)
-        if proposal.edit_result is not None
-        else None
-    )
+    edit_result_json = seed.legacy_edit_result_json
     content_json = {
         key: value for key, value in envelope_json.items() if key != "reasoning"
     }
     content_json["spec"] = spec_json
+    content_json["description_override_manual"] = (
+        bool(edit_result_json.get("description_override_manual"))
+        if edit_result_json is not None
+        else False
+    )
     if edit_result_json is not None:
-        content_json["edit_result"] = edit_result_json
+        compiled_edit = edit_result_json["compiled_edit"]
+        assert isinstance(compiled_edit, dict)
+        diff = compiled_edit["diff"]
+        assert isinstance(diff, dict)
+        step_changes = diff["step_changes"]
+        assert isinstance(step_changes, list)
+        content_json["edit"] = {
+            "base_flow_revision": compiled_edit["base_flow_revision"],
+            "removed_existing_step_refs": sorted(
+                change["step_ref"]
+                for change in step_changes
+                if isinstance(change, dict)
+                and change.get("kind") == "removed"
+                and change.get("step_ref") is not None
+            ),
+            "diff": diff,
+            "warnings": compiled_edit.get("warnings", []),
+            "advisories": compiled_edit.get("advisories", []),
+            "risk_flags": compiled_edit.get("risk_flags", []),
+            "confidence": compiled_edit.get("confidence", "ready"),
+        }
     proposal_json = {
         "content": content_json,
         "resource_bindings": resource_bindings_json,
@@ -192,14 +257,14 @@ def _expected_plan_row(
 
 def _seed_old_plan_row(
     cur: psycopg2.extensions.cursor,
-    proposal: FlowBuilderProposal,
+    seed: _SeedProposal,
 ) -> _ExpectedPlanRow:
     tenant_id = uuid4()
     user_id = uuid4()
     space_id = uuid4()
     session_id = uuid4()
     plan_id = uuid4()
-    expected = _expected_plan_row(plan_id=str(plan_id), proposal=proposal)
+    expected = _expected_plan_row(plan_id=str(plan_id), seed=seed)
 
     cur.execute(
         """

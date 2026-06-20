@@ -997,6 +997,8 @@ If your application also needs to create or maintain flows, there are two user-p
 
 AI Builder lives under `/api/v1/flows/ai-builder/` and is a user-principal authoring surface. Service keys can run published flows, but they cannot draft or revise flows through AI Builder. For the product mental model and authoring details, see <a href="/docs/ai-builder">AI Builder</a>.
 
+Plan responses expose a single `proposal` object. Use `proposal.spec` as the proposed draft Flow. For edit sessions, use `proposal.edit` for the approved base revision, explicit removed step refs, preview diff, warnings, advisories, risk flags, and confidence. `description_override_manual` records a reviewer decision to keep the current Flow description. Do not integrate against legacy `edit_result` or compiled-edit fields; those are not part of the public API contract.
+
 For template-fill document output, treat the DOCX template asset path as an **accessibility-reviewed template path**. This is especially important for sensitive document workflows:
 
 - upload reusable DOCX templates through the template asset route

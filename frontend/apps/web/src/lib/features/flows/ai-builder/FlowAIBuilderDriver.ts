@@ -1038,15 +1038,15 @@ export class FlowAIBuilderDriver {
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {
-    const compiledEdit = plan.proposal.edit_result?.compiled_edit ?? null;
+    const edit = plan.proposal.edit ?? null;
     return {
       ...plan,
       status: plan.status ?? "proposed",
-      edit_diff: plan.edit_diff ?? compiledEdit?.diff ?? null,
-      edit_confidence: plan.edit_confidence ?? compiledEdit?.confidence ?? null,
-      edit_warnings: plan.edit_warnings ?? compiledEdit?.warnings ?? null,
-      edit_advisories: plan.edit_advisories ?? compiledEdit?.advisories ?? null,
-      edit_risk_flags: plan.edit_risk_flags ?? compiledEdit?.risk_flags ?? null
+      edit_diff: plan.edit_diff ?? edit?.diff ?? null,
+      edit_confidence: plan.edit_confidence ?? edit?.confidence ?? null,
+      edit_warnings: plan.edit_warnings ?? edit?.warnings ?? null,
+      edit_advisories: plan.edit_advisories ?? edit?.advisories ?? null,
+      edit_risk_flags: plan.edit_risk_flags ?? edit?.risk_flags ?? null
     };
   }
 

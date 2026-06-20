@@ -10,9 +10,11 @@ import pytest
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
     CompiledEditResult,
+    FlowEditDraft,
+)
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
-    FlowEditDraft,
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_edit_repair import (

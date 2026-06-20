@@ -40,9 +40,65 @@ def upgrade() -> None:
                 'content',
                 (envelope_json - 'spec' - 'reasoning')
                 || jsonb_build_object('spec', spec_json)
+                || jsonb_build_object(
+                    'description_override_manual',
+                    CASE
+                        WHEN edit_result_json IS NOT NULL
+                             AND jsonb_typeof(edit_result_json -> 'description_override_manual') = 'boolean'
+                            THEN edit_result_json -> 'description_override_manual'
+                        ELSE 'false'::jsonb
+                    END
+                )
                 || CASE
-                    WHEN edit_result_json IS NULL THEN '{}'::jsonb
-                    ELSE jsonb_build_object('edit_result', edit_result_json)
+                    WHEN edit_result_json IS NULL
+                         OR NOT (edit_result_json ? 'compiled_edit')
+                         OR edit_result_json -> 'compiled_edit' = 'null'::jsonb
+                        THEN '{}'::jsonb
+                    ELSE jsonb_build_object(
+                        'edit',
+                        jsonb_build_object(
+                            'base_flow_revision',
+                            edit_result_json -> 'compiled_edit' -> 'base_flow_revision',
+                            'removed_existing_step_refs',
+                            COALESCE(
+                                (
+                                    SELECT jsonb_agg(
+                                        change -> 'step_ref'
+                                        ORDER BY (change ->> 'step_ref') COLLATE "C"
+                                    )
+                                    FROM jsonb_array_elements(
+                                        edit_result_json -> 'compiled_edit' -> 'diff' -> 'step_changes'
+                                    ) AS change
+                                    WHERE change ->> 'kind' = 'removed'
+                                      AND change ? 'step_ref'
+                                      AND change -> 'step_ref' <> 'null'::jsonb
+                                ),
+                                '[]'::jsonb
+                            ),
+                            'diff',
+                            edit_result_json -> 'compiled_edit' -> 'diff',
+                            'warnings',
+                            COALESCE(
+                                edit_result_json -> 'compiled_edit' -> 'warnings',
+                                '[]'::jsonb
+                            ),
+                            'advisories',
+                            COALESCE(
+                                edit_result_json -> 'compiled_edit' -> 'advisories',
+                                '[]'::jsonb
+                            ),
+                            'risk_flags',
+                            COALESCE(
+                                edit_result_json -> 'compiled_edit' -> 'risk_flags',
+                                '[]'::jsonb
+                            ),
+                            'confidence',
+                            COALESCE(
+                                edit_result_json -> 'compiled_edit' -> 'confidence',
+                                '"ready"'::jsonb
+                            )
+                        )
+                    )
                 END,
                 'resource_bindings',
                 COALESCE(resource_bindings_json, '[]'::jsonb)
@@ -102,7 +158,8 @@ def downgrade() -> None:
         SET
             spec_json = proposal_json -> 'content' -> 'spec',
             envelope_json =
-                (proposal_json -> 'content') - 'spec' - 'edit_result'
+                (proposal_json -> 'content') - 'spec' - 'edit'
+                    - 'description_override_manual'
                 || CASE
                     WHEN proposal_json ? 'reasoning'
                         THEN jsonb_build_object('reasoning', proposal_json -> 'reasoning')
@@ -112,7 +169,73 @@ def downgrade() -> None:
                 proposal_json -> 'resource_bindings',
                 '[]'::jsonb
             ),
-            edit_result_json = proposal_json -> 'content' -> 'edit_result'
+            edit_result_json =
+                CASE
+                    WHEN proposal_json -> 'content' ? 'edit'
+                        THEN jsonb_build_object(
+                            'description_override_manual',
+                            COALESCE(
+                                proposal_json -> 'content' -> 'description_override_manual',
+                                'false'::jsonb
+                            ),
+                            'compiled_edit',
+                            jsonb_build_object(
+                                'compiled_spec',
+                                proposal_json -> 'content' -> 'spec',
+                                'diff',
+                                proposal_json -> 'content' -> 'edit' -> 'diff',
+                                'original_draft',
+                                jsonb_build_object(
+                                    'operations',
+                                    COALESCE(
+                                        (
+                                            SELECT jsonb_agg(
+                                                jsonb_build_object(
+                                                    'op',
+                                                    'remove',
+                                                    'target_ref',
+                                                    removed_ref.value
+                                                )
+                                            )
+                                            FROM jsonb_array_elements_text(
+                                                proposal_json -> 'content' -> 'edit'
+                                                    -> 'removed_existing_step_refs'
+                                            ) AS removed_ref(value)
+                                        ),
+                                        '[]'::jsonb
+                                    )
+                                ),
+                                'base_flow_revision',
+                                proposal_json -> 'content' -> 'edit' -> 'base_flow_revision',
+                                'warnings',
+                                COALESCE(
+                                    proposal_json -> 'content' -> 'edit' -> 'warnings',
+                                    '[]'::jsonb
+                                ),
+                                'advisories',
+                                COALESCE(
+                                    proposal_json -> 'content' -> 'edit' -> 'advisories',
+                                    '[]'::jsonb
+                                ),
+                                'risk_flags',
+                                COALESCE(
+                                    proposal_json -> 'content' -> 'edit' -> 'risk_flags',
+                                    '[]'::jsonb
+                                ),
+                                'confidence',
+                                COALESCE(
+                                    proposal_json -> 'content' -> 'edit' -> 'confidence',
+                                    '"ready"'::jsonb
+                                )
+                            )
+                        )
+                    WHEN COALESCE(
+                        (proposal_json -> 'content' ->> 'description_override_manual')::boolean,
+                        false
+                    )
+                        THEN jsonb_build_object('description_override_manual', true)
+                    ELSE NULL
+                END
         """
     )
 
@@ -178,10 +301,16 @@ def _assert_new_column_is_valid() -> None:
                    OR NOT (proposal_json ? 'resource_bindings')
                    OR jsonb_typeof(proposal_json -> 'resource_bindings') <> 'array'
                    OR (
-                        (proposal_json -> 'content') ? 'edit_result'
+                        (proposal_json -> 'content') ? 'edit'
                         AND jsonb_typeof(
-                            proposal_json -> 'content' -> 'edit_result'
+                            proposal_json -> 'content' -> 'edit'
                         ) <> 'object'
+                   )
+                   OR (
+                        (proposal_json -> 'content') ? 'description_override_manual'
+                        AND jsonb_typeof(
+                            proposal_json -> 'content' -> 'description_override_manual'
+                        ) <> 'boolean'
                    )
                    OR (
                         proposal_json ? 'reasoning'
@@ -218,7 +347,8 @@ def _assert_new_column_is_valid() -> None:
                     'lint_warnings',
                     'risk_acknowledgments',
                     'plan_rationale',
-                    'edit_result'
+                    'description_override_manual',
+                    'edit'
                 )
             ) THEN
                 RAISE EXCEPTION

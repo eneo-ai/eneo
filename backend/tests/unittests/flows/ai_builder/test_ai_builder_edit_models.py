@@ -11,18 +11,20 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
     BuilderPlanEditResult,
     CompiledEditResult,
-    FlowEditDiff,
     FlowEditDraft,
     FlowMetadataPatch,
     FormFieldOperation,
     FormFieldSpec,
     RuntimeInputPatch,
-    StepChange,
     StepEditOperation,
     StepPatch,
     StepPlacement,
     TranscriptionPatch,
     validate_step_operation_shape,
+)
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+    FlowEditDiff,
+    StepChange,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,

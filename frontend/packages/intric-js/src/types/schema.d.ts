@@ -10915,15 +10915,6 @@ export interface components {
        */
       package_file: string;
     };
-    /** BuilderPlanEditResult */
-    BuilderPlanEditResult: {
-      compiled_edit?: components["schemas"]["CompiledEditResult"] | null;
-      /**
-       * Description Override Manual
-       * @default false
-       */
-      description_override_manual?: boolean;
-    };
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -11077,29 +11068,6 @@ export interface components {
     CollectionUpdate: {
       /** Name */
       name: string;
-    };
-    /**
-     * CompiledEditResult
-     * @description Backend-compiled concrete result. This is what the user approves.
-     */
-    CompiledEditResult: {
-      compiled_spec: components["schemas"]["FlowDraftSpecCore"];
-      diff: components["schemas"]["FlowEditDiff"];
-      original_draft: components["schemas"]["FlowEditDraft"];
-      /** Base Flow Revision */
-      base_flow_revision: number;
-      /** Warnings */
-      warnings?: string[];
-      /** Advisories */
-      advisories?: components["schemas"]["EditAdvisory"][];
-      /** Risk Flags */
-      risk_flags?: string[];
-      /**
-       * Confidence
-       * @default ready
-       * @enum {string}
-       */
-      confidence?: "ready" | "needs_review" | "low_confidence";
     };
     /** CompletionModel */
     CompletionModel: {
@@ -12356,10 +12324,7 @@ export interface components {
        */
       deleted_keys: string[];
     };
-    /**
-     * EditAdvisory
-     * @description Structured advisory for the user about an edit result.
-     */
+    /** EditAdvisory */
     EditAdvisory: {
       /** Code */
       code: string;
@@ -13403,6 +13368,26 @@ export interface components {
       /** Name */
       name: string;
     };
+    /** FlowBuilderEditApproval */
+    FlowBuilderEditApproval: {
+      /** Base Flow Revision */
+      base_flow_revision: number;
+      /** Removed Existing Step Refs */
+      removed_existing_step_refs?: string[];
+      diff: components["schemas"]["FlowEditDiff"];
+      /** Warnings */
+      warnings?: string[];
+      /** Advisories */
+      advisories?: components["schemas"]["EditAdvisory"][];
+      /** Risk Flags */
+      risk_flags?: string[];
+      /**
+       * Confidence
+       * @default ready
+       * @enum {string}
+       */
+      confidence?: "ready" | "needs_review" | "low_confidence";
+    };
     /**
      * FlowBuilderProposalContent
      * @description Typed proposal content reused by storage, HTTP responses, and SSE.
@@ -13417,7 +13402,12 @@ export interface components {
       risk_acknowledgments?: string[];
       /** Plan Rationale */
       plan_rationale?: string | null;
-      edit_result?: components["schemas"]["BuilderPlanEditResult"] | null;
+      /**
+       * Description Override Manual
+       * @default false
+       */
+      description_override_manual?: boolean;
+      edit?: components["schemas"]["FlowBuilderEditApproval"] | null;
     };
     /**
      * FlowClassificationRetentionPoliciesPublic
@@ -13590,16 +13580,11 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["StepSpec"][];
       /** Form Fields */
-      form_fields?:
-        | components["schemas"]["intric__flows__flow_authoring_spec__FormFieldSpec"][]
-        | null;
+      form_fields?: components["schemas"]["FormFieldSpec"][] | null;
       /** Document Body Writer Step Refs */
       document_body_writer_step_refs?: string[] | null;
     };
-    /**
-     * FlowEditDiff
-     * @description Complete diff between original flow and proposed changes.
-     */
+    /** FlowEditDiff */
     FlowEditDiff: {
       /** Step Changes */
       step_changes: components["schemas"]["StepChange"][];
@@ -13609,7 +13594,7 @@ export interface components {
       metadata_changes?: components["schemas"]["MetadataChange"][];
       /** Flow Property Changes */
       flow_property_changes?: {
-        [key: string]: [unknown, unknown];
+        [key: string]: [components["schemas"]["JsonValue"], components["schemas"]["JsonValue"]];
       };
       /**
        * Net Steps Added
@@ -13621,28 +13606,6 @@ export interface components {
        * @default 0
        */
       net_steps_removed?: number;
-    };
-    /**
-     * FlowEditDraft
-     * @description Edit-mode planner output. Compiled by backend into concrete preview.
-     */
-    FlowEditDraft: {
-      /** Flow Name */
-      flow_name?: string | null;
-      /** Flow Description */
-      flow_description?: string | null;
-      /** Operations */
-      operations: components["schemas"]["StepEditOperation"][];
-      /** Form Operations */
-      form_operations?: components["schemas"]["FormFieldOperation"][];
-      metadata_patch?: components["schemas"]["FlowMetadataPatch"] | null;
-      /** Assumptions */
-      assumptions?: string[];
-      /**
-       * Plan Rationale
-       * @default
-       */
-      plan_rationale?: string;
     };
     /**
      * FlowEvidencePolicyPublic
@@ -13804,11 +13767,6 @@ export interface components {
      * @enum {string}
      */
     FlowMcpPolicy: "inherit" | "restricted";
-    /** FlowMetadataPatch */
-    FlowMetadataPatch: {
-      transcription?: components["schemas"]["TranscriptionPatch"] | null;
-      runtime_input?: components["schemas"]["RuntimeInputPatch"] | null;
-    };
     /**
      * FlowOutputDelivery
      * @enum {string}
@@ -18151,22 +18109,6 @@ export interface components {
       /** Details */
       details?: string | null;
     };
-    /**
-     * FormFieldOperation
-     * @description Operation on a form field.
-     */
-    FormFieldOperation: {
-      /**
-       * Op
-       * @enum {string}
-       */
-      op: "add" | "modify" | "remove";
-      /** Field Name */
-      field_name: string;
-      field_payload?:
-        | components["schemas"]["intric__flows__ai_builder__ai_builder_edit_models__FormFieldSpec"]
-        | null;
-    };
     /** FormFieldPublic */
     FormFieldPublic: {
       /**
@@ -18197,6 +18139,22 @@ export interface components {
        * @description Display order for generated run forms.
        */
       order?: number | null;
+    };
+    /** FormFieldSpec */
+    FormFieldSpec: {
+      /** Name */
+      name: string;
+      /** Type */
+      type: string;
+      /** Label */
+      label: string;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+      /** Options */
+      options?: string[] | null;
     };
     /** FormatLimit */
     FormatLimit: {
@@ -19226,6 +19184,7 @@ export interface components {
       /** Finished At */
       finished_at?: string | null;
     };
+    JsonValue: unknown;
     /** Knowledge */
     Knowledge: {
       groups: components["schemas"]["PaginatedPermissions_CollectionPublic_"];
@@ -19762,10 +19721,8 @@ export interface components {
       kind: "added" | "modified" | "removed";
       /** Path */
       path: string;
-      /** Old Value */
-      old_value?: unknown;
-      /** New Value */
-      new_value?: unknown;
+      old_value?: components["schemas"]["JsonValue"];
+      new_value?: components["schemas"]["JsonValue"];
     };
     /** MetadataCount */
     MetadataCount: {
@@ -20264,62 +20221,6 @@ export interface components {
      * @enum {string}
      */
     Modules: "intric-applications";
-    /**
-     * NewStepDraft
-     * @description Shared authoring contract for a brand-new step.
-     */
-    NewStepDraft: {
-      /** Name */
-      name: string;
-      /** Instructions */
-      instructions?: string | null;
-      assistant_spec?: components["schemas"]["AssistantSpec"] | null;
-      input_source: components["schemas"]["AIBuilderInputSource"];
-      /** @default text */
-      input_type?: components["schemas"]["AIBuilderInputType"];
-      /** @default text */
-      output_type?: components["schemas"]["FlowOutputType"];
-      /** Model Ref */
-      model_ref?: string | null;
-      /** Knowledge Refs */
-      knowledge_refs?: string[];
-      /** Mcp Server Refs */
-      mcp_server_refs?: string[];
-      /** Mcp Tool Refs */
-      mcp_tool_refs?: string[];
-      /**
-       * Runtime Upload
-       * @default false
-       */
-      runtime_upload?: boolean;
-      /**
-       * Runtime Required
-       * @default false
-       */
-      runtime_required?: boolean;
-      /** Runtime Max Files */
-      runtime_max_files?: number | null;
-      /** Uses Form Fields */
-      uses_form_fields?: string[];
-      /** Uses Previous Fields */
-      uses_previous_fields?: components["schemas"]["PreviousFieldRef"][];
-      /** Uses Previous Outputs */
-      uses_previous_outputs?: components["schemas"]["PreviousOutputRef"][];
-      /**
-       * Document Delivery Mode
-       * @default not_applicable
-       * @enum {string}
-       */
-      document_delivery_mode?: "not_applicable" | "generated" | "template_fill";
-      /**
-       * Citations Requested
-       * @default false
-       */
-      citations_requested?: boolean;
-      review_mode?: components["schemas"]["FlowStepReviewMode"] | null;
-      /** Output Fields */
-      output_fields?: components["schemas"]["StructuredFieldDraft"][] | null;
-    };
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -21741,22 +21642,6 @@ export interface components {
       /** Context Window */
       context_window: number;
     };
-    /** PreviousFieldRef */
-    PreviousFieldRef: {
-      /** From Step */
-      from_step: number;
-      /** Field Path */
-      field_path: string;
-      /** Label */
-      label?: string | null;
-    };
-    /** PreviousOutputRef */
-    PreviousOutputRef: {
-      /** From Step */
-      from_step: number;
-      /** Label */
-      label?: string | null;
-    };
     /**
      * PrincipalType
      * @enum {string}
@@ -22282,17 +22167,6 @@ export interface components {
        * @default []
        */
       files?: components["schemas"]["ModelId"][];
-    };
-    /** RuntimeInputPatch */
-    RuntimeInputPatch: {
-      /** Enabled */
-      enabled?: boolean | null;
-      /** Required */
-      required?: boolean | null;
-      /** Max Files */
-      max_files?: number | null;
-      /** Input Format */
-      input_format?: string | null;
     };
     /** ScimTokenCreatedResponse */
     ScimTokenCreatedResponse: {
@@ -23497,10 +23371,7 @@ export interface components {
      * @enum {string}
      */
     Status: "in progress" | "queued" | "complete" | "failed" | "not found";
-    /**
-     * StepChange
-     * @description One entry in the step diff.
-     */
+    /** StepChange */
     StepChange: {
       /**
        * Kind
@@ -23513,76 +23384,6 @@ export interface components {
       step_ref?: string | null;
       /** Details */
       details?: string | null;
-    };
-    /**
-     * StepEditOperation
-     * @description A single edit operation on a step.
-     */
-    StepEditOperation: {
-      /**
-       * Op
-       * @enum {string}
-       */
-      op: "add" | "modify" | "remove";
-      /** Target Ref */
-      target_ref?: string | null;
-      placement?: components["schemas"]["StepPlacement"] | null;
-      add_payload?: components["schemas"]["NewStepDraft"] | null;
-      patch?: components["schemas"]["StepPatch"] | null;
-    };
-    /**
-     * StepPatch
-     * @description Partial update for existing steps. Only include fields being changed.
-     */
-    StepPatch: {
-      /** Name */
-      name?: string | null;
-      assistant_spec?: components["schemas"]["AssistantSpec"] | null;
-      input_source?: components["schemas"]["AIBuilderInputSource"] | null;
-      input_type?: components["schemas"]["AIBuilderInputType"] | null;
-      output_mode?: components["schemas"]["AIBuilderOutputMode"] | null;
-      output_type?: components["schemas"]["FlowOutputType"] | null;
-      /** Document Delivery Mode */
-      document_delivery_mode?: ("not_applicable" | "generated" | "template_fill") | null;
-      mcp_policy?: components["schemas"]["FlowMcpPolicy"] | null;
-      /** Uses Form Fields */
-      uses_form_fields?: string[] | null;
-      /** Uses Previous Fields */
-      uses_previous_fields?: components["schemas"]["PreviousFieldRef"][] | null;
-      /** Input Bindings */
-      input_bindings?: {
-        [key: string]: unknown;
-      } | null;
-      /** Input Contract */
-      input_contract?: {
-        [key: string]: unknown;
-      } | null;
-      /** Output Contract */
-      output_contract?: {
-        [key: string]: unknown;
-      } | null;
-      /** Input Config */
-      input_config?: {
-        [key: string]: unknown;
-      } | null;
-      /** Output Config */
-      output_config?: {
-        [key: string]: unknown;
-      } | null;
-      review_mode?: components["schemas"]["FlowStepReviewMode"] | null;
-    };
-    /**
-     * StepPlacement
-     * @description Where to insert a new step relative to existing steps.
-     */
-    StepPlacement: {
-      /**
-       * Position
-       * @enum {string}
-       */
-      position: "before" | "after" | "append";
-      /** Anchor Ref */
-      anchor_ref?: string | null;
     };
     /** StepRunInput */
     StepRunInput: {
@@ -23698,27 +23499,6 @@ export interface components {
       email: string;
       /** Role */
       role: string;
-    };
-    /** StructuredFieldDraft */
-    StructuredFieldDraft: {
-      /** Name */
-      name: string;
-      /**
-       * Field Type
-       * @enum {string}
-       */
-      field_type: "string" | "number" | "boolean" | "object" | "array";
-      /** Description */
-      description: string;
-      /**
-       * Required
-       * @default true
-       */
-      required?: boolean;
-      /** Fields */
-      fields?: components["schemas"]["StructuredFieldDraft"][] | null;
-      /** Item Fields */
-      item_fields?: components["schemas"]["StructuredFieldDraft"][] | null;
     };
     /** StructuredQuestionAnswerMetadata */
     StructuredQuestionAnswerMetadata: {
@@ -25023,15 +24803,6 @@ export interface components {
        */
       total_count?: number;
     };
-    /** TranscriptionPatch */
-    TranscriptionPatch: {
-      /** Enabled */
-      enabled?: boolean | null;
-      /** Model Id */
-      model_id?: string | null;
-      /** Language */
-      language?: string | null;
-    };
     /**
      * TranscriptionUsageEntity
      * @description One entity using a transcription model. Shape matches completion's
@@ -26081,38 +25852,6 @@ export interface components {
      * @enum {string}
      */
     WizardType: "attachments" | "groups";
-    /**
-     * FormFieldSpec
-     * @description Spec for a form field (add or modify).
-     */
-    intric__flows__ai_builder__ai_builder_edit_models__FormFieldSpec: {
-      /** Label */
-      label?: string | null;
-      /** Field Type */
-      field_type?: string | null;
-      /** Required */
-      required?: boolean | null;
-      /** Description */
-      description?: string | null;
-      /** Options */
-      options?: string[] | null;
-    };
-    /** FormFieldSpec */
-    intric__flows__flow_authoring_spec__FormFieldSpec: {
-      /** Name */
-      name: string;
-      /** Type */
-      type: string;
-      /** Label */
-      label: string;
-      /**
-       * Required
-       * @default false
-       */
-      required?: boolean;
-      /** Options */
-      options?: string[] | null;
-    };
     /**
      * CredentialInfo
      * @description Information about a configured credential.

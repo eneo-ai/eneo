@@ -13,9 +13,13 @@ from typing import Any
 from uuid import UUID
 
 import uuid_utils
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
-from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+    EditAdvisory,
+    EditConfidence,
+    FlowEditDiff,
+)
 from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -52,6 +56,10 @@ class LintSeverity(str, enum.Enum):
 
 
 def _default_lint_warnings() -> list[LintWarning]:
+    return []
+
+
+def _default_edit_advisories() -> list[EditAdvisory]:
     return []
 
 
@@ -141,6 +149,24 @@ class BuilderSession(BaseModel):
     updated_at: datetime | None = None
 
 
+class FlowBuilderEditApproval(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_flow_revision: int
+    removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
+    diff: FlowEditDiff
+    warnings: list[str] = Field(default_factory=list)
+    advisories: list[EditAdvisory] = Field(default_factory=_default_edit_advisories)
+    risk_flags: list[str] = Field(default_factory=list)
+    confidence: EditConfidence = "ready"
+
+    @field_serializer("removed_existing_step_refs")
+    def _serialize_removed_existing_step_refs(
+        self, removed_existing_step_refs: frozenset[str]
+    ) -> list[str]:
+        return sorted(removed_existing_step_refs)
+
+
 class FlowBuilderProposalContent(BaseModel):
     """Typed proposal content reused by storage, HTTP responses, and SSE."""
 
@@ -151,7 +177,8 @@ class FlowBuilderProposalContent(BaseModel):
     lint_warnings: list[LintWarning] = Field(default_factory=_default_lint_warnings)
     risk_acknowledgments: list[str] = Field(default_factory=list)
     plan_rationale: str | None = None
-    edit_result: BuilderPlanEditResult | None = None
+    description_override_manual: bool = False
+    edit: FlowBuilderEditApproval | None = None
 
 
 class FlowBuilderProposal(BaseModel):
@@ -171,10 +198,6 @@ class FlowBuilderProposal(BaseModel):
 
     def storage_json(self) -> FlowPersistedJsonObject:
         return self.model_dump(mode="json", exclude_none=True, round_trip=True)
-
-    @property
-    def edit_result(self) -> BuilderPlanEditResult | None:
-        return self.content.edit_result
 
 
 class BuilderPlan(BaseModel):
@@ -200,15 +223,12 @@ class BuilderPlan(BaseModel):
     def resource_bindings(self) -> tuple[LocalResourceBinding, ...]:
         return self.proposal.resource_bindings
 
-    @property
-    def edit_result(self) -> BuilderPlanEditResult | None:
-        return self.proposal.edit_result
-
 
 __all__ = [
     "BuilderPlan",
     "BuilderSession",
     "ConversationMessage",
+    "FlowBuilderEditApproval",
     "FlowBuilderProposal",
     "FlowBuilderProposalContent",
     "LintSeverity",

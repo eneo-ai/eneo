@@ -16,7 +16,16 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
     LintWarning,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+    CompiledEditResult,
+    FlowEditDraft,
+)
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+    EditAdvisory,
+    FlowEditDiff,
+    StepChange,
+)
 from intric.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
     append_plan_messages,
@@ -101,7 +110,38 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
         message="Visible warning.",
     )
     binding = _make_binding()
-    edit_result = BuilderPlanEditResult(description_override_manual=True)
+    edit_diff = FlowEditDiff(
+        step_changes=[
+            StepChange(kind="unchanged", step_name="Step A"),
+            StepChange(
+                kind="removed",
+                step_name="Old step",
+                step_ref="existing_step_2",
+                details="Removed from the approved edit.",
+            ),
+        ],
+        net_steps_removed=1,
+        flow_property_changes={"flow_description": ("old", "new")},
+    )
+    edit_result = BuilderPlanEditResult(
+        compiled_edit=CompiledEditResult(
+            compiled_spec=_make_turn_spec(),
+            diff=edit_diff,
+            original_draft=FlowEditDraft(operations=[]),
+            base_flow_revision=7,
+            warnings=["Review before applying."],
+            advisories=[
+                EditAdvisory(
+                    code="flow_description_update_required",
+                    message="Review the flow description.",
+                    severity="warning",
+                )
+            ],
+            risk_flags=["type_downgrade"],
+            confidence="needs_review",
+        ),
+        description_override_manual=True,
+    )
     compiled = CompiledProposal(
         spec=_make_turn_spec(),
         assumptions=("Assumption",),
@@ -119,7 +159,20 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
     assert proposal.content.plan_rationale == "Use one step."
     assert proposal.reasoning == "Internal reasoning."
     assert proposal.resource_bindings == (binding,)
-    assert proposal.edit_result == edit_result
+    assert not hasattr(proposal, "edit_result")
+    assert proposal.content.description_override_manual is True
+    assert proposal.content.edit is not None
+    assert proposal.content.edit.base_flow_revision == 7
+    assert proposal.content.edit.removed_existing_step_refs == frozenset(
+        {"existing_step_2"}
+    )
+    assert proposal.content.edit.diff == edit_diff
+    assert proposal.content.edit.warnings == ["Review before applying."]
+    assert proposal.content.edit.advisories[0].code == (
+        "flow_description_update_required"
+    )
+    assert proposal.content.edit.risk_flags == ["type_downgrade"]
+    assert proposal.content.edit.confidence == "needs_review"
     assert proposal.content.lint_warnings == [
         LintWarning(
             step_ref="step_a",

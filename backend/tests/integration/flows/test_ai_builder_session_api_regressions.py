@@ -26,17 +26,15 @@ from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysi
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     PlanStatus,
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    CompiledEditResult,
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
-    FlowEditDraft,
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
@@ -475,27 +473,23 @@ def _compiled_builder_plan(spec: FlowDraftSpecCore) -> CompiledProposal:
     )
 
 
-def _make_builder_edit_result(
+def _make_builder_edit_approval(
     *,
     spec: FlowDraftSpecCore,
     base_flow_revision: int,
-) -> BuilderPlanEditResult:
+) -> FlowBuilderEditApproval:
     step = spec.steps[0]
-    return BuilderPlanEditResult(
-        compiled_edit=CompiledEditResult(
-            compiled_spec=spec,
-            diff=FlowEditDiff(
-                step_changes=[
-                    StepChange(
-                        kind="unchanged",
-                        step_name=step.name,
-                        step_ref=step.existing_step_ref,
-                    )
-                ]
-            ),
-            original_draft=FlowEditDraft(operations=[]),
-            base_flow_revision=base_flow_revision,
-        )
+    return FlowBuilderEditApproval(
+        base_flow_revision=base_flow_revision,
+        diff=FlowEditDiff(
+            step_changes=[
+                StepChange(
+                    kind="unchanged",
+                    step_name=step.name,
+                    step_ref=step.existing_step_ref,
+                )
+            ]
+        ),
     )
 
 
@@ -700,9 +694,10 @@ async def test_revise_plan_api_creates_replacement_without_active_send(
     assert response.status_code == 200, response.text
     new_plan_id = UUID(response.json()["plan_id"])
     assert new_plan_id != old_plan_id
-    assert response.json()["proposal"]["edit_result"] == {
-        "description_override_manual": True
-    }
+    response_proposal = response.json()["proposal"]
+    assert response_proposal["description_override_manual"] is True
+    assert response_proposal.get("edit") is None
+    assert "edit_result" not in response_proposal
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -4119,7 +4114,7 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
             proposal=FlowBuilderProposal(
                 content=FlowBuilderProposalContent(
                     spec=spec,
-                    edit_result=_make_builder_edit_result(
+                    edit=_make_builder_edit_approval(
                         spec=spec,
                         base_flow_revision=flow_revision,
                     ),

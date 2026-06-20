@@ -21,6 +21,11 @@ from pydantic import (
     field_validator,
 )
 
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
+    EditAdvisory,
+    EditConfidence,
+    FlowEditDiff,
+)
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
@@ -229,14 +234,6 @@ def _default_form_operations() -> list["FormFieldOperation"]:
     return []
 
 
-def _default_metadata_changes() -> list["MetadataChange"]:
-    return []
-
-
-def _default_form_changes() -> list["FormFieldChange"]:
-    return []
-
-
 def _default_edit_warnings() -> list[str]:
     return []
 
@@ -278,59 +275,8 @@ class FlowEditDraft(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Diff models — what the user sees
-# ---------------------------------------------------------------------------
-
-
-class StepChange(BaseModel):
-    """One entry in the step diff."""
-
-    kind: Literal["added", "modified", "removed", "unchanged"]
-    step_name: str
-    step_ref: str | None = None
-    details: str | None = None  # e.g., "input_source: flow_input → previous_step"
-
-
-class FormFieldChange(BaseModel):
-    kind: Literal["added", "modified", "removed"]
-    field_name: str
-    details: str | None = None
-
-
-class MetadataChange(BaseModel):
-    kind: Literal["added", "modified", "removed"]
-    path: str
-    old_value: Any = None
-    new_value: Any = None
-
-
-class FlowEditDiff(BaseModel):
-    """Complete diff between original flow and proposed changes."""
-
-    step_changes: list[StepChange]
-    form_changes: list[FormFieldChange] = Field(default_factory=_default_form_changes)
-    metadata_changes: list[MetadataChange] = Field(
-        default_factory=_default_metadata_changes
-    )
-    flow_property_changes: dict[str, tuple[Any, Any]] = Field(default_factory=dict)
-    net_steps_added: int = 0
-    net_steps_removed: int = 0
-
-
-# ---------------------------------------------------------------------------
 # Compiled result — what the user approves
 # ---------------------------------------------------------------------------
-
-EditConfidence = Literal["ready", "needs_review", "low_confidence"]
-
-
-class EditAdvisory(BaseModel):
-    """Structured advisory for the user about an edit result."""
-
-    code: str
-    message: str
-    severity: Literal["info", "warning", "error"]
-    field: str | None = None
 
 
 class CompiledEditResult(BaseModel):

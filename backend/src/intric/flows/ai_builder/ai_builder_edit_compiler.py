@@ -20,15 +20,17 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
+    FlowEditDraft,
+    StepEditOperation,
+    StepPatch,
+)
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     EditConfidence,
     FlowEditDiff,
-    FlowEditDraft,
     FormFieldChange,
     MetadataChange,
     StepChange,
-    StepEditOperation,
-    StepPatch,
 )
 from intric.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,

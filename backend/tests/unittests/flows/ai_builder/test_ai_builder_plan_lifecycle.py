@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthori
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     LintSeverity,
@@ -20,19 +21,16 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    CompiledEditResult,
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
-    FlowEditDraft,
     StepChange,
-    StepEditOperation,
 )
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
 from intric.flows.application.flow_authoring_command import (
+    CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowAuthoringResult,
@@ -153,7 +151,8 @@ def _make_plan(
     session_id,
     tenant_id,
     status: PlanStatus = PlanStatus.APPROVED,
-    edit_result: BuilderPlanEditResult | None = None,
+    edit: FlowBuilderEditApproval | None = None,
+    description_override_manual: bool = False,
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     lint_warnings: list[LintWarning] | None = None,
@@ -169,7 +168,8 @@ def _make_plan(
             content=FlowBuilderProposalContent(
                 spec=used_spec,
                 lint_warnings=lint_warnings or [],
-                edit_result=edit_result,
+                description_override_manual=description_override_manual,
+                edit=edit,
             ),
             reasoning=reasoning,
             resource_bindings=resource_bindings,
@@ -177,30 +177,23 @@ def _make_plan(
     )
 
 
-def _make_compiled_edit_result(
+def _make_plan_edit_approval(
     spec: FlowDraftSpecCore,
     *,
-    operations: list[StepEditOperation] | None = None,
-) -> CompiledEditResult:
-    return CompiledEditResult(
-        compiled_spec=spec,
-        diff=FlowEditDiff(
-            step_changes=[StepChange(kind="unchanged", step_name="Step A")]
-        ),
-        original_draft=FlowEditDraft(operations=operations or []),
-        base_flow_revision=1,
+    removed_existing_step_refs: frozenset[str] = frozenset(),
+) -> FlowBuilderEditApproval:
+    step_changes = [StepChange(kind="unchanged", step_name="Step A")]
+    step_changes.extend(
+        StepChange(kind="removed", step_name=ref, step_ref=ref)
+        for ref in sorted(removed_existing_step_refs)
     )
-
-
-def _make_plan_edit_result(
-    spec: FlowDraftSpecCore,
-    *,
-    operations: list[StepEditOperation] | None = None,
-    description_override_manual: bool = False,
-) -> BuilderPlanEditResult:
-    return BuilderPlanEditResult(
-        compiled_edit=_make_compiled_edit_result(spec, operations=operations),
-        description_override_manual=description_override_manual,
+    return FlowBuilderEditApproval(
+        base_flow_revision=1,
+        removed_existing_step_refs=removed_existing_step_refs,
+        diff=FlowEditDiff(
+            step_changes=step_changes,
+            net_steps_removed=len(removed_existing_step_refs),
+        ),
     )
 
 
@@ -285,14 +278,12 @@ class TestAIBuilderPlanLifecycle:
             local_id=uuid4(),
         )
         plan_spec = _make_spec()
-        compiled_edit_result = _make_compiled_edit_result(plan_spec)
         plan = _make_plan(
             session_id=uuid4(),
             tenant_id=user.tenant_id,
             status=PlanStatus.PROPOSED,
             spec=plan_spec,
             resource_bindings=(binding,),
-            edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit_result),
             lint_warnings=[
                 LintWarning(
                     code="needs_model",
@@ -314,10 +305,7 @@ class TestAIBuilderPlanLifecycle:
             tenant_id=user.tenant_id,
             status=PlanStatus.PROPOSED,
             resource_bindings=(binding,),
-            edit_result=BuilderPlanEditResult(
-                compiled_edit=compiled_edit_result,
-                description_override_manual=True,
-            ),
+            description_override_manual=True,
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
@@ -347,11 +335,10 @@ class TestAIBuilderPlanLifecycle:
         proposal = create_kwargs["proposal"]
         assert proposal.spec == plan.spec
         assert proposal.content.lint_warnings == plan.proposal.content.lint_warnings
+        assert proposal.content.description_override_manual is True
         assert proposal.reasoning is None
         assert proposal.resource_bindings == (binding,)
-        assert proposal.edit_result == BuilderPlanEditResult(
-            compiled_edit=compiled_edit_result, description_override_manual=True
-        )
+        assert proposal.content.edit is None
         repo.update_session_latest_plan_without_send_lease.assert_awaited_once_with(
             session_id=plan.session_id,
             tenant_id=user.tenant_id,
@@ -396,10 +383,8 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=_make_plan_edit_result(
-                _make_spec(),
-                description_override_manual=True,
-            ),
+            edit=_make_plan_edit_approval(_make_spec()),
+            description_override_manual=True,
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
@@ -426,6 +411,45 @@ class TestAIBuilderPlanLifecycle:
             authoring_service.prepare.await_args.kwargs["origin_policy"],
             AIBuilderAuthoringPolicy,
         )
+
+    @pytest.mark.anyio
+    async def test_apply_create_plan_passes_manual_description_override_to_compile(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            description_override_manual=True,
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        authoring_service = _make_authoring_service(steps_created=1, steps_updated=0)
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        await lifecycle.apply_plan(plan_id=plan.id)
+
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        assert isinstance(command, CreateFlowAuthoringCommand)
+        assert command.origin.description_override_manual is True
+        assert command.origin.session_id == session.id
+        assert command.origin.plan_id == plan.id
+        assert command.origin.spec_hash == plan.spec_hash
 
     @pytest.mark.anyio
     async def test_apply_plan_derives_removed_refs_from_persisted_edit_intent(
@@ -458,11 +482,9 @@ class TestAIBuilderPlanLifecycle:
             session_id=session.id,
             tenant_id=user.tenant_id,
             spec=spec,
-            edit_result=_make_plan_edit_result(
+            edit=_make_plan_edit_approval(
                 spec,
-                operations=[
-                    StepEditOperation(op="remove", target_ref="existing_step_2")
-                ],
+                removed_existing_step_refs=frozenset({"existing_step_2"}),
             ),
         )
         repo.get_plan.return_value = plan
@@ -565,7 +587,7 @@ class TestAIBuilderPlanLifecycle:
             session_id=session.id,
             tenant_id=user.tenant_id,
             spec=spec,
-            edit_result=_make_plan_edit_result(spec, operations=[]),
+            edit=_make_plan_edit_approval(spec),
         )
         flow_service.get_flow.return_value = _make_flow_for_edit(
             flow_id=flow_id,
@@ -595,7 +617,7 @@ class TestAIBuilderPlanLifecycle:
         repo.update_plan_status.assert_not_awaited()
 
     @pytest.mark.anyio
-    async def test_apply_plan_rejects_edit_plan_without_compiled_edit(
+    async def test_apply_plan_rejects_edit_plan_without_edit_approval(
         self,
     ) -> None:
         user = _make_user()
@@ -611,7 +633,6 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=BuilderPlanEditResult(),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
@@ -634,7 +655,7 @@ class TestAIBuilderPlanLifecycle:
             await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
 
         assert exc_info.value.code == "bad_request"
-        assert "compiled edit artifact" in str(exc_info.value)
+        assert "edit approval metadata" in str(exc_info.value)
 
     @pytest.mark.anyio
     async def test_apply_plan_rejects_edit_flow_space_mismatch(self):
@@ -653,7 +674,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=_make_plan_edit_result(_make_spec()),
+            edit=_make_plan_edit_approval(_make_spec()),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
@@ -773,7 +794,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=_make_plan_edit_result(_make_spec()),
+            edit=_make_plan_edit_approval(_make_spec()),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
@@ -833,7 +854,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=_make_plan_edit_result(_make_spec()),
+            edit=_make_plan_edit_approval(_make_spec()),
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
@@ -879,7 +900,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=_make_plan_edit_result(_make_spec()),
+            edit=_make_plan_edit_approval(_make_spec()),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
@@ -966,7 +987,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=_make_plan_edit_result(_make_spec()),
+            edit=_make_plan_edit_approval(_make_spec()),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,

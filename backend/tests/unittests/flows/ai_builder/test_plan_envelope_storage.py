@@ -10,17 +10,15 @@ import pytest
 from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
     PlanStatus,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    CompiledEditResult,
+from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
-    FlowEditDraft,
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_repo import (
@@ -92,14 +90,21 @@ def _binding() -> LocalResourceBinding:
     )
 
 
-def _compiled_edit_result(spec: FlowDraftSpecCore) -> CompiledEditResult:
-    return CompiledEditResult(
-        compiled_spec=spec,
-        diff=FlowEditDiff(
-            step_changes=[StepChange(kind="unchanged", step_name="Step A")]
-        ),
-        original_draft=FlowEditDraft(operations=[]),
+def _edit_approval() -> FlowBuilderEditApproval:
+    return FlowBuilderEditApproval(
         base_flow_revision=1,
+        removed_existing_step_refs=frozenset({"existing_step_2"}),
+        diff=FlowEditDiff(
+            step_changes=[
+                StepChange(kind="unchanged", step_name="Step A"),
+                StepChange(
+                    kind="removed",
+                    step_name="Old step",
+                    step_ref="existing_step_2",
+                ),
+            ],
+            net_steps_removed=1,
+        ),
     )
 
 
@@ -107,6 +112,7 @@ def test_plan_response_does_not_expose_resource_bindings() -> None:
     assert "resource_bindings" not in FlowBuilderProposalContent.model_fields
     assert "resource_bindings_json" not in FlowBuilderProposalContent.model_fields
     assert "reasoning" not in FlowBuilderProposalContent.model_fields
+    assert "edit_result" not in FlowBuilderProposalContent.model_fields
 
 
 def test_plan_from_row_rehydrates_spec_from_proposal_json() -> None:
@@ -126,7 +132,7 @@ def test_plan_from_row_rehydrates_spec_from_proposal_json() -> None:
 def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None:
     spec = _make_spec("Proposal roundtrip")
     binding = _binding()
-    compiled = _compiled_edit_result(spec)
+    edit = _edit_approval()
     warning = LintWarning(
         step_ref="step_a",
         code="needs_review",
@@ -140,7 +146,8 @@ def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None
             lint_warnings=[warning],
             risk_acknowledgments=["Generated summaries need review."],
             plan_rationale="One-step summary flow.",
-            edit_result=BuilderPlanEditResult(compiled_edit=compiled),
+            description_override_manual=True,
+            edit=edit,
         ),
         reasoning="Internal planning note.",
         resource_bindings=(binding,),
@@ -157,7 +164,7 @@ def test_plan_from_row_rehydrates_complete_proposal_from_proposal_json() -> None
     assert plan.spec_hash == expected.spec_hash
     assert plan.proposal.content == expected.content
     assert plan.resource_bindings == (binding,)
-    assert plan.edit_result == expected.edit_result
+    assert plan.proposal.content.edit == edit
 
 
 def test_plan_from_row_rehydrates_resource_bindings() -> None:
@@ -176,23 +183,33 @@ def test_plan_from_row_rehydrates_resource_bindings() -> None:
     assert plan.resource_bindings[0].slot_ref.label == "Fast model"
 
 
-def test_plan_from_row_rehydrates_populated_edit_result() -> None:
-    spec = _make_spec("Edit result roundtrip")
-    compiled = _compiled_edit_result(spec)
-    edit_result = BuilderPlanEditResult(compiled_edit=compiled)
+def test_plan_from_row_rehydrates_populated_edit_approval() -> None:
+    spec = _make_spec("Edit approval roundtrip")
+    edit = _edit_approval()
 
     plan = _plan_from_row(
         _row(
             proposal=FlowBuilderProposal(
                 content=FlowBuilderProposalContent(
                     spec=spec,
-                    edit_result=edit_result,
+                    edit=edit,
                 ),
             ),
         )
     )
 
-    assert plan.edit_result == edit_result
+    assert plan.proposal.content.edit == edit
+
+
+def test_plan_from_row_rejects_legacy_content_edit_result() -> None:
+    proposal = FlowBuilderProposal(
+        content=FlowBuilderProposalContent(spec=_make_spec())
+    )
+    row = _row(proposal=proposal)
+    row.proposal_json["content"]["edit_result"] = {"description_override_manual": True}
+
+    with pytest.raises(ValidationError, match="edit_result"):
+        _plan_from_row(row)
 
 
 def test_plan_from_row_rejects_unknown_proposal_json_fields() -> None:
