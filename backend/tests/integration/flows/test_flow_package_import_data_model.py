@@ -67,9 +67,6 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
 )
 from intric.flow_packages.infrastructure import flow_package_zip_reader as reader
-from intric.flow_packages.infrastructure.flow_package_import_repo import (
-    FlowPackageImportRepository,
-)
 from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
@@ -408,46 +405,66 @@ async def test_flow_package_import_failed_record_survives_draft_savepoint_rollba
     completion_model_factory,
     space_factory,
     admin_user,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with db_container() as container:
         session = container.session()
-        space = await _create_space(
+        valid_model = await completion_model_factory(
             session=session,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
+            name=f"flow-package-savepoint-model-{uuid4()}",
         )
-        repo = FlowPackageImportRepository(session)
+        space = await space_factory(
+            session,
+            f"Flow package import savepoint {uuid4()}",
+            [valid_model.id],
+        )
+        space_id = space.id
+        await _add_space_membership(
+            session=session,
+            space_id=space_id,
+            user_id=admin_user.id,
+        )
+        missing_model_id = uuid4()
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space_id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(missing_model_id)]
+            ),
+        )
 
-        with pytest.raises(RuntimeError):
-            async with session.begin_nested():
-                raise RuntimeError("draft creation rolled back")
-
-        import_id = await repo.create_failed(
-            tenant_id=admin_user.tenant_id,
-            space_id=space.id,
-            created_by_user_id=admin_user.id,
-            package_id="se.demo.flow",
-            package_version="1.0.0",
-            content_checksum="0" * 64,
-            import_plan=_import_plan(),
-            selection=_selection(),
-            failure=_failure(),
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space_id,
+            import_request=FlowPackageImportRequest(
+                package_base64=_package_base64_with_model_requirement(),
+                selected_bindings=[_model_binding_request(missing_model_id)],
+            ),
+            request=_request(),
+            container=cast(Container, container),
         )
         await session.flush()
 
         row = await session.scalar(
-            sa.select(FlowPackageImports).where(FlowPackageImports.id == import_id)
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.space_id == space_id,
+                FlowPackageImports.package_id == "se.demo.route-import",
+            )
+        )
+        draft_flow_count = await session.scalar(
+            sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space_id)
         )
 
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 400
         assert row is not None
         assert row.status == FlowPackageImportStatus.FAILED.value
         assert row.flow_id is None
-        assert row.failure_json == _failure().model_dump(mode="json")
-        assert row.selected_mappings_json == _selection().model_dump(mode="json")
-        assert row.import_plan_json == _import_plan().model_dump(
-            mode="json",
-            exclude={"can_publish_after_import"},
-        )
+        assert row.failure_json == {
+            "code": "bad_request",
+            "message": "The completion model is not enabled in the space.",
+            "context": {},
+        }
+        assert draft_flow_count == 0
 
 
 @pytest.mark.asyncio

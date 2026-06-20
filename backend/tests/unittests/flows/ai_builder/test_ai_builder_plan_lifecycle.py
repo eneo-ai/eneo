@@ -433,7 +433,7 @@ class TestAIBuilderPlanLifecycle:
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
-    async def test_apply_plan_create_failure_rolls_back_without_flow_listing(
+    async def test_apply_plan_create_failure_marks_applying_without_flow_listing(
         self,
         mock_compile,
         mock_execute,
@@ -470,7 +470,7 @@ class TestAIBuilderPlanLifecycle:
         repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            status=SessionStatus.AWAITING_APPROVAL,
+            status=SessionStatus.APPLYING,
         )
         flow_service.list_flows.assert_not_awaited()
 
@@ -478,7 +478,7 @@ class TestAIBuilderPlanLifecycle:
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
-    async def test_apply_plan_logs_compile_runtime_failure_and_rolls_back(
+    async def test_apply_plan_logs_compile_runtime_failure(
         self,
         mock_compile,
         mock_execute,
@@ -530,7 +530,7 @@ class TestAIBuilderPlanLifecycle:
         repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            status=SessionStatus.AWAITING_APPROVAL,
+            status=SessionStatus.APPLYING,
         )
 
     @pytest.mark.anyio
@@ -650,7 +650,7 @@ class TestAIBuilderPlanLifecycle:
         repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            status=SessionStatus.AWAITING_APPROVAL,
+            status=SessionStatus.APPLYING,
         )
 
     @pytest.mark.anyio

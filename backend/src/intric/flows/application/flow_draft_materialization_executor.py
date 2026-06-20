@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import assert_never
@@ -36,8 +35,6 @@ from intric.flows.flow_resource_bindings import (
 from intric.main.exceptions import BadRequestException
 from intric.prompts.api.prompt_models import PromptCreate
 
-logger = logging.getLogger(__name__)
-
 _MODEL_LOCAL_KINDS = frozenset({LocalResourceKind.COMPLETION_MODEL})
 _MCP_SERVER_LOCAL_KINDS = frozenset({LocalResourceKind.MCP_SERVER})
 _MCP_TOOL_LOCAL_KINDS = frozenset({LocalResourceKind.MCP_TOOL})
@@ -60,7 +57,6 @@ class FlowDraftMaterializer:
         | None = None,
     ) -> FlowDraftMaterializationResult:
         is_create = flow_id is None
-        created_flow_id: UUID | None = None
         progress = _MaterializationProgressAccumulator(callback=progress_callback)
 
         try:
@@ -70,142 +66,126 @@ class FlowDraftMaterializer:
         except FlowResourceBindingResolutionError as exc:
             raise _slot_binding_bad_request(exc) from exc
 
-        try:
-            ref_to_assistant_id: dict[str, UUID] = {}
-            completion_required_by_plan_ref = _completion_required_by_plan_ref(
-                changeset.compiled_steps
+        ref_to_assistant_id: dict[str, UUID] = {}
+        completion_required_by_plan_ref = _completion_required_by_plan_ref(
+            changeset.compiled_steps
+        )
+        completion_required_by_assistant_id = _completion_required_by_assistant_id(
+            changeset.compiled_steps
+        )
+        flow_name = changeset.flow_name
+
+        if is_create:
+            flow_name = await _deduplicate_flow_name(
+                flow_service=flow_service,
+                space_id=space_id,
+                desired_name=changeset.flow_name,
             )
-            completion_required_by_assistant_id = _completion_required_by_assistant_id(
-                changeset.compiled_steps
+            temp_flow = await flow_service.create_flow(
+                space_id=space_id,
+                name=flow_name,
+                description=changeset.flow_description,
+                steps=[],
+                metadata_json=changeset.metadata_json,
             )
-            flow_name = changeset.flow_name
+            flow_id = temp_flow.id
+            progress.flow_created = True
+            progress.emit(FlowDraftMaterializationStage.FLOW_CREATED)
 
-            if is_create:
-                flow_name = await _deduplicate_flow_name(
-                    flow_service=flow_service,
-                    space_id=space_id,
-                    desired_name=changeset.flow_name,
+        if flow_id is None:
+            raise BadRequestException("Flow id missing while executing changeset.")
+
+        for assistant_to_create in changeset.assistants_to_create:
+            assistant, _ = await flow_service.create_flow_assistant(
+                flow_id=flow_id,
+                name=assistant_to_create.plan_step_ref,
+            )
+            ref_to_assistant_id[assistant_to_create.plan_step_ref] = assistant.id
+            progress.assistants_created += 1
+            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_CREATED)
+
+            await _configure_assistant(
+                flow_service=flow_service,
+                flow_id=flow_id,
+                assistant_id=assistant.id,
+                assistant_spec=assistant_to_create.assistant_spec,
+                requires_completion_model_for_step=_completion_required_for_plan_ref(
+                    plan_step_ref=assistant_to_create.plan_step_ref,
+                    completion_required_by_plan_ref=completion_required_by_plan_ref,
+                ),
+                resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+            )
+            progress.assistants_configured += 1
+            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_CONFIGURED)
+
+        for assistant_to_update in changeset.assistants_to_update:
+            if assistant_to_update.existing_assistant_id is None:
+                raise BadRequestException(
+                    "Existing assistant id missing while applying changeset."
                 )
-                temp_flow = await flow_service.create_flow(
-                    space_id=space_id,
-                    name=flow_name,
-                    description=changeset.flow_description,
-                    steps=[],
-                    metadata_json=changeset.metadata_json,
-                )
-                flow_id = temp_flow.id
-                created_flow_id = flow_id
-                progress.flow_created = True
-                progress.emit(FlowDraftMaterializationStage.FLOW_CREATED)
-
-            if flow_id is None:
-                raise BadRequestException("Flow id missing while executing changeset.")
-
-            for assistant_to_create in changeset.assistants_to_create:
-                assistant, _ = await flow_service.create_flow_assistant(
-                    flow_id=flow_id,
-                    name=assistant_to_create.plan_step_ref,
-                )
-                ref_to_assistant_id[assistant_to_create.plan_step_ref] = assistant.id
-                progress.assistants_created += 1
-                progress.emit(FlowDraftMaterializationStage.ASSISTANTS_CREATED)
-
-                await _configure_assistant(
-                    flow_service=flow_service,
-                    flow_id=flow_id,
-                    assistant_id=assistant.id,
-                    assistant_spec=assistant_to_create.assistant_spec,
-                    requires_completion_model_for_step=_completion_required_for_plan_ref(
-                        plan_step_ref=assistant_to_create.plan_step_ref,
-                        completion_required_by_plan_ref=completion_required_by_plan_ref,
-                    ),
-                    resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                )
-                progress.assistants_configured += 1
-                progress.emit(FlowDraftMaterializationStage.ASSISTANTS_CONFIGURED)
-
-            for assistant_to_update in changeset.assistants_to_update:
-                if assistant_to_update.existing_assistant_id is None:
-                    raise BadRequestException(
-                        "Existing assistant id missing while applying changeset."
-                    )
-                await _configure_assistant(
-                    flow_service=flow_service,
-                    flow_id=flow_id,
+            await _configure_assistant(
+                flow_service=flow_service,
+                flow_id=flow_id,
+                assistant_id=assistant_to_update.existing_assistant_id,
+                assistant_spec=assistant_to_update.assistant_spec,
+                requires_completion_model_for_step=_completion_required_for_assistant_id(
                     assistant_id=assistant_to_update.existing_assistant_id,
-                    assistant_spec=assistant_to_update.assistant_spec,
-                    requires_completion_model_for_step=_completion_required_for_assistant_id(
-                        assistant_id=assistant_to_update.existing_assistant_id,
-                        completion_required_by_assistant_id=completion_required_by_assistant_id,
-                    ),
-                    resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                )
-                progress.assistants_updated += 1
-                progress.emit(FlowDraftMaterializationStage.ASSISTANTS_UPDATED)
-
-            final_steps = _build_flow_steps(
-                compiled_steps=changeset.compiled_steps,
-                ref_to_assistant_id=ref_to_assistant_id,
-            )
-
-            if is_create:
-                await flow_service.update_flow(flow_id=flow_id, steps=final_steps)
-            else:
-                await flow_service.update_flow(
-                    flow_id=flow_id,
-                    name=changeset.flow_name,
-                    description=changeset.flow_description,
-                    steps=final_steps,
-                    metadata_json=changeset.metadata_json,
-                    expected_revision=expected_revision,
-                )
-            progress.flow_updated = True
-            progress.emit(FlowDraftMaterializationStage.FLOW_UPDATED)
-
-            await flow_service.replace_resource_bindings(
-                flow_id=flow_id,
-                bindings=resource_bindings,
-                source=binding_source,
-            )
-
-            for assistant_to_delete in changeset.assistants_to_delete:
-                await _delete_removed_assistant(
-                    flow_service=flow_service,
-                    flow_id=flow_id,
-                    assistant_to_delete=assistant_to_delete,
-                )
-                progress.assistants_deleted += 1
-                progress.emit(FlowDraftMaterializationStage.ASSISTANTS_DELETED)
-
-            return FlowDraftMaterializationResult(
-                flow_id=flow_id,
-                flow_name=flow_name,
-                steps_created=sum(
-                    1
-                    for step in changeset.compiled_steps
-                    if step.change_kind == FlowDraftStepChangeKind.ADDED
+                    completion_required_by_assistant_id=completion_required_by_assistant_id,
                 ),
-                steps_updated=sum(
-                    1
-                    for step in changeset.compiled_steps
-                    if step.change_kind == FlowDraftStepChangeKind.MODIFIED
-                ),
-                steps_removed=len(changeset.assistants_to_delete),
+                resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
             )
-        except Exception:
-            if is_create and created_flow_id is not None:
-                try:
-                    await flow_service.delete_flow(created_flow_id)
-                except Exception as cleanup_error:
-                    logger.warning(
-                        "Failed to clean up temporary flow after materialization error",
-                        exc_info=cleanup_error,
-                        extra={
-                            "flow_id": str(created_flow_id),
-                            "space_id": str(space_id),
-                        },
-                    )
-            raise
+            progress.assistants_updated += 1
+            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_UPDATED)
+
+        final_steps = _build_flow_steps(
+            compiled_steps=changeset.compiled_steps,
+            ref_to_assistant_id=ref_to_assistant_id,
+        )
+
+        if is_create:
+            await flow_service.update_flow(flow_id=flow_id, steps=final_steps)
+        else:
+            await flow_service.update_flow(
+                flow_id=flow_id,
+                name=changeset.flow_name,
+                description=changeset.flow_description,
+                steps=final_steps,
+                metadata_json=changeset.metadata_json,
+                expected_revision=expected_revision,
+            )
+        progress.flow_updated = True
+        progress.emit(FlowDraftMaterializationStage.FLOW_UPDATED)
+
+        await flow_service.replace_resource_bindings(
+            flow_id=flow_id,
+            bindings=resource_bindings,
+            source=binding_source,
+        )
+
+        for assistant_to_delete in changeset.assistants_to_delete:
+            await _delete_removed_assistant(
+                flow_service=flow_service,
+                flow_id=flow_id,
+                assistant_to_delete=assistant_to_delete,
+            )
+            progress.assistants_deleted += 1
+            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_DELETED)
+
+        return FlowDraftMaterializationResult(
+            flow_id=flow_id,
+            flow_name=flow_name,
+            steps_created=sum(
+                1
+                for step in changeset.compiled_steps
+                if step.change_kind == FlowDraftStepChangeKind.ADDED
+            ),
+            steps_updated=sum(
+                1
+                for step in changeset.compiled_steps
+                if step.change_kind == FlowDraftStepChangeKind.MODIFIED
+            ),
+            steps_removed=len(changeset.assistants_to_delete),
+        )
 
 
 class _MaterializationProgressAccumulator:

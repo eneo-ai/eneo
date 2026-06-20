@@ -22,6 +22,7 @@ from intric.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from intric.database.tables.tenant_table import Tenants
+from intric.flows.ai_builder import ai_builder_plan_lifecycle
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -510,6 +511,64 @@ async def _create_proposed_ai_builder_plan(
             lease=turn.lease,
         )
         return session_id, tenant_id, stored_plan.plan.id, turn.lease
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_apply_plan_request_transaction_rolls_back_applying_status_on_failure(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Apply Transaction Rollback",
+    )
+    session_id, tenant_id, plan_id, _ = await _create_proposed_ai_builder_plan(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        space_id=space_id,
+    )
+
+    approve_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert approve_response.status_code == 200, approve_response.text
+
+    async def fail_materialization(**_kwargs: object) -> object:
+        raise BadRequestException("forced apply failure", code="forced_apply_failure")
+
+    monkeypatch.setattr(
+        ai_builder_plan_lifecycle,
+        "execute_changeset",
+        fail_materialization,
+    )
+
+    apply_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+        json={},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+
+    assert apply_response.status_code == 400, apply_response.text
+    async with db_container() as container:
+        persisted_status = (
+            await container.session().execute(
+                select(BuilderSessions.status).where(
+                    BuilderSessions.id == session_id,
+                    BuilderSessions.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+
+    assert persisted_status == SessionStatus.AWAITING_APPROVAL.value
 
 
 @pytest.mark.integration

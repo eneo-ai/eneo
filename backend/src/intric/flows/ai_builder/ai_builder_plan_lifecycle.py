@@ -58,15 +58,12 @@ from intric.flows.flow_authoring_spec import (
     InputType,
 )
 from intric.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
-from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.flows.application.flow_service import FlowService
     from intric.flows.domain.flow import Flow
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
-
-logger = get_logger(__name__)
 
 
 def _build_changeset_count_summary(changeset: FlowChangeSet) -> ChangesetCountSummary:
@@ -284,7 +281,6 @@ class AIBuilderPlanLifecycle:
                 changeset_counts=None,
                 materializer_progress=None,
             )
-            await self._rollback_session_status(session.id)
             raise
 
         materializer_progress: MaterializerProgressSnapshot | None = None
@@ -316,7 +312,6 @@ class AIBuilderPlanLifecycle:
                 changeset_counts=_build_changeset_count_summary(changeset),
                 materializer_progress=materializer_progress,
             )
-            await self._rollback_session_status(session.id)
             raise
 
         await self.repo.update_plan_status(
@@ -471,19 +466,6 @@ class AIBuilderPlanLifecycle:
                 "target_kind": session.target_kind.value,
             },
         )
-
-    async def _rollback_session_status(self, session_id: UUID) -> None:
-        try:
-            await self.repo.update_session_status_without_send_lease(
-                session_id=session_id,
-                tenant_id=self.user.tenant_id,
-                status=SessionStatus.AWAITING_APPROVAL,
-            )
-        except Exception as error:
-            logger.warning(
-                "Failed to rollback AI builder session status",
-                exc_info=error,
-            )
 
     @staticmethod
     def _require_plan_status(

@@ -2114,7 +2114,7 @@ class TestApplyPlan:
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
-    async def test_apply_failure_rolls_back_session_status(
+    async def test_apply_failure_marks_applying_before_request_transaction_rollback(
         self, mock_compile, mock_execute
     ):
         user = _make_user()
@@ -2144,8 +2144,8 @@ class TestApplyPlan:
         # Apply lifecycle writes are out-of-band and must not use an active send lease.
         repo.update_session_status.assert_not_awaited()
         status_calls = repo.update_session_status_without_send_lease.call_args_list
+        assert len(status_calls) == 1
         assert status_calls[0].kwargs["status"] == SessionStatus.APPLYING
-        assert status_calls[1].kwargs["status"] == SessionStatus.AWAITING_APPROVAL
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")

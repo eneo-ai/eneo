@@ -16,7 +16,6 @@ from intric.main.exceptions import BadRequestException
         (SessionStatus.AWAITING_APPROVAL, SessionStatus.CHATTING),
         (SessionStatus.AWAITING_APPROVAL, SessionStatus.APPLYING),
         (SessionStatus.APPLYING, SessionStatus.APPLIED),
-        (SessionStatus.APPLYING, SessionStatus.AWAITING_APPROVAL),
         (SessionStatus.CANCELLED, SessionStatus.CANCELLED),
     ],
 )

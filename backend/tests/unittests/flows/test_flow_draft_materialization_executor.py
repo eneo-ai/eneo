@@ -150,7 +150,7 @@ async def test_create_mode_materializes_flow_and_resource_bindings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_mode_cleans_up_temp_flow_after_failure() -> None:
+async def test_create_mode_propagates_update_failure_without_cleanup() -> None:
     flow_id = uuid4()
     service = _flow_service()
     service.create_flow.return_value = _flow(flow_id=flow_id)
@@ -178,7 +178,7 @@ async def test_create_mode_cleans_up_temp_flow_after_failure() -> None:
             binding_source=FlowResourceBindingSource.AI_BUILDER,
         )
 
-    service.delete_flow.assert_awaited_once_with(flow_id)
+    service.delete_flow.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -534,7 +534,7 @@ async def test_duplicate_slot_bindings_fail_before_mutation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_slot_ref_preserves_bad_request_code() -> None:
+async def test_invalid_slot_ref_preserves_bad_request_code_without_cleanup() -> None:
     flow_id = uuid4()
     service = _flow_service()
     service.create_flow.return_value = _flow(flow_id=flow_id)
@@ -565,7 +565,7 @@ async def test_invalid_slot_ref_preserves_bad_request_code() -> None:
         )
 
     assert error.value.code == "invalid_model_ref"
-    service.delete_flow.assert_awaited_once_with(flow_id)
+    service.delete_flow.assert_not_awaited()
 
 
 @pytest.mark.asyncio

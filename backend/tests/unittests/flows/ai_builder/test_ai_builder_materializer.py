@@ -1787,7 +1787,7 @@ class TestExecuteCreateFlow:
             "actual_kind": "model",
         }
         mock_flow_service.update_flow_assistant.assert_not_called()
-        mock_flow_service.delete_flow.assert_awaited_once_with(flow_id)
+        mock_flow_service.delete_flow.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_wrong_slot_kind_fails_before_uuid_conversion(self) -> None:
@@ -1972,7 +1972,7 @@ class TestExecuteCreateFlow:
         assert error.value.context == {"model_ref": "not-a-valid-ref"}
 
     @pytest.mark.asyncio
-    async def test_create_mode_cleans_up_exact_temp_flow_when_apply_fails(self) -> None:
+    async def test_create_mode_propagates_update_failure_without_cleanup(self) -> None:
         flow_id = uuid4()
         space_id = uuid4()
         assistant_id = uuid4()
@@ -2016,10 +2016,10 @@ class TestExecuteCreateFlow:
                 flow_id=None,
             )
 
-        mock_flow_service.delete_flow.assert_awaited_once_with(flow_id)
+        mock_flow_service.delete_flow.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_create_mode_cleans_up_temp_flow_when_binding_write_fails(
+    async def test_create_mode_propagates_binding_write_failure_without_cleanup(
         self,
     ) -> None:
         flow_id = uuid4()
@@ -2070,7 +2070,7 @@ class TestExecuteCreateFlow:
             )
 
         mock_flow_service.update_flow.assert_awaited_once()
-        mock_flow_service.delete_flow.assert_awaited_once_with(flow_id)
+        mock_flow_service.delete_flow.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
