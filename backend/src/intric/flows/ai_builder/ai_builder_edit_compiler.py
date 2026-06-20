@@ -7,16 +7,17 @@ the LLM describes the change, and the backend preserves everything else.
 
 from __future__ import annotations
 
-import logging
 import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    AddStep,
     AssistantSpecPatch,
     ModifyExistingStep,
-    compile_existing_step_modification,
+    OrderedEditProposal,
+    compile_ordered_edit_proposal,
     flow_step_to_authoring_spec,
     flow_steps_to_authoring_specs,
 )
@@ -36,10 +37,6 @@ from intric.flows.ai_builder.ai_builder_edit_preview_models import (
 )
 from intric.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
-)
-from intric.flows.ai_builder.ai_builder_new_step_compiler import (
-    compile_new_step_draft,
-    make_plan_step_ref,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
@@ -67,11 +64,7 @@ from intric.flows.flow_authoring_spec import (
     InputType,
     OutputType,
     StepSpec,
-    completion_model_ref_strip_log_extra,
-    strip_inapplicable_completion_model,
 )
-
-logger = logging.getLogger(__name__)
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
@@ -88,6 +81,13 @@ class _NewStepEntry:
 
 
 _EditStepEntry = _ExistingStepEntry | _NewStepEntry
+
+
+@dataclass(frozen=True, slots=True)
+class _OrderedEditBuildResult:
+    proposal: OrderedEditProposal
+    warnings: list[str]
+    shadowed_primary_input_fields: list[str]
 
 
 def compile_edit_draft(
@@ -112,62 +112,25 @@ def compile_edit_draft(
         flow_name: Current flow name (used if edit_draft doesn't change it).
         flow_description: Current flow description.
     """
-    working: list[_EditStepEntry] = [
-        _ExistingStepEntry(ref=f"existing_step_{s.step_order}", step=s)
-        for s in current_steps
-    ]
-
-    form_changes = []
-    removed_refs: set[str] = set()
-    modified_refs: dict[str, StepPatch] = {}
-    warnings: list[str] = []
     primary_runtime_input_type = _primary_runtime_input_type_from_steps(current_steps)
-    shadowed_primary_input_fields: list[str] = []
-
-    for op in edit_draft.operations:
-        if op.op == "remove":
-            _apply_remove(op, working, removed_refs)
-        elif op.op == "modify":
-            _apply_modify(op, modified_refs)
-        elif op.op == "add":
-            _apply_add(op, working)
-
-    _repair_leading_audio_document_extraction(
-        working=working,
-        modified_refs=modified_refs,
-        warnings=warnings,
+    ordered_edit = _build_ordered_edit_proposal(
+        edit_draft=edit_draft,
+        current_steps=current_steps,
+        primary_runtime_input_type=primary_runtime_input_type,
     )
-
-    compiled_steps: list[StepSpec] = []
-    for i, entry in enumerate(working):
-        plan_ref = make_plan_step_ref(i)
-
-        if isinstance(entry, _NewStepEntry):
-            step_draft, dropped_field_names = _without_primary_runtime_shadow_fields(
-                entry.draft,
-                primary_runtime_input_type=primary_runtime_input_type,
-            )
-            shadowed_primary_input_fields.extend(dropped_field_names)
-            compiled_steps.append(
-                compile_new_step_draft(
-                    step_draft=step_draft,
-                    plan_step_ref=plan_ref,
-                    prior_steps=compiled_steps,
-                )
-            )
-        else:
-            patch = modified_refs.get(entry.ref)
-            compiled_steps.append(
-                _flow_step_to_spec(
-                    entry.step,
-                    plan_ref,
-                    patch,
-                    assistant_snapshots=assistant_snapshots,
-                    resource_catalog=resource_catalog,
-                    primary_runtime_input_type=primary_runtime_input_type,
-                    prior_steps=compiled_steps,
-                )
-            )
+    base_spec = _current_flow_authoring_spec(
+        current_steps=current_steps,
+        flow_name=flow_name,
+        flow_description=flow_description,
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
+    )
+    compiled_spec = compile_ordered_edit_proposal(
+        base_spec=base_spec,
+        proposal=ordered_edit.proposal,
+        primary_runtime_input_type=primary_runtime_input_type,
+    )
+    compiled_steps = compiled_spec.steps
 
     compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
     normalized_spec, normalization_changes = normalize_ai_builder_spec(
@@ -190,9 +153,11 @@ def compile_edit_draft(
         current_metadata_json=current_metadata_json,
         primary_runtime_input_type=primary_runtime_input_type,
     )
-    shadowed_primary_input_fields.extend(dropped_form_field_names)
+    shadowed_primary_input_fields = [
+        *ordered_edit.shadowed_primary_input_fields,
+        *dropped_form_field_names,
+    ]
 
-    # Resolve flow name/description — no regex mutation, just pass-through
     final_name = normalized_spec.flow_name
     final_description = normalized_spec.flow_description
 
@@ -224,7 +189,7 @@ def compile_edit_draft(
     step_changes = _build_step_changes(
         current_steps=current_steps,
         compiled_steps=compiled_steps,
-        removed_refs=removed_refs,
+        removed_refs=ordered_edit.proposal.removed_existing_step_refs,
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
@@ -255,17 +220,113 @@ def compile_edit_draft(
     risk_flags: list[str] = []
     if any(op.op == "remove" for op in edit_draft.operations):
         risk_flags.append("step_removal")
-    confidence = _compute_confidence(step_changes, warnings, edit_draft)
+    confidence = _compute_confidence(step_changes, ordered_edit.warnings, edit_draft)
 
     return CompiledEditResult(
         compiled_spec=compiled_spec,
         diff=diff,
         original_draft=edit_draft,
         base_flow_revision=base_flow_revision,
-        warnings=warnings,
+        warnings=ordered_edit.warnings,
         advisories=advisories,
         risk_flags=risk_flags,
         confidence=confidence,
+    )
+
+
+def _build_ordered_edit_proposal(
+    *,
+    edit_draft: FlowEditDraft,
+    current_steps: list[FlowStep],
+    primary_runtime_input_type: InputType | None,
+) -> _OrderedEditBuildResult:
+    working: list[_EditStepEntry] = [
+        _ExistingStepEntry(ref=f"existing_step_{s.step_order}", step=s)
+        for s in current_steps
+    ]
+    removed_refs: set[str] = set()
+    modified_refs: dict[str, StepPatch] = {}
+    warnings: list[str] = []
+    shadowed_primary_input_fields: list[str] = []
+
+    for op in edit_draft.operations:
+        if op.op == "remove":
+            _apply_remove(op, working, removed_refs)
+        elif op.op == "modify":
+            _apply_modify(op, modified_refs)
+        elif op.op == "add":
+            _apply_add(op, working)
+
+    _repair_leading_audio_document_extraction(
+        working=working,
+        modified_refs=modified_refs,
+        warnings=warnings,
+    )
+
+    ordered_steps: list[AddStep | ModifyExistingStep] = []
+    compiled_index_by_original_order: dict[int, int] = {}
+    for entry in working:
+        if isinstance(entry, _NewStepEntry):
+            step_draft, dropped_field_names = _without_primary_runtime_shadow_fields(
+                entry.draft,
+                primary_runtime_input_type=primary_runtime_input_type,
+            )
+            shadowed_primary_input_fields.extend(dropped_field_names)
+            ordered_steps.append(AddStep(step=step_draft))
+            continue
+
+        patch = modified_refs.get(entry.ref)
+        if patch is None:
+            ordered_steps.append(ModifyExistingStep(existing_step_ref=entry.ref))
+        else:
+            ordered_steps.append(
+                _modify_step_from_patch(
+                    existing_step_ref=entry.ref,
+                    patch=patch,
+                    compiled_index_by_original_order=compiled_index_by_original_order,
+                )
+            )
+        original_order = _existing_step_order(entry.ref)
+        if original_order is not None:
+            compiled_index_by_original_order[original_order] = len(ordered_steps)
+
+    payload: dict[str, object] = {
+        "steps": ordered_steps,
+        "removed_existing_step_refs": frozenset(removed_refs),
+    }
+    if edit_draft.flow_name is not None:
+        payload["flow_name"] = edit_draft.flow_name
+    if edit_draft.flow_description is not None:
+        payload["flow_description"] = edit_draft.flow_description
+
+    return _OrderedEditBuildResult(
+        proposal=OrderedEditProposal.model_validate(payload),
+        warnings=warnings,
+        shadowed_primary_input_fields=shadowed_primary_input_fields,
+    )
+
+
+def _current_flow_authoring_spec(
+    *,
+    current_steps: list[FlowStep],
+    flow_name: str | None,
+    flow_description: str | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
+) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name=normalize_flow_name(flow_name or "Unnamed Flow"),
+        flow_description=flow_description or "",
+        steps=[
+            flow_step_to_authoring_spec(
+                step,
+                plan_ref=f"existing_step_{step.step_order}",
+                assistant_snapshots=assistant_snapshots,
+                resource_catalog=resource_catalog,
+            )
+            for step in current_steps
+        ],
+        form_fields=None,
     )
 
 
@@ -424,57 +485,11 @@ def _runtime_input_config(input_config: dict[str, Any] | None) -> dict[str, Any]
     )
 
 
-def _flow_step_to_spec(
-    step: FlowStep,
-    plan_ref: str,
-    patch: StepPatch | None = None,
-    *,
-    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
-    primary_runtime_input_type: InputType | None = None,
-    prior_steps: list[StepSpec] | None = None,
-) -> StepSpec:
-    """Convert an existing FlowStep to a StepSpec, applying patch if present."""
-    spec = flow_step_to_authoring_spec(
-        step=step,
-        plan_ref=plan_ref,
-        assistant_snapshots=assistant_snapshots,
-        resource_catalog=resource_catalog,
-    )
-    base_assistant_spec = spec.assistant_spec
-    supplied_model_ref = base_assistant_spec.model_ref
-    model_ref_source = "snapshot"
-
-    if patch is not None:
-        if patch.assistant_spec is not None:
-            if "model_ref" in patch.assistant_spec.model_fields_set:
-                supplied_model_ref = patch.assistant_spec.model_ref
-                model_ref_source = "patch"
-        spec = compile_existing_step_modification(
-            spec,
-            _modify_step_from_patch(
-                existing_step_ref=spec.existing_step_ref or plan_ref,
-                patch=patch,
-                prior_steps=prior_steps or [],
-            ),
-            prior_steps=prior_steps or [],
-            primary_runtime_input_type=primary_runtime_input_type,
-        )
-
-    spec = strip_inapplicable_completion_model(spec)
-    _log_transcribe_only_model_ref_stripped(
-        supplied_model_ref=supplied_model_ref,
-        validated_step=spec,
-        source=model_ref_source,
-    )
-    return spec
-
-
 def _modify_step_from_patch(
     *,
     existing_step_ref: str,
     patch: StepPatch,
-    prior_steps: list[StepSpec],
+    compiled_index_by_original_order: dict[int, int],
 ) -> ModifyExistingStep:
     payload: dict[str, object | None] = {
         "existing_step_ref": existing_step_ref,
@@ -511,7 +526,7 @@ def _modify_step_from_patch(
     if "uses_previous_fields" in patch.model_fields_set:
         payload["uses_previous_fields"] = _translate_previous_field_refs(
             field_refs=patch.uses_previous_fields or [],
-            prior_steps=prior_steps,
+            compiled_index_by_original_order=compiled_index_by_original_order,
         )
     return ModifyExistingStep.model_validate(payload)
 
@@ -519,15 +534,10 @@ def _modify_step_from_patch(
 def _translate_previous_field_refs(
     *,
     field_refs: list[PreviousFieldRef],
-    prior_steps: list[StepSpec],
+    compiled_index_by_original_order: dict[int, int],
 ) -> list[PreviousFieldRef]:
     # Legacy StepPatch refs are authored as original step_order values; the
     # shared owner consumes indexes into the compiled prior-step list.
-    compiled_index_by_original_order = {
-        original_order: index
-        for index, step in enumerate(prior_steps, start=1)
-        if (original_order := _existing_step_order(step.existing_step_ref)) is not None
-    }
     translated: list[PreviousFieldRef] = []
     for field_ref in field_refs:
         compiled_index = compiled_index_by_original_order.get(field_ref.from_step)
@@ -535,22 +545,6 @@ def _translate_previous_field_refs(
             continue
         translated.append(field_ref.model_copy(update={"from_step": compiled_index}))
     return translated
-
-
-def _log_transcribe_only_model_ref_stripped(
-    *,
-    supplied_model_ref: str | None,
-    validated_step: StepSpec,
-    source: str,
-) -> None:
-    extra = completion_model_ref_strip_log_extra(
-        supplied_model_ref=supplied_model_ref,
-        validated_step=validated_step,
-        source=source,
-    )
-    if extra is None:
-        return
-    logger.info("ai_builder_transcribe_only_model_ref_stripped", extra=extra)
 
 
 def _build_normalization_advisories(
@@ -574,7 +568,7 @@ def _build_step_changes(
     *,
     current_steps: list[FlowStep],
     compiled_steps: list[StepSpec],
-    removed_refs: set[str],
+    removed_refs: frozenset[str],
     assistant_snapshots: AssistantAuthoringSnapshots | None,
     resource_catalog: AIBuilderResourceCatalog | None,
 ) -> list[StepChange]:
@@ -588,7 +582,7 @@ def _build_step_changes(
     for step in current_steps:
         ref = f"existing_step_{step.step_order}"
         plan_ref = existing_order_to_plan_ref.get(step.step_order, ref)
-        baseline_spec = _flow_step_to_spec(
+        baseline_spec = flow_step_to_authoring_spec(
             step,
             plan_ref,
             assistant_snapshots=assistant_snapshots,

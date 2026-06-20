@@ -262,6 +262,12 @@ CREATE_COMPILER_MODULE = ".".join(
 EDIT_MODELS_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_models.py")
 EDIT_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_compiler.py")
 EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES = frozenset[int]()
+AUTHORING_PROJECTION_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_authoring_projection")
+)
+NEW_STEP_COMPILER_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_new_step_compiler")
+)
 RUNTIME_INPUT_FIELDS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_runtime_input_fields")
 )
@@ -1157,14 +1163,54 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
     if edit_entry_alias != "_ExistingStepEntry | _NewStepEntry":
         violations.append(f"{edit_compiler_path}: _EditStepEntry={edit_entry_alias}")
 
-    compile_function = next(
+    imported_names_by_module: dict[str, set[str]] = {}
+    for node in edit_compiler_tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        imported_names_by_module.setdefault(node.module, set()).update(
+            alias.name for alias in node.names
+        )
+
+    authoring_imports = imported_names_by_module.get(AUTHORING_PROJECTION_MODULE, set())
+    if "compile_ordered_edit_proposal" not in authoring_imports:
+        violations.append(
+            f"{edit_compiler_path}: missing compile_ordered_edit_proposal import"
+        )
+
+    banned_authoring_imports = {
+        "compile_existing_step_modification",
+    }
+    banned_new_step_imports = {
+        "compile_new_step_draft",
+        "make_plan_step_ref",
+    }
+    banned_imports = (
+        authoring_imports & banned_authoring_imports,
+        imported_names_by_module.get(NEW_STEP_COMPILER_MODULE, set())
+        & banned_new_step_imports,
+    )
+    if any(banned_imports):
+        violations.append(
+            f"{edit_compiler_path}: direct compile imports {banned_imports}"
+        )
+
+    top_level_functions = {
+        node.name
+        for node in edit_compiler_tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    if "_flow_step_to_spec" in top_level_functions:
+        violations.append(f"{edit_compiler_path}: redefines _flow_step_to_spec")
+
+    ordered_proposal_function = next(
         node
         for node in ast.walk(edit_compiler_tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "compile_edit_draft"
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_build_ordered_edit_proposal"
     )
     working_annotations = [
         ast.unparse(node.annotation)
-        for node in ast.walk(compile_function)
+        for node in ast.walk(ordered_proposal_function)
         if isinstance(node, ast.AnnAssign)
         and isinstance(node.target, ast.Name)
         and node.target.id == "working"

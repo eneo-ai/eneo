@@ -139,6 +139,7 @@ def compile_ordered_edit_proposal(
     *,
     base_spec: FlowDraftSpecCore,
     proposal: OrderedEditProposal,
+    primary_runtime_input_type: InputType | None = None,
 ) -> FlowDraftSpecCore:
     base_by_ref = {
         step.existing_step_ref: step
@@ -169,6 +170,7 @@ def compile_ordered_edit_proposal(
             base_step,
             item,
             prior_steps=compiled_steps,
+            primary_runtime_input_type=primary_runtime_input_type,
         )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
