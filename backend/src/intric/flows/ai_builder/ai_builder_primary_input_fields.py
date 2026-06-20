@@ -78,23 +78,8 @@ def split_primary_runtime_input_shadow_names(
     return kept, dropped
 
 
-def remove_primary_runtime_input_shadow_names(
-    *,
-    field_names: list[str],
-    runtime_input_type: InputType | None,
-) -> list[str]:
-    """Filter step form-field references that point at the primary input."""
-
-    kept, _ = split_primary_runtime_input_shadow_names(
-        field_names=field_names,
-        runtime_input_type=runtime_input_type,
-    )
-    return kept
-
-
 __all__ = [
     "is_primary_runtime_input_shadow_field",
     "primary_input_shadow_alias_input_types",
-    "remove_primary_runtime_input_shadow_names",
     "split_primary_runtime_input_shadow_names",
 ]

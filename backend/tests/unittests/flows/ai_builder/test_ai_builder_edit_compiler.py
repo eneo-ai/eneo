@@ -1419,6 +1419,65 @@ class TestUntouchedStepsPreserved:
         validation = validate_spec(result.compiled_spec)
         assert validation.valid
 
+    def test_modify_step_ignores_form_field_that_shadows_primary_text_input(self):
+        existing = [
+            _make_flow_step(
+                step_order=1,
+                user_description="Analyze text",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string"},
+                    },
+                },
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Write report",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+        ]
+        draft = FlowEditDraft(
+            operations=[
+                StepEditOperation(
+                    op="modify",
+                    target_ref="existing_step_2",
+                    patch=StepPatch(uses_form_fields=["text", "case_id"]),
+                ),
+            ],
+        )
+
+        result = compile_edit_draft(
+            draft,
+            existing,
+            base_flow_revision=2,
+            current_metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "case_id",
+                            "type": "text",
+                            "label": "Case ID",
+                        }
+                    ]
+                }
+            },
+        )
+
+        assert result.compiled_spec.steps[1].input_bindings == {
+            "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
+        }
+        assert any(
+            advisory.code == "form_field_shadows_primary_input"
+            and advisory.field == "form_fields"
+            for advisory in result.advisories
+        )
+
     def test_modify_all_previous_step_keeps_fan_in_implicit_and_adds_hints(self):
         existing = [
             _make_flow_step(

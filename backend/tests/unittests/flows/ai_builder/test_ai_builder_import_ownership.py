@@ -1164,12 +1164,14 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
         violations.append(f"{edit_compiler_path}: _EditStepEntry={edit_entry_alias}")
 
     imported_names_by_module: dict[str, set[str]] = {}
-    for node in edit_compiler_tree.body:
-        if not isinstance(node, ast.ImportFrom) or node.module is None:
-            continue
-        imported_names_by_module.setdefault(node.module, set()).update(
-            alias.name for alias in node.names
-        )
+    direct_module_imports: set[str] = set()
+    for node in ast.walk(edit_compiler_tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported_names_by_module.setdefault(node.module, set()).update(
+                alias.name for alias in node.names
+            )
+        elif isinstance(node, ast.Import):
+            direct_module_imports.update(alias.name for alias in node.names)
 
     authoring_imports = imported_names_by_module.get(AUTHORING_PROJECTION_MODULE, set())
     if "compile_ordered_edit_proposal" not in authoring_imports:
@@ -1178,6 +1180,7 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
         )
 
     banned_authoring_imports = {
+        "_compile_existing_step_modification",
         "compile_existing_step_modification",
     }
     banned_new_step_imports = {
@@ -1188,18 +1191,19 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
         authoring_imports & banned_authoring_imports,
         imported_names_by_module.get(NEW_STEP_COMPILER_MODULE, set())
         & banned_new_step_imports,
+        direct_module_imports & {AUTHORING_PROJECTION_MODULE, NEW_STEP_COMPILER_MODULE},
     )
     if any(banned_imports):
         violations.append(
             f"{edit_compiler_path}: direct compile imports {banned_imports}"
         )
 
-    top_level_functions = {
+    function_names = {
         node.name
-        for node in edit_compiler_tree.body
+        for node in ast.walk(edit_compiler_tree)
         if isinstance(node, ast.FunctionDef)
     }
-    if "_flow_step_to_spec" in top_level_functions:
+    if "_flow_step_to_spec" in function_names:
         violations.append(f"{edit_compiler_path}: redefines _flow_step_to_spec")
 
     ordered_proposal_function = next(

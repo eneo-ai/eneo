@@ -17,15 +17,13 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
 )
-from intric.flows.ai_builder.ai_builder_primary_input_fields import (
-    remove_primary_runtime_input_shadow_names,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from intric.flows.flow_authoring_name import normalize_flow_name
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -135,11 +133,34 @@ def flow_steps_to_authoring_specs(steps: list[FlowStep]) -> list[StepSpec]:
     ]
 
 
+def current_flow_authoring_spec(
+    *,
+    current_steps: list[FlowStep],
+    flow_name: str | None,
+    flow_description: str | None,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
+) -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name=normalize_flow_name(flow_name or "Unnamed Flow"),
+        flow_description=flow_description or "",
+        steps=[
+            flow_step_to_authoring_spec(
+                step,
+                plan_ref=f"existing_step_{step.step_order}",
+                assistant_snapshots=assistant_snapshots,
+                resource_catalog=resource_catalog,
+            )
+            for step in current_steps
+        ],
+        form_fields=None,
+    )
+
+
 def compile_ordered_edit_proposal(
     *,
     base_spec: FlowDraftSpecCore,
     proposal: OrderedEditProposal,
-    primary_runtime_input_type: InputType | None = None,
 ) -> FlowDraftSpecCore:
     base_by_ref = {
         step.existing_step_ref: step
@@ -166,11 +187,10 @@ def compile_ordered_edit_proposal(
             preserved_refs.append(item.existing_step_ref)
             continue
         preserved_refs.append(item.existing_step_ref)
-        compiled = compile_existing_step_modification(
+        compiled = _compile_existing_step_modification(
             base_step,
             item,
             prior_steps=compiled_steps,
-            primary_runtime_input_type=primary_runtime_input_type,
         )
         compiled_steps.append(compiled.model_copy(update={"plan_step_ref": plan_ref}))
 
@@ -234,21 +254,17 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
-def compile_existing_step_modification(
+def _compile_existing_step_modification(
     existing: StepSpec,
     patch: ModifyExistingStep,
     *,
     prior_steps: list[StepSpec],
-    primary_runtime_input_type: InputType | None = None,
 ) -> StepSpec:
     step = apply_existing_step_patch(existing, patch)
     fields = patch.model_fields_set
 
     if "uses_previous_fields" in fields or "uses_form_fields" in fields:
-        uses_form_fields = remove_primary_runtime_input_shadow_names(
-            field_names=patch.uses_form_fields or [],
-            runtime_input_type=primary_runtime_input_type,
-        )
+        uses_form_fields = patch.uses_form_fields or []
         uses_previous_fields = patch.uses_previous_fields or []
         input_bindings = compile_step_input_bindings(
             input_source=step.input_source,
@@ -448,8 +464,8 @@ __all__ = [
     "AssistantSpecPatch",
     "ModifyExistingStep",
     "OrderedEditProposal",
-    "compile_existing_step_modification",
     "compile_ordered_edit_proposal",
+    "current_flow_authoring_spec",
     "flow_step_to_authoring_spec",
     "flow_steps_to_authoring_specs",
     "merge_assistant_spec_patch",

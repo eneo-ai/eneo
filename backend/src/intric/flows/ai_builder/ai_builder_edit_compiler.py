@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     ModifyExistingStep,
     OrderedEditProposal,
     compile_ordered_edit_proposal,
+    current_flow_authoring_spec,
     flow_step_to_authoring_spec,
     flow_steps_to_authoring_specs,
 )
@@ -118,7 +119,7 @@ def compile_edit_draft(
         current_steps=current_steps,
         primary_runtime_input_type=primary_runtime_input_type,
     )
-    base_spec = _current_flow_authoring_spec(
+    base_spec = current_flow_authoring_spec(
         current_steps=current_steps,
         flow_name=flow_name,
         flow_description=flow_description,
@@ -128,7 +129,6 @@ def compile_edit_draft(
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=base_spec,
         proposal=ordered_edit.proposal,
-        primary_runtime_input_type=primary_runtime_input_type,
     )
     compiled_steps = compiled_spec.steps
 
@@ -279,13 +279,14 @@ def _build_ordered_edit_proposal(
         if patch is None:
             ordered_steps.append(ModifyExistingStep(existing_step_ref=entry.ref))
         else:
-            ordered_steps.append(
-                _modify_step_from_patch(
-                    existing_step_ref=entry.ref,
-                    patch=patch,
-                    compiled_index_by_original_order=compiled_index_by_original_order,
-                )
+            modified_step, dropped_field_names = _modify_step_from_patch(
+                existing_step_ref=entry.ref,
+                patch=patch,
+                compiled_index_by_original_order=compiled_index_by_original_order,
+                primary_runtime_input_type=primary_runtime_input_type,
             )
+            shadowed_primary_input_fields.extend(dropped_field_names)
+            ordered_steps.append(modified_step)
         original_order = _existing_step_order(entry.ref)
         if original_order is not None:
             compiled_index_by_original_order[original_order] = len(ordered_steps)
@@ -303,30 +304,6 @@ def _build_ordered_edit_proposal(
         proposal=OrderedEditProposal.model_validate(payload),
         warnings=warnings,
         shadowed_primary_input_fields=shadowed_primary_input_fields,
-    )
-
-
-def _current_flow_authoring_spec(
-    *,
-    current_steps: list[FlowStep],
-    flow_name: str | None,
-    flow_description: str | None,
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    resource_catalog: AIBuilderResourceCatalog | None,
-) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name=normalize_flow_name(flow_name or "Unnamed Flow"),
-        flow_description=flow_description or "",
-        steps=[
-            flow_step_to_authoring_spec(
-                step,
-                plan_ref=f"existing_step_{step.step_order}",
-                assistant_snapshots=assistant_snapshots,
-                resource_catalog=resource_catalog,
-            )
-            for step in current_steps
-        ],
-        form_fields=None,
     )
 
 
@@ -490,10 +467,12 @@ def _modify_step_from_patch(
     existing_step_ref: str,
     patch: StepPatch,
     compiled_index_by_original_order: dict[int, int],
-) -> ModifyExistingStep:
+    primary_runtime_input_type: InputType | None,
+) -> tuple[ModifyExistingStep, list[str]]:
     payload: dict[str, object | None] = {
         "existing_step_ref": existing_step_ref,
     }
+    shadowed_primary_input_fields: list[str] = []
     # Non-nullable StepSpec fields preserve old StepPatch omission semantics;
     # nullable fields below use model_fields_set so explicit clears survive.
     for field_name in (
@@ -512,7 +491,6 @@ def _modify_step_from_patch(
             patch.assistant_spec.model_dump(mode="python", exclude_unset=True)
         )
     for field_name in (
-        "uses_form_fields",
         "document_delivery_mode",
         "input_bindings",
         "input_contract",
@@ -523,12 +501,19 @@ def _modify_step_from_patch(
     ):
         if field_name in patch.model_fields_set:
             payload[field_name] = getattr(patch, field_name)
+    if "uses_form_fields" in patch.model_fields_set:
+        filtered, dropped = split_primary_runtime_input_shadow_names(
+            field_names=patch.uses_form_fields or [],
+            runtime_input_type=primary_runtime_input_type,
+        )
+        payload["uses_form_fields"] = filtered
+        shadowed_primary_input_fields.extend(dropped)
     if "uses_previous_fields" in patch.model_fields_set:
         payload["uses_previous_fields"] = _translate_previous_field_refs(
             field_refs=patch.uses_previous_fields or [],
             compiled_index_by_original_order=compiled_index_by_original_order,
         )
-    return ModifyExistingStep.model_validate(payload)
+    return ModifyExistingStep.model_validate(payload), shadowed_primary_input_fields
 
 
 def _translate_previous_field_refs(

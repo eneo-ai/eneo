@@ -169,6 +169,42 @@ def test_edit_overlay_rejects_raw_review_policy_patch() -> None:
         )
 
 
+def test_edit_overlay_compiles_form_field_refs_without_shadow_policy() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step(
+                "step_a",
+                "existing_step_1",
+                "Extract JSON",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"summary": {"type": "string"}},
+                },
+            ),
+            _step(
+                "step_b",
+                "existing_step_2",
+                "Write report",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+                ModifyExistingStep(
+                    existing_step_ref="existing_step_2",
+                    uses_form_fields=["text"],
+                ),
+            ],
+        ),
+    )
+
+    assert result.steps[1].input_bindings == {
+        "question": "{{ step_a.output.structured }}\n\ntext: {{ flow_input.text }}"
+    }
+
+
 def test_edit_overlay_requires_step_coverage_or_removal() -> None:
     base = _base_spec(
         _step("step_a", "existing_step_1", "First"),
