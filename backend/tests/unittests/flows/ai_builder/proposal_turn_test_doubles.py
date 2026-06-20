@@ -14,6 +14,9 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
 from intric.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CompiledProposal,
+)
 from intric.flows.application.flow_authoring_description_semantics import (
     DescriptionProvenance,
     description_hash,
@@ -70,8 +73,10 @@ def _flow_with_builder_description(description: str) -> SimpleNamespace:
 
 
 async def _store_compiled_plan(**kwargs: object):
+    compiled = kwargs["compiled"]
+    assert isinstance(compiled, CompiledProposal)
     return _stored_plan_result(
-        proposal=FlowBuilderProposal(spec=kwargs["spec"]),
+        proposal=FlowBuilderProposal(spec=compiled.spec),
     )
 
 

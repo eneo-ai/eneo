@@ -13,10 +13,8 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
     LintWarning,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-)
 from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import CompiledProposal
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_validation_common import (
@@ -29,7 +27,6 @@ from intric.flows.ai_builder.planning_state_builder import (
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
-from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
@@ -66,23 +63,16 @@ def _is_user_visible_lint_warning(warning: LintWarning) -> bool:
 
 
 def build_flow_builder_proposal(
-    *,
-    spec: FlowDraftSpecCore,
-    assumptions: list[str],
-    plan_rationale: str | None,
-    reasoning: str | None,
-    validation: SpecValidationResult,
-    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result: BuilderPlanEditResult | None = None,
+    compiled: CompiledProposal,
 ) -> FlowBuilderProposal:
     return FlowBuilderProposal(
-        spec=spec,
-        assumptions=assumptions,
-        plan_rationale=plan_rationale,
-        reasoning=reasoning,
-        lint_warnings=build_lint_warnings(validation),
-        resource_bindings=resource_bindings,
-        edit_result=edit_result,
+        spec=compiled.spec,
+        assumptions=list(compiled.assumptions),
+        plan_rationale=compiled.plan_rationale,
+        reasoning=compiled.reasoning,
+        lint_warnings=build_lint_warnings(compiled.validation),
+        resource_bindings=compiled.resource_bindings,
+        edit_result=compiled.edit_result,
     )
 
 
@@ -97,24 +87,10 @@ async def store_plan_and_update_conversation(
     tool_call_id: str,
     tool_name: str,
     arguments: dict[str, Any],
-    spec: FlowDraftSpecCore,
-    assumptions: list[str],
-    plan_rationale: str | None,
-    reasoning: str | None,
-    validation: SpecValidationResult,
-    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result: BuilderPlanEditResult | None = None,
+    compiled: CompiledProposal,
     flow: "Flow | None" = None,
 ) -> StoredPlanResult:
-    proposal = build_flow_builder_proposal(
-        spec=spec,
-        assumptions=assumptions,
-        plan_rationale=plan_rationale,
-        reasoning=reasoning,
-        validation=validation,
-        resource_bindings=resource_bindings,
-        edit_result=edit_result,
-    )
+    proposal = build_flow_builder_proposal(compiled)
     append_plan_messages(
         conversation=conversation,
         assistant_content=assistant_content,
@@ -122,8 +98,8 @@ async def store_plan_and_update_conversation(
         tool_call_id=tool_call_id,
         tool_name=tool_name,
         arguments=arguments,
-        spec=spec,
-        assumptions=assumptions,
+        spec=compiled.spec,
+        assumptions=list(compiled.assumptions),
     )
     async with repo.savepoint():
         prior_state = await repo.load_planning_state(

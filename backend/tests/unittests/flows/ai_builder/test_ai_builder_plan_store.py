@@ -15,11 +15,16 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
     LintWarning,
 )
+from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
     append_plan_messages,
+    build_flow_builder_proposal,
     build_lint_warnings,
     store_plan_and_update_conversation,
+)
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CompiledProposal,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -76,6 +81,49 @@ def test_build_lint_warnings_hides_internal_info_level_quality_lints() -> None:
             step_ref="step_e",
             code="all_previous_overuse",
             message="Too many steps use all_previous_steps.",
+            severity=LintSeverity.WARNING,
+        )
+    ]
+
+
+def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
+    validation = SpecValidationResult()
+    validation.add_warning(
+        step_ref="step_a",
+        code="internal_quality_note",
+        message="Internal note.",
+        severity=LintSeverity.INFO,
+    )
+    validation.add_warning(
+        step_ref="step_a",
+        code="visible_warning",
+        message="Visible warning.",
+    )
+    binding = _make_binding()
+    edit_result = BuilderPlanEditResult(description_override_manual=True)
+    compiled = CompiledProposal(
+        spec=_make_turn_spec(),
+        assumptions=("Assumption",),
+        plan_rationale="Use one step.",
+        reasoning="Internal reasoning.",
+        validation=validation,
+        resource_bindings=(binding,),
+        edit_result=edit_result,
+    )
+
+    proposal = build_flow_builder_proposal(compiled)
+
+    assert proposal.spec == compiled.spec
+    assert proposal.assumptions == ["Assumption"]
+    assert proposal.plan_rationale == "Use one step."
+    assert proposal.reasoning == "Internal reasoning."
+    assert proposal.resource_bindings == (binding,)
+    assert proposal.edit_result == edit_result
+    assert proposal.lint_warnings == [
+        LintWarning(
+            step_ref="step_a",
+            code="visible_warning",
+            message="Visible warning.",
             severity=LintSeverity.WARNING,
         )
     ]
@@ -155,6 +203,22 @@ def _make_binding() -> LocalResourceBinding:
     )
 
 
+def _compiled_proposal(
+    *,
+    spec: FlowDraftSpecCore | None = None,
+    validation: SpecValidationResult | None = None,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
+) -> CompiledProposal:
+    return CompiledProposal(
+        spec=spec or _make_turn_spec(),
+        assumptions=tuple(),
+        plan_rationale=None,
+        reasoning=None,
+        validation=validation or SpecValidationResult(),
+        resource_bindings=resource_bindings,
+    )
+
+
 def _make_turn(
     *,
     tenant_id=None,
@@ -185,11 +249,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
         tool_call_id="call-unit-1",
         tool_name=OUTLINE_FLOW_TOOL_NAME,
         arguments={},
-        spec=spec,
-        assumptions=[],
-        plan_rationale=None,
-        reasoning=None,
-        validation=SpecValidationResult(),
+        compiled=_compiled_proposal(spec=spec),
     )
 
     repo.save_planning_state.assert_awaited_once()
@@ -217,12 +277,7 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
         tool_call_id="call-unit-1",
         tool_name=OUTLINE_FLOW_TOOL_NAME,
         arguments={},
-        spec=_make_turn_spec(),
-        assumptions=[],
-        plan_rationale=None,
-        reasoning=None,
-        validation=SpecValidationResult(),
-        resource_bindings=(binding,),
+        compiled=_compiled_proposal(resource_bindings=(binding,)),
     )
 
     assert repo.create_plan.await_args is not None

@@ -164,13 +164,7 @@ class CompiledProposalFinalizer:
             tool_call_id=request.tool_call_id,
             tool_name=request.tool_name,
             arguments=request.arguments,
-            spec=compiled.spec,
-            assumptions=list(compiled.assumptions),
-            plan_rationale=compiled.plan_rationale,
-            reasoning=compiled.reasoning,
-            validation=compiled.validation,
-            resource_bindings=compiled.resource_bindings,
-            edit_result=compiled.edit_result,
+            compiled=compiled,
             flow=request.flow,
         )
         return ToolProcessingResult(

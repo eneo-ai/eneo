@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from typing import AsyncGenerator, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -40,11 +39,15 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CompiledProposal,
+)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -461,6 +464,16 @@ def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCo
     )
 
 
+def _compiled_builder_plan(spec: FlowDraftSpecCore) -> CompiledProposal:
+    return CompiledProposal(
+        spec=spec,
+        assumptions=tuple(),
+        plan_rationale=None,
+        reasoning=None,
+        validation=SpecValidationResult(),
+    )
+
+
 def _make_builder_edit_result(
     *,
     spec: FlowDraftSpecCore,
@@ -529,11 +542,9 @@ async def _create_proposed_ai_builder_plan(
             tool_call_id=f"call-revise-{uuid4()}",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
-            spec=_make_builder_plan_spec(existing_step_ref=None),
-            assumptions=[],
-            plan_rationale=None,
-            reasoning=None,
-            validation=MagicMock(warnings=[]),
+            compiled=_compiled_builder_plan(
+                _make_builder_plan_spec(existing_step_ref=None)
+            ),
             flow=None,
         )
         await repo.release_session_send(
@@ -2351,11 +2362,9 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
                 tool_call_id="call-stale-1",
                 tool_name=OUTLINE_FLOW_TOOL_NAME,
                 arguments={},
-                spec=_make_builder_plan_spec(existing_step_ref=None),
-                assumptions=[],
-                plan_rationale=None,
-                reasoning=None,
-                validation=MagicMock(warnings=[]),
+                compiled=_compiled_builder_plan(
+                    _make_builder_plan_spec(existing_step_ref=None)
+                ),
                 flow=None,
             )
 
@@ -2443,11 +2452,9 @@ async def test_store_plan_and_update_conversation_rejects_lost_session_send_leas
                 tool_call_id="call-lost-lease-1",
                 tool_name=OUTLINE_FLOW_TOOL_NAME,
                 arguments={},
-                spec=_make_builder_plan_spec(existing_step_ref=None),
-                assumptions=[],
-                plan_rationale=None,
-                reasoning=None,
-                validation=MagicMock(warnings=[]),
+                compiled=_compiled_builder_plan(
+                    _make_builder_plan_spec(existing_step_ref=None)
+                ),
                 flow=None,
             )
 
@@ -2847,11 +2854,9 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
             tool_call_id="call-match-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
-            spec=_make_builder_plan_spec(existing_step_ref=None),
-            assumptions=[],
-            plan_rationale=None,
-            reasoning=None,
-            validation=MagicMock(warnings=[]),
+            compiled=_compiled_builder_plan(
+                _make_builder_plan_spec(existing_step_ref=None)
+            ),
             flow=None,
         )
 
@@ -2960,11 +2965,7 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
             tool_call_id="call_plan",
             tool_name="propose_plan",
             arguments={},
-            spec=spec,
-            assumptions=[],
-            plan_rationale=None,
-            reasoning=None,
-            validation=SimpleNamespace(warnings=[]),
+            compiled=_compiled_builder_plan(spec),
         )
 
     async with db_container() as container:
@@ -3043,11 +3044,7 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
                     tool_call_id="call-1",
                     tool_name=OUTLINE_FLOW_TOOL_NAME,
                     arguments={},
-                    spec=spec,
-                    assumptions=[],
-                    plan_rationale=None,
-                    reasoning=None,
-                    validation=MagicMock(warnings=[]),
+                    compiled=_compiled_builder_plan(spec),
                 )
         finally:
             repo.append_session_messages = original_append  # type: ignore[method-assign]
@@ -3120,11 +3117,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
             tool_call_id="call-ps-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
-            spec=spec,
-            assumptions=[],
-            plan_rationale=None,
-            reasoning=None,
-            validation=MagicMock(warnings=[]),
+            compiled=_compiled_builder_plan(spec),
             flow=None,
         )
 
@@ -3210,11 +3203,7 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
             tool_call_id="call-identity-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
-            spec=spec,
-            assumptions=[],
-            plan_rationale=None,
-            reasoning=None,
-            validation=MagicMock(warnings=[]),
+            compiled=_compiled_builder_plan(spec),
             flow=None,
         )
 
@@ -3291,11 +3280,7 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
             tool_call_id="call-cmp-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
             arguments={},
-            spec=spec,
-            assumptions=[],
-            plan_rationale=None,
-            reasoning=None,
-            validation=MagicMock(warnings=[]),
+            compiled=_compiled_builder_plan(spec),
             flow=None,
         )
 

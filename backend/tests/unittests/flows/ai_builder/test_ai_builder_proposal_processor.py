@@ -464,7 +464,7 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
     captured_specs: list[FlowDraftSpecCore] = []
 
     async def store_plan(**kwargs):
-        captured_specs.append(kwargs["spec"])
+        captured_specs.append(kwargs["compiled"].spec)
         return await _store_compiled_plan(**kwargs)
 
     with (

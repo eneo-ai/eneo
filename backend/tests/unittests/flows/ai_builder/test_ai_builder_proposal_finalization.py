@@ -144,7 +144,7 @@ def _stored_plan_result(*, plan=None, proposal=None):
 
 async def _store_compiled_plan(**kwargs):
     return _stored_plan_result(
-        proposal=FlowBuilderProposal(spec=kwargs["spec"]),
+        proposal=FlowBuilderProposal(spec=kwargs["compiled"].spec),
     )
 
 
@@ -375,7 +375,7 @@ async def test_finalize_compiled_proposal_persists_edit_result_without_descripti
     captured_edit_results: list[BuilderPlanEditResult | None] = []
 
     async def store_plan(**kwargs):
-        captured_edit_results.append(kwargs["edit_result"])
+        captured_edit_results.append(kwargs["compiled"].edit_result)
         return await _store_compiled_plan(**kwargs)
 
     with patch(
