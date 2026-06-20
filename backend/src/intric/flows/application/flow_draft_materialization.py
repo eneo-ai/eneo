@@ -230,7 +230,20 @@ def _validate_existing_step_ref_coverage(
         for step in spec.steps
         if step.existing_step_ref is not None
     ]
-    if not existing_by_ref:
+    validate_existing_step_ref_coverage(
+        current_refs=set(existing_by_ref),
+        preserved_refs=preserved_refs,
+        removed_existing_step_refs=removed_existing_step_refs,
+    )
+
+
+def validate_existing_step_ref_coverage(
+    *,
+    current_refs: set[str],
+    preserved_refs: list[str],
+    removed_existing_step_refs: frozenset[str],
+) -> None:
+    if not current_refs:
         if removed_existing_step_refs:
             raise _invalid_existing_step_ref(
                 "Create flow commands cannot remove existing steps.",
@@ -256,7 +269,6 @@ def _validate_existing_step_ref_coverage(
             duplicate_refs=duplicate_refs,
         )
 
-    current_refs = set(existing_by_ref)
     unknown_preserved_refs = sorted(preserved_ref_set - current_refs)
     if unknown_preserved_refs:
         raise _invalid_existing_step_ref(

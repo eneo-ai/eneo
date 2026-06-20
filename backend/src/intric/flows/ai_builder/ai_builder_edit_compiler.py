@@ -13,6 +13,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    flow_step_to_authoring_spec,
+    merge_assistant_specs,
+)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
     EditAdvisory,
@@ -60,7 +64,6 @@ from intric.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
@@ -433,33 +436,15 @@ def _flow_step_to_spec(
     primary_runtime_input_type: InputType | None = None,
 ) -> StepSpec:
     """Convert an existing FlowStep to a StepSpec, applying patch if present."""
-    name = step.user_description or f"Step {step.step_order}"
-    input_source = InputSource(step.input_source)
-    base_assistant_spec = _resolve_existing_assistant_spec(
+    spec = flow_step_to_authoring_spec(
         step=step,
+        plan_ref=plan_ref,
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
+    base_assistant_spec = spec.assistant_spec
     supplied_model_ref = base_assistant_spec.model_ref
     model_ref_source = "snapshot"
-
-    spec = StepSpec(
-        plan_step_ref=plan_ref,
-        existing_step_ref=f"existing_step_{step.step_order}",
-        name=name,
-        assistant_spec=base_assistant_spec,
-        input_source=input_source,
-        input_type=InputType(step.input_type),
-        output_mode=OutputMode(step.output_mode),
-        output_type=OutputType(step.output_type),
-        mcp_policy=MCPPolicy(step.mcp_policy),
-        input_bindings=step.input_bindings,
-        input_contract=step.input_contract,
-        output_contract=step.output_contract,
-        input_config=step.input_config,
-        output_config=step.output_config,
-        review_policy=step.review_policy,
-    )
 
     if patch is not None:
         updates: dict[str, Any] = {}
@@ -479,7 +464,7 @@ def _flow_step_to_spec(
             if "model_ref" in patch.assistant_spec.model_fields_set:
                 supplied_model_ref = patch.assistant_spec.model_ref
                 model_ref_source = "patch"
-            updates["assistant_spec"] = _merge_assistant_specs(
+            updates["assistant_spec"] = merge_assistant_specs(
                 base_assistant_spec,
                 patch.assistant_spec,
             )
@@ -595,80 +580,6 @@ def _document_delivery_mode_for_effective_step(spec: StepSpec) -> DocumentDelive
     if spec.output_type in {OutputType.DOCX, OutputType.PDF}:
         return "generated"
     return "not_applicable"
-
-
-def _resolve_existing_assistant_spec(
-    *,
-    step: FlowStep,
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    resource_catalog: AIBuilderResourceCatalog | None,
-) -> AssistantSpec:
-    if not assistant_snapshots:
-        return AssistantSpec(instructions="")
-
-    snapshot = assistant_snapshots.get(step.assistant_id)
-    if snapshot is None:
-        return AssistantSpec(instructions="")
-
-    if resource_catalog is None:
-        if (
-            snapshot.model is None
-            and not snapshot.knowledge_refs
-            and not snapshot.mcp_server_refs
-            and not snapshot.mcp_tool_refs
-        ):
-            return AssistantSpec(instructions=snapshot.instructions)
-        raise ValueError(
-            "Resource catalog is required to translate assistant snapshots."
-        )
-    return resource_catalog.assistant_spec_from_snapshot(snapshot)
-
-
-def _merge_assistant_specs(
-    existing: AssistantSpec,
-    patch: AssistantSpec,
-) -> AssistantSpec:
-    patched_fields = patch.model_fields_set
-    instructions = existing.instructions
-    if "instructions" in patched_fields:
-        instructions = patch.instructions.strip() or existing.instructions
-
-    model_ref = existing.model_ref
-    if "model_ref" in patched_fields:
-        model_ref = patch.model_ref
-
-    knowledge_refs = existing.knowledge_refs
-    if "knowledge_refs" in patched_fields:
-        knowledge_refs = patch.knowledge_refs
-
-    mcp_server_refs = existing.mcp_server_refs
-    if "mcp_server_refs" in patched_fields:
-        mcp_server_refs = patch.mcp_server_refs
-
-    mcp_tool_refs = existing.mcp_tool_refs
-    if "mcp_tool_refs" in patched_fields:
-        mcp_tool_refs = patch.mcp_tool_refs
-
-    patch_selects_knowledge = "knowledge_refs" in patched_fields and bool(
-        patch.knowledge_refs
-    )
-    patch_selects_mcp = (
-        "mcp_server_refs" in patched_fields and bool(patch.mcp_server_refs)
-    ) or ("mcp_tool_refs" in patched_fields and bool(patch.mcp_tool_refs))
-
-    if patch_selects_knowledge:
-        mcp_server_refs = []
-        mcp_tool_refs = []
-    elif patch_selects_mcp:
-        knowledge_refs = []
-
-    return AssistantSpec(
-        instructions=instructions,
-        model_ref=model_ref,
-        knowledge_refs=knowledge_refs,
-        mcp_server_refs=mcp_server_refs,
-        mcp_tool_refs=mcp_tool_refs,
-    )
 
 
 def _build_normalization_advisories(
