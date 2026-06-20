@@ -25,10 +25,9 @@ logger = logging.getLogger(__name__)
 def compile_new_step_draft(
     *,
     step_draft: NewStepDraft,
-    step_index: int,
+    plan_step_ref: str,
     prior_steps: list[StepSpec],
 ) -> StepSpec:
-    plan_step_ref = make_plan_step_ref(step_index)
     output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
     input_config = compile_input_config(step_draft)

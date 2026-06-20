@@ -13,11 +13,16 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     flow_step_to_authoring_spec,
     flow_steps_to_authoring_specs,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    PreviousFieldRef,
+)
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -140,22 +145,24 @@ def test_edit_overlay_step_order_and_insertion() -> None:
     base = _base_spec(
         _step("step_a", "existing_step_1", "First"),
         _step("step_b", "existing_step_2", "Second"),
+        _step("step_c", "existing_step_3", "Third"),
         document_body_writer_step_refs=("step_b",),
     )
     result = compile_ordered_edit_proposal(
         base_spec=base,
         proposal=OrderedEditProposal(
             steps=[
+                AddStep(step=_new_step("Inserted first")),
                 ModifyExistingStep(existing_step_ref="existing_step_2"),
-                AddStep(step=_step("inserted_step", None, "Inserted")),
                 ModifyExistingStep(existing_step_ref="existing_step_1"),
             ],
+            removed_existing_step_refs=frozenset({"existing_step_3"}),
         ),
     )
 
     assert [step.existing_step_ref for step in result.steps] == [
-        "existing_step_2",
         None,
+        "existing_step_2",
         "existing_step_1",
     ]
     assert [step.plan_step_ref for step in result.steps] == [
@@ -163,8 +170,112 @@ def test_edit_overlay_step_order_and_insertion() -> None:
         "step_b",
         "step_c",
     ]
-    assert result.steps[1].name == "Inserted"
-    assert result.document_body_writer_step_refs == ("step_a",)
+    assert result.steps[0].name == "Inserted first"
+    assert result.document_body_writer_step_refs == ("step_b",)
+
+
+def test_edit_overlay_add_step_uses_form_field_with_shared_new_step_compiler() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            form_fields=[
+                FormFieldSpec(
+                    name="case_id",
+                    type="text",
+                    label="Case ID",
+                )
+            ],
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+                AddStep(
+                    step=_new_step(
+                        "Use case id",
+                        uses_form_fields=["case_id"],
+                    )
+                ),
+            ],
+        ),
+    )
+
+    assert result.steps[1].input_bindings == {
+        "question": "{{ step_a.output.text }}\n\ncase_id: {{ flow_input.case_id }}"
+    }
+
+
+def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_step() -> (
+    None
+):
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step(
+                "step_a",
+                "existing_step_1",
+                "Extract",
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                },
+            )
+        ),
+        proposal=OrderedEditProposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+                AddStep(
+                    step=_new_step(
+                        "Use answer",
+                        uses_previous_fields=[
+                            PreviousFieldRef(from_step=1, field_path="answer")
+                        ],
+                    )
+                ),
+            ],
+        ),
+    )
+
+    assert result.steps[1].input_bindings == {
+        "question": "answer: {{ step_a.output.structured.answer }}"
+    }
+
+
+def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=OrderedEditProposal(
+            steps=[
+                AddStep(
+                    step=_new_step(
+                        "Transcribe",
+                        input_source=InputSource.FLOW_INPUT,
+                        input_type=InputType.AUDIO,
+                        output_type=OutputType.TEXT,
+                    )
+                ),
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+            ],
+        ),
+    )
+
+    assert result.steps[0].output_mode == OutputMode.TRANSCRIBE_ONLY
+
+
+def test_edit_overlay_drops_document_body_writer_ref_when_writer_step_is_removed() -> (
+    None
+):
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step("step_a", "existing_step_1", "Keep"),
+            _step("step_b", "existing_step_2", "Writer"),
+            document_body_writer_step_refs=("step_b",),
+        ),
+        proposal=OrderedEditProposal(
+            steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
+        ),
+    )
+
+    assert result.document_body_writer_step_refs is None
 
 
 def test_flow_to_authoring_projection_preserves_authoring_fields() -> None:
@@ -284,12 +395,14 @@ def test_flow_steps_to_authoring_specs_preserves_signature_vocabulary() -> None:
 def _base_spec(
     *steps: StepSpec,
     document_body_writer_step_refs: tuple[str, ...] | None = None,
+    form_fields: list[FormFieldSpec] | None = None,
 ) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Existing flow",
         flow_description="Existing description",
         steps=list(steps) or [_step("step_a", "existing_step_1", "First")],
         document_body_writer_step_refs=document_body_writer_step_refs,
+        form_fields=form_fields,
     )
 
 
@@ -297,6 +410,9 @@ def _step(
     plan_ref: str,
     existing_ref: str | None,
     name: str,
+    *,
+    output_type: OutputType = OutputType.TEXT,
+    output_contract: dict[str, object] | None = None,
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_ref,
@@ -310,5 +426,26 @@ def _step(
         input_source=InputSource.FLOW_INPUT,
         input_type=InputType.TEXT,
         output_mode=OutputMode.PASS_THROUGH,
-        output_type=OutputType.TEXT,
+        output_type=output_type,
+        output_contract=output_contract,
+    )
+
+
+def _new_step(
+    name: str,
+    *,
+    input_source: InputSource = InputSource.PREVIOUS_STEP,
+    input_type: InputType = InputType.TEXT,
+    output_type: OutputType = OutputType.TEXT,
+    uses_form_fields: list[str] | None = None,
+    uses_previous_fields: list[PreviousFieldRef] | None = None,
+) -> NewStepDraft:
+    return NewStepDraft(
+        name=name,
+        instructions="New prompt",
+        input_source=input_source,
+        input_type=input_type,
+        output_type=output_type,
+        uses_form_fields=uses_form_fields or [],
+        uses_previous_fields=uses_previous_fields or [],
     )

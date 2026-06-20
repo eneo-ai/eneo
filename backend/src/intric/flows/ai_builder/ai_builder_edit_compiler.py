@@ -40,6 +40,7 @@ from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_review_policy,
     default_previous_field_label,
     derive_new_step_output_mode,
+    make_plan_step_ref,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
@@ -144,7 +145,7 @@ def compile_edit_draft(
 
     compiled_steps: list[StepSpec] = []
     for i, entry in enumerate(working):
-        plan_ref = f"step_{chr(ord('a') + i)}" if i < 26 else f"step_{i + 1}"
+        plan_ref = make_plan_step_ref(i)
 
         if isinstance(entry, _NewStepEntry):
             step_draft, dropped_field_names = _without_primary_runtime_shadow_fields(
@@ -155,7 +156,7 @@ def compile_edit_draft(
             compiled_steps.append(
                 compile_new_step_draft(
                     step_draft=step_draft,
-                    step_index=i,
+                    plan_step_ref=plan_ref,
                     prior_steps=compiled_steps,
                 )
             )

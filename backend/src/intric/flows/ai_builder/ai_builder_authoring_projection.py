@@ -4,6 +4,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from intric.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_new_step_draft,
+    make_plan_step_ref,
+)
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
@@ -59,7 +64,7 @@ class AddStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["add"] = "add"
-    step: StepSpec
+    step: NewStepDraft
 
 
 OrderedEditStep = Annotated[ModifyExistingStep | AddStep, Field(discriminator="kind")]
@@ -130,14 +135,13 @@ def compile_ordered_edit_proposal(
     compiled_steps: list[StepSpec] = []
 
     for index, item in enumerate(proposal.steps):
-        plan_ref = _plan_step_ref(index)
+        plan_ref = make_plan_step_ref(index)
         if item.kind == "add":
             compiled_steps.append(
-                item.step.model_copy(
-                    update={
-                        "plan_step_ref": plan_ref,
-                        "existing_step_ref": None,
-                    }
+                compile_new_step_draft(
+                    step_draft=item.step,
+                    plan_step_ref=plan_ref,
+                    prior_steps=compiled_steps,
                 )
             )
             continue
@@ -323,10 +327,6 @@ def _document_body_writer_step_refs(
         if next_ref is not None:
             refs.append(next_ref)
     return tuple(refs) or None
-
-
-def _plan_step_ref(index: int) -> str:
-    return f"step_{chr(ord('a') + index)}" if index < 26 else f"step_{index + 1}"
 
 
 def _resolve_flow_name(

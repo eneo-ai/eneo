@@ -27,7 +27,10 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
-from intric.flows.ai_builder.ai_builder_new_step_compiler import compile_new_step_draft
+from intric.flows.ai_builder.ai_builder_new_step_compiler import (
+    compile_new_step_draft,
+    make_plan_step_ref,
+)
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -306,7 +309,7 @@ def compile_create_draft(
         compiled_steps.append(
             compile_new_step_draft(
                 step_draft=step_draft,
-                step_index=index,
+                plan_step_ref=make_plan_step_ref(index),
                 prior_steps=compiled_steps,
             )
         )
