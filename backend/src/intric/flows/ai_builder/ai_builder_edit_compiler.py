@@ -13,9 +13,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_description_semantics import (
-    FlowSemanticSignature,
-)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
     EditAdvisory,
@@ -50,6 +47,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourc
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     StepNormalizationChange,
     normalize_ai_builder_spec,
+)
+from intric.flows.application.flow_authoring_description_semantics import (
+    FlowSemanticSignature,
 )
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.domain.flow import FlowStep

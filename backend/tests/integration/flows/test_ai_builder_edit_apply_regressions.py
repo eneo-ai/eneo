@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import SpacesTranscriptionModels
+from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
@@ -15,21 +17,27 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPatch,
     StepPlacement,
 )
-from intric.flows.ai_builder.ai_builder_materializer import (
-    compile_changeset,
-    execute_changeset,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+    normalize_ai_builder_spec,
+)
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.flows.application.flow_authoring_command import (
+    AIBuilderFlowAuthoringOrigin,
+    EditFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+)
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
+    FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputType,
 )
+from intric.flows.flow_resource_bindings import LocalResourceBinding
 from intric.prompts.api.prompt_models import PromptCreate
 
 
@@ -103,9 +111,41 @@ def _make_flow_step(
     )
 
 
+async def _apply_ai_builder_edit(
+    *,
+    flow_service,
+    space_id,
+    flow,
+    spec: FlowDraftSpecCore,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
+    default_transcription_model_id=None,
+) -> None:
+    normalized_spec, _ = normalize_ai_builder_spec(spec)
+    origin = AIBuilderFlowAuthoringOrigin(
+        session_id=uuid4(),
+        plan_id=uuid4(),
+        spec_hash=normalized_spec.spec_hash(),
+        applied_at=datetime.now(timezone.utc),
+    )
+    await FlowAuthoringCommandService().apply(
+        command=EditFlowAuthoringCommand(
+            space_id=space_id,
+            flow_id=flow.id,
+            expected_revision=flow.draft_revision,
+            spec=normalized_spec,
+            removed_existing_step_refs=frozenset(),
+            origin=origin,
+            resource_bindings=resource_bindings,
+            default_transcription_model_id=default_transcription_model_id,
+        ),
+        flow_service=flow_service,
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_execute_changeset_clears_stale_runtime_input_after_transcription_first_edit(
+async def test_authoring_command_clears_stale_runtime_input_after_transcription_first_edit(
     db_container,
     completion_model_factory,
     space_factory,
@@ -197,18 +237,12 @@ async def test_execute_changeset_clears_stale_runtime_input_after_transcription_
             flow_name=flow.name,
             flow_description=flow.description,
         )
-        changeset = compile_changeset(
-            compiled.compiled_spec,
-            current_flow=flow,
-            default_transcription_model_id=transcription_model.id,
-        )
-
-        await execute_changeset(
-            changeset=changeset,
+        await _apply_ai_builder_edit(
             flow_service=flow_service,
             space_id=space.id,
-            flow_id=flow.id,
-            expected_revision=flow.draft_revision,
+            flow=flow,
+            spec=compiled.compiled_spec,
+            default_transcription_model_id=transcription_model.id,
         )
 
         updated = await flow_service.get_flow(flow.id)
@@ -306,7 +340,10 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             available_models=[
                 {
                     "id": snapshot_model.local_ref,
+                    "ref": snapshot_model.local_ref,
                     "name": snapshot_model.label or model.name,
+                    "display_name": snapshot_model.label or model.name,
+                    "provider": "openai",
                 }
             ],
             available_kbs=[],
@@ -326,14 +363,11 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
         )
-        changeset = compile_changeset(compiled.compiled_spec, current_flow=flow)
-
-        await execute_changeset(
-            changeset=changeset,
+        await _apply_ai_builder_edit(
             flow_service=flow_service,
             space_id=space.id,
-            flow_id=flow.id,
-            expected_revision=flow.draft_revision,
+            flow=flow,
+            spec=compiled.compiled_spec,
             resource_bindings=resource_bindings,
         )
 

@@ -8,10 +8,10 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
-    FlowChangeSet,
     LintSeverity,
     LintWarning,
     PlannerPlanEnvelope,
@@ -25,11 +25,23 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDiff,
     FlowEditDraft,
     StepChange,
+    StepEditOperation,
 )
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
 )
+from intric.flows.application.flow_authoring_command import (
+    EditFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+    FlowAuthoringResult,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftChangeSet,
+    FlowDraftMaterializationProgress,
+    FlowDraftMaterializationStage,
+)
+from intric.flows.domain.flow import Flow, FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -73,6 +85,30 @@ def _make_repo_mock() -> AsyncMock:
     repo = AsyncMock()
     repo.savepoint = _noop_savepoint
     return repo
+
+
+def _make_authoring_service(
+    *,
+    flow_id=None,
+    flow_name: str = "Flow",
+    steps_created: int = 0,
+    steps_updated: int = 1,
+    steps_removed: int = 0,
+) -> AsyncMock:
+    service = AsyncMock()
+    service.prepare.return_value = SimpleNamespace(
+        changeset=FlowDraftChangeSet(flow_name=flow_name, flow_description="")
+    )
+    service.apply_prepared.return_value = FlowAuthoringResult(
+        flow_id=flow_id or uuid4(),
+        flow_name=flow_name,
+        draft_revision=2,
+        steps_created=steps_created,
+        steps_updated=steps_updated,
+        steps_removed=steps_removed,
+        command_spec_hash="spec-hash",
+    )
+    return service
 
 
 def _make_spec(*, input_type: InputType = InputType.TEXT) -> FlowDraftSpecCore:
@@ -135,14 +171,30 @@ def _make_plan(
     )
 
 
-def _make_compiled_edit_result(spec: FlowDraftSpecCore) -> CompiledEditResult:
+def _make_compiled_edit_result(
+    spec: FlowDraftSpecCore,
+    *,
+    operations: list[StepEditOperation] | None = None,
+) -> CompiledEditResult:
     return CompiledEditResult(
         compiled_spec=spec,
         diff=FlowEditDiff(
             step_changes=[StepChange(kind="unchanged", step_name="Step A")]
         ),
-        original_draft=FlowEditDraft(operations=[]),
+        original_draft=FlowEditDraft(operations=operations or []),
         base_flow_revision=1,
+    )
+
+
+def _make_plan_edit_result(
+    spec: FlowDraftSpecCore,
+    *,
+    operations: list[StepEditOperation] | None = None,
+    description_override_manual: bool = False,
+) -> BuilderPlanEditResult:
+    return BuilderPlanEditResult(
+        compiled_edit=_make_compiled_edit_result(spec, operations=operations),
+        description_override_manual=description_override_manual,
     )
 
 
@@ -178,6 +230,39 @@ def _make_session(
         flow_id=flow_id,
         target_kind=target_kind,
         status=status,
+    )
+
+
+def _make_flow_for_edit(
+    *,
+    flow_id,
+    space_id,
+    draft_revision: int = 1,
+    step_count: int = 1,
+) -> Flow:
+    return Flow(
+        id=flow_id,
+        tenant_id=uuid4(),
+        space_id=space_id,
+        name="Existing flow",
+        description="Existing flow description.",
+        draft_revision=draft_revision,
+        steps=[
+            FlowStep(
+                id=uuid4(),
+                flow_id=flow_id,
+                tenant_id=uuid4(),
+                assistant_id=uuid4(),
+                step_order=index,
+                user_description=f"Step {index}",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+                mcp_policy="inherit",
+            )
+            for index in range(1, step_count + 1)
+        ],
     )
 
 
@@ -290,12 +375,8 @@ class TestAIBuilderPlanLifecycle:
         repo.get_plan.assert_not_called()
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_passes_manual_description_override_to_compile(
         self,
-        mock_compile,
-        mock_execute,
     ):
         user = _make_user()
         repo = AsyncMock()
@@ -311,25 +392,232 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result=BuilderPlanEditResult(description_override_manual=True),
+            edit_result=_make_plan_edit_result(
+                _make_spec(),
+                description_override_manual=True,
+            ),
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        authoring_service = _make_authoring_service(flow_id=flow_id)
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+        await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        assert isinstance(command, EditFlowAuthoringCommand)
+        assert command.origin.description_override_manual is True
+        assert command.origin.session_id == session.id
+        assert command.origin.plan_id == plan.id
+        assert command.origin.spec_hash == plan.spec_hash
+        assert command.expected_revision == 1
+        assert command.resource_bindings == tuple()
+        assert isinstance(
+            authoring_service.prepare.await_args.kwargs["origin_policy"],
+            AIBuilderAuthoringPolicy,
+        )
+
+    @pytest.mark.anyio
+    async def test_apply_plan_derives_removed_refs_from_persisted_edit_intent(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        spec = FlowDraftSpecCore(
+            flow_name="Flow",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Step A",
+                    assistant_spec=AssistantSpec(instructions="Do something."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                )
+            ],
+        )
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+            edit_result=_make_plan_edit_result(
+                spec,
+                operations=[
+                    StepEditOperation(op="remove", target_ref="existing_step_2")
+                ],
+            ),
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        authoring_service = _make_authoring_service(flow_id=flow_id, steps_removed=1)
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+        await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        assert isinstance(command, EditFlowAuthoringCommand)
+        assert command.removed_existing_step_refs == frozenset({"existing_step_2"})
+
+    @pytest.mark.anyio
+    async def test_apply_plan_rejects_create_plan_with_existing_step_ref_at_authoring_boundary(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        spec = FlowDraftSpecCore(
+            flow_name="Flow",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Step A",
+                    assistant_spec=AssistantSpec(instructions="Do something."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                )
+            ],
+        )
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=FlowAuthoringCommandService(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id)
+
+        assert exc_info.value.code == "invalid_existing_step_ref"
+        assert exc_info.value.context == {
+            "reason": "create_cannot_use_existing_step_ref",
+            "existing_step_ref": "existing_step_1",
+        }
+        repo.update_plan_status.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_rejects_truncated_edit_spec_without_explicit_removal(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        spec = FlowDraftSpecCore(
+            flow_name="Flow",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    name="Step A",
+                    assistant_spec=AssistantSpec(instructions="Do something."),
+                    input_source=InputSource.FLOW_INPUT,
+                    input_type=InputType.TEXT,
+                )
+            ],
+        )
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+            edit_result=_make_plan_edit_result(spec, operations=[]),
+        )
+        flow_service.get_flow.return_value = _make_flow_for_edit(
+            flow_id=flow_id,
+            space_id=session.space_id,
+            draft_revision=1,
+            step_count=2,
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=FlowAuthoringCommandService(),
+        )
+
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        assert exc_info.value.code == "invalid_existing_step_ref"
+        assert exc_info.value.context == {
+            "reason": "missing_existing_step_ref",
+            "missing_refs": ["existing_step_2"],
+        }
+        repo.update_plan_status.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_apply_plan_rejects_edit_plan_without_compiled_edit(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        flow_id = uuid4()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=flow_id,
+            target_kind=TargetKind.EDIT,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            edit_result=BuilderPlanEditResult(),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
             space_id=session.space_id,
-            draft_revision=2,
+            draft_revision=1,
             published_version=None,
             steps=[],
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        mock_compile.return_value = MagicMock()
-        mock_execute.return_value = SimpleNamespace(
-            flow_id=flow_id,
-            flow_name="Flow",
-            steps_created=0,
-            steps_updated=1,
-            steps_removed=0,
-        )
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
@@ -337,15 +625,12 @@ class TestAIBuilderPlanLifecycle:
             flow_service=flow_service,
             space_service=_make_space_service(),
         )
-        await lifecycle.apply_plan(plan_id=plan.id, expected_revision=2)
 
-        assert mock_compile.call_args.kwargs["description_override_manual"] is True
-        origin = mock_compile.call_args.kwargs["ai_builder_origin"]
-        assert origin["builder_session_id"] == str(session.id)
-        assert origin["builder_plan_id"] == str(plan.id)
-        assert origin["builder_spec_hash"] == plan.spec_hash
-        assert isinstance(origin["applied_at"], str)
-        assert mock_execute.call_args.kwargs["resource_bindings"] == tuple()
+        with pytest.raises(BadRequestException) as exc_info:
+            await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+        assert exc_info.value.code == "bad_request"
+        assert "compiled edit artifact" in str(exc_info.value)
 
     @pytest.mark.anyio
     async def test_apply_plan_rejects_edit_flow_space_mismatch(self):
@@ -364,6 +649,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
+            edit_result=_make_plan_edit_result(_make_spec()),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
@@ -386,12 +672,8 @@ class TestAIBuilderPlanLifecycle:
             await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_requires_transcription_model_for_audio_create(
         self,
-        mock_compile,
-        mock_execute,
     ):
         user = _make_user()
         repo = AsyncMock()
@@ -427,16 +709,9 @@ class TestAIBuilderPlanLifecycle:
         ):
             await lifecycle.apply_plan(plan_id=plan.id)
 
-        mock_compile.assert_not_called()
-        mock_execute.assert_not_awaited()
-
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_create_failure_marks_applying_without_flow_listing(
         self,
-        mock_compile,
-        mock_execute,
     ):
         user = _make_user()
         repo = AsyncMock()
@@ -454,14 +729,15 @@ class TestAIBuilderPlanLifecycle:
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        mock_compile.return_value = MagicMock()
-        mock_execute.side_effect = RuntimeError("apply failed")
+        authoring_service = _make_authoring_service()
+        authoring_service.apply_prepared.side_effect = RuntimeError("apply failed")
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
             repo=repo,
             flow_service=flow_service,
             space_service=_make_space_service(),
+            authoring_service=authoring_service,
         )
 
         with pytest.raises(RuntimeError, match="apply failed"):
@@ -476,12 +752,8 @@ class TestAIBuilderPlanLifecycle:
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_logs_compile_runtime_failure(
         self,
-        mock_compile,
-        mock_execute,
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
@@ -494,7 +766,11 @@ class TestAIBuilderPlanLifecycle:
             flow_id=flow_id,
             target_kind=TargetKind.EDIT,
         )
-        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            edit_result=_make_plan_edit_result(_make_spec()),
+        )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
             space_id=session.space_id,
@@ -504,21 +780,23 @@ class TestAIBuilderPlanLifecycle:
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        mock_compile.side_effect = RuntimeError("compile exploded")
+        authoring_service = _make_authoring_service(flow_id=flow_id)
+        authoring_service.prepare.side_effect = RuntimeError("compile exploded")
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
             repo=repo,
             flow_service=flow_service,
             space_service=_make_space_service(),
+            authoring_service=authoring_service,
         )
 
         with pytest.raises(RuntimeError, match="compile exploded"):
             await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
 
-        mock_execute.assert_not_awaited()
+        authoring_service.apply_prepared.assert_not_awaited()
         mock_log_apply_failed.assert_called_once()
-        assert mock_log_apply_failed.call_args.kwargs["phase"] == "compile_changeset"
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "prepare_authoring"
         assert mock_log_apply_failed.call_args.kwargs["plan_id"] == plan.id
         assert mock_log_apply_failed.call_args.kwargs["session_id"] == session.id
         assert mock_log_apply_failed.call_args.kwargs["flow_id"] == flow_id
@@ -535,12 +813,8 @@ class TestAIBuilderPlanLifecycle:
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_logs_compile_bad_request_code(
         self,
-        mock_compile,
-        mock_execute,
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
@@ -552,10 +826,15 @@ class TestAIBuilderPlanLifecycle:
             flow_id=None,
             target_kind=TargetKind.CREATE,
         )
-        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            edit_result=_make_plan_edit_result(_make_spec()),
+        )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        mock_compile.side_effect = BadRequestException(
+        authoring_service = _make_authoring_service()
+        authoring_service.prepare.side_effect = BadRequestException(
             "invalid compile",
             code="invalid_compiled_spec",
         )
@@ -565,25 +844,22 @@ class TestAIBuilderPlanLifecycle:
             repo=repo,
             flow_service=flow_service,
             space_service=_make_space_service(),
+            authoring_service=authoring_service,
         )
 
         with pytest.raises(BadRequestException, match="invalid compile"):
             await lifecycle.apply_plan(plan_id=plan.id)
 
-        mock_execute.assert_not_awaited()
-        assert mock_log_apply_failed.call_args.kwargs["phase"] == "compile_changeset"
+        authoring_service.apply_prepared.assert_not_awaited()
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "prepare_authoring"
         exception = mock_log_apply_failed.call_args.kwargs["exception"]
         assert isinstance(exception, BadRequestException)
         assert exception.code == "invalid_compiled_spec"
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_logs_execute_runtime_failure_with_progress(
         self,
-        mock_compile,
-        mock_execute,
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
@@ -596,7 +872,11 @@ class TestAIBuilderPlanLifecycle:
             flow_id=flow_id,
             target_kind=TargetKind.EDIT,
         )
-        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            edit_result=_make_plan_edit_result(_make_spec()),
+        )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
             space_id=session.space_id,
@@ -606,7 +886,7 @@ class TestAIBuilderPlanLifecycle:
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Flow",
             flow_description="Desc",
             assistants_to_create=[],
@@ -614,9 +894,10 @@ class TestAIBuilderPlanLifecycle:
             assistants_to_delete=[],
             compiled_steps=[],
         )
-        mock_compile.return_value = changeset
-        progress = MaterializerProgressSnapshot(
-            stage="assistants_updated",
+        authoring_service = _make_authoring_service(flow_id=flow_id)
+        authoring_service.prepare.return_value = SimpleNamespace(changeset=changeset)
+        progress = FlowDraftMaterializationProgress(
+            stage=FlowDraftMaterializationStage.ASSISTANTS_UPDATED,
             assistants_created=0,
             assistants_configured=0,
             assistants_updated=1,
@@ -629,23 +910,32 @@ class TestAIBuilderPlanLifecycle:
             kwargs["progress_callback"](progress)
             raise RuntimeError("execute exploded")
 
-        mock_execute.side_effect = fail_execute
+        authoring_service.apply_prepared.side_effect = fail_execute
 
         lifecycle = AIBuilderPlanLifecycle(
             user=user,
             repo=repo,
             flow_service=flow_service,
             space_service=_make_space_service(),
+            authoring_service=authoring_service,
         )
 
         with pytest.raises(RuntimeError, match="execute exploded"):
             await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
 
         mock_log_apply_failed.assert_called_once()
-        assert mock_log_apply_failed.call_args.kwargs["phase"] == "execute_changeset"
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "apply_authoring"
         assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is not None
-        assert (
-            mock_log_apply_failed.call_args.kwargs["materializer_progress"] == progress
+        assert mock_log_apply_failed.call_args.kwargs[
+            "materializer_progress"
+        ] == MaterializerProgressSnapshot(
+            stage="assistants_updated",
+            assistants_created=0,
+            assistants_configured=0,
+            assistants_updated=1,
+            assistants_deleted=0,
+            flow_created=False,
+            flow_updated=False,
         )
         repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
@@ -655,12 +945,8 @@ class TestAIBuilderPlanLifecycle:
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_logs_execute_bad_request_code(
         self,
-        mock_compile,
-        mock_execute,
         mock_log_apply_failed,
     ) -> None:
         user = _make_user()
@@ -673,7 +959,11 @@ class TestAIBuilderPlanLifecycle:
             flow_id=flow_id,
             target_kind=TargetKind.EDIT,
         )
-        plan = _make_plan(session_id=session.id, tenant_id=user.tenant_id)
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            edit_result=_make_plan_edit_result(_make_spec()),
+        )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,
             space_id=session.space_id,
@@ -683,11 +973,14 @@ class TestAIBuilderPlanLifecycle:
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        mock_compile.return_value = FlowChangeSet(
-            flow_name="Flow",
-            flow_description="Desc",
+        authoring_service = _make_authoring_service(flow_id=flow_id)
+        authoring_service.prepare.return_value = SimpleNamespace(
+            changeset=FlowDraftChangeSet(
+                flow_name="Flow",
+                flow_description="Desc",
+            )
         )
-        mock_execute.side_effect = BadRequestException(
+        authoring_service.apply_prepared.side_effect = BadRequestException(
             "stale",
             code="stale_revision",
         )
@@ -697,23 +990,20 @@ class TestAIBuilderPlanLifecycle:
             repo=repo,
             flow_service=flow_service,
             space_service=_make_space_service(),
+            authoring_service=authoring_service,
         )
 
         with pytest.raises(BadRequestException, match="stale"):
             await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
 
-        assert mock_log_apply_failed.call_args.kwargs["phase"] == "execute_changeset"
+        assert mock_log_apply_failed.call_args.kwargs["phase"] == "apply_authoring"
         exception = mock_log_apply_failed.call_args.kwargs["exception"]
         assert isinstance(exception, BadRequestException)
         assert exception.code == "stale_revision"
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_uses_plan_resource_bindings_without_rederiving(
         self,
-        mock_compile,
-        mock_execute,
     ) -> None:
         user = _make_user()
         repo = AsyncMock()
@@ -764,13 +1054,10 @@ class TestAIBuilderPlanLifecycle:
         space_service.get_space.return_value = space
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
-        mock_compile.return_value = MagicMock()
-        mock_execute.return_value = SimpleNamespace(
-            flow_id=uuid4(),
+        authoring_service = _make_authoring_service(
             flow_name="Flow",
             steps_created=1,
             steps_updated=0,
-            steps_removed=0,
         )
 
         lifecycle = AIBuilderPlanLifecycle(
@@ -778,6 +1065,7 @@ class TestAIBuilderPlanLifecycle:
             repo=repo,
             flow_service=flow_service,
             space_service=space_service,
+            authoring_service=authoring_service,
         )
         with patch(
             (
@@ -789,19 +1077,15 @@ class TestAIBuilderPlanLifecycle:
         ):
             await lifecycle.apply_plan(plan_id=plan.id)
 
-        compiled_spec = mock_compile.call_args.args[0]
-        assistant_spec = compiled_spec.steps[0].assistant_spec
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        assistant_spec = command.spec.steps[0].assistant_spec
         assert assistant_spec.model_ref == "model.fast-model"
         assert assistant_spec.knowledge_refs == ["knowledge.policy-kb"]
-        assert mock_execute.call_args.kwargs["resource_bindings"] == plan_bindings
+        assert command.resource_bindings == plan_bindings
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_rejects_resource_plan_without_binding_snapshot(
         self,
-        mock_compile,
-        mock_execute,
     ) -> None:
         user = _make_user()
         repo = AsyncMock()
@@ -835,17 +1119,11 @@ class TestAIBuilderPlanLifecycle:
             await lifecycle.apply_plan(plan_id=plan.id)
 
         assert exc_info.value.code == "ai_builder_plan_resource_bindings_missing"
-        mock_compile.assert_not_called()
-        mock_execute.assert_not_called()
         repo.update_session_status_without_send_lease.assert_not_awaited()
 
     @pytest.mark.anyio
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
-    @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_plan_rejects_replaced_resource_with_same_name_before_compile(
         self,
-        mock_compile,
-        mock_execute,
     ) -> None:
         user = _make_user()
         repo = AsyncMock()
@@ -899,6 +1177,4 @@ class TestAIBuilderPlanLifecycle:
         assert exc_info.value.context["slot_ref"] == "model.fast-model"
         assert exc_info.value.context["slot_kind"] == "model"
         assert exc_info.value.context["local_kind"] == "completion_model"
-        mock_compile.assert_not_called()
-        mock_execute.assert_not_called()
         repo.update_session_status_without_send_lease.assert_not_awaited()

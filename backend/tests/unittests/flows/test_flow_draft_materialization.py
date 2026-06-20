@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
+import pytest
+
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
     compile_flow_draft_changeset,
@@ -18,6 +19,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.main.exceptions import BadRequestException
 
 
 def _step_spec(
@@ -80,17 +82,6 @@ def _flow(*steps: FlowStep, metadata_json: dict | None = None) -> Flow:
         steps=list(steps),
         metadata_json=metadata_json,
     )
-
-
-def _without_ai_builder_metadata(changeset_dump: dict) -> dict:
-    result = dict(changeset_dump)
-    result.pop("description_override_manual", None)
-    metadata = result.get("metadata_json")
-    if isinstance(metadata, dict):
-        metadata = dict(metadata)
-        metadata.pop("ai_builder", None)
-        result["metadata_json"] = metadata or None
-    return result
 
 
 def test_shared_compile_does_not_stamp_ai_builder_metadata() -> None:
@@ -171,9 +162,198 @@ def test_shared_compile_drops_output_config_when_output_mode_changes() -> None:
     assert changeset.compiled_steps[0].output_config is None
 
 
-def test_shared_compile_matches_ai_builder_compile_for_generic_changeset_shape() -> (
+def test_shared_compile_preserves_every_existing_step_without_removals() -> None:
+    current_flow = _flow(_flow_step(step_order=1), _flow_step(step_order=2))
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+            _step_spec(plan_step_ref="step_b", existing_step_ref="existing_step_2"),
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(spec, current_flow=current_flow)
+
+    assert len(changeset.assistants_to_delete) == 0
+    assert [step.change_kind for step in changeset.compiled_steps] == [
+        FlowDraftStepChangeKind.MODIFIED,
+        FlowDraftStepChangeKind.MODIFIED,
+    ]
+
+
+def test_shared_compile_deletes_only_explicit_removed_existing_step() -> None:
+    removed_assistant_id = uuid4()
+    current_flow = _flow(
+        _flow_step(step_order=1),
+        _flow_step(step_order=2, assistant_id=removed_assistant_id),
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(
+        spec,
+        current_flow=current_flow,
+        removed_existing_step_refs=frozenset({"existing_step_2"}),
+    )
+
+    assert len(changeset.assistants_to_delete) == 1
+    assert changeset.assistants_to_delete[0].assistant_id == removed_assistant_id
+
+
+def test_shared_compile_rejects_omitted_existing_step_without_explicit_removal() -> (
     None
 ):
+    current_flow = _flow(_flow_step(step_order=1), _flow_step(step_order=2))
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(spec, current_flow=current_flow)
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "missing_existing_step_ref",
+        "missing_refs": ["existing_step_2"],
+    }
+
+
+def test_shared_compile_rejects_unknown_removed_existing_step_ref() -> None:
+    current_flow = _flow(_flow_step(step_order=1))
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(
+            spec,
+            current_flow=current_flow,
+            removed_existing_step_refs=frozenset({"existing_step_99"}),
+        )
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "unknown_removed_existing_step_ref",
+        "unknown_refs": ["existing_step_99"],
+    }
+
+
+def test_shared_compile_rejects_preserved_and_removed_existing_ref_overlap() -> None:
+    current_flow = _flow(_flow_step(step_order=1))
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(
+            spec,
+            current_flow=current_flow,
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        )
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "preserved_and_removed_existing_step_ref",
+        "overlap_refs": ["existing_step_1"],
+    }
+
+
+def test_shared_compile_rejects_duplicate_existing_step_ref() -> None:
+    current_flow = _flow(_flow_step(step_order=1))
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+            _step_spec(plan_step_ref="step_b", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(spec, current_flow=current_flow)
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "duplicate_existing_step_ref",
+        "duplicate_refs": ["existing_step_1"],
+    }
+
+
+def test_shared_compile_reorder_preserves_existing_step_identity() -> None:
+    first_assistant_id = uuid4()
+    second_assistant_id = uuid4()
+    current_flow = _flow(
+        _flow_step(step_order=1, assistant_id=first_assistant_id),
+        _flow_step(step_order=2, assistant_id=second_assistant_id),
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_b", existing_step_ref="existing_step_2"),
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    changeset = compile_flow_draft_changeset(spec, current_flow=current_flow)
+
+    assert [step.assistant_id for step in changeset.compiled_steps] == [
+        second_assistant_id,
+        first_assistant_id,
+    ]
+    assert len(changeset.assistants_to_delete) == 0
+
+
+def test_shared_compile_rejects_create_spec_with_existing_step_ref() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="New flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(spec, current_flow=None)
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "create_cannot_use_existing_step_ref",
+        "existing_step_ref": "existing_step_1",
+    }
+
+
+def test_shared_compile_rejects_create_with_removed_existing_step_refs() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="New flow",
+        steps=[_step_spec(plan_step_ref="step_a")],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(
+            spec,
+            current_flow=None,
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        )
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "create_cannot_remove_existing_step_refs",
+        "removed_refs": ["existing_step_1"],
+    }
+
+
+def test_shared_compile_compiles_generic_edit_changeset_shape() -> None:
     existing_assistant_id = uuid4()
     removed_assistant_id = uuid4()
     current_flow = _flow(
@@ -204,12 +384,14 @@ def test_shared_compile_matches_ai_builder_compile_for_generic_changeset_shape()
         ],
     )
 
-    shared = compile_flow_draft_changeset(spec, current_flow=current_flow)
-    ai_builder = compile_changeset(spec, current_flow=current_flow)
-
-    assert _without_ai_builder_metadata(
-        ai_builder.model_dump(mode="json")
-    ) == _without_ai_builder_metadata(shared.model_dump(mode="json"))
+    removed_refs = frozenset({"existing_step_2"})
+    shared = compile_flow_draft_changeset(
+        spec,
+        current_flow=current_flow,
+        removed_existing_step_refs=removed_refs,
+    )
+    assert shared.metadata_json is not None
+    assert shared.metadata_json["form_schema"]["fields"][0]["name"] == "case_id"
     assert shared.compiled_steps[0].change_kind is FlowDraftStepChangeKind.MODIFIED
     assert shared.compiled_steps[1].change_kind is FlowDraftStepChangeKind.ADDED
     assert len(shared.assistants_to_delete) == 1

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_description_semantics import (
+from intric.flows.application.flow_authoring_description_semantics import (
     DescriptionProvenance,
     FlowSemanticSignature,
     _description_hash,

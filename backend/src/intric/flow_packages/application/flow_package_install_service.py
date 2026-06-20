@@ -24,16 +24,14 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageModelRequirement,
     FlowPackageTemplateAssetRequirement,
 )
-from intric.flows.application.flow_draft_materialization import (
-    compile_flow_draft_changeset,
-)
-from intric.flows.application.flow_draft_materialization_executor import (
-    FlowDraftMaterializer,
+from intric.flows.application.flow_authoring_command import (
+    CreateFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+    FlowPackageAuthoringOrigin,
 )
 from intric.flows.application.flow_service import FlowService
 from intric.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, StepSpec
 from intric.flows.flow_resource_bindings import (
-    FlowResourceBindingSource,
     LocalResourceBinding,
     LocalResourceKind,
     ResourceSlotKind,
@@ -61,8 +59,11 @@ class FlowPackageInstallResult:
 
 
 class FlowPackageInstallService:
-    def __init__(self, materializer: FlowDraftMaterializer | None = None) -> None:
-        self._materializer = materializer or FlowDraftMaterializer()
+    def __init__(
+        self,
+        authoring_service: FlowAuthoringCommandService | None = None,
+    ) -> None:
+        self._authoring_service = authoring_service or FlowAuthoringCommandService()
 
     async def install_as_draft(
         self,
@@ -83,18 +84,20 @@ class FlowPackageInstallService:
             spec=envelope.spec,
             selected_slot_refs=selection.selected_slot_refs,
         )
-        changeset = compile_flow_draft_changeset(
-            install_spec,
-            current_flow=None,
+        command = CreateFlowAuthoringCommand(
+            space_id=space_id,
+            spec=install_spec,
+            origin=FlowPackageAuthoringOrigin(
+                package_id=envelope.manifest.package_id,
+                package_version=envelope.manifest.package_version,
+                content_checksum=envelope.content_checksum,
+            ),
+            resource_bindings=selection.resource_bindings,
             default_transcription_model_id=default_transcription_model_id,
         )
-        materialized = await self._materializer.execute(
-            changeset=changeset,
+        materialized = await self._authoring_service.apply(
+            command=command,
             flow_service=flow_service,
-            space_id=space_id,
-            flow_id=None,
-            resource_bindings=selection.resource_bindings,
-            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
         )
         return FlowPackageInstallResult(
             flow_id=materialized.flow_id,

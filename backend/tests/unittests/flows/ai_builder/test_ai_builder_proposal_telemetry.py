@@ -224,7 +224,7 @@ def test_apply_failure_log_uses_typed_apply_payload() -> None:
     flow_id = uuid4()
 
     log_apply_failed(
-        phase="execute_changeset",
+        phase="apply_authoring",
         plan_id=plan_id,
         session_id=session_id,
         target_kind=TargetKind.EDIT,
@@ -258,7 +258,7 @@ def test_apply_failure_log_uses_typed_apply_payload() -> None:
         "event": "ai_builder.apply.failed",
         "schema_version": APPLY_TELEMETRY_SCHEMA_VERSION,
         "operation": "apply_failed",
-        "phase": "execute_changeset",
+        "phase": "apply_authoring",
         "plan_id": str(plan_id),
         "session_id": str(session_id),
         "target_kind": "edit",
@@ -287,7 +287,7 @@ def test_apply_failure_log_uses_typed_apply_payload() -> None:
 
 def test_compile_apply_failure_payload_omits_execute_only_fields() -> None:
     payload = ApplyFailureTelemetryPayload(
-        phase="compile_changeset",
+        phase="prepare_authoring",
         plan_id=str(uuid4()),
         session_id=str(uuid4()),
         target_kind="create",
@@ -298,7 +298,7 @@ def test_compile_apply_failure_payload_omits_execute_only_fields() -> None:
         materializer_progress=None,
     ).model_dump(exclude_none=True)
 
-    assert payload["phase"] == "compile_changeset"
+    assert payload["phase"] == "prepare_authoring"
     assert "code" not in payload
     assert "changeset_counts" not in payload
     assert "materializer_progress" not in payload
@@ -307,7 +307,7 @@ def test_compile_apply_failure_payload_omits_execute_only_fields() -> None:
 def test_apply_failure_payload_forbids_extra_raw_material_fields() -> None:
     with pytest.raises(ValidationError):
         ApplyFailureTelemetryPayload(
-            phase="compile_changeset",
+            phase="prepare_authoring",
             plan_id=str(uuid4()),
             session_id=str(uuid4()),
             target_kind="edit",
@@ -325,7 +325,7 @@ def test_apply_failure_payload_json_excludes_sensitive_material() -> None:
     ]
 
     payload = ApplyFailureTelemetryPayload(
-        phase="execute_changeset",
+        phase="apply_authoring",
         plan_id=str(uuid4()),
         session_id=str(uuid4()),
         target_kind="edit",

@@ -20,6 +20,7 @@ from intric.flows.ai_builder.ai_builder_validation_references import (
     validate_variable_references,
 )
 from intric.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
     FlowStepGraphIssue,
     FlowStepValidationError,
 )
@@ -31,8 +32,6 @@ from intric.flows.flow_authoring_variable_rewriting import (
     flow_step_validation_views_from_draft_spec,
 )
 from intric.flows.flow_validators import (
-    FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
-    FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
     collect_step_graph_issues,
     validate_form_schema,
 )
@@ -41,50 +40,66 @@ from intric.flows.flow_validators_form import (
 )
 from intric.main.exceptions import BadRequestException
 
-_BUILDER_IGNORED_FLOW_VALIDATION_CODES = frozenset(
+_BUILDER_IGNORED_FLOW_VALIDATION_CODES: frozenset[FlowGraphIssueCode] = frozenset(
     {
-        FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
-        FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+        FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
+        FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
     }
 )
-_CANONICAL_GRAPH_CODE_TO_BUILDER_CODE: dict[str, str] = {
-    "audio_document_transcript_chain_invalid": (
+_BUILDER_IGNORED_FLOW_VALIDATION_EXCEPTION_CODES = frozenset(
+    code.value for code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES
+)
+_CANONICAL_GRAPH_CODE_TO_BUILDER_CODE: dict[FlowGraphIssueCode, str] = {
+    FlowGraphIssueCode.AUDIO_DOCUMENT_TRANSCRIPT_CHAIN_INVALID: (
         "audio_document_transcript_chain_invalid"
     ),
-    "duplicate_step_name": "duplicate_step_name",
-    "flow_audio_transcription_invalid": "flow_audio_transcription_invalid",
-    "flow_http_post_output_must_be_terminal": (
+    FlowGraphIssueCode.DUPLICATE_STEP_NAME: "duplicate_step_name",
+    FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_INVALID: (
+        "flow_audio_transcription_invalid"
+    ),
+    FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL: (
         "flow_http_post_output_must_be_terminal"
     ),
-    "flow_input_contract_inapplicable": "input_contract_type_mismatch",
-    "typed_io_invalid_input_source_position": "first_step_invalid_source",
-    "typed_io_multiple_flow_input_steps": "multiple_flow_input",
-    "typed_io_flow_input_position_invalid": "flow_input_not_first",
-    "typed_io_document_source_unsupported": "media_source_mismatch",
-    "typed_io_audio_source_unsupported": "media_source_mismatch",
-    "typed_io_file_source_unsupported": "media_source_mismatch",
-    "typed_io_invalid_input_source_combination": "json_all_previous_incompatible",
-    "typed_io_incompatible_type_chain": "incompatible_type_chain",
-    "transcribe_only_violation": "transcribe_only_violation",
-    "template_fill_requires_docx": "template_fill_requires_docx",
-    "invalid_input_contract_schema": "invalid_input_contract_schema",
-    "invalid_output_contract_schema": "invalid_output_contract_schema",
-    "input_contract_type_mismatch": "input_contract_type_mismatch",
-    "input_contract_source_mismatch": "input_contract_type_mismatch",
-    "output_contract_type_mismatch": "output_contract_type_mismatch",
-    "output_contract_template_fill_incompatible": (
+    FlowGraphIssueCode.FLOW_INPUT_CONTRACT_INAPPLICABLE: (
+        "input_contract_type_mismatch"
+    ),
+    FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_POSITION: (
+        "first_step_invalid_source"
+    ),
+    FlowGraphIssueCode.TYPED_IO_MULTIPLE_FLOW_INPUT_STEPS: "multiple_flow_input",
+    FlowGraphIssueCode.TYPED_IO_FLOW_INPUT_POSITION_INVALID: "flow_input_not_first",
+    FlowGraphIssueCode.TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED: ("media_source_mismatch"),
+    FlowGraphIssueCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED: "media_source_mismatch",
+    FlowGraphIssueCode.TYPED_IO_FILE_SOURCE_UNSUPPORTED: "media_source_mismatch",
+    FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION: (
+        "json_all_previous_incompatible"
+    ),
+    FlowGraphIssueCode.TYPED_IO_INCOMPATIBLE_TYPE_CHAIN: "incompatible_type_chain",
+    FlowGraphIssueCode.TRANSCRIBE_ONLY_VIOLATION: "transcribe_only_violation",
+    FlowGraphIssueCode.TEMPLATE_FILL_REQUIRES_DOCX: "template_fill_requires_docx",
+    FlowGraphIssueCode.INVALID_INPUT_CONTRACT_SCHEMA: "invalid_input_contract_schema",
+    FlowGraphIssueCode.INVALID_OUTPUT_CONTRACT_SCHEMA: (
+        "invalid_output_contract_schema"
+    ),
+    FlowGraphIssueCode.INPUT_CONTRACT_TYPE_MISMATCH: "input_contract_type_mismatch",
+    FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH: "input_contract_type_mismatch",
+    FlowGraphIssueCode.OUTPUT_CONTRACT_TYPE_MISMATCH: "output_contract_type_mismatch",
+    FlowGraphIssueCode.OUTPUT_CONTRACT_TEMPLATE_FILL_INCOMPATIBLE: (
         "output_contract_template_fill_incompatible"
     ),
-    "unsupported_input_type": "unsupported_input_type",
+    FlowGraphIssueCode.UNSUPPORTED_INPUT_TYPE: "unsupported_input_type",
 }
-_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION = frozenset(
+_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION: frozenset[
+    FlowGraphIssueCode
+] = frozenset(
     {
-        "duplicate_step_order",
-        "flow_input_binding_unsupported_key",
-        "flow_review_policy_invalid",
-        "flow_step_invalid",
-        "step_order_not_contiguous",
-        "typed_io_missing_previous_step",
+        FlowGraphIssueCode.DUPLICATE_STEP_ORDER,
+        FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        FlowGraphIssueCode.FLOW_REVIEW_POLICY_INVALID,
+        FlowGraphIssueCode.FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
+        FlowGraphIssueCode.FLOW_STEP_INVALID,
+        FlowGraphIssueCode.STEP_ORDER_NOT_CONTIGUOUS,
+        FlowGraphIssueCode.TYPED_IO_MISSING_PREVIOUS_STEP,
     }
 )
 
@@ -263,7 +278,7 @@ def _step_ref_from_order(spec: FlowDraftSpecCore, step_order: int) -> str | None
 def _builder_ignores_graph_issue(issue: FlowStepGraphIssue) -> bool:
     return (
         issue.code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES
-        or issue.exception_code in _BUILDER_IGNORED_FLOW_VALIDATION_CODES
+        or issue.exception_code in _BUILDER_IGNORED_FLOW_VALIDATION_EXCEPTION_CODES
     )
 
 
@@ -277,6 +292,6 @@ def _builder_code_from_graph_issue(issue: FlowStepGraphIssue) -> str:
 
 
 def _builder_message_from_graph_issue(issue: FlowStepGraphIssue) -> str:
-    if issue.code == "duplicate_step_name":
+    if issue.code == FlowGraphIssueCode.DUPLICATE_STEP_NAME:
         return f"Duplicate step name. {issue.message}"
     return issue.message

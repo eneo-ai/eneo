@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-
 from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
 )
@@ -18,7 +15,7 @@ from intric.flows.ai_builder.ai_builder_validator import (
     _CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION,
     validate_spec,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
+from intric.flows.domain.flow_step_validation import FlowGraphIssueCode
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -28,14 +25,6 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
-)
-from intric.flows.flow_review_policy import FLOW_REVIEW_POLICY_INVALID
-from intric.flows.flow_validators import (
-    FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
-    FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
-)
-from intric.flows.input_binding_contract_rules import (
-    FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
 )
 
 # ---------------------------------------------------------------------------
@@ -83,113 +72,15 @@ def _assert_single_error(
     assert errors[0].step_ref == step_ref
 
 
-_FLOW_SOURCE_ROOT = Path(__file__).resolve().parents[4] / "src" / "intric" / "flows"
-_GRAPH_ISSUE_HELPERS = {
-    "_bad_request_issue",
-    "_flow_step_issue",
-}
-_GRAPH_ISSUE_CAPTURE_HELPERS = {
-    "_capture_bad_request_validation",
-    "_capture_contract_syntax",
-    "_capture_flow_step_validation",
-}
-_CANONICAL_EXCEPTION_CODES = frozenset(
-    {
-        FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED,
-        FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
-        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-        FLOW_REVIEW_POLICY_INVALID,
-        FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
-    }
-)
-
-
-def _canonical_graph_issue_codes_from_source() -> set[str]:
-    return (
-        _graph_issue_codes_from_source(_FLOW_SOURCE_ROOT / "flow_validators.py")
-        | _graph_issue_codes_from_source(_FLOW_SOURCE_ROOT / "step_chain_rules.py")
-        | set(_CANONICAL_EXCEPTION_CODES)
-    )
-
-
-def _graph_issue_codes_from_source(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text())
-    codes: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            function_name = _function_name(node.func)
-            if function_name in _GRAPH_ISSUE_HELPERS:
-                codes |= _keyword_code_strings(node)
-            elif function_name in _GRAPH_ISSUE_CAPTURE_HELPERS:
-                codes |= _positional_code_strings(node)
-                codes |= _keyword_code_strings(node)
-            elif function_name == "StepChainViolation":
-                codes |= _keyword_code_strings(node)
-        elif (
-            isinstance(node, ast.FunctionDef)
-            and node.name == "_output_contract_issue_code"
-        ):
-            for child in ast.walk(node):
-                if isinstance(child, ast.Return) and child.value is not None:
-                    codes |= _code_strings(child.value)
-    return codes
-
-
-def _function_name(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return None
-
-
-def _keyword_code_strings(node: ast.Call) -> set[str]:
-    for keyword in node.keywords:
-        if keyword.arg == "code":
-            return _code_strings(keyword.value)
-    return set()
-
-
-def _positional_code_strings(node: ast.Call) -> set[str]:
-    if len(node.args) < 2:
-        return set()
-    return _code_strings(node.args[1])
-
-
-def _code_strings(node: ast.AST) -> set[str]:
-    return _literal_strings(node) | _flow_api_error_code_strings(node)
-
-
-def _literal_strings(node: ast.AST) -> set[str]:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return {node.value}
-    if isinstance(node, ast.IfExp):
-        return _literal_strings(node.body) | _literal_strings(node.orelse)
-    return set()
-
-
-def _flow_api_error_code_strings(node: ast.AST) -> set[str]:
-    if not isinstance(node, ast.Attribute) or node.attr != "value":
-        return set()
-    enum_member = node.value
-    if not isinstance(enum_member, ast.Attribute):
-        return set()
-    enum_class = enum_member.value
-    if not isinstance(enum_class, ast.Name) or enum_class.id != "FlowApiErrorCode":
-        return set()
-    return {FlowApiErrorCode[enum_member.attr].value}
-
-
 class TestCanonicalGraphIssuePresentation:
     def test_every_canonical_graph_issue_has_builder_presentation(self) -> None:
-        canonical_codes = _canonical_graph_issue_codes_from_source()
         presented_codes = (
             set(_CANONICAL_GRAPH_CODE_TO_BUILDER_CODE)
             | set(_CANONICAL_GRAPH_CODES_WITH_GENERIC_BUILDER_PRESENTATION)
             | set(_BUILDER_IGNORED_FLOW_VALIDATION_CODES)
         )
 
-        assert canonical_codes <= presented_codes
+        assert set(FlowGraphIssueCode) <= presented_codes
 
 
 # ---------------------------------------------------------------------------

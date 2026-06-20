@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    FlowChangeSet,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
@@ -231,58 +230,6 @@ class TestPlannerPlanEnvelope:
         assert envelope.assumptions == []
         assert envelope.lint_warnings == []
         assert envelope.risk_acknowledgments == []
-
-
-# ---------------------------------------------------------------------------
-# FlowChangeSet
-# ---------------------------------------------------------------------------
-
-
-class TestFlowChangeSet:
-    def test_empty_changeset(self) -> None:
-        cs = FlowChangeSet(flow_name="Test", flow_description="")
-        assert cs.assistants_to_create == []
-        assert cs.assistants_to_update == []
-        assert cs.assistants_to_delete == []
-        assert cs.compiled_steps == []
-
-    def test_changeset_with_creates(self) -> None:
-        from intric.flows.application.flow_draft_materialization import (
-            FlowDraftAssistantToCreate as AssistantToCreate,
-        )
-        from intric.flows.application.flow_draft_materialization import (
-            FlowDraftCompiledStep as CompiledStep,
-        )
-        from intric.flows.application.flow_draft_materialization import (
-            FlowDraftStepChangeKind as StepChangeKind,
-        )
-
-        cs = FlowChangeSet(
-            flow_name="New flow",
-            flow_description="Desc",
-            assistants_to_create=[
-                AssistantToCreate(
-                    plan_step_ref="step_a",
-                    assistant_spec=AssistantSpec(instructions="Do X"),
-                ),
-            ],
-            compiled_steps=[
-                CompiledStep(
-                    plan_step_ref="step_a",
-                    change_kind=StepChangeKind.ADDED,
-                    step_order=1,
-                    user_description="Step A",
-                    input_source="flow_input",
-                    input_type="text",
-                    output_mode="pass_through",
-                    output_type="text",
-                    mcp_policy="inherit",
-                ),
-            ],
-        )
-        assert len(cs.assistants_to_create) == 1
-        assert len(cs.compiled_steps) == 1
-        assert cs.compiled_steps[0].assistant_id is None  # Needs creation
 
 
 # ---------------------------------------------------------------------------

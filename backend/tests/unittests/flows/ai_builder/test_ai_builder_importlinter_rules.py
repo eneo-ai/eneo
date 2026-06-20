@@ -74,6 +74,13 @@ def _backend_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
+def _lint_imports_command() -> list[str]:
+    local_script = _backend_root() / ".venv" / "bin" / "lint-imports"
+    if local_script.is_file():
+        return [str(local_script), "--no-cache"]
+    return ["uv", "run", "lint-imports", "--no-cache"]
+
+
 def _config() -> configparser.ConfigParser:
     parser = configparser.ConfigParser()
     parser.read(_backend_root() / ".importlinter", encoding="utf-8")
@@ -317,7 +324,7 @@ class TestRule2FcmNoAiBuilderContract:
 
     def test_lint_imports_keeps_the_contract(self) -> None:
         result = subprocess.run(
-            ["uv", "run", "lint-imports", "--no-cache"],
+            _lint_imports_command(),
             cwd=_backend_root(),
             capture_output=True,
             text=True,
@@ -436,7 +443,7 @@ class TestRule7AiBuilderNoMcpExecutionContract:
 
     def test_lint_imports_keeps_the_contract(self) -> None:
         result = subprocess.run(
-            ["uv", "run", "lint-imports", "--no-cache"],
+            _lint_imports_command(),
             cwd=_backend_root(),
             capture_output=True,
             text=True,
@@ -564,8 +571,8 @@ class TestRule6FlowApiBoundary:
         )
         assert not offenders, (
             "The retired materialization bridge names must not be reintroduced. "
-            "Use compile_create_draft, compile_changeset, or AIBuilderRepository "
-            f"directly.\nOffenders: {offenders}"
+            "Use compile_create_draft, FlowAuthoringCommandService, or "
+            f"AIBuilderRepository directly.\nOffenders: {offenders}"
         )
 
     def test_helper_catches_all_offending_import_shapes(

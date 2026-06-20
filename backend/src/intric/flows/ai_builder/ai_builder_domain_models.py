@@ -16,9 +16,6 @@ import uuid_utils
 from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
-from intric.flows.application.flow_draft_materialization import (
-    FlowDraftChangeSet,
-)
 from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -86,10 +83,6 @@ class PlannerPlanEnvelope(BaseModel):
     risk_acknowledgments: list[str] = Field(default_factory=list)
     reasoning: str | None = None
     plan_rationale: str | None = None
-
-
-class FlowChangeSet(FlowDraftChangeSet):
-    description_override_manual: bool = False
 
 
 def _new_message_id() -> str:
@@ -187,7 +180,6 @@ __all__ = [
     "BuilderPlan",
     "BuilderSession",
     "ConversationMessage",
-    "FlowChangeSet",
     "LintSeverity",
     "LintWarning",
     "PlanStatus",

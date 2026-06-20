@@ -24,6 +24,13 @@ def _backend_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
+def _lint_imports_command() -> list[str]:
+    local_script = _backend_root() / ".venv" / "bin" / "lint-imports"
+    if local_script.is_file():
+        return [str(local_script), "--no-cache"]
+    return ["uv", "run", "lint-imports", "--no-cache"]
+
+
 def _expected_source_modules() -> set[str]:
     """Enumerate everything under `intric/flows/` except `ai_builder/` and
     dunder/cache artefacts. Returns the set of dotted module names we
@@ -133,7 +140,7 @@ def test_flows_engine_has_no_new_imports_into_ai_builder() -> None:
     assert config.is_file(), f"{config} not found — boundary rule missing"
 
     result = subprocess.run(
-        ["uv", "run", "lint-imports", "--no-cache"],
+        _lint_imports_command(),
         cwd=backend_root,
         capture_output=True,
         text=True,

@@ -67,13 +67,14 @@ from intric.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
 )
 from intric.flow_packages.infrastructure import flow_package_zip_reader as reader
-from intric.flows.ai_builder.ai_builder_materializer import (
-    compile_changeset,
-    execute_changeset,
-)
 from intric.flows.api.flow_access_context import (
     FlowAccessContext,
     FlowSpaceAccessContext,
+)
+from intric.flows.application.flow_authoring_command import (
+    CreateFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+    FlowPackageAuthoringOrigin,
 )
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_authoring_spec import (
@@ -696,12 +697,18 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
                 )
             ],
         )
-        ai_builder_apply = await execute_changeset(
-            changeset=compile_changeset(ai_builder_spec, current_flow=None),
+        ai_builder_apply = await FlowAuthoringCommandService().apply(
+            command=CreateFlowAuthoringCommand(
+                space_id=space.id,
+                spec=ai_builder_spec,
+                origin=FlowPackageAuthoringOrigin(
+                    package_id="se.demo.route-import",
+                    package_version="1.0.0",
+                    content_checksum="sha256:test",
+                ),
+                resource_bindings=(_model_binding(model.id),),
+            ),
             flow_service=container.flow_service(),
-            space_id=space.id,
-            flow_id=None,
-            resource_bindings=(_model_binding(model.id),),
         )
         await session.flush()
 

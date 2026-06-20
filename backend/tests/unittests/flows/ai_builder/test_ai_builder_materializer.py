@@ -1,4 +1,4 @@
-"""Tests for AI Builder materializer (compiler + executor)."""
+"""Tests for shared Flow draft compiler and materializer behavior."""
 
 from __future__ import annotations
 
@@ -8,9 +8,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
-    FlowChangeSet,
-)
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
@@ -18,14 +15,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPatch,
     StepPlacement,
 )
-from intric.flows.ai_builder.ai_builder_materializer import (
-    compile_changeset,
-    execute_changeset,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
-    MaterializerProgressSnapshot,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -40,7 +30,16 @@ from intric.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToUpdate as AssistantToUpdate,
 )
 from intric.flows.application.flow_draft_materialization import (
+    FlowDraftChangeSet,
+    FlowDraftMaterializationProgress,
+    FlowDraftMaterializationStage,
+    compile_flow_draft_changeset,
+)
+from intric.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind as StepChangeKind,
+)
+from intric.flows.application.flow_draft_materialization_executor import (
+    FlowDraftMaterializer,
 )
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -70,6 +69,28 @@ from intric.main.exceptions import BadRequestException
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def execute_draft_materialization(
+    *,
+    changeset: FlowDraftChangeSet,
+    flow_service: object,
+    space_id: UUID,
+    flow_id: UUID | None,
+    expected_revision: int | None = None,
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
+    progress_callback: (Any) = None,
+):
+    return await FlowDraftMaterializer().execute(
+        changeset=changeset,
+        flow_service=flow_service,
+        space_id=space_id,
+        flow_id=flow_id,
+        expected_revision=expected_revision,
+        resource_bindings=resource_bindings,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+        progress_callback=progress_callback,
+    )
 
 
 def _make_spec(
@@ -214,8 +235,10 @@ def _resource_binding(
     )
 
 
-def _create_changeset_with_assistant(assistant_spec: AssistantSpec) -> FlowChangeSet:
-    return FlowChangeSet(
+def _create_changeset_with_assistant(
+    assistant_spec: AssistantSpec,
+) -> FlowDraftChangeSet:
+    return FlowDraftChangeSet(
         flow_name="Test",
         flow_description="",
         assistants_to_create=[
@@ -244,7 +267,7 @@ class TestCompileCreateFlow:
 
     def test_empty_spec_creates_empty_changeset(self) -> None:
         spec = _make_spec(steps=[])
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert changeset.flow_name == "Test flow"
         assert changeset.flow_description == "A test flow"
         assert changeset.assistants_to_create == []
@@ -258,7 +281,7 @@ class TestCompileCreateFlow:
                 _make_step_spec(plan_step_ref="step_a", name="Extrahera fakta"),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert len(changeset.assistants_to_create) == 1
         assert changeset.assistants_to_create[0].plan_step_ref == "step_a"
         assert (
@@ -282,7 +305,7 @@ class TestCompileCreateFlow:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
 
         assert changeset.compiled_steps[0].review_policy == review_policy
 
@@ -306,7 +329,7 @@ class TestCompileCreateFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert len(changeset.assistants_to_create) == 3
         assert len(changeset.compiled_steps) == 3
         assert changeset.compiled_steps[0].step_order == 1
@@ -320,7 +343,7 @@ class TestCompileCreateFlow:
         spec = _make_spec(
             steps=[_make_step_spec(plan_step_ref="step_a")],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert changeset.compiled_steps[0].assistant_id is None
 
     def test_step_fields_propagate_correctly(self) -> None:
@@ -340,7 +363,7 @@ class TestCompileCreateFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         step = changeset.compiled_steps[0]
         assert step.input_source == "flow_input"
         assert step.input_type == "json"
@@ -349,28 +372,6 @@ class TestCompileCreateFlow:
         assert step.mcp_policy == "restricted"
         assert step.input_bindings is None
         assert step.input_contract == contract
-        assert step.output_contract == contract
-
-    def test_question_binding_clears_input_contract(self) -> None:
-        bindings = {"question": "{{ Ärendenummer }}"}
-        contract = {"type": "object", "properties": {"x": {"type": "string"}}}
-        spec = _make_spec(
-            steps=[
-                _make_step_spec(
-                    plan_step_ref="step_a",
-                    name="Bound Step",
-                    input_bindings=bindings,
-                    input_contract=contract,
-                    output_contract=contract,
-                ),
-            ],
-        )
-
-        changeset = compile_changeset(spec, current_flow=None)
-        step = changeset.compiled_steps[0]
-
-        assert step.input_bindings == bindings
-        assert step.input_contract is None
         assert step.output_contract == contract
 
     def test_document_flow_input_defaults_runtime_upload_config(self) -> None:
@@ -385,7 +386,7 @@ class TestCompileCreateFlow:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
 
         step = changeset.compiled_steps[0]
         assert step.input_config == {
@@ -416,7 +417,7 @@ class TestCompileCreateFlow:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
 
         assert changeset.compiled_steps[0].input_config == {
             "runtime_input": {
@@ -453,7 +454,7 @@ class TestCompileCreateFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert changeset.metadata_json is not None
         form_schema = changeset.metadata_json.get("form_schema")
         assert form_schema is not None
@@ -479,7 +480,7 @@ class TestCompileCreateFlow:
             ],
         )
 
-        changeset = compile_changeset(
+        changeset = compile_flow_draft_changeset(
             spec,
             current_flow=None,
             default_transcription_model_id=model_id,
@@ -492,11 +493,6 @@ class TestCompileCreateFlow:
             "transcription_model": {"id": str(model_id)},
             "transcription_language": "auto",
         }
-        # Provenance is also stamped
-        assert (
-            changeset.metadata_json["ai_builder"]["description"]["mode"]
-            == "builder_managed"
-        )
 
     def test_audio_flow_input_preserves_existing_transcription_metadata(self) -> None:
         existing_model_id = uuid4()
@@ -532,7 +528,7 @@ class TestCompileCreateFlow:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=current_flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=current_flow)
 
         assert changeset.metadata_json is not None
         wizard = changeset.metadata_json["wizard"]
@@ -568,7 +564,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert len(changeset.assistants_to_update) == 1
         assert (
             changeset.assistants_to_update[0].existing_assistant_id
@@ -602,7 +598,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert len(changeset.assistants_to_create) == 1
         assert changeset.assistants_to_create[0].plan_step_ref == "step_b"
         assert len(changeset.assistants_to_update) == 1
@@ -614,7 +610,7 @@ class TestCompileEditFlow:
         assert new_step[0].assistant_id is None
 
     def test_remove_existing_step(self) -> None:
-        """Steps in existing flow not referenced in spec → REMOVED."""
+        """Steps listed as removals are removed."""
         step1 = _make_flow_step(step_order=1, user_description="Keep")
         step2 = _make_flow_step(step_order=2, user_description="Remove")
         flow = _make_flow(steps=[step1, step2])
@@ -628,7 +624,11 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(
+            spec,
+            current_flow=flow,
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
+        )
         assert len(changeset.assistants_to_delete) == 1
         assert changeset.assistants_to_delete[0].step_id == step2.id
         assert changeset.assistants_to_delete[0].assistant_id == step2.assistant_id
@@ -654,7 +654,11 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(
+            spec,
+            current_flow=flow,
+            removed_existing_step_refs=frozenset({"existing_step_2"}),
+        )
         assert len(changeset.assistants_to_create) == 1
         assert len(changeset.assistants_to_update) == 1
         assert len(changeset.assistants_to_delete) == 1
@@ -683,7 +687,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         step = changeset.compiled_steps[0]
         assert step.input_config == existing_config
         assert step.output_config == existing_output_config
@@ -721,7 +725,7 @@ class TestCompileEditFlow:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
 
         assert changeset.compiled_steps[0].input_config == {
             "legacy_marker": "keep-me",
@@ -742,7 +746,7 @@ class TestCompileEditFlow:
             ],
         )
         with pytest.raises(BadRequestException, match="existing_step_99") as exc_info:
-            compile_changeset(spec, current_flow=flow)
+            compile_flow_draft_changeset(spec, current_flow=flow)
         assert exc_info.value.code == "invalid_existing_step_ref"
 
     def test_reorder_existing_steps(self) -> None:
@@ -767,7 +771,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert changeset.compiled_steps[0].step_order == 1
         assert changeset.compiled_steps[0].assistant_id == step2.assistant_id
         assert changeset.compiled_steps[1].step_order == 2
@@ -792,7 +796,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         step = changeset.compiled_steps[0]
         # output_config should be cleared because output_mode changed
         assert step.output_config is None
@@ -818,7 +822,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         step = changeset.compiled_steps[0]
         assert step.output_config == {"template_asset_id": "keep-me"}
 
@@ -842,7 +846,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         step = changeset.compiled_steps[0]
         assert step.output_config == {"new_key": "new_value"}
 
@@ -866,7 +870,7 @@ class TestCompileEditFlow:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
 
         assert changeset.compiled_steps[0].output_type == OutputType.PDF
         assert changeset.compiled_steps[0].output_config is None
@@ -878,19 +882,16 @@ class TestCompileEditFlow:
 
 
 class TestCompileMetadata:
-    def test_form_fields_none_still_has_provenance(self) -> None:
-        """Even without form fields, provenance is stamped."""
+    def test_form_fields_none_has_no_metadata_without_flow_metadata(self) -> None:
         spec = _make_spec(steps=[_make_step_spec(plan_step_ref="step_a")])
-        changeset = compile_changeset(spec, current_flow=None)
-        assert changeset.metadata_json is not None
-        assert "ai_builder" in changeset.metadata_json
-        assert "form_schema" not in changeset.metadata_json
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
+        assert changeset.metadata_json is None
 
     def test_preserves_existing_metadata_when_no_form_fields(self) -> None:
         """When editing, preserve existing metadata if spec has no form_fields."""
         flow = _make_flow(metadata_json={"custom_key": "value"})
         spec = _make_spec(steps=[_make_step_spec(plan_step_ref="step_a")])
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert changeset.metadata_json is not None
         assert changeset.metadata_json.get("custom_key") == "value"
 
@@ -914,7 +915,7 @@ class TestCompileMetadata:
                 FormFieldSpec(name="New field", type="text", label="New field"),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
         assert changeset.metadata_json is not None
         # Custom key preserved
         assert changeset.metadata_json.get("custom_key") == "preserve"
@@ -924,94 +925,7 @@ class TestCompileMetadata:
         assert fields[0]["name"] == "New field"
 
 
-# ---------------------------------------------------------------------------
-# Compiler: description provenance
-# ---------------------------------------------------------------------------
-
-
-class TestDescriptionProvenance:
-    def test_create_mode_stamps_builder_managed_provenance(self) -> None:
-        """New flow gets builder_managed provenance with signature and hash."""
-        spec = _make_spec(
-            flow_description="Tar emot dokument och analyserar dem.",
-            steps=[
-                _make_step_spec(
-                    plan_step_ref="step_a",
-                    input_source=InputSource.FLOW_INPUT,
-                    input_type=InputType.DOCUMENT,
-                    output_type=OutputType.PDF,
-                ),
-            ],
-        )
-        changeset = compile_changeset(spec, current_flow=None)
-        assert changeset.metadata_json is not None
-        ai_builder = changeset.metadata_json.get("ai_builder", {})
-        desc_prov = ai_builder.get("description", {})
-        assert desc_prov["mode"] == "builder_managed"
-        assert desc_prov["semantic_signature"]["entry_input_type"] == "document"
-        assert desc_prov["semantic_signature"]["terminal_output_type"] == "pdf"
-        assert desc_prov["last_generated_hash"] is not None
-
-    def test_description_override_manual_stamps_manual_provenance(self) -> None:
-        """When description_override_manual=True is passed, stamp manual provenance."""
-        spec = _make_spec(
-            flow_description="User wrote this.",
-            steps=[_make_step_spec(plan_step_ref="step_a")],
-        )
-        changeset = compile_changeset(
-            spec,
-            current_flow=None,
-            description_override_manual=True,
-        )
-        assert changeset.metadata_json is not None
-        ai_builder = changeset.metadata_json.get("ai_builder", {})
-        desc_prov = ai_builder.get("description", {})
-        assert desc_prov["mode"] == "manual"
-
-    def test_edit_mode_preserves_existing_ai_builder_metadata(self) -> None:
-        """Provenance update should preserve other ai_builder metadata keys."""
-        flow = _make_flow(
-            metadata_json={
-                "ai_builder": {"other_key": "preserve_me"},
-                "custom": "data",
-            }
-        )
-        spec = _make_spec(
-            flow_description="Updated description.",
-            steps=[
-                _make_step_spec(
-                    plan_step_ref="step_a",
-                    existing_step_ref="existing_step_1",
-                )
-            ],
-        )
-        flow.steps = [_make_flow_step(step_order=1)]
-        changeset = compile_changeset(spec, current_flow=flow)
-        assert changeset.metadata_json is not None
-        assert changeset.metadata_json.get("custom") == "data"
-        ai_builder = changeset.metadata_json["ai_builder"]
-        assert ai_builder.get("other_key") == "preserve_me"
-        assert "description" in ai_builder
-
-    def test_compile_changeset_stamps_ai_builder_origin_metadata(self) -> None:
-        spec = _make_spec(steps=[_make_step_spec(plan_step_ref="step_a")])
-
-        changeset = compile_changeset(
-            spec,
-            current_flow=None,
-            ai_builder_origin={
-                "builder_session_id": str(uuid4()),
-                "builder_plan_id": str(uuid4()),
-                "builder_spec_hash": spec.spec_hash(),
-                "applied_at": "2026-03-31T12:00:00Z",
-            },
-        )
-
-        assert changeset.metadata_json is not None
-        ai_builder = changeset.metadata_json["ai_builder"]
-        assert ai_builder["origin"]["builder_spec_hash"] == spec.spec_hash()
-        assert ai_builder["origin"]["applied_at"] == "2026-03-31T12:00:00Z"
-
+class TestDescriptionRewriteInputs:
     def test_edit_mode_tolerates_existing_http_get_input_source(self) -> None:
         flow = _make_flow(
             description="Fetches a remote payload and summarizes it.",
@@ -1035,7 +949,7 @@ class TestDescriptionProvenance:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
 
         assert changeset.flow_description == flow.description
 
@@ -1063,7 +977,7 @@ class TestDescriptionProvenance:
             ],
         )
 
-        changeset = compile_changeset(spec, current_flow=flow)
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
 
         assert changeset.flow_description == flow.description
 
@@ -1091,7 +1005,7 @@ class TestCompileVariableBindings:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         step_b = changeset.compiled_steps[1]
         # step_a is step_order 1, so {{ step_a.output.text }} → {{ step_1.output.text }}
         assert step_b.input_bindings is not None
@@ -1114,7 +1028,7 @@ class TestCompileVariableBindings:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         # extract → step_order 1
         create_for_summarize = [
             a for a in changeset.assistants_to_create if a.plan_step_ref == "summarize"
@@ -1136,7 +1050,7 @@ class TestCompileVariableBindings:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         bindings = changeset.compiled_steps[0].input_bindings
         assert bindings is not None
         assert "{{ föregående_steg }}" in bindings["question"]
@@ -1152,7 +1066,7 @@ class TestCompileVariableBindings:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         bindings = changeset.compiled_steps[0].input_bindings
         assert bindings is not None
         assert "{{ Ärendenummer }}" in bindings["question"]
@@ -1179,7 +1093,7 @@ class TestCompileVariableBindings:
                 ),
             ],
         )
-        changeset = compile_changeset(spec, current_flow=None)
+        changeset = compile_flow_draft_changeset(spec, current_flow=None)
         assert changeset.compiled_steps[1].output_config == {
             "bindings": {
                 "SUMMARY": "{{ step_1.output.text }}",
@@ -1214,7 +1128,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Created flow",
             flow_description="Desc",
             assistants_to_create=[
@@ -1233,7 +1147,7 @@ class TestExecuteCreateFlow:
             ],
         )
 
-        result = await execute_changeset(
+        result = await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1278,7 +1192,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Created flow",
             flow_description="Desc",
             assistants_to_create=[
@@ -1298,7 +1212,7 @@ class TestExecuteCreateFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1330,7 +1244,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.create_flow_assistant.side_effect = mock_create_assistant
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Multi",
             flow_description="",
             assistants_to_create=[
@@ -1351,7 +1265,7 @@ class TestExecuteCreateFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1367,7 +1281,7 @@ class TestExecuteCreateFlow:
             assert step.assistant_id == assistant_ids[i]
 
     @pytest.mark.asyncio
-    async def test_execute_changeset_reports_bounded_progress_snapshots(self) -> None:
+    async def test_materializer_reports_bounded_progress_snapshots(self) -> None:
         flow_id = uuid4()
         space_id = uuid4()
         assistant_ids = [uuid4(), uuid4()]
@@ -1388,7 +1302,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.create_flow_assistant.side_effect = mock_create_assistant
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Progress",
             flow_description="",
             assistants_to_create=[
@@ -1408,9 +1322,9 @@ class TestExecuteCreateFlow:
                 for i, c in enumerate("ab")
             ],
         )
-        snapshots: list[MaterializerProgressSnapshot] = []
+        snapshots: list[FlowDraftMaterializationProgress] = []
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1418,7 +1332,7 @@ class TestExecuteCreateFlow:
             progress_callback=snapshots.append,
         )
 
-        assert [snapshot.stage for snapshot in snapshots] == [
+        assert [snapshot.stage.value for snapshot in snapshots] == [
             "flow_created",
             "assistants_created",
             "assistants_configured",
@@ -1426,8 +1340,8 @@ class TestExecuteCreateFlow:
             "assistants_configured",
             "flow_updated",
         ]
-        assert snapshots[-1] == MaterializerProgressSnapshot(
-            stage="flow_updated",
+        assert snapshots[-1] == FlowDraftMaterializationProgress(
+            stage=FlowDraftMaterializationStage.FLOW_UPDATED,
             assistants_created=2,
             assistants_configured=2,
             assistants_updated=0,
@@ -1437,7 +1351,7 @@ class TestExecuteCreateFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_execute_changeset_keeps_last_progress_before_update_failure(
+    async def test_materializer_keeps_last_progress_before_update_failure(
         self,
     ) -> None:
         flow_id = uuid4()
@@ -1453,7 +1367,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow.side_effect = RuntimeError("update failed")
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Progress failure",
             flow_description="",
             assistants_to_create=[
@@ -1470,10 +1384,10 @@ class TestExecuteCreateFlow:
                 )
             ],
         )
-        snapshots: list[MaterializerProgressSnapshot] = []
+        snapshots: list[FlowDraftMaterializationProgress] = []
 
         with pytest.raises(RuntimeError, match="update failed"):
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -1481,8 +1395,8 @@ class TestExecuteCreateFlow:
                 progress_callback=snapshots.append,
             )
 
-        assert snapshots[-1] == MaterializerProgressSnapshot(
-            stage="assistants_configured",
+        assert snapshots[-1] == FlowDraftMaterializationProgress(
+            stage=FlowDraftMaterializationStage.ASSISTANTS_CONFIGURED,
             assistants_created=1,
             assistants_configured=1,
             assistants_updated=0,
@@ -1510,7 +1424,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_create=[
@@ -1532,7 +1446,7 @@ class TestExecuteCreateFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1589,7 +1503,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_create=[
@@ -1611,7 +1525,7 @@ class TestExecuteCreateFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1679,7 +1593,7 @@ class TestExecuteCreateFlow:
             ),
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1735,7 +1649,7 @@ class TestExecuteCreateFlow:
             ),
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1772,7 +1686,7 @@ class TestExecuteCreateFlow:
         )
 
         with pytest.raises(BadRequestException) as error:
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -1819,7 +1733,7 @@ class TestExecuteCreateFlow:
         )
 
         with pytest.raises(BadRequestException) as error:
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -1840,8 +1754,8 @@ class TestExecuteCreateFlow:
         mock_flow_service = AsyncMock()
 
         with pytest.raises(BadRequestException) as error:
-            await execute_changeset(
-                changeset=FlowChangeSet(flow_name="Test", flow_description=""),
+            await execute_draft_materialization(
+                changeset=FlowDraftChangeSet(flow_name="Test", flow_description=""),
                 flow_service=mock_flow_service,
                 space_id=space_id,
                 flow_id=None,
@@ -1882,7 +1796,7 @@ class TestExecuteCreateFlow:
         )
 
         with pytest.raises(BadRequestException) as error:
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -1922,7 +1836,7 @@ class TestExecuteCreateFlow:
             local_id=website_id,
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -1960,7 +1874,7 @@ class TestExecuteCreateFlow:
         )
 
         with pytest.raises(BadRequestException) as error:
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -1989,7 +1903,7 @@ class TestExecuteCreateFlow:
         mock_flow_service.update_flow_assistant.return_value = (created_assistant, [])
         mock_flow_service.update_flow.side_effect = RuntimeError("apply failed")
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Created flow",
             flow_description="Desc",
             assistants_to_create=[
@@ -2009,7 +1923,7 @@ class TestExecuteCreateFlow:
         )
 
         with pytest.raises(RuntimeError, match="apply failed"):
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -2041,7 +1955,7 @@ class TestExecuteCreateFlow:
             "binding write failed"
         )
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Created flow",
             flow_description="Desc",
             assistants_to_create=[
@@ -2061,7 +1975,7 @@ class TestExecuteCreateFlow:
         )
 
         with pytest.raises(RuntimeError, match="binding write failed"):
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -2090,7 +2004,7 @@ class TestExecuteEditFlow:
         mock_flow_service.update_flow.return_value = updated_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Updated",
             flow_description="Desc",
             assistants_to_update=[
@@ -2110,7 +2024,7 @@ class TestExecuteEditFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2139,7 +2053,7 @@ class TestExecuteEditFlow:
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Trimmed",
             flow_description="",
             assistants_to_delete=[
@@ -2151,7 +2065,7 @@ class TestExecuteEditFlow:
             compiled_steps=[],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2181,7 +2095,7 @@ class TestExecuteEditFlow:
         mock_flow_service.create_flow_assistant.return_value = (mock_new_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Mixed",
             flow_description="",
             assistants_to_create=[
@@ -2219,7 +2133,7 @@ class TestExecuteEditFlow:
             ],
         )
 
-        result = await execute_changeset(
+        result = await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2254,7 +2168,7 @@ class TestExecuteEditFlow:
             "binding write failed"
         )
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Updated",
             flow_description="Desc",
             assistants_to_update=[
@@ -2281,7 +2195,7 @@ class TestExecuteEditFlow:
         )
 
         with pytest.raises(RuntimeError, match="binding write failed"):
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -2305,7 +2219,7 @@ class TestExecuteEditFlow:
         mock_flow_service.update_flow.return_value = updated_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_update=[
@@ -2329,7 +2243,7 @@ class TestExecuteEditFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2352,7 +2266,7 @@ class TestExecuteEditFlow:
         mock_flow_service.update_flow.return_value = updated_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_update=[
@@ -2372,7 +2286,7 @@ class TestExecuteEditFlow:
             ],
         )
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2463,13 +2377,15 @@ class TestExecuteEditFlow:
             },
             resource_catalog=resource_catalog,
         )
-        changeset = compile_changeset(edit_result.compiled_spec, current_flow)
+        changeset = compile_flow_draft_changeset(
+            edit_result.compiled_spec, current_flow
+        )
 
         mock_flow_service = AsyncMock()
         mock_flow_service.update_flow.return_value = current_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2558,7 +2474,9 @@ class TestExecuteEditFlow:
             },
             resource_catalog=resource_catalog,
         )
-        changeset = compile_changeset(edit_result.compiled_spec, current_flow)
+        changeset = compile_flow_draft_changeset(
+            edit_result.compiled_spec, current_flow
+        )
 
         created_assistant = MagicMock()
         created_assistant.id = created_assistant_id
@@ -2567,7 +2485,7 @@ class TestExecuteEditFlow:
         mock_flow_service.update_flow.return_value = current_flow
         mock_flow_service.update_flow_assistant.return_value = (MagicMock(), [])
 
-        await execute_changeset(
+        await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=space_id,
@@ -2612,7 +2530,7 @@ class TestExecuteEditFlow:
         updated_flow = _make_flow(flow_id=flow_id, space_id=space_id)
         mock_flow_service.update_flow.return_value = updated_flow
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_update=[
@@ -2638,7 +2556,7 @@ class TestExecuteEditFlow:
         with pytest.raises(
             BadRequestException, match="Invalid knowledge base reference"
         ):
-            await execute_changeset(
+            await execute_draft_materialization(
                 changeset=changeset,
                 flow_service=mock_flow_service,
                 space_id=space_id,
@@ -2663,7 +2581,7 @@ class TestExecuteResultCounting:
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_create=[
@@ -2684,7 +2602,7 @@ class TestExecuteResultCounting:
             ],
         )
 
-        result = await execute_changeset(
+        result = await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=uuid4(),
@@ -2704,7 +2622,7 @@ class TestExecuteResultCounting:
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
         mod_assistant_id = uuid4()
 
-        changeset = FlowChangeSet(
+        changeset = FlowDraftChangeSet(
             flow_name="Test",
             flow_description="",
             assistants_to_create=[
@@ -2736,7 +2654,7 @@ class TestExecuteResultCounting:
             ],
         )
 
-        result = await execute_changeset(
+        result = await execute_draft_materialization(
             changeset=changeset,
             flow_service=mock_flow_service,
             space_id=uuid4(),

@@ -7,11 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_description_semantics import (
-    DescriptionProvenance,
-    FlowSemanticSignature,
-    description_hash,
-)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
     CompiledEditResult,
@@ -30,6 +25,11 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.application.flow_authoring_description_semantics import (
+    DescriptionProvenance,
+    FlowSemanticSignature,
+    description_hash,
+)
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,

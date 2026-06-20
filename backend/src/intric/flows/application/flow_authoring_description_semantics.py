@@ -1,8 +1,4 @@
-"""Semantic signature and description provenance for AI Builder flows.
-
-Owns the concept of "what kind of flow is this?" (entry input, terminal output)
-and "who owns the description?" (manual vs builder-managed with hash tracking).
-"""
+"""Description provenance for server-authored Flow drafts."""
 
 from __future__ import annotations
 
@@ -12,9 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from intric.flows.flow_authoring_spec import (
-    StepSpec,
-)
+from intric.flows.flow_authoring_spec import StepSpec
 
 
 class FlowSemanticSignature(BaseModel):

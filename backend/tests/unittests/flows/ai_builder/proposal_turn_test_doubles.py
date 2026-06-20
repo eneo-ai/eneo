@@ -7,16 +7,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_description_semantics import (
-    DescriptionProvenance,
-    description_hash,
-)
 from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
 from intric.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
+)
+from intric.flows.application.flow_authoring_description_semantics import (
+    DescriptionProvenance,
+    description_hash,
 )
 
 

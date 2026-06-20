@@ -143,9 +143,12 @@ class FlowDraftMaterializer:
         )
 
         if is_create:
-            await flow_service.update_flow(flow_id=flow_id, steps=final_steps)
+            materialized_flow = await flow_service.update_flow(
+                flow_id=flow_id,
+                steps=final_steps,
+            )
         else:
-            await flow_service.update_flow(
+            materialized_flow = await flow_service.update_flow(
                 flow_id=flow_id,
                 name=changeset.flow_name,
                 description=changeset.flow_description,
@@ -174,6 +177,7 @@ class FlowDraftMaterializer:
         return FlowDraftMaterializationResult(
             flow_id=flow_id,
             flow_name=flow_name,
+            draft_revision=materialized_flow.draft_revision,
             steps_created=sum(
                 1
                 for step in changeset.compiled_steps

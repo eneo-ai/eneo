@@ -130,6 +130,7 @@ class FlowDraftMaterializationProgress:
 class FlowDraftMaterializationResult:
     flow_id: UUID
     flow_name: str
+    draft_revision: int
     steps_created: int
     steps_updated: int
     steps_removed: int
@@ -139,15 +140,20 @@ def compile_flow_draft_changeset(
     spec: FlowDraftSpecCore,
     current_flow: Flow | None,
     *,
+    removed_existing_step_refs: frozenset[str] = frozenset(),
     default_transcription_model_id: UUID | None = None,
 ) -> FlowDraftChangeSet:
     existing_by_ref: dict[str, FlowStep] = {}
     if current_flow:
         for step in current_flow.steps:
             existing_by_ref[f"existing_step_{step.step_order}"] = step
+    _validate_existing_step_ref_coverage(
+        spec=spec,
+        existing_by_ref=existing_by_ref,
+        removed_existing_step_refs=removed_existing_step_refs,
+    )
 
     ref_to_order = build_ref_to_order(spec.steps)
-    referenced_existing_refs: set[str] = set()
     assistants_to_create: list[FlowDraftAssistantToCreate] = []
     assistants_to_update: list[FlowDraftAssistantToUpdate] = []
     compiled_steps: list[FlowDraftCompiledStep] = []
@@ -158,7 +164,6 @@ def compile_flow_draft_changeset(
         rewritten_spec = rewrite_step_spec_variables(step_spec, ref_to_order)
 
         if existing_step is not None:
-            referenced_existing_refs.add(step_spec.existing_step_ref or "")
             assistants_to_update.append(
                 FlowDraftAssistantToUpdate(
                     existing_step_id=existing_step.id,
@@ -190,14 +195,14 @@ def compile_flow_draft_changeset(
 
     assistants_to_delete: list[FlowDraftAssistantToDelete] = []
     if current_flow:
-        for ref, existing_step in existing_by_ref.items():
-            if ref not in referenced_existing_refs:
-                assistants_to_delete.append(
-                    FlowDraftAssistantToDelete(
-                        step_id=existing_step.id,
-                        assistant_id=existing_step.assistant_id,
-                    )
+        for ref in sorted(removed_existing_step_refs):
+            existing_step = existing_by_ref[ref]
+            assistants_to_delete.append(
+                FlowDraftAssistantToDelete(
+                    step_id=existing_step.id,
+                    assistant_id=existing_step.assistant_id,
                 )
+            )
 
     return FlowDraftChangeSet(
         flow_name=spec.flow_name,
@@ -212,6 +217,78 @@ def compile_flow_draft_changeset(
             default_transcription_model_id=default_transcription_model_id,
         ),
     )
+
+
+def _validate_existing_step_ref_coverage(
+    *,
+    spec: FlowDraftSpecCore,
+    existing_by_ref: dict[str, FlowStep],
+    removed_existing_step_refs: frozenset[str],
+) -> None:
+    preserved_refs = [
+        step.existing_step_ref
+        for step in spec.steps
+        if step.existing_step_ref is not None
+    ]
+    if not existing_by_ref:
+        if removed_existing_step_refs:
+            raise _invalid_existing_step_ref(
+                "Create flow commands cannot remove existing steps.",
+                reason="create_cannot_remove_existing_step_refs",
+                removed_refs=sorted(removed_existing_step_refs),
+            )
+        if preserved_refs:
+            raise _invalid_existing_step_ref(
+                "Create flow commands cannot reference existing steps.",
+                reason="create_cannot_use_existing_step_ref",
+                existing_step_ref=preserved_refs[0],
+            )
+        return
+
+    preserved_ref_set = set(preserved_refs)
+    duplicate_refs = sorted(
+        ref for ref in preserved_ref_set if preserved_refs.count(ref) > 1
+    )
+    if duplicate_refs:
+        raise _invalid_existing_step_ref(
+            "Each existing step can be preserved or updated at most once.",
+            reason="duplicate_existing_step_ref",
+            duplicate_refs=duplicate_refs,
+        )
+
+    current_refs = set(existing_by_ref)
+    unknown_preserved_refs = sorted(preserved_ref_set - current_refs)
+    if unknown_preserved_refs:
+        raise _invalid_existing_step_ref(
+            f"Spec references unknown existing steps: {unknown_preserved_refs}.",
+            reason="unknown_existing_step_ref",
+            unknown_refs=unknown_preserved_refs,
+            valid_refs=sorted(current_refs),
+        )
+
+    unknown_removed_refs = sorted(removed_existing_step_refs - current_refs)
+    if unknown_removed_refs:
+        raise _invalid_existing_step_ref(
+            "Removal list references unknown existing steps.",
+            reason="unknown_removed_existing_step_ref",
+            unknown_refs=unknown_removed_refs,
+        )
+
+    overlap_refs = sorted(preserved_ref_set & removed_existing_step_refs)
+    if overlap_refs:
+        raise _invalid_existing_step_ref(
+            "An existing step cannot be both preserved and removed.",
+            reason="preserved_and_removed_existing_step_ref",
+            overlap_refs=overlap_refs,
+        )
+
+    missing_refs = sorted(current_refs - preserved_ref_set - removed_existing_step_refs)
+    if missing_refs:
+        raise _invalid_existing_step_ref(
+            "Every existing step must be preserved or explicitly removed.",
+            reason="missing_existing_step_ref",
+            missing_refs=missing_refs,
+        )
 
 
 def preserve_modified_step_output_config(
@@ -284,6 +361,19 @@ def _resolve_existing_step(
             },
         )
     return resolved
+
+
+def _invalid_existing_step_ref(
+    message: str,
+    *,
+    reason: str,
+    **context: object,
+) -> BadRequestException:
+    return BadRequestException(
+        message,
+        code="invalid_existing_step_ref",
+        context={"reason": reason, **context},
+    )
 
 
 def _compile_new_step(

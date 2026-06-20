@@ -7,6 +7,7 @@ from uuid import UUID
 from intric.flows.ai_builder.ai_builder_api_models import (
     ApplyResultResponse,
 )
+from intric.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
     serialize_space_mcps,
@@ -15,22 +16,18 @@ from intric.flows.ai_builder.ai_builder_context import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
-    FlowChangeSet,
     PlanStatus,
     SessionStatus,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
+    CompiledEditResult,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderUnauthorizedException,
-)
-from intric.flows.ai_builder.ai_builder_materializer import (
-    compile_changeset,
-    execute_changeset,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ChangesetCountSummary,
@@ -42,12 +39,19 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_session_spec_validator import (
-    normalize_compiled_spec_for_session,
-    validate_compiled_spec_for_session,
-)
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
+)
+from intric.flows.application.flow_authoring_command import (
+    AIBuilderFlowAuthoringOrigin,
+    CreateFlowAuthoringCommand,
+    EditFlowAuthoringCommand,
+    FlowAuthoringCommand,
+    FlowAuthoringCommandService,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftChangeSet,
+    FlowDraftMaterializationProgress,
 )
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind as StepChangeKind,
@@ -61,12 +65,13 @@ from intric.flows.flow_resource_bindings import LocalResourceBinding, LocalResou
 
 if TYPE_CHECKING:
     from intric.flows.application.flow_service import FlowService
-    from intric.flows.domain.flow import Flow
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
 
-def _build_changeset_count_summary(changeset: FlowChangeSet) -> ChangesetCountSummary:
+def _build_changeset_count_summary(
+    changeset: FlowDraftChangeSet,
+) -> ChangesetCountSummary:
     return ChangesetCountSummary(
         steps_created=sum(
             1
@@ -113,6 +118,67 @@ def _available_local_binding_targets(
     return targets
 
 
+def _removed_existing_step_refs_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> frozenset[str]:
+    if session.target_kind != TargetKind.EDIT:
+        return frozenset()
+    compiled_edit = _compiled_edit_for_apply(session=session, plan=plan)
+    return frozenset(
+        operation.target_ref
+        for operation in compiled_edit.original_draft.operations
+        if operation.op == "remove" and operation.target_ref is not None
+    )
+
+
+def _compiled_edit_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+) -> CompiledEditResult:
+    compiled_edit = plan.edit_result.compiled_edit if plan.edit_result else None
+    if compiled_edit is not None:
+        return compiled_edit
+    raise AIBuilderBadRequestException(
+        "Approved edit plan is missing the compiled edit artifact.",
+        code=AIBuilderErrorCode.BAD_REQUEST,
+        context={
+            "plan_id": str(plan.id),
+            "session_id": str(session.id),
+            "target_kind": session.target_kind.value,
+        },
+    )
+
+
+def _expected_revision_for_apply(
+    *,
+    session: BuilderSession,
+    plan: BuilderPlan,
+    requested_expected_revision: int | None,
+) -> int | None:
+    if session.target_kind != TargetKind.EDIT:
+        return None
+    compiled_edit = _compiled_edit_for_apply(session=session, plan=plan)
+    expected_revision = compiled_edit.base_flow_revision
+    if (
+        requested_expected_revision is not None
+        and requested_expected_revision != expected_revision
+    ):
+        raise AIBuilderBadRequestException(
+            "Expected revision does not match the approved edit proposal.",
+            code=AIBuilderErrorCode.STALE_REVISION,
+            context={
+                "plan_id": str(plan.id),
+                "session_id": str(session.id),
+                "requested_expected_revision": requested_expected_revision,
+                "proposal_base_revision": expected_revision,
+            },
+        )
+    return expected_revision
+
+
 class AIBuilderPlanLifecycle:
     def __init__(
         self,
@@ -121,11 +187,13 @@ class AIBuilderPlanLifecycle:
         repo: AIBuilderRepository,
         flow_service: "FlowService",
         space_service: "SpaceService",
+        authoring_service: FlowAuthoringCommandService | None = None,
     ) -> None:
         self.user = user
         self.repo = repo
         self.flow_service = flow_service
         self.space_service = space_service
+        self.authoring_service = authoring_service or FlowAuthoringCommandService()
 
     async def approve_plan(self, *, plan_id: UUID) -> BuilderPlan:
         plan = await self._get_plan(plan_id)
@@ -208,9 +276,10 @@ class AIBuilderPlanLifecycle:
         )
 
         session = await self._require_session_creator(plan.session_id)
-        current_flow = await self._resolve_edit_flow(
+        canonical_expected_revision = _expected_revision_for_apply(
             session=session,
-            expected_revision=expected_revision,
+            plan=plan,
+            requested_expected_revision=expected_revision,
         )
         default_transcription_model_id = (
             await self._resolve_default_transcription_model_id(session.space_id)
@@ -220,59 +289,43 @@ class AIBuilderPlanLifecycle:
             plan=plan,
             default_transcription_model_id=default_transcription_model_id,
         )
-        spec = normalize_compiled_spec_for_session(
-            plan.spec,
-            target_kind=session.target_kind,
+        spec, _ = normalize_ai_builder_spec(plan.spec)
+        removed_existing_step_refs = _removed_existing_step_refs_for_apply(
+            session=session,
+            plan=plan,
         )
-        spec, _ = normalize_ai_builder_spec(spec)
         resource_bindings = await self._plan_resource_bindings_for_apply(
             session=session,
             plan=plan,
             spec=spec,
         )
-        self._require_valid_compiled_spec_for_session(
+        command = self._build_authoring_command(
             session=session,
+            plan=plan,
             spec=spec,
-            current_flow=current_flow,
+            expected_revision=canonical_expected_revision,
+            removed_existing_step_refs=removed_existing_step_refs,
+            resource_bindings=resource_bindings,
+            default_transcription_model_id=default_transcription_model_id,
         )
-
-        # Published flows cannot be mutated — require explicit unpublish first
-        if current_flow is not None and current_flow.published_version is not None:
-            raise AIBuilderBadRequestException(
-                "Flow is currently published. Unpublish the flow before applying changes.",
-                code=AIBuilderErrorCode.FLOW_IS_PUBLISHED,
-                context={
-                    "flow_id": str(current_flow.id),
-                    "published_version": current_flow.published_version,
-                },
-            )
 
         await self.repo.update_session_status_without_send_lease(
             session_id=session.id,
             tenant_id=self.user.tenant_id,
             status=SessionStatus.APPLYING,
         )
-        description_override_manual = (
-            plan.edit_result.description_override_manual
-            if plan.edit_result is not None
-            else False
-        )
+        if command.origin.kind != "ai_builder":
+            raise RuntimeError("AI Builder apply constructed a non-AI Builder command.")
+        origin_policy = AIBuilderAuthoringPolicy(command.origin)
         try:
-            changeset = compile_changeset(
-                spec,
-                current_flow,
-                default_transcription_model_id=default_transcription_model_id,
-                description_override_manual=description_override_manual,
-                ai_builder_origin={
-                    "builder_session_id": str(session.id),
-                    "builder_plan_id": str(plan.id),
-                    "builder_spec_hash": plan.spec_hash,
-                    "applied_at": datetime.now(timezone.utc).isoformat(),
-                },
+            prepared = await self.authoring_service.prepare(
+                command=command,
+                flow_service=self.flow_service,
+                origin_policy=origin_policy,
             )
         except Exception as exc:
             log_apply_failed(
-                phase="compile_changeset",
+                phase="prepare_authoring",
                 plan_id=plan.id,
                 session_id=session.id,
                 target_kind=session.target_kind,
@@ -286,30 +339,34 @@ class AIBuilderPlanLifecycle:
         materializer_progress: MaterializerProgressSnapshot | None = None
 
         def record_materializer_progress(
-            progress: MaterializerProgressSnapshot,
+            progress: FlowDraftMaterializationProgress,
         ) -> None:
             nonlocal materializer_progress
-            materializer_progress = progress
+            materializer_progress = MaterializerProgressSnapshot(
+                stage=progress.stage.value,
+                assistants_created=progress.assistants_created,
+                assistants_configured=progress.assistants_configured,
+                assistants_updated=progress.assistants_updated,
+                assistants_deleted=progress.assistants_deleted,
+                flow_created=progress.flow_created,
+                flow_updated=progress.flow_updated,
+            )
 
         try:
-            result = await execute_changeset(
-                changeset=changeset,
+            authoring_result = await self.authoring_service.apply_prepared(
+                prepared=prepared,
                 flow_service=self.flow_service,
-                space_id=session.space_id,
-                flow_id=session.flow_id,
-                expected_revision=expected_revision,
-                resource_bindings=resource_bindings,
                 progress_callback=record_materializer_progress,
             )
         except Exception as exc:
             log_apply_failed(
-                phase="execute_changeset",
+                phase="apply_authoring",
                 plan_id=plan.id,
                 session_id=session.id,
                 target_kind=session.target_kind,
                 flow_id=session.flow_id,
                 exception=exc,
-                changeset_counts=_build_changeset_count_summary(changeset),
+                changeset_counts=_build_changeset_count_summary(prepared.changeset),
                 materializer_progress=materializer_progress,
             )
             raise
@@ -329,10 +386,68 @@ class AIBuilderPlanLifecycle:
             await self.repo.update_session_flow_id(
                 session_id=session.id,
                 tenant_id=self.user.tenant_id,
-                flow_id=result.flow_id,
+                flow_id=authoring_result.flow_id,
             )
 
-        return result
+        return ApplyResultResponse(
+            flow_id=authoring_result.flow_id,
+            flow_name=authoring_result.flow_name,
+            steps_created=authoring_result.steps_created,
+            steps_updated=authoring_result.steps_updated,
+            steps_removed=authoring_result.steps_removed,
+        )
+
+    def _build_authoring_command(
+        self,
+        *,
+        session: BuilderSession,
+        plan: BuilderPlan,
+        spec: FlowDraftSpecCore,
+        expected_revision: int | None,
+        removed_existing_step_refs: frozenset[str],
+        resource_bindings: tuple[LocalResourceBinding, ...],
+        default_transcription_model_id: UUID | None,
+    ) -> FlowAuthoringCommand:
+        origin = AIBuilderFlowAuthoringOrigin(
+            session_id=session.id,
+            plan_id=plan.id,
+            spec_hash=plan.spec_hash,
+            applied_at=datetime.now(timezone.utc),
+            description_override_manual=(
+                plan.edit_result.description_override_manual
+                if plan.edit_result is not None
+                else False
+            ),
+        )
+        if session.target_kind == TargetKind.CREATE:
+            return CreateFlowAuthoringCommand(
+                space_id=session.space_id,
+                spec=spec,
+                origin=origin,
+                resource_bindings=resource_bindings,
+                default_transcription_model_id=default_transcription_model_id,
+            )
+        if session.flow_id is None:
+            raise AIBuilderBadRequestException(
+                "Edit session has no flow_id.",
+                code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
+            )
+        if expected_revision is None:
+            raise AIBuilderBadRequestException(
+                "Edit plans require an approved base Flow revision.",
+                code=AIBuilderErrorCode.STALE_REVISION,
+                context={"plan_id": str(plan.id), "session_id": str(session.id)},
+            )
+        return EditFlowAuthoringCommand(
+            space_id=session.space_id,
+            flow_id=session.flow_id,
+            expected_revision=expected_revision,
+            spec=spec,
+            removed_existing_step_refs=removed_existing_step_refs,
+            origin=origin,
+            resource_bindings=resource_bindings,
+            default_transcription_model_id=default_transcription_model_id,
+        )
 
     async def _resolve_default_transcription_model_id(
         self,
@@ -404,68 +519,6 @@ class AIBuilderPlanLifecycle:
                 context={"auth_layer": "session_creator"},
             )
         return session
-
-    async def _resolve_edit_flow(
-        self,
-        *,
-        session: BuilderSession,
-        expected_revision: int | None,
-    ) -> "Flow | None":
-        if session.target_kind != TargetKind.EDIT:
-            return None
-        if session.flow_id is None:
-            raise AIBuilderBadRequestException(
-                "Edit session has no flow_id.",
-                code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
-            )
-
-        current_flow = await self.flow_service.get_flow(session.flow_id)
-        if current_flow.space_id != session.space_id:
-            raise AIBuilderBadRequestException(
-                "Flow space does not match the AI builder session space.",
-                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
-            )
-        if (
-            expected_revision is not None
-            and current_flow.draft_revision != expected_revision
-        ):
-            raise AIBuilderBadRequestException(
-                "Flödet ändrades av en annan användare. "
-                "Dina ändringar beräknas mot den nya versionen.",
-                code=AIBuilderErrorCode.STALE_REVISION,
-            )
-        return current_flow
-
-    def _require_valid_compiled_spec_for_session(
-        self,
-        *,
-        session: BuilderSession,
-        spec: FlowDraftSpecCore,
-        current_flow: "Flow | None",
-    ) -> None:
-        valid_existing_step_refs = (
-            [f"existing_step_{step.step_order}" for step in current_flow.steps]
-            if current_flow is not None
-            else None
-        )
-        validation = validate_compiled_spec_for_session(
-            spec,
-            target_kind=session.target_kind,
-            valid_existing_step_refs=valid_existing_step_refs,
-        )
-        if not validation.errors:
-            return
-
-        first_error = validation.errors[0]
-        raise AIBuilderBadRequestException(
-            first_error.message,
-            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
-            context={
-                "step_ref": first_error.step_ref,
-                "valid_refs": valid_existing_step_refs,
-                "target_kind": session.target_kind.value,
-            },
-        )
 
     @staticmethod
     def _require_plan_status(

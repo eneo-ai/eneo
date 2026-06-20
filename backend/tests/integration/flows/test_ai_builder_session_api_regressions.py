@@ -22,7 +22,6 @@ from intric.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.ai_builder import ai_builder_plan_lifecycle
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -50,6 +49,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.flows.application.flow_authoring_command import FlowAuthoringCommandService
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -542,12 +542,12 @@ async def test_apply_plan_request_transaction_rolls_back_applying_status_on_fail
     )
     assert approve_response.status_code == 200, approve_response.text
 
-    async def fail_materialization(**_kwargs: object) -> object:
+    async def fail_materialization(self, **_kwargs: object) -> object:
         raise BadRequestException("forced apply failure", code="forced_apply_failure")
 
     monkeypatch.setattr(
-        ai_builder_plan_lifecycle,
-        "execute_changeset",
+        FlowAuthoringCommandService,
+        "apply_prepared",
         fail_materialization,
     )
 

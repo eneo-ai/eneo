@@ -59,7 +59,7 @@ ProposalRepairReason = Literal[
     "quality",
     "missing_submission_tool",
 ]
-ApplyFailurePhase = Literal["compile_changeset", "execute_changeset"]
+ApplyFailurePhase = Literal["prepare_authoring", "apply_authoring"]
 MaterializerProgressStage = Literal[
     "flow_created",
     "assistants_created",

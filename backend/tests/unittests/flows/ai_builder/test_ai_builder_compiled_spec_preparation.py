@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.application.flow_draft_materialization import (
+    compile_flow_draft_changeset,
+)
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -131,6 +134,13 @@ def _json_helper_before_text_terminal_spec(
             ),
         ],
     )
+
+
+def _assert_prepared_spec_compiles_with_shared_compiler(
+    spec: FlowDraftSpecCore,
+) -> None:
+    shared_changeset = compile_flow_draft_changeset(spec, current_flow=None)
+    assert len(shared_changeset.compiled_steps) == len(spec.steps)
 
 
 def test_prepare_compiled_spec_for_session_merges_session_validation_errors() -> None:
@@ -405,6 +415,23 @@ def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contr
     assert "Create the final DOCX file" in terminal.assistant_spec.instructions
 
 
+def test_prepared_terminal_artifact_spec_is_apply_compile_stable() -> None:
+    result = prepare_compiled_spec_for_session(
+        spec=_make_spec(),
+        target_kind=TargetKind.CREATE,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        valid_existing_step_refs=None,
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert result.validation.valid
+    _assert_prepared_spec_compiles_with_shared_compiler(result.spec)
+
+
 def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
     with (
         patch(
@@ -432,6 +459,22 @@ def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() 
         "Förbered DOCX-innehåll",
         "förbered docx-innehåll (2)",
     ]
+
+
+def test_prepared_edit_duplicate_names_are_apply_compile_stable() -> None:
+    result = prepare_compiled_spec_for_session(
+        spec=_duplicate_step_name_spec(),
+        target_kind=TargetKind.EDIT,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        valid_existing_step_refs=[],
+    )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert result.validation.valid
+    _assert_prepared_spec_compiles_with_shared_compiler(result.spec)
 
 
 def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_terminal() -> (

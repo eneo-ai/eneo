@@ -24,12 +24,12 @@ from intric.flows.domain.flow import (
     FlowStep,
 )
 from intric.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
     FlowStepGraphIssue,
     FlowStepValidationError,
     FlowStepValidationView,
     flow_step_validation_views_from_flow_steps,
 )
-from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.flow_capability_manifest import (
     FlowOutputMode,
     FlowOutputType,
@@ -77,8 +77,12 @@ _ALLOWED_FLOW_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
 _ALLOWED_FLOW_OUTPUT_MODES = set(FLOW_STEP_OUTPUT_MODE_VALUES)
 _ALLOWED_FLOW_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
 _ALLOWED_FLOW_MCP_POLICIES = set(FLOW_STEP_MCP_POLICY_VALUES)
-FLOW_AUDIO_TRANSCRIPTION_REQUIRED = "flow_audio_transcription_required"
-FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = "flow_audio_transcription_model_required"
+FLOW_AUDIO_TRANSCRIPTION_REQUIRED = (
+    FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_REQUIRED.value
+)
+FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = (
+    FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED.value
+)
 __all__ = [
     "FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED",
     "FLOW_AUDIO_TRANSCRIPTION_REQUIRED",
@@ -132,7 +136,7 @@ def collect_step_graph_issues(
     if len(step_orders) != len(set(step_orders)):
         return [
             _bad_request_issue(
-                code="duplicate_step_order",
+                code=FlowGraphIssueCode.DUPLICATE_STEP_ORDER,
                 message="Duplicate step_order detected.",
             )
         ]
@@ -141,7 +145,7 @@ def collect_step_graph_issues(
     if step_orders != expected_orders:
         return [
             _bad_request_issue(
-                code="step_order_not_contiguous",
+                code=FlowGraphIssueCode.STEP_ORDER_NOT_CONTIGUOUS,
                 message="Step order must be contiguous and start at 1.",
             )
         ]
@@ -157,7 +161,7 @@ def collect_step_graph_issues(
         if normalized_name in normalized_names:
             issues.append(
                 _bad_request_issue(
-                    code="duplicate_step_name",
+                    code=FlowGraphIssueCode.DUPLICATE_STEP_NAME,
                     message="Step names must be unique (case-insensitive) for publishable flows.",
                     step_order=step.step_order,
                 )
@@ -179,23 +183,31 @@ def collect_step_graph_issues(
         seen.add(step.step_order)
         issue_count_before_enum = len(issues)
         _capture_flow_step_validation(
-            issues, "flow_step_invalid", lambda: _validate_step_enum_values(step)
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_step_enum_values(step),
         )
         if len(issues) > issue_count_before_enum:
             continue
         _capture_flow_step_validation(
-            issues, "flow_step_invalid", lambda: _validate_step_timeout(step)
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_step_timeout(step),
         )
         _capture_flow_step_validation(
-            issues, "flow_step_invalid", lambda: _validate_review_policy(step)
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_review_policy(step),
         )
         _capture_flow_step_validation(
-            issues, "flow_step_invalid", lambda: _validate_citation_mode(step)
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_citation_mode(step),
         )
         if step.input_source in ("http_get", "http_post"):
             _capture_bad_request_validation(
                 issues,
-                "flow_step_invalid",
+                FlowGraphIssueCode.FLOW_STEP_INVALID,
                 step_order=step.step_order,
                 validate=lambda: validate_http_input_config(step=step),
             )
@@ -203,19 +215,21 @@ def collect_step_graph_issues(
             if step.step_order != terminal_step_order:
                 issues.append(
                     _flow_step_issue(
-                        code="flow_http_post_output_must_be_terminal",
+                        code=FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL,
                         message=(
                             f"Step {step.step_order}: output_mode 'http_post' is only supported "
                             "on the last step."
                         ),
                         step_order=step.step_order,
-                        exception_code="flow_http_post_output_must_be_terminal",
+                        exception_code=(
+                            FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL.value
+                        ),
                     )
                 )
             else:
                 _capture_bad_request_validation(
                     issues,
-                    "flow_step_invalid",
+                    FlowGraphIssueCode.FLOW_STEP_INVALID,
                     step_order=step.step_order,
                     validate=lambda: validate_http_output_config(step=step),
                 )
@@ -228,7 +242,7 @@ def collect_step_graph_issues(
         if transcribe_only_error is not None:
             issues.append(
                 _flow_step_issue(
-                    code="transcribe_only_violation",
+                    code=FlowGraphIssueCode.TRANSCRIBE_ONLY_VIOLATION,
                     message=transcribe_only_error,
                     step_order=step.step_order,
                 )
@@ -236,9 +250,9 @@ def collect_step_graph_issues(
         if step.output_mode == "template_fill":
             _capture_flow_step_validation(
                 issues,
-                "template_fill_requires_docx"
+                FlowGraphIssueCode.TEMPLATE_FILL_REQUIRES_DOCX
                 if step.output_type != "docx"
-                else "flow_step_invalid",
+                else FlowGraphIssueCode.FLOW_STEP_INVALID,
                 lambda: validate_template_fill_output_config(
                     step=step,
                     available_orders=seen,
@@ -249,7 +263,7 @@ def collect_step_graph_issues(
         if input_policy and not input_policy.supported:
             issues.append(
                 _flow_step_issue(
-                    code="unsupported_input_type",
+                    code=FlowGraphIssueCode.UNSUPPORTED_INPUT_TYPE,
                     message=(
                         f"Step {step.step_order}: {_enum_value(step.input_type)} is not yet supported."
                     ),
@@ -263,7 +277,7 @@ def collect_step_graph_issues(
         ):
             issues.append(
                 _flow_step_issue(
-                    code="input_contract_type_mismatch",
+                    code=FlowGraphIssueCode.INPUT_CONTRACT_TYPE_MISMATCH,
                     message=(
                         f"Step {step.step_order}: input_contract is not supported for "
                         f"input_type '{_enum_value(step.input_type)}'."
@@ -274,7 +288,7 @@ def collect_step_graph_issues(
         if step.input_contract is not None:
             input_contract_valid = _capture_contract_syntax(
                 issues,
-                code="invalid_input_contract_schema",
+                code=FlowGraphIssueCode.INVALID_INPUT_CONTRACT_SCHEMA,
                 contract=step.input_contract,
                 label=f"Step {step.step_order} input_contract",
                 step_order=step.step_order,
@@ -282,18 +296,18 @@ def collect_step_graph_issues(
             if input_contract_valid:
                 _capture_flow_step_validation(
                     issues,
-                    "flow_step_invalid",
+                    FlowGraphIssueCode.FLOW_STEP_INVALID,
                     lambda: _validate_input_contract_binding_compatibility(step=step),
                 )
                 _capture_flow_step_validation(
                     issues,
-                    "input_contract_source_mismatch",
+                    FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH,
                     lambda: _validate_input_contract_source_compatibility(step=step),
                 )
         if step.output_contract is not None:
             output_contract_valid = _capture_contract_syntax(
                 issues,
-                code="invalid_output_contract_schema",
+                code=FlowGraphIssueCode.INVALID_OUTPUT_CONTRACT_SCHEMA,
                 contract=step.output_contract,
                 label=f"Step {step.step_order} output_contract",
                 step_order=step.step_order,
@@ -310,12 +324,12 @@ def collect_step_graph_issues(
             if require_complete_template_fill_config:
                 _capture_flow_step_validation(
                     issues,
-                    "flow_step_invalid",
+                    FlowGraphIssueCode.FLOW_STEP_INVALID,
                     lambda: _validate_supported_input_binding_keys(step=step),
                 )
             _capture_flow_step_validation(
                 issues,
-                "flow_step_invalid",
+                FlowGraphIssueCode.FLOW_STEP_INVALID,
                 lambda: _validate_binding_references(
                     input_bindings=input_bindings,
                     current_step_order=step.step_order,
@@ -324,18 +338,18 @@ def collect_step_graph_issues(
             )
         _capture_flow_step_validation(
             issues,
-            "flow_step_invalid",
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
             lambda: _validate_runtime_input_publish_rules(step=step),
         )
 
     _capture_bad_request_validation(
         issues,
-        "audio_document_transcript_chain_invalid",
+        FlowGraphIssueCode.AUDIO_DOCUMENT_TRANSCRIPT_CHAIN_INVALID,
         validate=lambda: _validate_audio_document_transcript_chain(steps=sorted_steps),
     )
     _capture_bad_request_validation(
         issues,
-        "flow_audio_transcription_invalid",
+        FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_INVALID,
         validate=lambda: _validate_audio_transcription_settings(
             steps=sorted_steps,
             metadata_json=metadata_json,
@@ -361,7 +375,7 @@ def _to_exception(issue: FlowStepGraphIssue) -> BadRequestException:
 
 def _bad_request_issue(
     *,
-    code: str,
+    code: FlowGraphIssueCode,
     message: str,
     step_order: int | None = None,
     exception_code: str | None = None,
@@ -379,7 +393,7 @@ def _bad_request_issue(
 
 def _flow_step_issue(
     *,
-    code: str,
+    code: FlowGraphIssueCode,
     message: str,
     step_order: int,
     exception_code: str | None = None,
@@ -397,7 +411,7 @@ def _flow_step_issue(
 
 def _capture_flow_step_validation(
     issues: list[FlowStepGraphIssue],
-    code: str,
+    code: FlowGraphIssueCode,
     validate: Callable[[], None],
 ) -> None:
     try:
@@ -405,7 +419,7 @@ def _capture_flow_step_validation(
     except FlowStepValidationError as exc:
         issues.append(
             _flow_step_issue(
-                code=exc.code or code,
+                code=_issue_code_from_exception_code(exc.code, default=code),
                 message=str(exc),
                 step_order=exc.step_order,
                 exception_code=exc.code,
@@ -416,7 +430,7 @@ def _capture_flow_step_validation(
 
 def _capture_bad_request_validation(
     issues: list[FlowStepGraphIssue],
-    code: str,
+    code: FlowGraphIssueCode,
     *,
     validate: Callable[[], None],
     step_order: int | None = None,
@@ -426,7 +440,7 @@ def _capture_bad_request_validation(
     except FlowStepValidationError as exc:
         issues.append(
             _flow_step_issue(
-                code=exc.code or code,
+                code=_issue_code_from_exception_code(exc.code, default=code),
                 message=str(exc),
                 step_order=exc.step_order,
                 exception_code=exc.code,
@@ -436,7 +450,7 @@ def _capture_bad_request_validation(
     except BadRequestException as exc:
         issues.append(
             _bad_request_issue(
-                code=exc.code or code,
+                code=_issue_code_from_exception_code(exc.code, default=code),
                 message=str(exc),
                 step_order=step_order,
                 exception_code=exc.code,
@@ -448,7 +462,7 @@ def _capture_bad_request_validation(
 def _capture_contract_syntax(
     issues: list[FlowStepGraphIssue],
     *,
-    code: str,
+    code: FlowGraphIssueCode,
     contract: FlowPersistedJsonObject,
     label: str,
     step_order: int,
@@ -467,10 +481,23 @@ def _capture_contract_syntax(
     return True
 
 
-def _output_contract_issue_code(step: FlowStepValidationView) -> str:
+def _output_contract_issue_code(step: FlowStepValidationView) -> FlowGraphIssueCode:
     if step.output_mode == "template_fill":
-        return "output_contract_template_fill_incompatible"
-    return "output_contract_type_mismatch"
+        return FlowGraphIssueCode.OUTPUT_CONTRACT_TEMPLATE_FILL_INCOMPATIBLE
+    return FlowGraphIssueCode.OUTPUT_CONTRACT_TYPE_MISMATCH
+
+
+def _issue_code_from_exception_code(
+    value: str | None,
+    *,
+    default: FlowGraphIssueCode,
+) -> FlowGraphIssueCode:
+    if value is None:
+        return default
+    try:
+        return FlowGraphIssueCode(value)
+    except ValueError:
+        return default
 
 
 def _validate_step_enum_values(step: FlowStepValidationView) -> None:
@@ -613,7 +640,7 @@ def _validate_input_contract_binding_compatibility(
         "input_bindings.question because the question binding supplies the "
         "complete rendered step input. Remove input_contract or remove "
         "input_bindings.question.",
-        code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+        code=FlowGraphIssueCode.FLOW_INPUT_CONTRACT_INAPPLICABLE.value,
         context={
             "step_order": step.step_order,
             "field": "input_contract",
