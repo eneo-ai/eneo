@@ -317,17 +317,6 @@ def _document_delivery_mode_for_existing_step(
     return "not_applicable"
 
 
-def merge_assistant_specs(
-    existing: AssistantSpec, patch: AssistantSpec
-) -> AssistantSpec:
-    return merge_assistant_spec_patch(
-        existing,
-        AssistantSpecPatch.model_validate(
-            patch.model_dump(mode="python", exclude_unset=True)
-        ),
-    )
-
-
 def merge_assistant_spec_patch(
     existing: AssistantSpec,
     patch: AssistantSpecPatch,
@@ -462,5 +451,4 @@ __all__ = [
     "flow_step_to_authoring_spec",
     "flow_steps_to_authoring_specs",
     "merge_assistant_spec_patch",
-    "merge_assistant_specs",
 ]
