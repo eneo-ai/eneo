@@ -8,9 +8,7 @@ from intric.flows.ai_builder.ai_builder_create_compiler import (
 )
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
-    CreateStepDraft,
     FlowCreateDraft,
-    StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
     parse_outline_flow_arguments,
@@ -28,6 +26,10 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 )
 from intric.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
 from intric.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -189,7 +191,7 @@ def test_intermediate_form_field_use_flows_through_structured_previous_field() -
         plan_rationale="Extract a scored intermediate result before writing.",
         form_fields=[_form_field(variable_name="case_id", label="Case ID")],
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Score case",
                 instructions="Score the case using the runtime identifier.",
                 input_source="flow_input",
@@ -204,7 +206,7 @@ def test_intermediate_form_field_use_flows_through_structured_previous_field() -
                     )
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Write assessment",
                 instructions="Write the assessment from the structured score.",
                 input_source="previous_step",

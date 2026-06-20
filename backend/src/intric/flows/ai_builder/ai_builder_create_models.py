@@ -8,9 +8,6 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFie
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import (
-    StructuredFieldDraft as _StructuredFieldDraft,
-)
 from intric.flows.flow_authoring_name import normalize_flow_name
 
 
@@ -102,7 +99,3 @@ class FlowCreateDraft(BaseModel):
             normalized.append(candidate)
             seen.add(candidate)
         return normalized
-
-
-CreateStepDraft = NewStepDraft
-StructuredFieldDraft = _StructuredFieldDraft

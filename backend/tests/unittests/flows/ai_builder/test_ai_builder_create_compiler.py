@@ -24,9 +24,7 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
 )
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
-    CreateStepDraft,
     FlowCreateDraft,
-    StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
     MAX_OUTLINE_STEPS,
@@ -40,7 +38,10 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
     builder_output_type_values,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -320,7 +321,7 @@ def _source_facts_fields_snapshot() -> list[dict[str, object]]:
 @dataclass(frozen=True, slots=True)
 class _CreateCompilerArchetypeCase:
     pattern_id: str
-    steps: tuple[CreateStepDraft, ...]
+    steps: tuple[NewStepDraft, ...]
     expected_output_modes: tuple[str, ...]
     form_fields: tuple[CreateFormFieldDraft, ...] = ()
     expected_mcp_server_refs_by_step: tuple[tuple[str, ...], ...] | None = None
@@ -330,7 +331,7 @@ class _CreateCompilerArchetypeCase:
 def _case(
     *,
     pattern_id: str,
-    steps: tuple[CreateStepDraft, ...],
+    steps: tuple[NewStepDraft, ...],
     expected_output_modes: tuple[str, ...],
     form_fields: tuple[CreateFormFieldDraft, ...] = (),
     expected_mcp_server_refs_by_step: tuple[tuple[str, ...], ...] | None = None,
@@ -350,7 +351,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="summarize_text",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Sammanfatta texten",
                 instructions="Skriv en kort sammanfattning av texten.",
                 input_source=InputSource.FLOW_INPUT,
@@ -363,7 +364,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="extract_structured_fields",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera fält",
                 instructions="Extrahera namn och datum från texten.",
                 input_source=InputSource.FLOW_INPUT,
@@ -380,7 +381,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="json_to_structured_payload",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transformera JSON",
                 instructions="Normalisera inkommande JSON till det önskade schemat.",
                 input_source=InputSource.FLOW_INPUT,
@@ -397,7 +398,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="json_to_text_summary",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Sammanfatta JSON",
                 instructions="Skriv en läsbar sammanfattning av JSON-payloaden.",
                 input_source=InputSource.FLOW_INPUT,
@@ -410,7 +411,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="json_to_artifact_report",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa JSON-baserad rapport",
                 instructions="Skapa en DOCX-rapport från inkommande JSON.",
                 input_source=InputSource.FLOW_INPUT,
@@ -423,7 +424,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="document_to_structured_report",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Rapport från dokument",
                 instructions="Sammanfatta dokumentet som en strukturerad rapport.",
                 input_source=InputSource.FLOW_INPUT,
@@ -437,7 +438,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="document_to_docx_template",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Läs in dokument",
                 instructions="Läs in dokumentet och extrahera nyckelvärden.",
                 input_source=InputSource.FLOW_INPUT,
@@ -448,14 +449,14 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                     _field("reference_id", "string", description="Referensnummer."),
                 ),
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv brödtext",
                 instructions="Förbered den text som ska fyllas i mallen.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Fyll DOCX-mall",
                 instructions="Fyll i DOCX-mallen med brödtexten.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -469,7 +470,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="document_to_pdf_report",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="PDF-rapport",
                 instructions="Producera en strukturerad PDF-rapport.",
                 input_source=InputSource.FLOW_INPUT,
@@ -483,7 +484,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="audio_transcription",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera ljud",
                 instructions="Transkribera inspelningen till text.",
                 input_source=InputSource.FLOW_INPUT,
@@ -497,7 +498,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="audio_to_artifact_report",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera ljud",
                 instructions="Transkribera inspelningen till text.",
                 input_source=InputSource.FLOW_INPUT,
@@ -505,7 +506,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 output_type=OutputType.TEXT,
                 runtime_upload=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa PDF-rapport",
                 instructions="Skapa en PDF-rapport från transkriptionen.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -518,7 +519,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="text_to_artifact_report",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa DOCX-rapport",
                 instructions="Skapa en DOCX-rapport från textunderlaget.",
                 input_source=InputSource.FLOW_INPUT,
@@ -531,7 +532,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="multi_step_quality_chain",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera struktur",
                 instructions="Extrahera strukturerade fält från dokumentet.",
                 input_source=InputSource.FLOW_INPUT,
@@ -542,21 +543,21 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                     _field("topic", "string", description="Huvudämnet i dokumentet."),
                 ),
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv utkast",
                 instructions="Skapa ett första utkast baserat på extraktionen.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Granska kvalitet",
                 instructions="Granska utkastet och föreslå förbättringar.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Slutresultat",
                 instructions="Producera den slutgiltiga texten.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -574,7 +575,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="comparison",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Jämför dokument",
                 instructions="Jämför dokumentet mot de angivna referenserna.",
                 input_source=InputSource.FLOW_INPUT,
@@ -588,7 +589,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="sectioned_form_intake",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Fånga sektioner",
                 instructions="Ta in rubriktext för varje angiven sektion.",
                 input_source=InputSource.FLOW_INPUT,
@@ -596,7 +597,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 output_type=OutputType.TEXT,
                 uses_form_fields=("bakgrund", "analys"),
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Komponera resultat",
                 instructions="Sammanställ sektionerna till ett slutresultat.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -623,7 +624,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="form_field_runtime_inputs",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Generera svar",
                 instructions="Svara med utgångspunkt från formulärfälten.",
                 input_source=InputSource.FLOW_INPUT,
@@ -650,7 +651,7 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="mcp_tool_step",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Hämta lagerstatus",
                 instructions="Använd lagerverktyget för att hämta aktuell produktdata.",
                 input_source=InputSource.FLOW_INPUT,
@@ -667,21 +668,21 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
     _case(
         pattern_id="source_parallel_extractions_to_final_text",
         steps=(
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera produktdata",
                 instructions="Plocka ut produktrelaterade fält ur underlaget.",
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,
                 output_type=OutputType.JSON,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera kunddata",
                 instructions="Plocka ut kundrelaterade fält ur samma underlag.",
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.TEXT,
                 output_type=OutputType.JSON,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv sammanfattning",
                 instructions="Sammanfatta produkten och kundprofilen.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -773,7 +774,7 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
             ),
         ],
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera strukturerad data",
                 instructions="Extrahera viktiga datapunkter.",
                 input_source="flow_input",
@@ -807,7 +808,7 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
                     ),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Grounded sammanfattning",
                 instructions="Skriv en grounded sammanfattning med källhänvisningar.",
                 input_source="previous_step",
@@ -884,7 +885,7 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
             )
         ],
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera risker",
                 instructions="Extrahera risker och rekommendationer.",
                 input_source="flow_input",
@@ -906,7 +907,7 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
                     ),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv slutrapport",
                 instructions="Skriv slutrapport med specifika datapunkter.",
                 input_source="previous_step",
@@ -947,7 +948,7 @@ def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent
         flow_name="Protokoll",
         plan_rationale="Kombinera transkription och metadata.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Strukturera transkription",
                 instructions="Strukturera transkriptionen.",
                 input_source="flow_input",
@@ -961,7 +962,7 @@ def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent
                     )
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Identifiera metadata",
                 instructions="Identifiera metadata.",
                 input_source="previous_step",
@@ -971,7 +972,7 @@ def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent
                     _field("meeting_title", "string", description="Titel."),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa protokoll",
                 instructions="Skapa protokoll från metadata och transkription.",
                 input_source="previous_step",
@@ -1005,7 +1006,7 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
         flow_name="Protokoll",
         plan_rationale="Kombinera källtext och metadata.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera ljud",
                 instructions="Transkribera ljud.",
                 input_source="flow_input",
@@ -1014,7 +1015,7 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
                 runtime_upload=True,
                 runtime_required=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Identifiera metadata",
                 instructions="Identifiera metadata.",
                 input_source="previous_step",
@@ -1024,7 +1025,7 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
                     _field("meeting_title", "string", description="Titel."),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa protokoll",
                 instructions="Skapa protokoll från metadata och källtext.",
                 input_source="previous_step",
@@ -1057,7 +1058,7 @@ def test_compile_create_draft_all_previous_owns_source_over_previous_field_refs(
         flow_name="Samlad analys",
         plan_rationale="Ett brett syntessteg ska använda implicit fan-in.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera fakta",
                 instructions="Extrahera fakta.",
                 input_source="flow_input",
@@ -1069,14 +1070,14 @@ def test_compile_create_draft_all_previous_owns_source_over_previous_field_refs(
                     )
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Bedöm fakta",
                 instructions="Bedöm fakta.",
                 input_source="previous_step",
                 input_type="json",
                 output_type="text",
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Jämför allt",
                 instructions="Jämför allt tidigare arbete.",
                 input_source="all_previous_steps",
@@ -1112,7 +1113,7 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
         flow_name="Transkribera ljud",
         plan_rationale="Starta med transkribering.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera",
                 instructions="Transkribera ljudfilen ordagrant.",
                 input_source="flow_input",
@@ -1140,7 +1141,7 @@ def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
         flow_name="Granska transkribering",
         plan_rationale="Låt användaren granska transkriberingen innan analys.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera",
                 instructions="Transkribera ljudfilen.",
                 input_source="flow_input",
@@ -1775,7 +1776,7 @@ def test_compile_create_draft_derives_template_fill_for_docx_templates() -> None
         flow_name="Mallstyrd rapport",
         plan_rationale="Använd DOCX-mall för sista steget.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Generera rapport",
                 instructions="Fyll DOCX-mallen med det strukturerade innehållet.",
                 input_source="flow_input",
@@ -1796,7 +1797,7 @@ def test_validate_create_draft_rejects_template_fill_on_non_docx() -> None:
         flow_name="Ogiltig mall",
         plan_rationale="Ogiltig kombination.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="PDF-steg",
                 instructions="Generera PDF med mall.",
                 input_source="flow_input",
@@ -1820,7 +1821,7 @@ def test_validate_create_draft_rejects_unknown_previous_field_reference() -> Non
         flow_name="Ogiltig fältreferens",
         plan_rationale="Testar fältvalidering.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera risker",
                 instructions="Extrahera risker.",
                 input_source="flow_input",
@@ -1829,7 +1830,7 @@ def test_validate_create_draft_rejects_unknown_previous_field_reference() -> Non
                 runtime_upload=True,
                 output_fields=[_field("sammanfattning", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Sammanfatta",
                 instructions="Skriv sammanfattning.",
                 input_source="previous_step",
@@ -1853,14 +1854,14 @@ def test_validate_create_draft_rejects_non_json_previous_field_source() -> None:
         flow_name="Ogiltig fältkälla",
         plan_rationale="Testar icke-json källa.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv text",
                 instructions="Skriv text.",
                 input_source="flow_input",
                 input_type="text",
                 output_type="text",
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Sammanfatta",
                 instructions="Sammanfatta.",
                 input_source="previous_step",
@@ -1885,7 +1886,7 @@ def test_validate_create_draft_rejects_non_text_previous_output_source() -> None
         flow_name="Ogiltig textkälla",
         plan_rationale="Testar icke-text källa.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera fält",
                 instructions="Extrahera fält.",
                 input_source="flow_input",
@@ -1893,7 +1894,7 @@ def test_validate_create_draft_rejects_non_text_previous_output_source() -> None
                 output_type="json",
                 output_fields=[_field("titel", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv rapport",
                 instructions="Skriv rapport.",
                 input_source="previous_step",
@@ -1920,7 +1921,7 @@ def test_validate_create_draft_rejects_file_flow_input_without_runtime_upload() 
         flow_name="Ogiltig filindata",
         plan_rationale="Testar runtime upload-krav.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Analysera dokument",
                 instructions="Analysera dokumentet.",
                 input_source="flow_input",
@@ -1946,7 +1947,7 @@ def test_validate_create_draft_rejects_future_previous_field_source() -> None:
         flow_name="Ogiltig stegref",
         plan_rationale="Testar framtida stegref.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Steg 1",
                 instructions="Steg 1.",
                 input_source="flow_input",
@@ -1955,7 +1956,7 @@ def test_validate_create_draft_rejects_future_previous_field_source() -> None:
                 runtime_upload=True,
                 output_fields=[_field("titel", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Steg 2",
                 instructions="Steg 2.",
                 input_source="previous_step",
@@ -1980,7 +1981,7 @@ def test_structured_field_depth_above_three_is_rejected() -> None:
             flow_name="För djup struktur",
             plan_rationale="Test",
             steps=[
-                CreateStepDraft(
+                NewStepDraft(
                     name="Extrahera",
                     instructions="Extrahera struktur.",
                     input_source="flow_input",
@@ -2017,7 +2018,7 @@ def test_canonicalize_create_draft_resources_resolves_names_to_refs() -> None:
         flow_name="Resursupplösning",
         plan_rationale="Test",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Analys",
                 instructions="Analysera underlaget.",
                 input_source="flow_input",
@@ -4953,7 +4954,6 @@ def test_auto_bind_targeted_underlag_rewrites_aggregate_but_not_compare() -> Non
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5017,7 +5017,6 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5054,7 +5053,6 @@ def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() ->
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
     from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
@@ -5103,7 +5101,6 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
     from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
@@ -5174,7 +5171,6 @@ def test_auto_bind_targeted_underlag_rewrites_nonterminal_all_previous_composer(
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5249,7 +5245,6 @@ def test_auto_bind_targeted_underlag_rewrites_multiple_eligible_composers() -> N
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5315,7 +5310,6 @@ def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() ->
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5364,7 +5358,6 @@ def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() ->
     from intric.flows.ai_builder.ai_builder_framework_policy import (
         OutputIntentResolution,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
     from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
         PlannerPatternSignals,
     )
@@ -5465,7 +5458,6 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5541,7 +5533,6 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
         TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5670,7 +5661,7 @@ def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer
         flow_name="Förbunden rapport",
         plan_rationale="LLM-authored targeted refs should normalize to text input.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera produktdata",
                 instructions="x",
                 input_source="flow_input",
@@ -5678,7 +5669,7 @@ def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer
                 output_type="json",
                 output_fields=[_field("product_name", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera kunddata",
                 instructions="x",
                 input_source="previous_step",
@@ -5686,7 +5677,7 @@ def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer
                 output_type="json",
                 output_fields=[_field("customer_segment", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv sammanfattning",
                 instructions="x",
                 input_source="previous_step",
@@ -5729,14 +5720,14 @@ def test_normalize_create_draft_mechanics_treats_previous_output_text_composer_a
         flow_name="Förbunden textsammanfattning",
         plan_rationale="LLM-authored output refs should normalize to text input.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Förbered text",
                 instructions="x",
                 input_source="flow_input",
                 input_type="text",
                 output_type="text",
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera struktur",
                 instructions="x",
                 input_source="previous_step",
@@ -5744,7 +5735,7 @@ def test_normalize_create_draft_mechanics_treats_previous_output_text_composer_a
                 output_type="json",
                 output_fields=[_field("summary", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv sluttext",
                 instructions="x",
                 input_source="previous_step",
@@ -5776,7 +5767,6 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     steps_before = [
         NewStepDraft(
@@ -5969,7 +5959,7 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
         flow_name="Utvecklingsärende från Word",
         plan_rationale="Skapar ett Word-dokument med flera avsnitt.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Läs underlag",
                 instructions="Läs hela Word-dokumentet.",
                 input_source=InputSource.FLOW_INPUT,
@@ -5977,7 +5967,7 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
                 output_type=OutputType.TEXT,
                 runtime_upload=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera centrala fakta ur underlaget",
                 instructions="Extrahera återanvändbara fält för alla avsnitt.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6001,21 +5991,21 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
                     ),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv Problem och nuläge",
                 instructions="Beskriv nuläge och problem.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv Lösningsförslag och nyläge",
                 instructions="Beskriv lösningsförslag och nyläge.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv Plan för nyttorealisering",
                 instructions="Skriv plan för nyttorealisering.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6083,7 +6073,7 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
         flow_name="Dokument till verksamhetsunderlag",
         plan_rationale="Skriver flera rubriker i ett Word-dokument.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera centrala fakta",
                 instructions="Extrahera återanvändbara fält för hela dokumentet.",
                 input_source=InputSource.FLOW_INPUT,
@@ -6092,7 +6082,7 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
                 runtime_upload=True,
                 output_fields=extraction_fields,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv verksamhetsavsnitt",
                 instructions=(
                     "Skriv alla avsnitt och alla rubriker som användaren "
@@ -6102,14 +6092,14 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Sammanställ slutligt Word-dokument",
                 instructions="Sammanställ slutligt Word-dokument.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa DOCX",
                 instructions="Skapa DOCX från föregående text.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6161,7 +6151,7 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
         flow_name="Analys och utkast till verksamhetsunderlag",
         plan_rationale="Skriver flera avsnitt från samma Word-underlag.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera centrala fakta",
                 instructions="Extrahera återanvändbara fält för hela dokumentet.",
                 input_source=InputSource.FLOW_INPUT,
@@ -6170,7 +6160,7 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
                 runtime_upload=True,
                 output_fields=extraction_fields,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv problem och lösningsförslag",
                 instructions=(
                     "Skriv avsnittet utifrån hela det ursprungliga dokumentet. "
@@ -6180,7 +6170,7 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Beskriv resurser och tidplan",
                 instructions=(
                     "Skriv avsnittet utifrån hela det ursprungliga dokumentet. "
@@ -6190,7 +6180,7 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Förbered DOCX-innehåll",
                 instructions="Sammanställ slutligt Word-dokument.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6239,7 +6229,7 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
         flow_name="Verksamhetsunderlag",
         plan_rationale="Skriver avsnitt och exporterar senare till DOCX.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera centrala fakta",
                 instructions="Extrahera återanvändbara fält.",
                 input_source=InputSource.FLOW_INPUT,
@@ -6248,7 +6238,7 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
                 runtime_upload=True,
                 output_fields=extraction_fields,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv nuläge",
                 instructions=(
                     "Beskriv nuläge och problem. Dokumentet exporteras till "
@@ -6258,7 +6248,7 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv lösningsförslag",
                 instructions=(
                     "Beskriv lösningsförslag och nyläge. Slutlig granskning "
@@ -6268,7 +6258,7 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Förbered DOCX-innehåll",
                 instructions="Sammanställ slutligt Word-dokument.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6299,7 +6289,7 @@ def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> No
         flow_name="Verksamhetsunderlag",
         plan_rationale="Skriver flera avsnitt från ett dokument.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera centrala fakta",
                 instructions="Extrahera återanvändbara fält.",
                 input_source=InputSource.FLOW_INPUT,
@@ -6311,14 +6301,14 @@ def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> No
                     _field("tidplan", "string", description="Planerad tidplan."),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv oklar specialrubrik",
                 instructions="Skriv ett kort avsnitt utan tydlig koppling.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv ännu en specialrubrik",
                 instructions="Skriv ett annat kort avsnitt utan tydlig koppling.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6343,7 +6333,7 @@ def test_compile_create_draft_underlag_matching_handles_swedish_inflections() ->
         flow_name="Verksamhetsunderlag",
         plan_rationale="Skriver avsnitt från ett dokument.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera centrala fakta",
                 instructions="Extrahera återanvändbara fält.",
                 input_source=InputSource.FLOW_INPUT,
@@ -6365,21 +6355,21 @@ def test_compile_create_draft_underlag_matching_handles_swedish_inflections() ->
                     ),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Utarbeta tidsplanen",
                 instructions="Skriv avsnittet om den planerade tidsplanen.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Beskriv resursbehovet",
                 instructions="Beskriv resurserna och resursbehovet.",
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_type=OutputType.TEXT,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Beskriv lösningsförslaget",
                 instructions="Beskriv lösningsförslaget och nyläget.",
                 input_source=InputSource.PREVIOUS_STEP,
@@ -6753,7 +6743,7 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
             flow_name="Mötesrapport från ljud",
             plan_rationale="Transkribera ljud och skapa rapport.",
             steps=[
-                CreateStepDraft(
+                NewStepDraft(
                     name="Transkribera ljud",
                     instructions="Transkribera mötesljud.",
                     input_source="flow_input",
@@ -6762,7 +6752,7 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
                     runtime_upload=True,
                     runtime_required=True,
                 ),
-                CreateStepDraft(
+                NewStepDraft(
                     name="Etablera möteskontext",
                     instructions="Skapa möteskontext.",
                     input_source="previous_step",
@@ -6770,7 +6760,7 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
                     output_type="json",
                     output_fields=[_field("meeting_context", "string")],
                 ),
-                CreateStepDraft(
+                NewStepDraft(
                     name="Analysera beslut",
                     instructions="Extrahera beslut.",
                     input_source="previous_step",
@@ -6778,7 +6768,7 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
                     output_type="json",
                     output_fields=[_field("decisions", "string")],
                 ),
-                CreateStepDraft(
+                NewStepDraft(
                     name="Skriv rapport",
                     instructions="Skriv rapporten från underlaget.",
                     input_source="previous_step",
@@ -6807,7 +6797,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
         flow_name="Enkel sammanfattning",
         plan_rationale="Sammanfatta text.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Sammanfatta",
                 instructions="Sammanfatta texten.",
                 input_source="flow_input",
@@ -6820,7 +6810,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
         flow_name="Flera fält",
         plan_rationale="Sammanfatta flera JSON-priorer.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera a",
                 instructions="x",
                 input_source="flow_input",
@@ -6828,7 +6818,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
                 output_type="json",
                 output_fields=[_field("a", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera b",
                 instructions="x",
                 input_source="previous_step",
@@ -6836,7 +6826,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
                 output_type="json",
                 output_fields=[_field("b", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv rapport",
                 instructions="x",
                 input_source="previous_step",
@@ -6849,7 +6839,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
         flow_name="Mötesrapport från ljud",
         plan_rationale="Transkribera ljud och skriv rapport.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera mötesljud",
                 instructions="Transkribera mötesljudet.",
                 input_source="flow_input",
@@ -6857,7 +6847,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
                 output_type="text",
                 runtime_upload=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extrahera möteskontext",
                 instructions="Extrahera kontext.",
                 input_source="previous_step",
@@ -6865,7 +6855,7 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
                 output_type="json",
                 output_fields=[_field("meeting_context", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv rapport",
                 instructions="Skriv rapport.",
                 input_source="previous_step",
@@ -7046,7 +7036,7 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
         flow_name="Mötesprotokoll från ljud till Word",
         plan_rationale="Transkribera ljud och skapa DOCX.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera ljud",
                 instructions="Transkribera uppladdat ljud.",
                 input_source="flow_input",
@@ -7055,7 +7045,7 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
                 runtime_upload=True,
                 runtime_required=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Strukturera transkription",
                 instructions="Strukturera transkriptionen.",
                 input_source="previous_step",
@@ -7063,7 +7053,7 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
                 output_type="json",
                 output_fields=[_field("transcription_text", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Identifiera mötesmetadata",
                 instructions="Identifiera mötestitel.",
                 input_source="previous_step",
@@ -7071,7 +7061,7 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
                 output_type="json",
                 output_fields=[_field("meeting_title", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa mötesprotokoll med fasta rubriker",
                 instructions="Skapa protokollsektioner från metadata och transkription.",
                 input_source="previous_step",
@@ -7079,7 +7069,7 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
                 output_type="json",
                 output_fields=[_field("protocol_sections", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa DOCX",
                 instructions="Skapa slutdokumentet.",
                 input_source="previous_step",
@@ -7124,7 +7114,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
         flow_name="Mötesrapport från ljud",
         plan_rationale="Transkribera ljud och skapa en strukturerad mötesrapport.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera mötesljud",
                 instructions="Transkribera mötesljudet till svensk text.",
                 input_source="flow_input",
@@ -7133,7 +7123,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
                 runtime_upload=True,
                 runtime_required=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Etablera möteskontext",
                 instructions="Skapa möteskontext baserat på transkriberingen.",
                 input_source="previous_step",
@@ -7141,7 +7131,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
                 output_type="json",
                 output_fields=[_field("meeting_context", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Analysera bakgrund",
                 instructions="Läs hela transkriberingen och extrahera bakgrund.",
                 input_source="previous_step",
@@ -7149,7 +7139,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
                 output_type="json",
                 output_fields=[_field("background_notes", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Analysera genomgång och diskussion",
                 instructions=(
                     "Läs hela transkriberingen och extrahera diskussionsunderlag."
@@ -7159,7 +7149,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
                 output_type="json",
                 output_fields=[_field("discussion_notes", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv fullständig mötesrapport",
                 instructions="Skriv rapporten från möteskontext och alla underlag.",
                 input_source="previous_step",
@@ -7167,7 +7157,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
                 output_type="json",
                 output_fields=[_field("report_text", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skapa DOCX",
                 instructions="Skapa slutdokumentet.",
                 input_source="previous_step",
@@ -7220,7 +7210,7 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
         flow_name="Mötesrapport från ljud",
         plan_rationale="Transkribera ljud och skapa en textbaserad mötesrapport.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Transkribera mötesljud",
                 instructions="Transkribera mötesljudet till svensk text.",
                 input_source="flow_input",
@@ -7229,7 +7219,7 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
                 runtime_upload=True,
                 runtime_required=True,
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Etablera möteskontext",
                 instructions="Skapa möteskontext baserat på transkriberingen.",
                 input_source="previous_step",
@@ -7237,7 +7227,7 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
                 output_type="json",
                 output_fields=[_field("meeting_context", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Analysera beslut",
                 instructions="Extrahera beslut från mötet.",
                 input_source="previous_step",
@@ -7245,7 +7235,7 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
                 output_type="json",
                 output_fields=[_field("decisions", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Skriv rapport",
                 instructions="Skriv en textbaserad rapport från underlaget.",
                 input_source="previous_step",
@@ -8313,7 +8303,7 @@ def test_compile_create_draft_bridges_structured_previous_output_into_text_input
         flow_name="Structured bridge",
         plan_rationale="Extract JSON, then write text from the extracted structure.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extract fields",
                 instructions="Extract stable fields.",
                 input_source="flow_input",
@@ -8321,7 +8311,7 @@ def test_compile_create_draft_bridges_structured_previous_output_into_text_input
                 output_type="json",
                 output_fields=[_field("summary", "string")],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Write body",
                 instructions="Write the document body from the structured fields.",
                 input_source="previous_step",
@@ -8343,7 +8333,7 @@ def test_compile_create_draft_prefers_specific_previous_fields_for_text_input() 
         flow_name="Structured bridge",
         plan_rationale="Extract JSON, then write text from a selected field.",
         steps=[
-            CreateStepDraft(
+            NewStepDraft(
                 name="Extract fields",
                 instructions="Extract stable fields.",
                 input_source="flow_input",
@@ -8354,7 +8344,7 @@ def test_compile_create_draft_prefers_specific_previous_fields_for_text_input() 
                     _field("details", "string"),
                 ],
             ),
-            CreateStepDraft(
+            NewStepDraft(
                 name="Write body",
                 instructions="Write the document body from selected fields.",
                 input_source="previous_step",
