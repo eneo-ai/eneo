@@ -583,7 +583,7 @@ def build_outline_flow_tool_schema(
             "description": (
                 "Submit a semantic create-flow outline. Describe what the flow "
                 "should do; the backend will compile Flow mechanics such as "
-                "input_source, runtime uploads, step refs, output_mode, and "
+                "input_source, runtime input, step refs, output_mode, and "
                 "underlag/input_bindings."
             ),
             "parameters": {

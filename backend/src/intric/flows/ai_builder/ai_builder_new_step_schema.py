@@ -61,12 +61,12 @@ def build_new_step_draft_schema(
         "runtime_required": {
             "type": "boolean",
             "default": False,
-            "description": "Whether the runtime upload is required for this step.",
+            "description": "Whether the runtime input is required for this step.",
         },
         "runtime_max_files": {
             "type": ["integer", "null"],
             "minimum": 1,
-            "description": "Optional max number of files for runtime upload.",
+            "description": "Optional max number of files for runtime input.",
         },
         "uses_form_fields": {
             "type": "array",

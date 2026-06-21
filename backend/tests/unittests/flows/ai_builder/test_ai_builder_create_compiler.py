@@ -1899,7 +1899,7 @@ def test_normalize_create_draft_prunes_non_json_previous_field_source() -> None:
 def test_compile_create_draft_derives_file_flow_input_runtime_config() -> None:
     draft = FlowCreateDraft(
         flow_name="Ogiltig filindata",
-        plan_rationale="Testar runtime upload-krav.",
+        plan_rationale="Testar runtime input-krav.",
         steps=[
             NewStepDraft(
                 name="Analysera dokument",

@@ -42,7 +42,7 @@ def is_primary_runtime_input_shadow_field(
 
     AI Builder form fields represent secondary runtime parameters such as
     audience, tone, case id, or report level. The primary material the flow
-    processes is already supplied through Flow input/runtime upload, so a form
+    processes is already supplied through Flow runtime input, so a form
     field named after that primary input would create duplicate UX and token
     usage.
     """
