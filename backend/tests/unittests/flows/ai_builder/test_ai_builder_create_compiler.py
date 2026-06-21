@@ -1796,7 +1796,7 @@ def test_compile_create_draft_derives_template_fill_for_docx_templates() -> None
     assert compiled.steps[0].output_mode.value == "template_fill"
 
 
-def test_validate_create_draft_rejects_template_fill_on_non_docx() -> None:
+def test_normalize_create_draft_mechanics_strips_template_fill_from_non_docx() -> None:
     draft = FlowCreateDraft(
         flow_name="Ogiltig mall",
         plan_rationale="Ogiltig kombination.",
@@ -1812,12 +1812,40 @@ def test_validate_create_draft_rejects_template_fill_on_non_docx() -> None:
         ],
     )
 
-    validation = validate_create_draft(draft)
+    normalized = normalize_create_draft_mechanics(draft)
+    compiled = compile_create_draft(normalized)
+    validation = validate_spec(compiled)
 
-    assert not validation.valid
-    assert any(
-        error.code == "template_fill_requires_docx" for error in validation.errors
+    assert normalized.steps[0].document_delivery_mode == "generated"
+    assert compiled.steps[0].output_mode == OutputMode.PASS_THROUGH
+    assert validation.valid
+
+
+def test_normalize_create_draft_mechanics_strips_template_fill_from_text_output() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Ogiltig textmall",
+        plan_rationale="Ogiltig kombination.",
+        steps=[
+            NewStepDraft(
+                name="Textsteg",
+                instructions="Skriv en text.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+                document_delivery_mode="template_fill",
+            )
+        ],
     )
+
+    normalized = normalize_create_draft_mechanics(draft)
+    compiled = compile_create_draft(normalized)
+    validation = validate_spec(compiled)
+
+    assert normalized.steps[0].document_delivery_mode == "not_applicable"
+    assert compiled.steps[0].output_mode == OutputMode.PASS_THROUGH
+    assert validation.valid
 
 
 def test_validate_create_draft_rejects_unknown_previous_field_reference() -> None:
@@ -1920,7 +1948,9 @@ def test_validate_create_draft_rejects_non_text_previous_output_source() -> None
     )
 
 
-def test_validate_create_draft_rejects_file_flow_input_without_runtime_upload() -> None:
+def test_normalize_create_draft_mechanics_enables_file_flow_input_runtime_upload() -> (
+    None
+):
     draft = FlowCreateDraft(
         flow_name="Ogiltig filindata",
         plan_rationale="Testar runtime upload-krav.",
@@ -1937,13 +1967,12 @@ def test_validate_create_draft_rejects_file_flow_input_without_runtime_upload() 
         ],
     )
 
-    validation = validate_create_draft(draft)
+    normalized = normalize_create_draft_mechanics(draft)
+    compiled = compile_create_draft(normalized)
+    validation = validate_spec(compiled)
 
-    assert not validation.valid
-    assert any(
-        error.code == "file_flow_input_requires_runtime_upload"
-        for error in validation.errors
-    )
+    assert normalized.steps[0].runtime_upload is True
+    assert validation.valid
 
 
 def test_validate_create_draft_rejects_future_previous_field_source() -> None:

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_new_step_mechanics import (
-    validate_new_step_mechanics,
-)
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
 )
@@ -26,15 +23,7 @@ def validate_create_draft(draft: FlowCreateDraft) -> SpecValidationResult:
 
     _validate_form_fields(draft, result)
 
-    for index, step in enumerate(draft.steps):
-        step_ref = f"steps[{index}]"
-        validate_new_step_mechanics(
-            step=step,
-            step_ref=step_ref,
-            step_index=index,
-            available_form_fields={form_field.name for form_field in draft.form_fields},
-            result=result,
-        )
+    for index in range(len(draft.steps)):
         _validate_previous_field_references(
             draft=draft,
             step_index=index,

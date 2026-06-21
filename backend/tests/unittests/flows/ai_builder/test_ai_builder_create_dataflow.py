@@ -896,8 +896,6 @@ def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> No
         ],
     )
 
-    assert not validate_create_draft(draft).valid
-
     normalized = normalize_create_draft_mechanics(draft)
 
     assert validate_create_draft(normalized).valid
@@ -938,8 +936,6 @@ def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
             },
         ],
     )
-
-    assert not validate_create_draft(draft).valid
 
     normalized = normalize_create_draft_mechanics(draft)
 

@@ -325,6 +325,14 @@ def _normalize_step_mechanics(
         updates["runtime_max_files"] = None
 
     if (
+        step.document_delivery_mode == "template_fill"
+        and output_type != OutputType.DOCX
+    ):
+        # DOCX is the only template-fill runtime; other document outputs are generated.
+        updates["document_delivery_mode"] = (
+            "generated" if output_type in _DOCUMENT_OUTPUT_TYPES else "not_applicable"
+        )
+    elif (
         step.document_delivery_mode != "not_applicable"
         and output_type not in _DOCUMENT_OUTPUT_TYPES
     ):
