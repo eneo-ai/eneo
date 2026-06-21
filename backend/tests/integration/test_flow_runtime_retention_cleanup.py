@@ -845,6 +845,52 @@ async def test_cleanup_old_flow_runtime_data_keeps_generated_file_shared_with_re
 
 
 @pytest.mark.asyncio
+async def test_cleanup_old_flow_runtime_data_keeps_generated_file_with_derived_child(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    child_file = Files(
+        name="generated-child.txt",
+        text="derived child",
+        blob=None,
+        checksum=f"generated-child-{uuid4()}",
+        size=13,
+        mimetype="text/plain",
+        file_type="text",
+        transcription=None,
+        owner_type="user",
+        owner_user_id=admin_user.id,
+        owner_service_id=None,
+        tenant_id=test_tenant.id,
+        parent_file_id=fixture.generated_file.id,
+    )
+    async_session.add(child_file)
+    await async_session.flush()
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts["flow_runs_purged"] == 1
+    assert counts["flow_generated_files_deleted"] == 0
+    assert await async_session.get(FlowRuns, fixture.run.id) is None
+    assert await async_session.get(Files, fixture.generated_file.id) is not None
+    assert await async_session.get(Files, child_file.id) is not None
+
+
+@pytest.mark.asyncio
 async def test_cleanup_old_flow_runtime_data_uses_flow_retention_before_space_default(
     async_session: AsyncSession,
     test_tenant,

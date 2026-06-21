@@ -7,6 +7,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from intric.database.tables.app_table import AppRunsFiles, AppsFiles
 from intric.database.tables.assistant_table import AssistantsFiles
@@ -227,9 +228,21 @@ def _builder_session_file_exists() -> sa.Exists:
     )
 
 
+def _child_file_exists() -> sa.Exists:
+    # A derived child blocks parent purge: cascading could delete a referenced child.
+    child_files = aliased(Files)
+    return (
+        sa.select(sa.literal(1))
+        .select_from(child_files)
+        .where(child_files.parent_file_id == Files.id)
+        .exists()
+    )
+
+
 _FILE_REFERENCE_EXISTS_BY_TABLE: Mapping[str, Callable[[], sa.Exists]] = (
     MappingProxyType(
         {
+            Files.__tablename__: _child_file_exists,
             FlowTemplateAssets.__tablename__: _flow_template_asset_file_exists,
             FlowRuntimeUploadedFiles.__tablename__: _flow_runtime_upload_file_exists,
             FlowRunStepInputFiles.__tablename__: _flow_run_step_input_file_exists,
