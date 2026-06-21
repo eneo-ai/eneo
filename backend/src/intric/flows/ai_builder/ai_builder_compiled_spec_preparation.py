@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -10,10 +11,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     canonicalize_flow_spec_resources,
     format_resource_resolution_feedback,
-)
-from intric.flows.ai_builder.ai_builder_session_spec_validator import (
-    normalize_compiled_spec_for_session,
-    validate_compiled_spec_for_session,
 )
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
@@ -31,6 +28,7 @@ logger = get_logger(__name__)
 _STRICT_TERMINAL_OUTPUT_TYPES = frozenset(
     {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
 )
+_EXISTING_STEP_REF_RE = re.compile(r"^existing_step_[1-9]\d*$")
 
 
 @dataclass(frozen=True)
@@ -50,7 +48,7 @@ def prepare_compiled_spec_for_session(
     valid_existing_step_refs: list[str] | None,
     terminal_output_type: OutputType | None = None,
 ) -> PreparedCompiledSpecResult:
-    prepared_spec = normalize_compiled_spec_for_session(
+    prepared_spec = _normalize_compiled_spec_for_session(
         spec,
         target_kind=target_kind,
     )
@@ -95,7 +93,7 @@ def prepare_compiled_spec_for_session(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
     )
-    session_validation = validate_compiled_spec_for_session(
+    session_validation = _validate_compiled_spec_for_session(
         prepared_spec,
         target_kind=target_kind,
         valid_existing_step_refs=valid_existing_step_refs,
@@ -116,6 +114,98 @@ def prepare_compiled_spec_for_session(
         spec=prepared_spec,
         validation=validation,
     )
+
+
+def _normalize_compiled_spec_for_session(
+    spec: FlowDraftSpecCore,
+    *,
+    target_kind: TargetKind,
+) -> FlowDraftSpecCore:
+    if target_kind != TargetKind.CREATE:
+        return spec
+
+    normalized_steps: list[StepSpec] = []
+    changed = False
+    for step in spec.steps:
+        if step.existing_step_ref is None:
+            normalized_steps.append(step)
+            continue
+        normalized_steps.append(step.model_copy(update={"existing_step_ref": None}))
+        changed = True
+
+    if not changed:
+        return spec
+
+    return spec.model_copy(update={"steps": normalized_steps})
+
+
+def _validate_compiled_spec_for_session(
+    spec: FlowDraftSpecCore,
+    *,
+    target_kind: TargetKind,
+    valid_existing_step_refs: list[str] | None,
+) -> SpecValidationResult:
+    result = SpecValidationResult()
+    seen_existing_refs: set[str] = set()
+
+    for step in spec.steps:
+        existing_step_ref = step.existing_step_ref
+        if existing_step_ref is None:
+            continue
+
+        if target_kind == TargetKind.CREATE:
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="invalid_existing_step_ref",
+                message=(
+                    f"Step '{step.plan_step_ref}' cannot set existing_step_ref "
+                    f"'{existing_step_ref}' in create mode."
+                ),
+            )
+            continue
+
+        if not _EXISTING_STEP_REF_RE.match(existing_step_ref):
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="invalid_existing_step_ref",
+                message=(
+                    f"Step '{step.plan_step_ref}' uses invalid existing_step_ref "
+                    f"'{existing_step_ref}'. Expected the server alias format "
+                    f"'existing_step_N'."
+                ),
+            )
+            continue
+
+        if (
+            valid_existing_step_refs is not None
+            and existing_step_ref not in valid_existing_step_refs
+        ):
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="invalid_existing_step_ref",
+                message=(
+                    f"Step '{step.plan_step_ref}' references unknown "
+                    f"existing_step_ref '{existing_step_ref}'. Valid refs: "
+                    f"{valid_existing_step_refs}"
+                ),
+            )
+            continue
+
+        if existing_step_ref in seen_existing_refs:
+            result.add_error(
+                step_ref=step.plan_step_ref,
+                code="invalid_existing_step_ref",
+                message=(
+                    f"Step '{step.plan_step_ref}' reuses existing_step_ref "
+                    f"'{existing_step_ref}'. Each existing step can only be "
+                    "targeted once."
+                ),
+            )
+            continue
+
+        seen_existing_refs.add(existing_step_ref)
+
+    return result
 
 
 def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
