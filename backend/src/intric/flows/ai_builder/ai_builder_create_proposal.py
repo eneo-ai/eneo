@@ -16,9 +16,6 @@ from intric.flows.ai_builder.ai_builder_create_compiler import (
     compile_outline_to_create_draft,
     outline_compile_context_from_planning_state,
 )
-from intric.flows.ai_builder.ai_builder_create_dataflow import (
-    normalize_create_draft_mechanics,
-)
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_outline_quality_feedback,
 )
@@ -320,11 +317,6 @@ async def _process_create_draft(
                 feedback=format_resource_resolution_feedback(resolution_issues),
                 failure_kind="validation",
             )
-
-    draft = normalize_create_draft_mechanics(
-        draft,
-        aggregation_intent=aggregation_intent,
-    )
 
     try:
         spec = compile_create_draft(
