@@ -19,22 +19,9 @@ running API and model.
 
 from __future__ import annotations
 
-import asyncio
-from datetime import UTC, datetime
-from unittest.mock import MagicMock
-from uuid import uuid4
-
 import pytest
 
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
-from intric.flows.application.flow_authoring_command import (
-    AIBuilderFlowAuthoringOrigin,
-    CreateFlowAuthoringCommand,
-    FlowAuthoringCommandService,
-)
-from intric.flows.application.flow_draft_materialization import (
-    FlowDraftStepChangeKind,
-)
 from intric.flows.enums import (
     AIBuilderInputSource,
     AIBuilderOutputMode,
@@ -48,6 +35,9 @@ from intric.flows.flow_authoring_spec import (
     InputType,
     OutputType,
     StepSpec,
+)
+from tests.unittests.flows.ai_builder.authoring_command_assertions import (
+    assert_create_spec_prepares_through_authoring_command,
 )
 
 from .coverage import (
@@ -160,37 +150,11 @@ def test_each_golden_has_no_architecture_blockers(case: BuildableGoldenCase) -> 
     )
 
 
-def test_buildable_goldens_prepare_through_canonical_authoring_command() -> None:
-    async def prepare_all() -> None:
-        service = FlowAuthoringCommandService()
-        flow_service = MagicMock()
-        for case in GOLDEN_CASES:
-            command = CreateFlowAuthoringCommand(
-                space_id=uuid4(),
-                spec=case.spec,
-                origin=AIBuilderFlowAuthoringOrigin(
-                    session_id=uuid4(),
-                    plan_id=uuid4(),
-                    spec_hash=case.spec.spec_hash(),
-                    applied_at=datetime.now(UTC),
-                ),
-            )
-            prepared = await service.prepare(
-                command=command,
-                flow_service=flow_service,
-            )
-
-            assert prepared.preview.steps_created == len(prepared.spec.steps), (
-                case.case_id
-            )
-            assert prepared.preview.steps_updated == 0, case.case_id
-            assert prepared.preview.steps_removed == 0, case.case_id
-            assert {step.change_kind for step in prepared.preview.step_changes} == {
-                FlowDraftStepChangeKind.ADDED
-            }, case.case_id
-            assert prepared.preview.spec_hash == prepared.spec.spec_hash(), case.case_id
-
-    asyncio.run(prepare_all())
+@pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)
+def test_buildable_golden_prepares_through_canonical_authoring_command(
+    case: BuildableGoldenCase,
+) -> None:
+    assert_create_spec_prepares_through_authoring_command(case.spec)
 
 
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)

@@ -83,6 +83,9 @@ from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads imp
     expected_step_assumption_strings,
     self_correction_outline_with_step_assumptions_payload,
 )
+from tests.unittests.flows.ai_builder.authoring_command_assertions import (
+    assert_create_spec_prepares_through_authoring_command,
+)
 
 CREATE_OUTLINE_LOGGER = "intric.flows.ai_builder.ai_builder_create_outline"
 CREATE_COMPILER_LOGGER = "intric.flows.ai_builder.ai_builder_create_compiler"
@@ -2940,6 +2943,7 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     assert compiled.steps[2].input_bindings is None
     validation = validate_spec(compiled)
     assert validation.valid
+    assert_create_spec_prepares_through_authoring_command(compiled)
 
 
 def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_reference_them() -> (
@@ -7770,6 +7774,7 @@ def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> Non
     assert draft.steps[2].document_delivery_mode == "template_fill"
     assert compiled.steps[2].output_mode.value == "template_fill"
     assert validation.valid
+    assert_create_spec_prepares_through_authoring_command(compiled)
 
 
 def test_compile_outline_flow_docx_chain_preserves_all_semantic_steps() -> None:
@@ -8023,6 +8028,7 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
     assert compiled.steps[1].input_type.value == "json"
     assert compiled.steps[3].output_type.value == "pdf"
     assert validation.valid
+    assert_create_spec_prepares_through_authoring_command(compiled)
 
 
 def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_output() -> (
