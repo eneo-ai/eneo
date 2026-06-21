@@ -57,7 +57,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_turn,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
-    _flow_with_builder_description,
+    _flow_with_description,
     _make_response_with_text,
     _make_submission,
     _make_tool_call,
@@ -729,7 +729,7 @@ async def test_edit_flow_retry_preserves_description_advisory_without_completion
         ).model_copy(update={"flow_description": "Old generated description"}),
         advisories=[_description_update_advisory()],
     )
-    flow = _flow_with_builder_description("Old generated description")
+    flow = _flow_with_description("Old generated description")
     config = submission._edit_flow_retry_config(
         assistant_snapshots=None,
         request_id="req-forced-retry-edit-advisory",
@@ -786,7 +786,7 @@ async def test_handle_edit_flow_preserves_description_advisory_without_completio
         ).model_copy(update={"flow_description": "Old generated description"}),
         advisories=[_description_update_advisory()],
     )
-    flow = _flow_with_builder_description("Old generated description")
+    flow = _flow_with_description("Old generated description")
     ctx = _make_context(
         flow=flow,
         text_content="Assistant text",

@@ -1,10 +1,6 @@
-"""Description provenance for server-authored Flow drafts."""
+"""Semantic signature used when rewriting Flow descriptions."""
 
 from __future__ import annotations
-
-import hashlib
-import unicodedata
-from typing import Literal
 
 from pydantic import BaseModel
 
@@ -34,21 +30,3 @@ class FlowSemanticSignature(BaseModel):
 
     def has_semantic_change(self, other: FlowSemanticSignature) -> bool:
         return self != other
-
-
-class DescriptionProvenance(BaseModel):
-    """Tracks who owns a flow description and when it was last generated."""
-
-    mode: Literal["manual", "builder_managed"] = "manual"
-    semantic_signature: FlowSemanticSignature | None = None
-    last_generated_hash: str | None = None
-    version: int = 1
-
-
-def description_hash(text: str | None) -> str:
-    normalized = (text or "").strip().replace("\r\n", "\n")
-    normalized = unicodedata.normalize("NFC", normalized)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-_description_hash = description_hash

@@ -1,11 +1,9 @@
-"""Tests for AI Builder description semantics — signature, provenance, hashing."""
+"""Tests for AI Builder description semantic signatures."""
 
 from __future__ import annotations
 
 from intric.flows.application.flow_authoring_description_semantics import (
-    DescriptionProvenance,
     FlowSemanticSignature,
-    _description_hash,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -109,60 +107,3 @@ class TestFlowSemanticSignature:
         )
         new = old.model_copy(update={"terminal_output_type": "pdf"})
         assert old.has_semantic_change(new) is True
-
-
-class TestDescriptionProvenance:
-    def test_default_is_manual(self) -> None:
-        prov = DescriptionProvenance()
-        assert prov.mode == "manual"
-        assert prov.semantic_signature is None
-        assert prov.last_generated_hash is None
-        assert prov.version == 1
-
-    def test_builder_managed_with_signature(self) -> None:
-        sig = FlowSemanticSignature(
-            entry_input_type="audio",
-            entry_input_source="flow_input",
-            terminal_output_type="text",
-            terminal_output_mode="transcribe_only",
-        )
-        prov = DescriptionProvenance(
-            mode="builder_managed",
-            semantic_signature=sig,
-            last_generated_hash="abc123",
-        )
-        assert prov.mode == "builder_managed"
-        assert prov.semantic_signature == sig
-
-    def test_roundtrip_serialization(self) -> None:
-        sig = FlowSemanticSignature(
-            entry_input_type="document",
-            entry_input_source="flow_input",
-            terminal_output_type="pdf",
-            terminal_output_mode="pass_through",
-        )
-        prov = DescriptionProvenance(
-            mode="builder_managed",
-            semantic_signature=sig,
-            last_generated_hash="deadbeef",
-        )
-        data = prov.model_dump(mode="json")
-        restored = DescriptionProvenance.model_validate(data)
-        assert restored == prov
-
-
-class TestDescriptionHash:
-    def test_deterministic(self) -> None:
-        assert _description_hash("hello") == _description_hash("hello")
-
-    def test_normalizes_whitespace(self) -> None:
-        assert _description_hash("hello ") == _description_hash("hello")
-
-    def test_normalizes_line_endings(self) -> None:
-        assert _description_hash("a\r\nb") == _description_hash("a\nb")
-
-    def test_none_treated_as_empty(self) -> None:
-        assert _description_hash(None) == _description_hash("")
-
-    def test_different_content_different_hash(self) -> None:
-        assert _description_hash("hello") != _description_hash("world")

@@ -7,9 +7,7 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
 )
 from intric.flows.application.flow_authoring_command import AIBuilderFlowAuthoringOrigin
 from intric.flows.application.flow_authoring_description_semantics import (
-    DescriptionProvenance,
     FlowSemanticSignature,
-    description_hash,
 )
 from intric.flows.application.flow_draft_materialization import FlowDraftChangeSet
 from intric.flows.domain.flow import (
@@ -45,11 +43,9 @@ class AIBuilderAuthoringPolicy:
         self,
         *,
         changeset: FlowDraftChangeSet,
-        spec: FlowDraftSpecCore,
     ) -> FlowDraftChangeSet:
         metadata = _stamp_ai_builder_metadata(
             metadata=changeset.metadata_json,
-            spec=spec,
             origin=self._origin,
         )
         return changeset.model_copy(update={"metadata_json": metadata})
@@ -114,16 +110,13 @@ def _rewrite_terminal_output_phrase(
 def _stamp_ai_builder_metadata(
     *,
     metadata: FlowPersistedJsonObject | None,
-    spec: FlowDraftSpecCore,
     origin: AIBuilderFlowAuthoringOrigin,
 ) -> FlowPersistedJsonObject:
     result = dict(metadata or {})
     raw_ai_builder = result.get("ai_builder")
     ai_builder = clone_json_object(raw_ai_builder) or {}
-    ai_builder["description"] = _description_provenance(
-        spec=spec,
-        description_override_manual=origin.description_override_manual,
-    ).model_dump(mode="json")
+    # Drop pre-production provenance so future applies converge to origin-only metadata.
+    ai_builder.pop("description", None)
     ai_builder["origin"] = {
         "builder_session_id": str(origin.session_id),
         "builder_plan_id": str(origin.plan_id),
@@ -132,17 +125,3 @@ def _stamp_ai_builder_metadata(
     }
     result["ai_builder"] = ai_builder
     return result
-
-
-def _description_provenance(
-    *,
-    spec: FlowDraftSpecCore,
-    description_override_manual: bool,
-) -> DescriptionProvenance:
-    if description_override_manual:
-        return DescriptionProvenance(mode="manual")
-    return DescriptionProvenance(
-        mode="builder_managed",
-        semantic_signature=FlowSemanticSignature.from_steps(spec.steps),
-        last_generated_hash=description_hash(spec.flow_description),
-    )

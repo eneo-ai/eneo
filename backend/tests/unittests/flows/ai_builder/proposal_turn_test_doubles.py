@@ -20,10 +20,6 @@ from intric.flows.ai_builder.ai_builder_proposal_submission import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
-from intric.flows.application.flow_authoring_description_semantics import (
-    DescriptionProvenance,
-    description_hash,
-)
 
 
 def _make_processor(**overrides: object) -> AIBuilderProposalProcessor:
@@ -61,17 +57,10 @@ def _stored_plan_result(*, plan: object | None = None, proposal: object | None =
     )
 
 
-def _flow_with_builder_description(description: str) -> SimpleNamespace:
+def _flow_with_description(description: str) -> SimpleNamespace:
     return SimpleNamespace(
         description=description,
-        metadata_json={
-            "ai_builder": {
-                "description": DescriptionProvenance(
-                    mode="builder_managed",
-                    last_generated_hash=description_hash(description),
-                ).model_dump(mode="json")
-            }
-        },
+        metadata_json={"ai_builder": {}},
     )
 
 

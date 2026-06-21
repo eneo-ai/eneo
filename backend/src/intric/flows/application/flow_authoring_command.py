@@ -167,7 +167,6 @@ class FlowAuthoringCommandService:
         )
         changeset = policy.stamp_metadata(
             changeset=changeset,
-            spec=spec,
         )
         return PreparedFlowAuthoring(
             command=command,

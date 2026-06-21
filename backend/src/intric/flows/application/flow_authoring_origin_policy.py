@@ -19,7 +19,6 @@ class FlowAuthoringOriginPolicy(Protocol):
         self,
         *,
         changeset: FlowDraftChangeSet,
-        spec: FlowDraftSpecCore,
     ) -> FlowDraftChangeSet: ...
 
 
@@ -36,6 +35,5 @@ class NoopFlowAuthoringOriginPolicy:
         self,
         *,
         changeset: FlowDraftChangeSet,
-        spec: FlowDraftSpecCore,
     ) -> FlowDraftChangeSet:
         return changeset

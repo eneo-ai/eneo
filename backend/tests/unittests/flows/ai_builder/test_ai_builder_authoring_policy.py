@@ -13,7 +13,7 @@ from intric.flows.application.flow_authoring_command import (
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
 )
-from intric.flows.domain.flow import Flow, FlowStep
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -26,7 +26,7 @@ from intric.flows.flow_authoring_spec import (
 
 
 @pytest.mark.anyio
-async def test_prepare_stamps_ai_builder_origin_and_description_provenance() -> None:
+async def test_prepare_stamps_ai_builder_origin() -> None:
     spec = _spec(
         flow_description="Generate a DOCX-format report.",
         output_type=OutputType.DOCX,
@@ -51,11 +51,49 @@ async def test_prepare_stamps_ai_builder_origin_and_description_provenance() -> 
         "builder_spec_hash": origin.spec_hash,
         "applied_at": origin.applied_at.isoformat(),
     }
-    assert metadata["description"]["mode"] == "builder_managed"
-    assert metadata["description"]["last_generated_hash"] is not None
-    assert (
-        metadata["description"]["semantic_signature"]["terminal_output_type"] == "docx"
+    assert "description" not in metadata
+
+
+@pytest.mark.anyio
+async def test_prepare_removes_stale_ai_builder_description_metadata() -> None:
+    current_flow = _flow(
+        description="Existing description.",
+        draft_revision=1,
+        steps=[_flow_step(output_type="text")],
+        metadata_json={
+            "ai_builder": {
+                "description": {
+                    "stale": True,
+                },
+                "other": {"kept": True},
+            }
+        },
     )
+    spec = _spec(
+        flow_description=current_flow.description or "",
+        existing_step_ref="existing_step_1",
+        output_type=OutputType.TEXT,
+    )
+    origin = _origin(spec_hash=spec.spec_hash())
+
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=EditFlowAuthoringCommand(
+            space_id=current_flow.space_id,
+            flow_id=current_flow.id,
+            expected_revision=1,
+            spec=spec,
+            removed_existing_step_refs=frozenset(),
+            origin=origin,
+        ),
+        flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+
+    assert prepared.changeset.metadata_json is not None
+    ai_builder = prepared.changeset.metadata_json["ai_builder"]
+    assert "description" not in ai_builder
+    assert ai_builder["other"] == {"kept": True}
+    assert ai_builder["origin"]["builder_plan_id"] == str(origin.plan_id)
 
 
 @pytest.mark.anyio
@@ -123,10 +161,9 @@ async def test_manual_description_override_keeps_current_description() -> None:
 
     assert prepared.spec.flow_description == current_flow.description
     assert prepared.changeset.metadata_json is not None
-    description_metadata = prepared.changeset.metadata_json["ai_builder"]["description"]
-    assert description_metadata["mode"] == "manual"
-    assert description_metadata["semantic_signature"] is None
-    assert description_metadata["last_generated_hash"] is None
+    metadata = prepared.changeset.metadata_json["ai_builder"]
+    assert "description" not in metadata
+    assert metadata["origin"]["builder_plan_id"] == str(origin.plan_id)
 
 
 @pytest.mark.anyio
@@ -190,6 +227,7 @@ def _flow(
     description: str,
     draft_revision: int,
     steps: list[FlowStep],
+    metadata_json: FlowPersistedJsonObject | None = None,
 ) -> Flow:
     return Flow(
         id=uuid4(),
@@ -199,6 +237,7 @@ def _flow(
         description=description,
         steps=steps,
         draft_revision=draft_revision,
+        metadata_json=metadata_json,
     )
 
 
