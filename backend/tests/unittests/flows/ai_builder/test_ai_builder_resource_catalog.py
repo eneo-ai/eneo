@@ -4,12 +4,6 @@ from uuid import UUID
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    FlowEditDraft,
-    StepEditOperation,
-    StepPlacement,
-)
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
     AIBuilderAvailableKnowledgeBaseResource,
@@ -20,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
     canonicalize_assistant_spec_resources,
-    canonicalize_edit_draft_resources,
     canonicalize_flow_spec_resources,
     collect_flow_spec_resource_bindings,
     format_resource_resolution_feedback,
@@ -672,49 +665,6 @@ def test_mcp_tool_alias_adds_parent_server_without_enabling_sibling_tools() -> N
     assert issues == []
     assert assistant_spec.mcp_server_refs == ["mcp_server.rendesystem"]
     assert assistant_spec.mcp_tool_refs == ["mcp_tool.rendesystem-lookup-case"]
-
-
-def test_edit_add_payload_canonicalizes_mcp_tool_refs() -> None:
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "server-uuid-1",
-                "name": "Ärendesystem",
-                "tools": [
-                    {"id": "tool-uuid-1", "name": "lookup_case"},
-                    {"id": "tool-uuid-2", "name": "delete_case"},
-                ],
-            }
-        ],
-    )
-    draft = FlowEditDraft(
-        operations=[
-            StepEditOperation(
-                op="add",
-                placement=StepPlacement(position="append"),
-                add_payload=NewStepDraft(
-                    name="Hämta ärende",
-                    instructions="Hämta aktuell ärendedata med valt MCP-verktyg.",
-                    input_source=InputSource.FLOW_INPUT,
-                    mcp_tool_refs=["lookup_case"],
-                ),
-            )
-        ],
-        plan_rationale="Lägg till ett steg för live-data.",
-    )
-
-    canonicalized, issues = canonicalize_edit_draft_resources(
-        draft,
-        catalog=catalog,
-    )
-
-    assert issues == []
-    add_payload = canonicalized.operations[0].add_payload
-    assert add_payload is not None
-    assert add_payload.mcp_server_refs == ["mcp_server.rendesystem"]
-    assert add_payload.mcp_tool_refs == ["mcp_tool.rendesystem-lookup-case"]
 
 
 def test_mcp_server_ref_expands_to_enabled_server_tools() -> None:

@@ -21,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from intric.flows.domain.flow import FlowStep
+from intric.flows.enums import FlowMcpPolicy
 
 
 def _make_step(step_order: int) -> FlowStep:
@@ -57,14 +58,60 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     )
 
 
+def _modify_step_schema(schema):
+    step_variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "oneOf"
+    ]
+    return next(
+        variant
+        for variant in step_variants
+        if variant["properties"]["kind"]["enum"] == ["modify"]
+    )
+
+
+def _add_step_payload_schema(schema):
+    step_variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
+        "oneOf"
+    ]
+    add_schema = next(
+        variant
+        for variant in step_variants
+        if variant["properties"]["kind"]["enum"] == ["add"]
+    )
+    return add_schema["properties"]["step"]
+
+
 class TestBuildEditFlowToolSchema:
     def test_schema_has_correct_name(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)], resource_catalog=_empty_catalog()
         )
         assert schema["function"]["name"] == EDIT_FLOW_TOOL_NAME
-        assert "form_operations" in schema["function"]["description"]
-        assert "uses_form_fields" in schema["function"]["description"]
+        assert "complete ordered step list" in schema["function"]["description"]
+        assert "removed_existing_step_refs" in schema["function"]["description"]
+
+    def test_schema_uses_flat_ordered_edit_contract(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1), _make_step(2)],
+            resource_catalog=_empty_catalog(),
+        )
+
+        params = schema["function"]["parameters"]
+        props = params["properties"]
+        assert "steps" in props
+        assert "removed_existing_step_refs" in props
+        assert "operations" not in props
+        assert "form_operations" not in props
+
+        step_item = props["steps"]["items"]
+        serialized = str(step_item)
+        assert "existing_step_ref" in serialized
+        assert "existing_step_1" in serialized
+        assert "kind" in serialized
+        assert "modify" in serialized
+        assert "add" in serialized
+        assert "placement" not in serialized
+        assert "patch" not in serialized
 
     def test_schema_exposes_direct_flow_metadata_fields_not_metadata_patch(self):
         schema = build_edit_flow_tool_schema(
@@ -76,26 +123,28 @@ class TestBuildEditFlowToolSchema:
         assert "flow_description" in properties
         assert "metadata_patch" not in properties
 
-    def test_target_ref_enum_contains_valid_refs(self):
+    def test_existing_step_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
         schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
 
-        ops_schema = schema["function"]["parameters"]["properties"]["operations"]
-        target_ref = ops_schema["items"]["properties"]["target_ref"]
-        assert "existing_step_1" in target_ref["enum"]
-        assert "existing_step_2" in target_ref["enum"]
-        assert "existing_step_3" in target_ref["enum"]
-        assert None in target_ref["enum"]
+        existing_ref = _modify_step_schema(schema)["properties"]["existing_step_ref"]
+        assert existing_ref["enum"] == [
+            "existing_step_1",
+            "existing_step_2",
+            "existing_step_3",
+        ]
 
-    def test_anchor_ref_enum_matches_valid_refs(self):
+    def test_removed_existing_step_refs_match_valid_refs(self):
         steps = [_make_step(1), _make_step(2)]
         schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
 
-        ops_schema = schema["function"]["parameters"]["properties"]["operations"]
-        placement = ops_schema["items"]["properties"]["placement"]
-        anchor_ref = placement["properties"]["anchor_ref"]
-        assert "existing_step_1" in anchor_ref["enum"]
-        assert "existing_step_2" in anchor_ref["enum"]
+        removed_refs = schema["function"]["parameters"]["properties"][
+            "removed_existing_step_refs"
+        ]
+        assert removed_refs["items"]["enum"] == [
+            "existing_step_1",
+            "existing_step_2",
+        ]
 
     def test_model_refs_injected_when_small(self):
         catalog = _catalog_with_models(
@@ -118,9 +167,7 @@ class TestBuildEditFlowToolSchema:
         )
         schema = build_edit_flow_tool_schema([_make_step(1)], resource_catalog=catalog)
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"][
-            "items"
-        ]["properties"]["add_payload"]
+        add_payload = _add_step_payload_schema(schema)
         model_ref = add_payload["properties"]["model_ref"]
         assert "enum" in model_ref
         assert "model.model-a" in model_ref["enum"]
@@ -140,69 +187,61 @@ class TestBuildEditFlowToolSchema:
         )
         schema = build_edit_flow_tool_schema([_make_step(1)], resource_catalog=catalog)
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"][
-            "items"
-        ]["properties"]["add_payload"]
+        add_payload = _add_step_payload_schema(schema)
         model_ref = add_payload["properties"]["model_ref"]
         assert "enum" not in model_ref
 
-    def test_op_enum_is_add_modify_remove(self):
+    def test_step_kind_variants_are_add_and_modify(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)], resource_catalog=_empty_catalog()
         )
-        ops_schema = schema["function"]["parameters"]["properties"]["operations"]
-        op_field = ops_schema["items"]["properties"]["op"]
-        assert op_field["enum"] == ["add", "modify", "remove"]
-
-    def test_form_operations_schema_teaches_form_field_edits(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)], resource_catalog=_empty_catalog()
-        )
-
-        form_operations = schema["function"]["parameters"]["properties"][
-            "form_operations"
+        variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
+            "oneOf"
         ]
-        item_schema = form_operations["items"]
+        assert [variant["properties"]["kind"]["enum"][0] for variant in variants] == [
+            "modify",
+            "add",
+        ]
+
+    def test_form_fields_schema_teaches_complete_state_edits(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
+
+        form_fields = schema["function"]["parameters"]["properties"]["form_fields"]
+        item_schema = form_fields["items"]
         properties = item_schema["properties"]
-        payload = properties["field_payload"]
 
         assert item_schema["additionalProperties"] is False
-        assert properties["op"]["enum"] == ["add", "modify", "remove"]
-        assert item_schema["required"] == ["op", "field_name"]
-        assert properties["field_name"] == {"type": "string", "minLength": 1}
-        assert set(payload["properties"]) == {
+        assert item_schema["required"] == ["name", "type", "label"]
+        assert set(properties) == {
+            "name",
+            "type",
             "label",
-            "field_type",
             "required",
-            "description",
             "options",
         }
-        assert payload["additionalProperties"] is False
-        assert payload["properties"]["field_type"]["enum"] == [
+        assert properties["type"]["enum"] == [
             "text",
             "number",
             "date",
             "select",
             "multiselect",
         ]
-        assert payload["properties"]["options"] == {
-            "type": "array",
+        assert properties["options"] == {
+            "type": ["array", "null"],
             "items": {"type": "string"},
         }
-        description = form_operations["description"]
-        assert "uses_form_fields" in description
-        assert "orphan UI controls" in description
-        assert "field_payload is required for add and modify" in description
-        assert "omit field_payload for remove" in description
+        description = form_fields["description"]
+        assert "Omit to preserve" in description
+        assert "set null to clear all" in description
 
     def test_add_payload_uses_shared_new_step_authoring_shape(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)], resource_catalog=_empty_catalog()
         )
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"][
-            "items"
-        ]["properties"]["add_payload"]
+        add_payload = _add_step_payload_schema(schema)
 
         assert "assistant_spec" not in add_payload["properties"]
         assert "output_mode" not in add_payload["properties"]
@@ -238,16 +277,12 @@ class TestBuildEditFlowToolSchema:
             resource_catalog=catalog,
         )
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"][
-            "items"
-        ]["properties"]["add_payload"]
-        patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
-            "properties"
-        ]["patch"]
+        add_payload = _add_step_payload_schema(schema)
+        modify_step = _modify_step_schema(schema)
 
         assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
         assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
-        assistant_spec = patch["properties"]["assistant_spec"]
+        assistant_spec = modify_step["properties"]["assistant_spec"]
         assert "enum" not in assistant_spec["properties"]["mcp_server_refs"]["items"]
         assert "enum" not in assistant_spec["properties"]["mcp_tool_refs"]["items"]
 
@@ -272,43 +307,40 @@ class TestBuildEditFlowToolSchema:
             resource_catalog=catalog,
         )
 
-        add_payload = schema["function"]["parameters"]["properties"]["operations"][
-            "items"
-        ]["properties"]["add_payload"]
+        add_payload = _add_step_payload_schema(schema)
 
         assert "enum" not in add_payload["properties"]["mcp_server_refs"]["items"]
         assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
 
-    def test_patch_schema_exposes_typed_previous_field_refs(self):
+    def test_modify_step_schema_exposes_typed_previous_field_refs(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1), _make_step(2)], resource_catalog=_empty_catalog()
         )
-        patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
-            "properties"
-        ]["patch"]
+        modify_step = _modify_step_schema(schema)
 
-        previous_fields = patch["properties"]["uses_previous_fields"]
+        previous_fields = modify_step["properties"]["uses_previous_fields"]
         assert previous_fields["items"]["required"] == ["from_step", "field_path"]
-        assert "input_bindings" not in patch["properties"]
-        assert "uses_form_fields" in patch["properties"]
-        assert "typed `uses_previous_fields`" in patch["description"]
+        assert "input_bindings" in modify_step["properties"]
+        assert "uses_form_fields" in modify_step["properties"]
 
-    def test_patch_schema_uses_generated_flow_schema_values(self):
+    def test_modify_step_schema_uses_generated_flow_schema_values(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1), _make_step(2)], resource_catalog=_empty_catalog()
         )
-        patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
-            "properties"
-        ]["patch"]
-        props = patch["properties"]
+        props = _modify_step_schema(schema)["properties"]
 
-        assert props["input_source"]["enum"] == builder_input_source_values()
-        assert props["input_type"]["enum"] == builder_input_type_values()
+        assert props["input_source"]["enum"] == [*builder_input_source_values(), None]
+        assert props["input_type"]["enum"] == [*builder_input_type_values(), None]
         assert "output_mode" not in props
-        assert props["output_type"]["enum"] == builder_output_type_values()
-        assert (
-            props["document_delivery_mode"]["enum"] == document_delivery_mode_values()
-        )
+        assert props["output_type"]["enum"] == [*builder_output_type_values(), None]
+        assert props["document_delivery_mode"]["enum"] == [
+            *document_delivery_mode_values(),
+            None,
+        ]
+        assert props["mcp_policy"]["enum"] == [
+            *(policy.value for policy in FlowMcpPolicy),
+            None,
+        ]
         assert props["review_mode"]["enum"] == ["view", "edit", None]
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_input_reference_instruction_hint,
@@ -92,6 +92,46 @@ class OrderedEditProposal(BaseModel):
     form_fields: list[FormFieldSpec] | None = None
 
 
+class OrderedEditSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan_rationale: str
+    assumptions: list[str] = Field(default_factory=list)
+    flow_name: str | None = None
+    flow_description: str | None = None
+    steps: list[OrderedEditStep]
+    removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
+    form_fields: list[FormFieldSpec] | None = None
+
+    @field_validator("plan_rationale")
+    @classmethod
+    def _normalize_plan_rationale(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("plan_rationale must not be empty.")
+        return normalized
+
+    @field_validator("assumptions")
+    @classmethod
+    def _normalize_assumptions(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            assumption = value.strip()
+            if assumption:
+                normalized.append(assumption)
+        return normalized
+
+    def to_proposal(self) -> OrderedEditProposal:
+        payload: dict[str, object] = {
+            "steps": self.steps,
+            "removed_existing_step_refs": self.removed_existing_step_refs,
+        }
+        for field_name in ("flow_name", "flow_description", "form_fields"):
+            if field_name in self.model_fields_set:
+                payload[field_name] = getattr(self, field_name)
+        return OrderedEditProposal.model_validate(payload)
+
+
 def flow_step_to_authoring_spec(
     step: FlowStep,
     plan_ref: str,
@@ -140,6 +180,7 @@ def current_flow_authoring_spec(
     flow_description: str | None,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
     resource_catalog: AIBuilderResourceCatalog | None,
+    form_fields: list[FormFieldSpec] | None = None,
 ) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name=normalize_flow_name(flow_name or "Unnamed Flow"),
@@ -153,7 +194,7 @@ def current_flow_authoring_spec(
             )
             for step in current_steps
         ],
-        form_fields=None,
+        form_fields=form_fields,
     )
 
 
@@ -463,6 +504,7 @@ __all__ = [
     "AddStep",
     "AssistantSpecPatch",
     "ModifyExistingStep",
+    "OrderedEditSubmission",
     "OrderedEditProposal",
     "compile_ordered_edit_proposal",
     "current_flow_authoring_spec",

@@ -25,6 +25,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.domain.flow import FlowStep
+from intric.flows.enums import FlowMcpPolicy
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 
 EDIT_FLOW_TOOL_NAME = "edit_flow"
@@ -36,9 +37,6 @@ def build_edit_flow_tool_schema(
     resource_catalog: AIBuilderResourceCatalog,
 ) -> dict[str, Any]:
     valid_refs = [f"existing_step_{s.step_order}" for s in current_steps]
-    # Include None for add operations where target_ref should be absent
-    target_ref_enum: list[str | None] = valid_refs + [None]
-    anchor_ref_enum: list[str | None] = valid_refs + [None]
 
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
@@ -54,23 +52,30 @@ def build_edit_flow_tool_schema(
         mcp_server_refs,
         mcp_tool_refs,
     )
+    modify_step_schema = _build_modify_step_schema(
+        valid_refs=valid_refs,
+        model_refs=model_refs,
+        kb_refs=kb_refs,
+        mcp_server_refs=mcp_server_refs,
+        mcp_tool_refs=mcp_tool_refs,
+    )
 
     return {
         "type": "function",
         "function": {
             "name": EDIT_FLOW_TOOL_NAME,
             "description": (
-                "Edit an existing flow. Describe only the steps or flow properties that truly change — "
-                "the backend preserves everything else. Each operation targets "
-                "a specific step by its ref. Unmentioned steps are kept as-is. "
-                "Use form_operations to add, modify, or remove flow-level inmatningsfält/form fields, "
-                "then reference those fields from consuming steps with uses_form_fields. "
+                "Edit an existing flow by returning the complete ordered step list. "
+                "Every existing step must appear once in steps unless its ref appears "
+                "in removed_existing_step_refs. Omit flow fields and form_fields to "
+                "preserve them; set form_fields to the complete desired list or null "
+                "to clear all flow-level inmatningsfält/form fields. "
                 "When you change output_type or document_delivery_mode, clear or omit "
                 "incompatible output_config fields instead of rewriting unrelated step config."
             ),
             "parameters": {
                 "type": "object",
-                "required": ["operations", "plan_rationale"],
+                "required": ["steps", "plan_rationale"],
                 "properties": {
                     "plan_rationale": {
                         "type": "string",
@@ -88,64 +93,47 @@ def build_edit_flow_tool_schema(
                         "type": ["string", "null"],
                         "description": "New flow description, or null to keep current.",
                     },
-                    "operations": {
+                    "steps": {
                         "type": "array",
                         "description": (
-                            "List of step operations. Each operation is add, modify, or remove. "
-                            "Use at most one modify operation per existing target_ref; combine "
-                            "all changes for the same step into that one patch."
+                            "Complete ordered step list after the edit. Preserve an "
+                            "existing step with kind=modify and its existing_step_ref; "
+                            "include only fields that change on that step. Add new "
+                            "steps with kind=add and a typed step payload."
                         ),
                         "items": {
-                            "type": "object",
-                            "required": ["op"],
-                            "properties": {
-                                "op": {
-                                    "type": "string",
-                                    "enum": ["add", "modify", "remove"],
-                                    "description": (
-                                        "add: insert a new step. "
-                                        "modify: change fields on an existing step. "
-                                        "remove: delete an existing step."
-                                    ),
-                                },
-                                "target_ref": {
-                                    "type": ["string", "null"],
-                                    "enum": target_ref_enum,
-                                    "description": (
-                                        "For modify/remove: the existing step to target. "
-                                        f"Valid refs: {valid_refs}. "
-                                        "Must be null for add operations."
-                                    ),
-                                },
-                                "placement": {
+                            "oneOf": [
+                                modify_step_schema,
+                                {
                                     "type": "object",
-                                    "description": "For add: where to insert the new step.",
+                                    "required": ["kind", "step"],
+                                    "additionalProperties": False,
                                     "properties": {
-                                        "position": {
-                                            "type": "string",
-                                            "enum": ["before", "after", "append"],
-                                        },
-                                        "anchor_ref": {
-                                            "type": ["string", "null"],
-                                            "enum": anchor_ref_enum,
-                                            "description": (
-                                                "Required for before/after. "
-                                                f"Valid refs: {valid_refs}"
-                                            ),
-                                        },
+                                        "kind": {"type": "string", "enum": ["add"]},
+                                        "step": step_payload_schema,
                                     },
                                 },
-                                "add_payload": step_payload_schema,
-                                "patch": _build_patch_schema(
-                                    model_refs,
-                                    kb_refs,
-                                    mcp_server_refs,
-                                    mcp_tool_refs,
-                                ),
-                            },
+                            ],
                         },
                     },
-                    "form_operations": _build_form_operations_schema(),
+                    "removed_existing_step_refs": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": valid_refs},
+                        "uniqueItems": True,
+                        "description": (
+                            "Existing step refs intentionally deleted by this edit. "
+                            "Omission is never deletion; list every removed ref here."
+                        ),
+                    },
+                    "form_fields": {
+                        "type": ["array", "null"],
+                        "items": _build_form_field_spec_schema(),
+                        "description": (
+                            "Complete desired form field list. Omit to preserve current "
+                            "fields; set null to clear all fields; provide a list to add, "
+                            "modify, or remove fields by complete state."
+                        ),
+                    },
                     "assumptions": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -182,51 +170,97 @@ def build_edit_mode_tool_schemas(
 # ---------------------------------------------------------------------------
 
 
-def _build_form_operations_schema() -> dict[str, Any]:
+def _build_modify_step_schema(
+    *,
+    valid_refs: list[str],
+    model_refs: list[str] | None,
+    kb_refs: list[str] | None,
+    mcp_server_refs: list[str] | None,
+    mcp_tool_refs: list[str] | None,
+) -> dict[str, Any]:
     return {
-        "type": "array",
-        "description": (
-            "Optional operations for flow-level form fields/inmatningsfält. "
-            "When adding a field, also add the field name to uses_form_fields on "
-            "every step that consumes it; declared fields without step references "
-            "become orphan UI controls. field_payload is required for add and "
-            "modify; omit field_payload for remove."
-        ),
-        "items": {
-            "type": "object",
-            "required": ["op", "field_name"],
-            "additionalProperties": False,
-            "properties": {
-                "op": {
-                    "type": "string",
-                    "enum": ["add", "modify", "remove"],
-                    "description": (
-                        "add: create a new form field. "
-                        "modify: update an existing form field. "
-                        "remove: delete an existing form field."
-                    ),
-                },
-                "field_name": {"type": "string", "minLength": 1},
-                "field_payload": _build_form_field_payload_schema(),
+        "type": "object",
+        "required": ["kind", "existing_step_ref"],
+        "additionalProperties": False,
+        "properties": {
+            "kind": {"type": "string", "enum": ["modify"]},
+            "existing_step_ref": {
+                "type": "string",
+                "enum": valid_refs,
+                "description": f"Server alias for the existing step. Valid refs: {valid_refs}.",
             },
+            "name": {"type": ["string", "null"]},
+            "assistant_spec": _build_assistant_spec_schema(
+                model_refs,
+                kb_refs,
+                mcp_server_refs,
+                mcp_tool_refs,
+            ),
+            "mcp_policy": {
+                "type": ["string", "null"],
+                "enum": [*(policy.value for policy in FlowMcpPolicy), None],
+            },
+            "input_source": {
+                "type": ["string", "null"],
+                "enum": [*builder_input_source_values(), None],
+            },
+            "input_type": {
+                "type": ["string", "null"],
+                "enum": [*builder_input_type_values(), None],
+            },
+            "output_type": {
+                "type": ["string", "null"],
+                "enum": [*builder_output_type_values(), None],
+            },
+            "document_delivery_mode": {
+                "type": ["string", "null"],
+                "enum": [*document_delivery_mode_values(), None],
+            },
+            "uses_form_fields": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+            },
+            "uses_previous_fields": build_previous_field_refs_schema(),
+            "input_bindings": {
+                "type": ["object", "null"],
+                "additionalProperties": True,
+            },
+            "input_contract": {
+                "type": ["object", "null"],
+                "additionalProperties": True,
+            },
+            "output_contract": {
+                "type": ["object", "null"],
+                "additionalProperties": True,
+            },
+            "input_config": {
+                "type": ["object", "null"],
+                "additionalProperties": True,
+            },
+            "output_config": {
+                "type": ["object", "null"],
+                "additionalProperties": True,
+            },
+            "review_mode": build_review_mode_schema(),
         },
     }
 
 
-def _build_form_field_payload_schema() -> dict[str, Any]:
+def _build_form_field_spec_schema() -> dict[str, Any]:
     return {
-        "type": ["object", "null"],
+        "type": "object",
+        "required": ["name", "type", "label"],
         "additionalProperties": False,
         "properties": {
-            "label": {"type": "string"},
-            "field_type": {
+            "name": {"type": "string", "minLength": 1},
+            "type": {
                 "type": "string",
                 "enum": builder_form_field_type_values(),
             },
-            "required": {"type": "boolean"},
-            "description": {"type": "string"},
+            "label": {"type": "string", "minLength": 1},
+            "required": {"type": "boolean", "default": False},
             "options": {
-                "type": "array",
+                "type": ["array", "null"],
                 "items": {"type": "string"},
             },
         },
@@ -239,7 +273,6 @@ def _build_step_payload_schema(
     mcp_server_refs: list[str] | None,
     mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
-    """Schema for add_payload (shared typed draft for new steps)."""
     return build_new_step_draft_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
@@ -257,71 +290,6 @@ def _build_step_payload_schema(
         ),
         expose_previous_field_refs=True,
     )
-
-
-def _build_patch_schema(
-    model_refs: list[str] | None,
-    kb_refs: list[str] | None,
-    mcp_server_refs: list[str] | None,
-    mcp_tool_refs: list[str] | None,
-) -> dict[str, Any]:
-    """Schema for patch (partial update for modify operations)."""
-    assistant_spec = _build_assistant_spec_schema(
-        model_refs,
-        kb_refs,
-        mcp_server_refs,
-        mcp_tool_refs,
-    )
-
-    return {
-        "type": "object",
-        "description": (
-            "Partial update for existing steps (modify operations). "
-            "Only include fields you want to change. "
-            "Use typed `uses_previous_fields` for field-level reuse from earlier "
-            "JSON-producing steps; do not author raw `input_bindings`."
-        ),
-        "properties": {
-            "name": {"type": "string"},
-            "assistant_spec": assistant_spec,
-            "input_source": {
-                "type": "string",
-                "enum": builder_input_source_values(),
-            },
-            "input_type": {
-                "type": "string",
-                "enum": builder_input_type_values(),
-            },
-            "uses_form_fields": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional form field variable names this existing step should reuse in its compiled underlag.",
-            },
-            "uses_previous_fields": build_previous_field_refs_schema(),
-            "output_type": {
-                "type": "string",
-                "enum": builder_output_type_values(),
-            },
-            "document_delivery_mode": {
-                "type": "string",
-                "enum": document_delivery_mode_values(),
-                "description": (
-                    "How a DOCX/PDF output should be produced. Use 'generated' for normal "
-                    "generated DOCX/PDF and 'template_fill' only when filling a DOCX template. "
-                    "Do not use this for human review checkpoints; use review_mode."
-                ),
-            },
-            "output_config": {
-                "type": ["object", "null"],
-                "description": (
-                    "Optional output configuration patch. Use null when you want to clear "
-                    "the existing output_config for this step."
-                ),
-                "additionalProperties": True,
-            },
-            "review_mode": build_review_mode_schema(),
-        },
-    }
 
 
 def _build_assistant_spec_schema(

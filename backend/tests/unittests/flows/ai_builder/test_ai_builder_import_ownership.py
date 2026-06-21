@@ -253,7 +253,6 @@ CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compi
 CREATE_COMPILER_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_create_compiler")
 )
-EDIT_MODELS_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_models.py")
 EDIT_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_compiler.py")
 EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES = frozenset[int]()
 AUTHORING_PROJECTION_MODULE = ".".join(
@@ -1103,7 +1102,7 @@ def test_proposal_completion_has_single_request_boundary() -> None:
     assert violations == []
 
 
-def test_edit_compiler_working_state_uses_typed_entries() -> None:
+def test_edit_compiler_consumes_ordered_proposals_without_operation_ir() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     edit_compiler_path = backend_root / EDIT_COMPILER_PATH
     edit_compiler_text = edit_compiler_path.read_text()
@@ -1120,42 +1119,6 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
             f"{edit_compiler_path}: type-ignore lines {sorted(type_ignore_lines)}"
         )
 
-    class_fields: dict[str, dict[str, str]] = {}
-    for node in ast.walk(edit_compiler_tree):
-        if not isinstance(node, ast.ClassDef) or node.name not in {
-            "_ExistingStepEntry",
-            "_NewStepEntry",
-        }:
-            continue
-        class_fields[node.name] = {
-            statement.target.id: ast.unparse(statement.annotation)
-            for statement in node.body
-            if isinstance(statement, ast.AnnAssign)
-            and isinstance(statement.target, ast.Name)
-        }
-
-    expected_class_fields = {
-        "_ExistingStepEntry": {"ref": "str", "step": "FlowStep"},
-        "_NewStepEntry": {"draft": "NewStepDraft"},
-    }
-    if class_fields != expected_class_fields:
-        violations.append(f"{edit_compiler_path}: entry fields {class_fields}")
-
-    edit_entry_alias = next(
-        (
-            ast.unparse(statement.value)
-            for statement in edit_compiler_tree.body
-            if isinstance(statement, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "_EditStepEntry"
-                for target in statement.targets
-            )
-        ),
-        None,
-    )
-    if edit_entry_alias != "_ExistingStepEntry | _NewStepEntry":
-        violations.append(f"{edit_compiler_path}: _EditStepEntry={edit_entry_alias}")
-
     imported_names_by_module: dict[str, set[str]] = {}
     direct_module_imports: set[str] = set()
     for node in ast.walk(edit_compiler_tree):
@@ -1171,6 +1134,8 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
         violations.append(
             f"{edit_compiler_path}: missing compile_ordered_edit_proposal import"
         )
+    if "OrderedEditProposal" not in authoring_imports:
+        violations.append(f"{edit_compiler_path}: missing OrderedEditProposal import")
 
     banned_authoring_imports = {
         "_compile_existing_step_modification",
@@ -1196,25 +1161,16 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
         for node in ast.walk(edit_compiler_tree)
         if isinstance(node, ast.FunctionDef)
     }
-    if "_flow_step_to_spec" in function_names:
-        violations.append(f"{edit_compiler_path}: redefines _flow_step_to_spec")
-
-    ordered_proposal_function = next(
-        node
-        for node in ast.walk(edit_compiler_tree)
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_build_ordered_edit_proposal"
-    )
-    working_annotations = [
-        ast.unparse(node.annotation)
-        for node in ast.walk(ordered_proposal_function)
-        if isinstance(node, ast.AnnAssign)
-        and isinstance(node.target, ast.Name)
-        and node.target.id == "working"
-    ]
-    if working_annotations != ["list[_EditStepEntry]"]:
+    banned_functions = {
+        "_flow_step_to_spec",
+        "_build_ordered_edit_proposal",
+        "_apply_add",
+        "_apply_modify",
+        "_apply_remove",
+    }
+    if overlap := function_names & banned_functions:
         violations.append(
-            f"{edit_compiler_path}: working annotations {working_annotations}"
+            f"{edit_compiler_path}: stale edit functions {sorted(overlap)}"
         )
 
     banned_annotation = "tuple[str | None, FlowStep | NewStepDraft]"
@@ -1235,31 +1191,16 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
     assert violations == []
 
 
-def test_edit_models_do_not_encode_operation_shape_as_field_comments() -> None:
+def test_old_edit_operation_ir_files_are_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    edit_models_path = backend_root / EDIT_MODELS_PATH
-    text = edit_models_path.read_text()
-
-    banned_snippets = (
-        "# Required for",
-        "# For add ops only",
-        "# For modify ops only",
-        "# For add/modify",
+    deleted_paths = (
+        Path("src/intric/flows/ai_builder/ai_builder_edit_models.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_edit_normalizer.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_edit_validator.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_edit_mechanics.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_edit_effective_steps.py"),
     )
-    task_markers = (
-        # Concatenated so this guard's own source does not trip the check.
-        "T" + "106",
-        "T" + "107",
-        "Ph" + "ase",
-        "\u00a7" + "A",
-        "plan " + "\u00a7",
-    )
-    scanned_text = text.lower()
-    violations = [
-        f"{edit_models_path}: contains {snippet!r}"
-        for snippet in (*banned_snippets, *task_markers)
-        if snippet.lower() in scanned_text
-    ]
+    violations = [str(path) for path in deleted_paths if (backend_root / path).exists()]
 
     assert violations == []
 

@@ -926,11 +926,11 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
     tool_call.function.arguments = json.dumps(
         {
             "plan_rationale": "Lägg till citerande textsteg.",
-            "operations": [
+            "steps": [
                 {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {"output_type": "text"},
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_type": "text",
                 },
                 'assumptions:["trasig"]',
             ],
@@ -954,5 +954,5 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
-    assert "StepEditOperation" in request.error_message
+    assert "OrderedEditSubmission" in request.error_message
     assert request.retry_config.target_tool_name == EDIT_FLOW_TOOL_NAME

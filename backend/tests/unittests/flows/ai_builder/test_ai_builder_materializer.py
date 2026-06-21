@@ -8,13 +8,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    FlowEditDraft,
-    StepEditOperation,
-    StepPatch,
-    StepPlacement,
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    AddStep,
+    AssistantSpecPatch,
+    ModifyExistingStep,
+    OrderedEditProposal,
 )
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -2339,20 +2339,16 @@ class TestExecuteEditFlow:
                 }
             ],
         )
-        edit_result = compile_edit_draft(
-            FlowEditDraft(
-                operations=[
-                    StepEditOperation(
-                        op="modify",
-                        target_ref="existing_step_1",
-                        patch=StepPatch(
-                            assistant_spec=AssistantSpec(
-                                instructions="Hämta och sammanfatta aktuellt kundärende."
-                            )
+        edit_result = compile_edit_proposal(
+            OrderedEditProposal(
+                steps=[
+                    ModifyExistingStep(
+                        existing_step_ref="existing_step_1",
+                        assistant_spec=AssistantSpecPatch(
+                            instructions="Hämta och sammanfatta aktuellt kundärende."
                         ),
                     )
-                ],
-                plan_rationale="Uppdatera instruktionen utan att ändra verktygsåtkomst.",
+                ]
             ),
             [existing_step],
             base_flow_revision=4,
@@ -2442,13 +2438,12 @@ class TestExecuteEditFlow:
             available_models=[],
             available_kbs=[],
         )
-        edit_result = compile_edit_draft(
-            FlowEditDraft(
-                operations=[
-                    StepEditOperation(
-                        op="add",
-                        placement=StepPlacement(position="append"),
-                        add_payload=NewStepDraft(
+        edit_result = compile_edit_proposal(
+            OrderedEditProposal(
+                steps=[
+                    ModifyExistingStep(existing_step_ref="existing_step_1"),
+                    AddStep(
+                        step=NewStepDraft(
                             name="Hämta live-data",
                             instructions="Hämta aktuell ärendedata via valt MCP-verktyg.",
                             input_source=InputSource.PREVIOUS_STEP,
@@ -2457,9 +2452,8 @@ class TestExecuteEditFlow:
                             mcp_server_refs=["mcp_server.case-registry"],
                             mcp_tool_refs=["mcp_tool.case-registry-lookup"],
                         ),
-                    )
-                ],
-                plan_rationale="Lägg till live-data utan att ändra första steget.",
+                    ),
+                ]
             ),
             [existing_step],
             base_flow_revision=2,

@@ -1,33 +1,27 @@
-"""Edit IR compiler for the AI Builder.
+"""Ordered edit compiler for the AI Builder.
 
-Compiles FlowEditDraft operations into a canonical authoring spec plus the
-edit approval metadata the user approves. The key principle is that the LLM
-describes the change, and the backend preserves everything else.
+Compiles the model-visible ordered edit proposal into the canonical authoring
+spec plus the edit approval metadata the user approves. The key principle is
+that every existing step is either represented in order or explicitly removed.
 """
 
 from __future__ import annotations
 
 import re
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
     AddStep,
-    AssistantSpecPatch,
     ModifyExistingStep,
     OrderedEditProposal,
+    OrderedEditStep,
     compile_ordered_edit_proposal,
     current_flow_authoring_spec,
     flow_step_to_authoring_spec,
     flow_steps_to_authoring_specs,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderEditApproval
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    FlowEditDraft,
-    StepEditOperation,
-    StepPatch,
-)
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     EditConfidence,
@@ -41,7 +35,6 @@ from intric.flows.ai_builder.ai_builder_form_fields import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
-    PreviousFieldRef,
 )
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
@@ -71,21 +64,7 @@ _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
 
 @dataclass(frozen=True, slots=True)
-class _ExistingStepEntry:
-    ref: str
-    step: FlowStep
-
-
-@dataclass(frozen=True, slots=True)
-class _NewStepEntry:
-    draft: NewStepDraft
-
-
-_EditStepEntry = _ExistingStepEntry | _NewStepEntry
-
-
-@dataclass(frozen=True, slots=True)
-class _OrderedEditBuildResult:
+class _PreparedOrderedEditProposal:
     proposal: OrderedEditProposal
     warnings: list[str]
     shadowed_primary_input_fields: list[str]
@@ -97,8 +76,8 @@ class EditCompilationResult:
     approval: FlowBuilderEditApproval
 
 
-def compile_edit_draft(
-    edit_draft: FlowEditDraft,
+def compile_edit_proposal(
+    proposal: OrderedEditProposal,
     current_steps: list[FlowStep],
     base_flow_revision: int,
     *,
@@ -108,65 +87,43 @@ def compile_edit_draft(
     assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
 ) -> EditCompilationResult:
-    """Compile edit operations into a concrete flow preview + diff.
-
-    The user approves the compiled spec and edit approval metadata, not the
-    raw draft.
-
-    Args:
-        edit_draft: The LLM's edit operations.
-        current_steps: Existing flow steps (ordered by step_order).
-        base_flow_revision: Current flow revision for stale-plan protection.
-        flow_name: Current flow name (used if edit_draft doesn't change it).
-        flow_description: Current flow description.
-    """
+    """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = _primary_runtime_input_type_from_steps(current_steps)
-    ordered_edit = _build_ordered_edit_proposal(
-        edit_draft=edit_draft,
+    prepared = _prepare_ordered_edit_proposal(
+        proposal=proposal,
         current_steps=current_steps,
+        current_metadata_json=current_metadata_json,
         primary_runtime_input_type=primary_runtime_input_type,
     )
+    base_form_fields = extract_form_fields_from_metadata(current_metadata_json)
     base_spec = current_flow_authoring_spec(
         current_steps=current_steps,
         flow_name=flow_name,
         flow_description=flow_description,
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
+        form_fields=base_form_fields,
     )
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=base_spec,
-        proposal=ordered_edit.proposal,
+        proposal=prepared.proposal,
     )
     compiled_steps = compiled_spec.steps
 
     compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
     normalized_spec, normalization_changes = normalize_ai_builder_spec(
         FlowDraftSpecCore(
-            flow_name=normalize_flow_name(
-                edit_draft.flow_name or flow_name or "Unnamed Flow"
-            ),
-            flow_description=_resolve_flow_description(
-                edit_draft=edit_draft,
-                current_description=flow_description,
-            ),
+            flow_name=normalize_flow_name(compiled_spec.flow_name),
+            flow_description=compiled_spec.flow_description,
             steps=compiled_steps,
-            form_fields=None,
+            form_fields=compiled_spec.form_fields,
         )
     )
     compiled_steps = normalized_spec.steps
-
-    compiled_form_fields, form_changes, dropped_form_field_names = _compile_form_fields(
-        edit_draft,
-        current_metadata_json=current_metadata_json,
-        primary_runtime_input_type=primary_runtime_input_type,
-    )
-    shadowed_primary_input_fields = [
-        *ordered_edit.shadowed_primary_input_fields,
-        *dropped_form_field_names,
-    ]
-
     final_name = normalized_spec.flow_name
     final_description = normalized_spec.flow_description
+    compiled_form_fields = normalized_spec.form_fields
+    form_changes = _build_form_field_changes(base_form_fields, compiled_form_fields)
 
     compiled_spec = FlowDraftSpecCore(
         flow_name=final_name,
@@ -180,7 +137,7 @@ def compile_edit_draft(
     )
     advisories.extend(
         _build_description_advisories(
-            edit_draft=edit_draft,
+            proposal=prepared.proposal,
             current_steps=current_steps,
             compiled_steps=compiled_steps,
             current_description=flow_description,
@@ -188,7 +145,7 @@ def compile_edit_draft(
     )
     advisories.extend(
         _build_primary_input_shadow_advisories(
-            field_names=shadowed_primary_input_fields,
+            field_names=prepared.shadowed_primary_input_fields,
             primary_runtime_input_type=primary_runtime_input_type,
         )
     )
@@ -196,15 +153,15 @@ def compile_edit_draft(
     step_changes = _build_step_changes(
         current_steps=current_steps,
         compiled_steps=compiled_steps,
-        removed_refs=ordered_edit.proposal.removed_existing_step_refs,
+        removed_refs=prepared.proposal.removed_existing_step_refs,
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
 
     metadata_changes: list[MetadataChange] = []
     flow_property_changes: dict[str, tuple[Any, Any]] = {}
-    if edit_draft.flow_name and edit_draft.flow_name != flow_name:
-        flow_property_changes["flow_name"] = (flow_name, edit_draft.flow_name)
+    if "flow_name" in prepared.proposal.model_fields_set and final_name != flow_name:
+        flow_property_changes["flow_name"] = (flow_name, final_name)
     previous_description = flow_description or ""
     if final_description != previous_description:
         flow_property_changes["flow_description"] = (
@@ -225,17 +182,21 @@ def compile_edit_draft(
     )
 
     risk_flags: list[str] = []
-    if any(op.op == "remove" for op in edit_draft.operations):
+    if prepared.proposal.removed_existing_step_refs:
         risk_flags.append("step_removal")
-    confidence = _compute_confidence(step_changes, ordered_edit.warnings, edit_draft)
+    confidence = _compute_confidence(
+        step_changes=step_changes,
+        form_changes=form_changes,
+        warnings=prepared.warnings,
+    )
 
     return EditCompilationResult(
         spec=compiled_spec,
         approval=FlowBuilderEditApproval(
             base_flow_revision=base_flow_revision,
-            removed_existing_step_refs=ordered_edit.proposal.removed_existing_step_refs,
+            removed_existing_step_refs=prepared.proposal.removed_existing_step_refs,
             diff=diff,
-            warnings=ordered_edit.warnings,
+            warnings=prepared.warnings,
             advisories=advisories,
             risk_flags=risk_flags,
             confidence=confidence,
@@ -243,198 +204,200 @@ def compile_edit_draft(
     )
 
 
-def _build_ordered_edit_proposal(
+def _prepare_ordered_edit_proposal(
     *,
-    edit_draft: FlowEditDraft,
+    proposal: OrderedEditProposal,
     current_steps: list[FlowStep],
+    current_metadata_json: dict[str, Any] | None,
     primary_runtime_input_type: InputType | None,
-) -> _OrderedEditBuildResult:
-    working: list[_EditStepEntry] = [
-        _ExistingStepEntry(ref=f"existing_step_{s.step_order}", step=s)
-        for s in current_steps
-    ]
-    removed_refs: set[str] = set()
-    modified_refs: dict[str, StepPatch] = {}
+) -> _PreparedOrderedEditProposal:
     warnings: list[str] = []
-    shadowed_primary_input_fields: list[str] = []
-
-    for op in edit_draft.operations:
-        if op.op == "remove":
-            _apply_remove(op, working, removed_refs)
-        elif op.op == "modify":
-            _apply_modify(op, modified_refs)
-        elif op.op == "add":
-            _apply_add(op, working)
-
-    _repair_leading_audio_document_extraction(
-        working=working,
-        modified_refs=modified_refs,
+    prepared, dropped_step_field_names = _sanitize_shadowed_primary_inputs(
+        proposal=proposal,
+        primary_runtime_input_type=primary_runtime_input_type,
+    )
+    prepared, dropped_declared_field_names = _sanitize_shadowed_form_fields(
+        proposal=prepared,
+        base_form_fields=extract_form_fields_from_metadata(current_metadata_json),
+        primary_runtime_input_type=primary_runtime_input_type,
+    )
+    prepared = _repair_leading_audio_shape(
+        proposal=prepared,
+        current_steps=current_steps,
         warnings=warnings,
     )
+    return _PreparedOrderedEditProposal(
+        proposal=prepared,
+        warnings=warnings,
+        shadowed_primary_input_fields=[
+            *dropped_step_field_names,
+            *dropped_declared_field_names,
+        ],
+    )
 
-    ordered_steps: list[AddStep | ModifyExistingStep] = []
-    compiled_index_by_original_order: dict[int, int] = {}
-    for entry in working:
-        if isinstance(entry, _NewStepEntry):
-            step_draft, dropped_field_names = _without_primary_runtime_shadow_fields(
-                entry.draft,
+
+def _sanitize_shadowed_primary_inputs(
+    *,
+    proposal: OrderedEditProposal,
+    primary_runtime_input_type: InputType | None,
+) -> tuple[OrderedEditProposal, list[str]]:
+    steps: list[OrderedEditStep] = []
+    dropped_field_names: list[str] = []
+    changed = False
+
+    for item in proposal.steps:
+        if isinstance(item, AddStep):
+            step, dropped = _without_primary_runtime_shadow_fields(
+                item.step,
                 primary_runtime_input_type=primary_runtime_input_type,
             )
-            shadowed_primary_input_fields.extend(dropped_field_names)
-            ordered_steps.append(AddStep(step=step_draft))
+            dropped_field_names.extend(dropped)
+            if step is item.step:
+                steps.append(item)
+            else:
+                steps.append(item.model_copy(update={"step": step}))
+                changed = True
             continue
 
-        patch = modified_refs.get(entry.ref)
-        if patch is None:
-            ordered_steps.append(ModifyExistingStep(existing_step_ref=entry.ref))
-        else:
-            modified_step, dropped_field_names = _modify_step_from_patch(
-                existing_step_ref=entry.ref,
-                patch=patch,
-                compiled_index_by_original_order=compiled_index_by_original_order,
-                primary_runtime_input_type=primary_runtime_input_type,
-            )
-            shadowed_primary_input_fields.extend(dropped_field_names)
-            ordered_steps.append(modified_step)
-        original_order = _existing_step_order(entry.ref)
-        if original_order is not None:
-            compiled_index_by_original_order[original_order] = len(ordered_steps)
-
-    payload: dict[str, object] = {
-        "steps": ordered_steps,
-        "removed_existing_step_refs": frozenset(removed_refs),
-    }
-    if edit_draft.flow_name is not None:
-        payload["flow_name"] = edit_draft.flow_name
-    if edit_draft.flow_description is not None:
-        payload["flow_description"] = edit_draft.flow_description
-
-    return _OrderedEditBuildResult(
-        proposal=OrderedEditProposal.model_validate(payload),
-        warnings=warnings,
-        shadowed_primary_input_fields=shadowed_primary_input_fields,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Operation helpers
-# ---------------------------------------------------------------------------
-
-
-def _apply_remove(
-    op: StepEditOperation,
-    working: list[_EditStepEntry],
-    removed_refs: set[str],
-) -> None:
-    if op.target_ref is None:
-        return
-    for i, entry in enumerate(working):
-        if isinstance(entry, _ExistingStepEntry) and entry.ref == op.target_ref:
-            removed_refs.add(entry.ref)
-            working.pop(i)
-            return
-
-
-def _apply_modify(
-    op: StepEditOperation,
-    modified_refs: dict[str, StepPatch],
-) -> None:
-    if op.target_ref is None or op.patch is None:
-        return
-    if op.target_ref in modified_refs:
-        raise ValueError(
-            f"Duplicate modify operation for {op.target_ref}; edit drafts must be "
-            "canonicalized before compilation."
+        if "uses_form_fields" not in item.model_fields_set:
+            steps.append(item)
+            continue
+        filtered, dropped = split_primary_runtime_input_shadow_names(
+            field_names=item.uses_form_fields or [],
+            runtime_input_type=primary_runtime_input_type,
         )
-    modified_refs[op.target_ref] = op.patch
+        dropped_field_names.extend(dropped)
+        if filtered == (item.uses_form_fields or []):
+            steps.append(item)
+            continue
+        steps.append(item.model_copy(update={"uses_form_fields": filtered}))
+        changed = True
+
+    if not changed:
+        return proposal, dropped_field_names
+    return proposal.model_copy(update={"steps": steps}), dropped_field_names
 
 
-def _apply_add(
-    op: StepEditOperation,
-    working: list[_EditStepEntry],
-) -> None:
-    if op.add_payload is None:
-        return
-
-    new_entry = _NewStepEntry(draft=op.add_payload)
-
-    if op.placement is None or op.placement.position == "append":
-        working.append(new_entry)
-        return
-
-    if op.placement.anchor_ref is not None:
-        for i, entry in enumerate(working):
-            if (
-                isinstance(entry, _ExistingStepEntry)
-                and entry.ref == op.placement.anchor_ref
-            ):
-                if op.placement.position == "before":
-                    working.insert(i, new_entry)
-                else:  # after
-                    working.insert(i + 1, new_entry)
-                return
-
-    # Fallback: append
-    working.append(new_entry)
-
-
-def _repair_leading_audio_document_extraction(
+def _sanitize_shadowed_form_fields(
     *,
-    working: list[_EditStepEntry],
-    modified_refs: dict[str, StepPatch],
-    warnings: list[str],
-) -> None:
-    if len(working) < 2:
-        return
-    first_entry = working[0]
-    if not isinstance(first_entry, _ExistingStepEntry):
-        return
-    if not _is_bad_leading_audio_document_extraction(first_entry.step, working):
-        return
+    proposal: OrderedEditProposal,
+    base_form_fields: list[FormFieldSpec] | None,
+    primary_runtime_input_type: InputType | None,
+) -> tuple[OrderedEditProposal, list[str]]:
+    if "form_fields" not in proposal.model_fields_set or proposal.form_fields is None:
+        return proposal, []
 
-    working.insert(
-        0,
-        _NewStepEntry(
-            draft=NewStepDraft(
-                name="Transkribera ljud",
-                instructions="Transkribera uppladdat ljud till text.",
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.AUDIO,
-                output_type=OutputType.TEXT,
-                runtime_upload=True,
-                runtime_required=_runtime_input_required(first_entry.step.input_config),
-                runtime_max_files=_runtime_input_max_files(
-                    first_entry.step.input_config
-                ),
-            ),
-        ),
+    kept_fields: list[FormFieldSpec] = []
+    dropped_field_names: list[str] = []
+    for field in proposal.form_fields:
+        if is_primary_runtime_input_shadow_field(
+            variable_name=field.name,
+            field_type=field.type,
+            runtime_input_type=primary_runtime_input_type,
+        ):
+            dropped_field_names.append(field.name)
+            continue
+        kept_fields.append(field)
+
+    if not dropped_field_names:
+        return proposal, []
+    if not kept_fields and not base_form_fields:
+        return proposal.model_copy(update={"form_fields": None}), dropped_field_names
+    return proposal.model_copy(
+        update={"form_fields": kept_fields or None}
+    ), dropped_field_names
+
+
+def _repair_leading_audio_shape(
+    *,
+    proposal: OrderedEditProposal,
+    current_steps: list[FlowStep],
+    warnings: list[str],
+) -> OrderedEditProposal:
+    if len(proposal.steps) < 2 or not current_steps:
+        return proposal
+    if _starts_with_transcription_step(proposal.steps):
+        return proposal
+
+    current_by_ref = {
+        f"existing_step_{step.step_order}": step for step in current_steps
+    }
+    first_item = proposal.steps[0]
+    if not isinstance(first_item, ModifyExistingStep):
+        return proposal
+    first_step = current_by_ref.get(first_item.existing_step_ref)
+    if first_step is None:
+        return proposal
+    if not _is_bad_leading_audio_document_extraction(
+        first_step,
+        terminal_output_type=_terminal_output_type(proposal.steps, current_by_ref),
+    ):
+        return proposal
+
+    transcript_step = AddStep(
+        step=NewStepDraft(
+            name="Transkribera ljud",
+            instructions="Transkribera uppladdat ljud till text.",
+            input_source=InputSource.FLOW_INPUT,
+            input_type=InputType.AUDIO,
+            output_type=OutputType.TEXT,
+            runtime_upload=True,
+            runtime_required=_runtime_input_required(first_step.input_config),
+            runtime_max_files=_runtime_input_max_files(first_step.input_config),
+        )
     )
-    modified_refs[first_entry.ref] = _merge_step_patch(
-        modified_refs.get(first_entry.ref),
-        StepPatch(
-            input_source=InputSource.PREVIOUS_STEP,
-            input_type=InputType.TEXT,
-            input_bindings=None,
-            input_contract=None,
-            input_config=None,
-        ),
+    rewired_first = ModifyExistingStep.model_validate(
+        {
+            **first_item.model_dump(mode="python", exclude_unset=True),
+            "input_source": InputSource.PREVIOUS_STEP,
+            "input_type": InputType.TEXT,
+            "input_bindings": None,
+            "input_contract": None,
+            "input_config": None,
+        }
     )
     warnings.append(
         "Inserted a dedicated audio transcription step before the existing "
         "structured analysis step."
     )
+    return proposal.model_copy(
+        update={"steps": [transcript_step, rewired_first, *proposal.steps[1:]]}
+    )
+
+
+def _starts_with_transcription_step(steps: list[OrderedEditStep]) -> bool:
+    first = steps[0]
+    return (
+        isinstance(first, AddStep)
+        and first.step.input_source == InputSource.FLOW_INPUT
+        and first.step.input_type == InputType.AUDIO
+        and first.step.output_type == OutputType.TEXT
+    )
+
+
+def _terminal_output_type(
+    steps: list[OrderedEditStep],
+    current_by_ref: dict[str, FlowStep],
+) -> OutputType | None:
+    terminal = steps[-1]
+    if isinstance(terminal, AddStep):
+        return terminal.step.output_type
+    if "output_type" in terminal.model_fields_set and terminal.output_type is not None:
+        return terminal.output_type
+    current = current_by_ref.get(terminal.existing_step_ref)
+    if current is None:
+        return None
+    try:
+        return OutputType(current.output_type)
+    except ValueError:
+        return None
 
 
 def _is_bad_leading_audio_document_extraction(
     step: FlowStep,
-    working: list[_EditStepEntry],
+    *,
+    terminal_output_type: OutputType | None,
 ) -> bool:
-    terminal = working[-1]
-    terminal_output_type = (
-        terminal.draft.output_type
-        if isinstance(terminal, _NewStepEntry)
-        else OutputType(terminal.step.output_type)
-    )
     return (
         step.input_source == InputSource.FLOW_INPUT.value
         and step.input_type == InputType.AUDIO.value
@@ -443,10 +406,26 @@ def _is_bad_leading_audio_document_extraction(
     )
 
 
-def _merge_step_patch(existing: StepPatch | None, repair: StepPatch) -> StepPatch:
-    if existing is None:
-        return repair
-    return existing.model_copy(update=repair.model_dump(exclude_unset=True))
+def _build_form_field_changes(
+    current_fields: list[FormFieldSpec] | None,
+    proposed_fields: list[FormFieldSpec] | None,
+) -> list[FormFieldChange]:
+    current_by_name = {field.name: field for field in current_fields or []}
+    proposed_by_name = {field.name: field for field in proposed_fields or []}
+    changes: list[FormFieldChange] = []
+
+    for field in proposed_fields or []:
+        current = current_by_name.get(field.name)
+        if current is None:
+            changes.append(FormFieldChange(kind="added", field_name=field.name))
+        elif current != field:
+            changes.append(FormFieldChange(kind="modified", field_name=field.name))
+
+    for field in current_fields or []:
+        if field.name not in proposed_by_name:
+            changes.append(FormFieldChange(kind="removed", field_name=field.name))
+
+    return changes
 
 
 def _runtime_input_required(input_config: dict[str, Any] | None) -> bool:
@@ -469,76 +448,6 @@ def _runtime_input_config(input_config: dict[str, Any] | None) -> dict[str, Any]
     return (
         cast(dict[str, Any], runtime_input) if isinstance(runtime_input, dict) else {}
     )
-
-
-def _modify_step_from_patch(
-    *,
-    existing_step_ref: str,
-    patch: StepPatch,
-    compiled_index_by_original_order: dict[int, int],
-    primary_runtime_input_type: InputType | None,
-) -> tuple[ModifyExistingStep, list[str]]:
-    payload: dict[str, object | None] = {
-        "existing_step_ref": existing_step_ref,
-    }
-    shadowed_primary_input_fields: list[str] = []
-    # Non-nullable StepSpec fields preserve old StepPatch omission semantics;
-    # nullable fields below use model_fields_set so explicit clears survive.
-    for field_name in (
-        "name",
-        "input_source",
-        "input_type",
-        "output_mode",
-        "output_type",
-        "mcp_policy",
-    ):
-        value = getattr(patch, field_name)
-        if value is not None:
-            payload[field_name] = value
-    if patch.assistant_spec is not None:
-        payload["assistant_spec"] = AssistantSpecPatch.model_validate(
-            patch.assistant_spec.model_dump(mode="python", exclude_unset=True)
-        )
-    for field_name in (
-        "document_delivery_mode",
-        "input_bindings",
-        "input_contract",
-        "output_contract",
-        "input_config",
-        "output_config",
-        "review_mode",
-    ):
-        if field_name in patch.model_fields_set:
-            payload[field_name] = getattr(patch, field_name)
-    if "uses_form_fields" in patch.model_fields_set:
-        filtered, dropped = split_primary_runtime_input_shadow_names(
-            field_names=patch.uses_form_fields or [],
-            runtime_input_type=primary_runtime_input_type,
-        )
-        payload["uses_form_fields"] = filtered
-        shadowed_primary_input_fields.extend(dropped)
-    if "uses_previous_fields" in patch.model_fields_set:
-        payload["uses_previous_fields"] = _translate_previous_field_refs(
-            field_refs=patch.uses_previous_fields or [],
-            compiled_index_by_original_order=compiled_index_by_original_order,
-        )
-    return ModifyExistingStep.model_validate(payload), shadowed_primary_input_fields
-
-
-def _translate_previous_field_refs(
-    *,
-    field_refs: list[PreviousFieldRef],
-    compiled_index_by_original_order: dict[int, int],
-) -> list[PreviousFieldRef]:
-    # Legacy StepPatch refs are authored as original step_order values; the
-    # shared owner consumes indexes into the compiled prior-step list.
-    translated: list[PreviousFieldRef] = []
-    for field_ref in field_refs:
-        compiled_index = compiled_index_by_original_order.get(field_ref.from_step)
-        if compiled_index is None:
-            continue
-        translated.append(field_ref.model_copy(update={"from_step": compiled_index}))
-    return translated
 
 
 def _build_normalization_advisories(
@@ -697,39 +606,30 @@ def _describe_step_change(previous: StepSpec | None, current: StepSpec) -> str |
 
 
 def _compute_confidence(
+    *,
     step_changes: list[StepChange],
+    form_changes: list[FormFieldChange],
     warnings: list[str],
-    draft: FlowEditDraft,
 ) -> EditConfidence:
     if warnings:
         return "needs_review"
-    removed_count = sum(1 for c in step_changes if c.kind == "removed")
-    if removed_count > 1:
-        return "needs_review"
-    if len(draft.operations) > 5:
+    changed_count = sum(
+        1 for change in step_changes if change.kind in {"added", "modified", "removed"}
+    ) + len(form_changes)
+    if changed_count > 5:
         return "needs_review"
     return "ready"
 
 
-def _resolve_flow_description(
-    *,
-    edit_draft: FlowEditDraft,
-    current_description: str | None,
-) -> str:
-    if edit_draft.flow_description is not None:
-        return edit_draft.flow_description
-    return current_description or ""
-
-
 def _build_description_advisories(
     *,
-    edit_draft: FlowEditDraft,
+    proposal: OrderedEditProposal,
     current_steps: list[FlowStep],
     compiled_steps: list[StepSpec],
     current_description: str | None,
 ) -> list[EditAdvisory]:
     """Emit advisory when semantic signature changed but description wasn't updated."""
-    if edit_draft.flow_description is not None:
+    if "flow_description" in proposal.model_fields_set:
         return []
     if not current_steps or not compiled_steps or not current_description:
         return []
@@ -776,97 +676,6 @@ def _build_primary_input_shadow_advisories(
             field="form_fields",
         )
     ]
-
-
-def _compile_form_fields(
-    edit_draft: FlowEditDraft,
-    *,
-    current_metadata_json: dict[str, Any] | None,
-    primary_runtime_input_type: InputType | None,
-) -> tuple[list[FormFieldSpec] | None, list[FormFieldChange], list[str]]:
-    current_fields = extract_form_fields_from_metadata(current_metadata_json)
-    if not edit_draft.form_operations:
-        return (
-            deepcopy(current_fields) if current_fields is not None else None,
-            [],
-            [],
-        )
-
-    working_fields = deepcopy(current_fields) if current_fields is not None else []
-    field_index = {field.name: index for index, field in enumerate(working_fields)}
-    form_changes: list[FormFieldChange] = []
-    dropped_primary_input_field_names: list[str] = []
-
-    for op in edit_draft.form_operations:
-        existing_index = field_index.get(op.field_name)
-        existing_field = (
-            working_fields[existing_index] if existing_index is not None else None
-        )
-
-        if op.op == "remove":
-            if existing_index is None:
-                continue
-            working_fields.pop(existing_index)
-            field_index = {
-                field.name: index for index, field in enumerate(working_fields)
-            }
-            form_changes.append(
-                FormFieldChange(kind="removed", field_name=op.field_name)
-            )
-            continue
-
-        payload = op.field_payload
-        payload_field_type = (
-            payload.field_type
-            if payload is not None and payload.field_type is not None
-            else existing_field.type
-            if existing_field is not None
-            else "text"
-        )
-        if is_primary_runtime_input_shadow_field(
-            variable_name=op.field_name,
-            field_type=payload_field_type,
-            runtime_input_type=primary_runtime_input_type,
-        ):
-            dropped_primary_input_field_names.append(op.field_name)
-            continue
-
-        merged_field = FormFieldSpec(
-            name=op.field_name,
-            type=payload_field_type,
-            label=(
-                payload.label
-                if payload is not None and payload.label is not None
-                else existing_field.label
-                if existing_field is not None
-                else op.field_name
-            ),
-            required=(
-                payload.required
-                if payload is not None and payload.required is not None
-                else existing_field.required
-                if existing_field is not None
-                else False
-            ),
-            options=(
-                deepcopy(payload.options)
-                if payload is not None and payload.options is not None
-                else deepcopy(existing_field.options)
-                if existing_field is not None
-                else None
-            ),
-        )
-
-        if existing_index is None:
-            working_fields.append(merged_field)
-            field_index[merged_field.name] = len(working_fields) - 1
-            form_changes.append(FormFieldChange(kind="added", field_name=op.field_name))
-            continue
-
-        working_fields[existing_index] = merged_field
-        form_changes.append(FormFieldChange(kind="modified", field_name=op.field_name))
-
-    return (working_fields or None, form_changes, dropped_primary_input_field_names)
 
 
 def _primary_runtime_input_type_from_steps(

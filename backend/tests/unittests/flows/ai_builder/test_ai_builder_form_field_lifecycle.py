@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    ModifyExistingStep,
+    OrderedEditProposal,
+)
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_draft,
     compile_outline_to_create_draft,
@@ -18,12 +22,7 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
     evaluate_critic_invariants,
 )
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    FlowEditDraft,
-    StepEditOperation,
-    StepPatch,
-)
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from intric.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
 from intric.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
 from intric.flows.ai_builder.ai_builder_new_step_models import (
@@ -309,23 +308,21 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
             output_type="text",
         ),
     ]
-    draft = FlowEditDraft(
-        operations=[
-            StepEditOperation(
-                op="modify",
-                target_ref="existing_step_1",
-                patch=StepPatch(uses_form_fields=["audience"]),
+    proposal = OrderedEditProposal(
+        steps=[
+            ModifyExistingStep(
+                existing_step_ref="existing_step_1",
+                uses_form_fields=["audience"],
             ),
-            StepEditOperation(
-                op="modify",
-                target_ref="existing_step_2",
-                patch=StepPatch(uses_form_fields=["audience"]),
+            ModifyExistingStep(
+                existing_step_ref="existing_step_2",
+                uses_form_fields=["audience"],
             ),
         ],
     )
 
-    result = compile_edit_draft(
-        draft,
+    result = compile_edit_proposal(
+        proposal,
         existing,
         base_flow_revision=1,
         current_metadata_json=_form_metadata(

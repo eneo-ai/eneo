@@ -14,9 +14,6 @@ from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    FlowEditDraft,
-)
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
@@ -61,7 +58,6 @@ from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -1180,18 +1176,18 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
     flow.metadata_json = {}
     arguments = {
         "plan_rationale": "Byt namn.",
-        "operations": [
+        "steps": [
             {
-                "op": "modify",
-                "target_ref": "existing_step_1",
-                "patch": {"name": "Skapa DOCX-rapport"},
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "name": "Skapa DOCX-rapport",
             }
         ],
     }
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             side_effect=AssistantSnapshotResourceUnavailableError(
                 kind="knowledge_base",
                 local_ref="missing-kb",
@@ -1227,11 +1223,10 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
     flow.metadata_json = {}
     arguments = {
         "plan_rationale": "Lägg till granskning.",
-        "operations": [
+        "steps": [
             {
-                "op": "add",
-                "placement": {"position": "append"},
-                "add_payload": {
+                "kind": "add",
+                "step": {
                     "name": "Granska rubriker",
                     "instructions": "Kontrollera rubrikernas underlag.",
                     "input_source": "previous_step",
@@ -1273,17 +1268,9 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ) as compile_edit,
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
-        ),
     ):
         result = await process_edit_arguments(
             turn=_make_turn(),
@@ -1297,9 +1284,8 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
         )
 
     assert result.compiled_proposal is not None
-    draft = compile_edit.call_args.args[0]
-    payload = draft.operations[0].add_payload
-    assert payload is not None
+    proposal = compile_edit.call_args.args[0]
+    payload = proposal.steps[0].step
     assert payload.output_fields is not None
     rubriker = payload.output_fields[0]
     assert rubriker.field_type == "array"
@@ -1319,18 +1305,16 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
     flow.description = "Skapar PDF idag."
     flow.metadata_json = {}
 
-    draft = FlowEditDraft.model_validate(
-        {
-            "plan_rationale": "Byt bara slutformatet.",
-            "operations": [
-                {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {"output_type": "docx"},
-                }
-            ],
-        }
-    )
+    arguments = {
+        "plan_rationale": "Byt bara slutformatet.",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "output_type": "docx",
+            }
+        ],
+    }
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
     edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
@@ -1345,18 +1329,14 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
         ),
     ):
         result = await process_edit_arguments(
             turn=_make_turn(base_planning_state_version=7),
             conversation=[],
-            arguments=draft.model_dump(mode="json"),
+            arguments=arguments,
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
@@ -1388,18 +1368,16 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
         ],
     )
 
-    draft = FlowEditDraft.model_validate(
-        {
-            "plan_rationale": "Lägg till ett tidsteg.",
-            "operations": [
-                {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {"output_type": "json"},
-                }
-            ],
-        }
-    )
+    arguments = {
+        "plan_rationale": "Lägg till ett tidsteg.",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "output_type": "json",
+            }
+        ],
+    }
     compiled_spec = _make_flow_spec(
         model_ref=None,
         knowledge_refs=[],
@@ -1418,12 +1396,8 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
             ),
         ) as prepare_spec,
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
         ),
     ):
         result = await process_edit_arguments(
@@ -1435,7 +1409,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
                     metadata={"ui_language": "sv"},
                 )
             ],
-            arguments=draft.model_dump(mode="json"),
+            arguments=arguments,
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
@@ -1468,18 +1442,16 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
         ],
     )
 
-    draft = FlowEditDraft.model_validate(
-        {
-            "plan_rationale": "Lägg till ett tidsteg.",
-            "operations": [
-                {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {"output_type": "json"},
-                }
-            ],
-        }
-    )
+    arguments = {
+        "plan_rationale": "Lägg till ett tidsteg.",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "output_type": "json",
+            }
+        ],
+    }
     compiled_spec = _make_flow_spec(
         model_ref=None,
         knowledge_refs=[],
@@ -1497,12 +1469,8 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
         ),
     ):
         result = await process_edit_arguments(
@@ -1519,7 +1487,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
                     },
                 )
             ],
-            arguments=draft.model_dump(mode="json"),
+            arguments=arguments,
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
@@ -1532,7 +1500,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
+async def test_edit_proposal_passes_metadata_to_edit_compiler() -> None:
     flow = MagicMock()
     flow.steps = []
     flow.draft_revision = 7
@@ -1544,18 +1512,16 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
         }
     }
 
-    draft = FlowEditDraft.model_validate(
-        {
-            "plan_rationale": "Byt bara slutformatet.",
-            "operations": [
-                {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {"output_type": "docx"},
-                }
-            ],
-        }
-    )
+    arguments = {
+        "plan_rationale": "Byt bara slutformatet.",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "output_type": "docx",
+            }
+        ],
+    }
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
     edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
@@ -1570,19 +1536,15 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
-        ) as validate_edit,
+        ) as compile_edit,
     ):
         turn = _make_turn(base_planning_state_version=7)
         await process_edit_arguments(
             turn=turn,
             conversation=[],
-            arguments=draft.model_dump(mode="json"),
+            arguments=arguments,
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
@@ -1590,14 +1552,12 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             resource_catalog=_empty_catalog(),
         )
 
-    assert validate_edit.call_args is not None
-    assert validate_edit.call_args.kwargs["current_metadata_json"] == flow.metadata_json
+    assert compile_edit.call_args is not None
+    assert compile_edit.call_args.kwargs["current_metadata_json"] == flow.metadata_json
 
 
 @pytest.mark.asyncio
-async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validation() -> (
-    None
-):
+async def test_edit_proposal_passes_flat_modify_step_to_compiler() -> None:
     flow = MagicMock()
     flow.steps = [
         FlowStep(
@@ -1620,16 +1580,12 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
     flow.metadata_json = {}
     arguments = {
         "plan_rationale": "Byt slutsteget till DOCX och byt namn.",
-        "operations": [
+        "steps": [
             {
-                "op": "modify",
-                "target_ref": "existing_step_1",
-                "patch": {"name": "Skapa DOCX-rapport"},
-            },
-            {
-                "op": "modify",
-                "target_ref": "existing_step_1",
-                "patch": {"output_type": "docx"},
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "name": "Skapa DOCX-rapport",
+                "output_type": "docx",
             },
         ],
     }
@@ -1647,7 +1603,7 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
             ),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
+            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_proposal",
             return_value=edit,
         ) as compile_edit,
     ):
@@ -1663,215 +1619,11 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
         )
 
     assert result.compiled_proposal is not None
-    compiled_draft = compile_edit.call_args.args[0]
-    assert len(compiled_draft.operations) == 1
-    patch_payload = compiled_draft.operations[0].patch
-    assert patch_payload is not None
-    assert patch_payload.name == "Skapa DOCX-rapport"
-    assert patch_payload.output_type == OutputType.DOCX
-
-
-@pytest.mark.asyncio
-async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate_modifies() -> (
-    None
-):
-    flow = MagicMock()
-    flow.steps = [
-        FlowStep(
-            id=uuid4(),
-            flow_id=uuid4(),
-            tenant_id=uuid4(),
-            assistant_id=uuid4(),
-            step_order=1,
-            user_description="Skapa rapport",
-            input_source="flow_input",
-            input_type="text",
-            output_mode="pass_through",
-            output_type="text",
-            mcp_policy="inherit",
-        )
-    ]
-    flow.draft_revision = 7
-    flow.name = "Rapportflöde"
-    flow.description = "Skapar rapport."
-    flow.metadata_json = {}
-    arguments = {
-        "plan_rationale": "Två olika namn för samma steg.",
-        "operations": [
-            {
-                "op": "modify",
-                "target_ref": "existing_step_1",
-                "patch": {"name": "Skapa rapport"},
-            },
-            {
-                "op": "modify",
-                "target_ref": "existing_step_1",
-                "patch": {"name": "Skapa DOCX"},
-            },
-        ],
-    }
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft"
-    ) as compile_edit:
-        result = await process_edit_arguments(
-            turn=_make_turn(),
-            conversation=[],
-            arguments=arguments,
-            available_model_refs=None,
-            available_kb_refs=None,
-            flow=flow,
-            assistant_snapshots=None,
-            resource_catalog=_empty_catalog(),
-        )
-
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
-    assert "conflicting patch fields" in result.feedback
-    assert "existing_step_1: name" in result.feedback
-    compile_edit.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> None:
-    flow = MagicMock()
-    flow.steps = [
-        MagicMock(
-            step_order=1,
-            output_type="json",
-            output_contract={
-                "type": "object",
-                "properties": {"summary": {"type": "string"}},
-            },
-        ),
-        MagicMock(step_order=2, output_type="text", output_contract=None),
-    ]
-    flow.draft_revision = 7
-    flow.name = "Rapportflöde"
-    flow.description = "Skapar rapport."
-    flow.metadata_json = {
-        "form_schema": {"fields": [{"name": "case_id", "type": "text"}]}
-    }
-    arguments = {
-        "plan_rationale": "Uppdatera kopplingar.",
-        "operations": [
-            {
-                "op": "modify",
-                "target_ref": "existing_step_2",
-                "patch": {
-                    "uses_previous_fields": [
-                        {"from_step": 1, "field_path": "summary"},
-                        {"from_step": 1, "field_path": "invented"},
-                    ],
-                    "uses_form_fields": ["case_id", "invented_field"],
-                },
-            }
-        ],
-    }
-    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit = _make_edit_compilation(compiled_spec)
-    compiled_validation = MagicMock(valid=True, errors=[])
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
-            return_value=SimpleNamespace(
-                spec=compiled_spec,
-                validation=compiled_validation,
-                failure_feedback=None,
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
-        ) as validate_edit,
-    ):
-        await process_edit_arguments(
-            turn=_make_turn(),
-            conversation=[],
-            arguments=arguments,
-            available_model_refs=None,
-            available_kb_refs=None,
-            flow=flow,
-            assistant_snapshots=None,
-            resource_catalog=_empty_catalog(),
-        )
-
-    assert validate_edit.call_args is not None
-    normalized_draft = validate_edit.call_args.args[0]
-    patch_payload = normalized_draft.operations[0].patch
-    assert patch_payload is not None
-    assert [
-        (ref.from_step, ref.field_path) for ref in patch_payload.uses_previous_fields
-    ] == [
-        (1, "summary"),
-    ]
-    assert patch_payload.uses_form_fields == ["case_id"]
-
-
-@pytest.mark.asyncio
-async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_conflict() -> (
-    None
-):
-    flow = MagicMock()
-    flow.steps = [
-        FlowStep(
-            id=uuid4(),
-            flow_id=uuid4(),
-            tenant_id=uuid4(),
-            assistant_id=uuid4(),
-            step_order=1,
-            user_description="Skapa rapport",
-            input_source="flow_input",
-            input_type="text",
-            output_mode="pass_through",
-            output_type="text",
-            mcp_policy="inherit",
-        )
-    ]
-    flow.draft_revision = 7
-    flow.name = "Rapportflöde"
-    flow.description = "Skapar rapport."
-    flow.metadata_json = {}
-    arguments = {
-        "plan_rationale": "Byt till mallfyllning.",
-        "operations": [
-            {
-                "op": "modify",
-                "target_ref": "existing_step_1",
-                "patch": {
-                    "output_mode": "template_fill",
-                    "output_type": "pdf",
-                },
-            }
-        ],
-    }
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-        ) as compile_edit,
-    ):
-        result = await process_edit_arguments(
-            turn=_make_turn(),
-            conversation=[],
-            arguments=arguments,
-            available_model_refs=None,
-            available_kb_refs=None,
-            flow=flow,
-            assistant_snapshots=None,
-            resource_catalog=_empty_catalog(),
-        )
-
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
-    assert "output_mode 'template_fill'" in result.feedback
-    assert "output_type 'pdf'" in result.feedback
-    compile_edit.assert_not_called()
+    proposal = compile_edit.call_args.args[0]
+    assert len(proposal.steps) == 1
+    step = proposal.steps[0]
+    assert step.name == "Skapa DOCX-rapport"
+    assert step.output_type == OutputType.DOCX
 
 
 @pytest.mark.asyncio
@@ -1884,7 +1636,7 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
         EDIT_FLOW_TOOL_NAME,
         {
             "plan_rationale": "Byt slutformatet.",
-            "operations": [],
+            "steps": [],
         },
     )
     captured_ctx: ProposalTurnContext | None = None

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    OrderedEditSubmission,
+)
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -13,16 +16,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
-from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_mechanics
-from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
-from intric.flows.ai_builder.ai_builder_edit_normalizer import (
-    canonicalize_duplicate_modify_operations,
-    format_duplicate_modify_conflicts,
-    normalize_edit_draft_mechanics,
-    normalize_loose_edit_arguments,
-)
-from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
@@ -37,12 +31,11 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AssistantSnapshotResourceUnavailableError,
-    canonicalize_edit_draft_resources,
     collect_flow_spec_resource_bindings,
-    format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -75,60 +68,18 @@ async def process_edit_arguments(
         )
 
     try:
-        draft = FlowEditDraft.model_validate(normalize_loose_edit_arguments(arguments))
+        submission = OrderedEditSubmission.model_validate(arguments)
     except Exception as exc:
         logger.warning("Failed to parse edit_flow arguments: %s", exc)
         return ToolProcessingResult(
             feedback=f"Invalid edit_flow arguments: {exc}",
             failure_kind="parse",
         )
-
-    if resource_catalog is not None:
-        draft, resolution_issues = canonicalize_edit_draft_resources(
-            draft,
-            catalog=resource_catalog,
-        )
-        if resolution_issues:
-            return ToolProcessingResult(
-                feedback=format_resource_resolution_feedback(resolution_issues),
-                failure_kind="validation",
-            )
-
-    canonicalized = canonicalize_duplicate_modify_operations(draft)
-    if canonicalized.conflicts:
-        return ToolProcessingResult(
-            feedback=format_duplicate_modify_conflicts(canonicalized.conflicts),
-            failure_kind="validation",
-        )
-    draft = canonicalized.draft
-
-    draft = normalize_edit_draft_mechanics(
-        draft,
-        current_steps=list(flow.steps),
-        current_metadata_json=flow.metadata_json,
-    )
-    draft = fill_edit_draft_mechanics(
-        draft,
-        current_steps=list(flow.steps),
-    )
     valid_step_refs = [f"existing_step_{step.step_order}" for step in flow.steps]
-    edit_validation = validate_edit_draft(
-        draft,
-        valid_step_refs,
-        current_steps=list(flow.steps),
-        current_metadata_json=flow.metadata_json,
-    )
-    if edit_validation.errors:
-        error_messages = [err.message for err in edit_validation.errors]
-        logger.info("Edit draft validation failed: %s", error_messages)
-        return ToolProcessingResult(
-            feedback=f"Edit validation failed: {'; '.join(error_messages)}",
-            failure_kind="validation",
-        )
 
     try:
-        edit_result = compile_edit_draft(
-            draft,
+        edit_result = compile_edit_proposal(
+            submission.to_proposal(),
             current_steps=list(flow.steps),
             base_flow_revision=flow.draft_revision,
             flow_name=flow.name,
@@ -136,6 +87,11 @@ async def process_edit_arguments(
             current_metadata_json=flow.metadata_json,
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
+        )
+    except BadRequestException as exc:
+        return ToolProcessingResult(
+            feedback=_format_edit_compilation_request_error(exc),
+            failure_kind="validation",
         )
     except AssistantSnapshotResourceUnavailableError as exc:
         logger.warning(
@@ -218,12 +174,11 @@ async def process_edit_arguments(
             failure_kind="quality",
         )
 
-    assumptions = list(draft.assumptions) if draft.assumptions else []
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
             spec=compiled_spec,
-            assumptions=tuple(assumptions),
-            plan_rationale=draft.plan_rationale,
+            assumptions=tuple(submission.assumptions),
+            plan_rationale=submission.plan_rationale,
             reasoning=None,
             validation=validation,
             resource_bindings=(
@@ -236,3 +191,24 @@ async def process_edit_arguments(
             edit=edit_result.approval,
         ),
     )
+
+
+def _format_edit_compilation_request_error(exc: BadRequestException) -> str:
+    if exc.code != "invalid_existing_step_ref":
+        return f"Failed to compile edit: {exc}"
+    context = exc.context or {}
+    missing_refs = context.get("missing_refs")
+    if isinstance(missing_refs, list) and missing_refs:
+        return (
+            "Edit validation failed: every existing step must appear in steps "
+            "or be listed in removed_existing_step_refs. Missing refs: "
+            f"{missing_refs}."
+        )
+    overlap_refs = context.get("overlap_refs")
+    if isinstance(overlap_refs, list) and overlap_refs:
+        return (
+            "Edit validation failed: refs cannot appear in both steps and "
+            "removed_existing_step_refs. Overlap refs: "
+            f"{overlap_refs}."
+        )
+    return f"Edit validation failed: {exc}"

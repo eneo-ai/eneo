@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -197,6 +197,15 @@ class NewStepDraft(BaseModel):
         if value is not None and value < 1:
             raise ValueError("runtime_max_files must be at least 1 when provided.")
         return value
+
+    @field_validator("output_fields", mode="before")
+    @classmethod
+    def _normalize_output_fields(cls, value: Any) -> Any:
+        from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
+            normalize_structured_field_list,
+        )
+
+        return normalize_structured_field_list(value)
 
     @model_validator(mode="after")
     def _validate_structured_depth(self) -> "NewStepDraft":

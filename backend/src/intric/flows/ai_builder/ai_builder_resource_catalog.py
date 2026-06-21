@@ -6,10 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    FlowEditDraft,
-    StepEditOperation,
-)
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPServerResource,
     normalize_ai_builder_mcp_resources,
@@ -538,72 +534,6 @@ def collect_flow_spec_resource_bindings(
                 ref=ref,
             )
     return tuple(bindings_by_slot.values())
-
-
-def canonicalize_edit_draft_resources(
-    draft: FlowEditDraft,
-    *,
-    catalog: AIBuilderResourceCatalog,
-) -> tuple[FlowEditDraft, list[AIBuilderResourceResolutionIssue]]:
-    issues: list[AIBuilderResourceResolutionIssue] = []
-    operations: list[StepEditOperation] = []
-    changed = False
-    for index, operation in enumerate(draft.operations):
-        operation_location = f"operation {index + 1}"
-        updated = operation
-        if operation.add_payload is not None:
-            assistant_spec, assistant_issues = canonicalize_assistant_spec_resources(
-                AssistantSpec(
-                    instructions=operation.add_payload.instructions or "",
-                    model_ref=operation.add_payload.model_ref,
-                    knowledge_refs=list(operation.add_payload.knowledge_refs),
-                    mcp_server_refs=list(operation.add_payload.mcp_server_refs),
-                    mcp_tool_refs=list(operation.add_payload.mcp_tool_refs),
-                ),
-                catalog=catalog,
-                location_prefix=f"{operation_location} add_payload",
-            )
-            issues.extend(assistant_issues)
-            if (
-                assistant_spec.model_ref != operation.add_payload.model_ref
-                or assistant_spec.knowledge_refs != operation.add_payload.knowledge_refs
-                or assistant_spec.mcp_server_refs
-                != operation.add_payload.mcp_server_refs
-                or assistant_spec.mcp_tool_refs != operation.add_payload.mcp_tool_refs
-            ):
-                changed = True
-                updated = updated.model_copy(
-                    update={
-                        "add_payload": operation.add_payload.model_copy(
-                            update={
-                                "model_ref": assistant_spec.model_ref,
-                                "knowledge_refs": assistant_spec.knowledge_refs,
-                                "mcp_server_refs": assistant_spec.mcp_server_refs,
-                                "mcp_tool_refs": assistant_spec.mcp_tool_refs,
-                            }
-                        ),
-                    }
-                )
-        if updated.patch is not None and updated.patch.assistant_spec is not None:
-            assistant_spec, assistant_issues = canonicalize_assistant_spec_resources(
-                updated.patch.assistant_spec,
-                catalog=catalog,
-                location_prefix=f"{operation_location} patch",
-            )
-            issues.extend(assistant_issues)
-            if assistant_spec != updated.patch.assistant_spec:
-                changed = True
-                updated = updated.model_copy(
-                    update={
-                        "patch": updated.patch.model_copy(
-                            update={"assistant_spec": assistant_spec}
-                        ),
-                    }
-                )
-        operations.append(updated)
-    if not changed:
-        return draft, issues
-    return draft.model_copy(update={"operations": operations}), issues
 
 
 def canonicalize_create_draft_resources(
