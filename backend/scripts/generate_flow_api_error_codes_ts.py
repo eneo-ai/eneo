@@ -29,6 +29,7 @@ TARGET_JS = (
     / "flow-api-error-codes.js"
 )
 TARGET_DTS = TARGET_JS.with_suffix(".d.ts")
+_JS_OBJECT_ENTRY_PRINT_WIDTH = 100
 
 
 def _load_flow_api_error_code_module() -> types.ModuleType:
@@ -45,6 +46,15 @@ def _load_flow_api_error_code_module() -> types.ModuleType:
     return module
 
 
+def _js_object_entry_lines(name: str, value: str, comma: str) -> list[str]:
+    encoded_value = json.dumps(value)
+    single_line = f"  {name}: {encoded_value}{comma}"
+    if len(single_line) <= _JS_OBJECT_ENTRY_PRINT_WIDTH:
+        return [single_line]
+
+    return [f"  {name}:", f"    {encoded_value}{comma}"]
+
+
 def main() -> None:
     flow_api_error_code = _load_flow_api_error_code_module()
     error_codes = tuple(flow_api_error_code.FLOW_API_ERROR_CODES)
@@ -54,7 +64,7 @@ def main() -> None:
     constant_lines = ["export const FLOW_API_ERROR_CODE = Object.freeze({"]
     for index, (name, value) in enumerate(error_code_entries):
         comma = "," if index < len(error_code_entries) - 1 else ""
-        constant_lines.append(f"  {name}: {json.dumps(value)}{comma}")
+        constant_lines.extend(_js_object_entry_lines(name, value, comma))
     constant_lines.append("});")
 
     constant_type_lines = ["export declare const FLOW_API_ERROR_CODE: Readonly<{"]

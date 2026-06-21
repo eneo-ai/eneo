@@ -36,6 +36,7 @@ Allowed target homes:
 | flow_ai_builder_budget_settings | module | plugin | Builder budget settings should live with the builder boundary. |
 | flow_api_error_code | module | api | Public Flow error catalog is API-facing. |
 | flow_api_exceptions | module | api | Public Flow error helpers are API-facing. |
+| flow_error_taxonomy | module | api | Public Flow error taxonomy is API consumer-facing metadata. |
 | flow_authoring_name | module | domain | Authoring name normalization is a domain value rule. |
 | flow_authoring_runtime_input | module | domain | Runtime-input authoring rules are Flow contract rules. |
 | flow_authoring_spec | module | domain | Authoring spec is a domain contract. |
