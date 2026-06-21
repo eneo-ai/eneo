@@ -11,16 +11,30 @@ Capabilities the builder cannot author yet (HTTP) are recorded as explicit
 ratchet keeps that honest: every row is classified `buildable`, `gap`, or
 `planned`, and a gap that silently becomes authorable fails the suite.
 
-LLM-output quality (prompt-token cost, edit/revise behaviour on real planner
-output) is not asserted here; that signal lives in the local live-eval runner
-(`scripts/flow_ai_builder_live_eval.py`), which needs a running API and model.
+Canonical command preparation is asserted here; LLM-output quality
+(prompt-token cost, edit/revise behaviour on real planner output) lives in the
+local live-eval runner (`scripts/flow_ai_builder_live_eval.py`), which needs a
+running API and model.
 """
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
+from uuid import uuid4
+
 import pytest
 
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
+from intric.flows.application.flow_authoring_command import (
+    AIBuilderFlowAuthoringOrigin,
+    CreateFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftStepChangeKind,
+)
 from intric.flows.enums import (
     AIBuilderInputSource,
     AIBuilderOutputMode,
@@ -144,6 +158,39 @@ def test_each_golden_has_no_architecture_blockers(case: BuildableGoldenCase) -> 
     assert not blockers, (
         f"{case.case_id}: critic reports architecture blockers {blockers}"
     )
+
+
+def test_buildable_goldens_prepare_through_canonical_authoring_command() -> None:
+    async def prepare_all() -> None:
+        service = FlowAuthoringCommandService()
+        flow_service = MagicMock()
+        for case in GOLDEN_CASES:
+            command = CreateFlowAuthoringCommand(
+                space_id=uuid4(),
+                spec=case.spec,
+                origin=AIBuilderFlowAuthoringOrigin(
+                    session_id=uuid4(),
+                    plan_id=uuid4(),
+                    spec_hash=case.spec.spec_hash(),
+                    applied_at=datetime.now(UTC),
+                ),
+            )
+            prepared = await service.prepare(
+                command=command,
+                flow_service=flow_service,
+            )
+
+            assert prepared.preview.steps_created == len(prepared.spec.steps), (
+                case.case_id
+            )
+            assert prepared.preview.steps_updated == 0, case.case_id
+            assert prepared.preview.steps_removed == 0, case.case_id
+            assert {step.change_kind for step in prepared.preview.step_changes} == {
+                FlowDraftStepChangeKind.ADDED
+            }, case.case_id
+            assert prepared.preview.spec_hash == prepared.spec.spec_hash(), case.case_id
+
+    asyncio.run(prepare_all())
 
 
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)

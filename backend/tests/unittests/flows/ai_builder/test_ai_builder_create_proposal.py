@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -54,6 +56,14 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     StepTriple,
+)
+from intric.flows.application.flow_authoring_command import (
+    AIBuilderFlowAuthoringOrigin,
+    CreateFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftStepChangeKind,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -172,6 +182,32 @@ def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, obj
     result = metadata_with_slot_classification(None, metadata)
     assert result is not None
     return result
+
+
+async def _assert_create_spec_prepares_through_authoring_command(
+    spec: FlowDraftSpecCore,
+) -> None:
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=CreateFlowAuthoringCommand(
+            space_id=uuid4(),
+            spec=spec,
+            origin=AIBuilderFlowAuthoringOrigin(
+                session_id=uuid4(),
+                plan_id=uuid4(),
+                spec_hash=spec.spec_hash(),
+                applied_at=datetime.now(UTC),
+            ),
+        ),
+        flow_service=MagicMock(),
+    )
+
+    assert prepared.preview.steps_created == len(prepared.spec.steps)
+    assert prepared.preview.steps_updated == 0
+    assert prepared.preview.steps_removed == 0
+    assert {step.change_kind for step in prepared.preview.step_changes} == {
+        FlowDraftStepChangeKind.ADDED
+    }
+    assert prepared.preview.spec_hash == prepared.spec.spec_hash()
 
 
 def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
@@ -377,6 +413,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     spec = result.compiled_proposal.spec
     assert spec.steps[0].input_type == InputType.AUDIO
     assert spec.steps[-1].output_type == OutputType.DOCX
+    await _assert_create_spec_prepares_through_authoring_command(spec)
 
 
 @pytest.mark.asyncio
@@ -425,6 +462,7 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
     assert [field.name for field in spec.form_fields] == ["malgrupp"]
     assert spec.steps[0].input_bindings is not None
     assert "{{ flow_input.malgrupp }}" in spec.steps[0].input_bindings["question"]
+    await _assert_create_spec_prepares_through_authoring_command(spec)
 
 
 @pytest.mark.asyncio
