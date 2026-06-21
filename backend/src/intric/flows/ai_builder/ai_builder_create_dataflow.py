@@ -22,7 +22,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
-    normalize_create_draft_source_material,
+    create_draft_returns_material_report,
     primary_source_material_ref,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
@@ -221,15 +221,14 @@ def normalize_create_draft_mechanics(
     """
 
     normalized_draft = _normalize_create_draft_refs(draft)
-    source_normalized_draft = normalize_create_draft_source_material(normalized_draft)
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
-        source_normalized_draft,
+        normalized_draft,
         aggregation_intent=aggregation_intent,
     )
     rebound_draft = (
-        source_normalized_draft
-        if rebound_steps is source_normalized_draft.steps
-        else source_normalized_draft.model_copy(update={"steps": rebound_steps})
+        normalized_draft
+        if rebound_steps is normalized_draft.steps
+        else normalized_draft.model_copy(update={"steps": rebound_steps})
     )
     return _normalize_create_draft_refs(rebound_draft)
 
@@ -391,6 +390,7 @@ def auto_bind_targeted_underlag_for_text_composer(
     """
     rewritten_steps = draft.steps
     source_ref = primary_source_material_ref(draft)
+    returns_material_report = create_draft_returns_material_report(draft)
     # Capture candidates before rewrites because each pass mutates input_source.
     terminal_renderer_candidate_indexes = set(
         _terminal_renderer_rewrite_indexes_for_draft(rewritten_steps)
@@ -433,6 +433,7 @@ def auto_bind_targeted_underlag_for_text_composer(
             composer_index=composer_index,
             all_previous_candidate_indexes=all_previous_candidate_indexes,
             primary_source_ref=source_ref,
+            returns_material_report=returns_material_report,
             aggregation_intent=aggregation_intent,
         )
         if binding_mode == "skip":
@@ -441,6 +442,7 @@ def auto_bind_targeted_underlag_for_text_composer(
             rewritten_steps,
             composer_index=composer_index,
             primary_source_ref=source_ref,
+            returns_material_report=returns_material_report,
             include_text_priors=binding_mode == "with_text_priors",
             allow_priority_fallback=binding_mode == "with_text_priors",
         )
@@ -533,6 +535,7 @@ def _targeted_underlag_binding_mode(
     composer_index: int,
     all_previous_candidate_indexes: set[int],
     primary_source_ref: PreviousOutputRef | None,
+    returns_material_report: bool,
     aggregation_intent: "AggregationIntent",
 ) -> _TargetedUnderlagBindingMode:
     """Choose whether to add structured fields, prior text outputs, or neither."""
@@ -593,14 +596,31 @@ def _targeted_underlag_binding_mode(
         return "skip"
     if len(json_priors) >= 2:
         return "with_text_priors"
-    if primary_source_ref is None:
-        return "skip"
-    if any(
-        output_ref.from_step == primary_source_ref.from_step
-        for output_ref in composer.uses_previous_outputs
+    if _single_json_prior_needs_source_material(
+        steps=steps,
+        composer_index=composer_index,
+        primary_source_ref=primary_source_ref,
+        returns_material_report=returns_material_report,
     ):
         return "with_text_priors"
     return "skip"
+
+
+def _single_json_prior_needs_source_material(
+    *,
+    steps: list[NewStepDraft],
+    composer_index: int,
+    primary_source_ref: PreviousOutputRef | None,
+    returns_material_report: bool,
+) -> bool:
+    if primary_source_ref is None or not returns_material_report:
+        return False
+    if composer_index == 0 or primary_source_ref.from_step >= composer_index + 1:
+        return False
+
+    # The composer consumes structured-only output from the immediate JSON
+    # predecessor; include the source text so the original material is not lost.
+    return steps[composer_index - 1].output_type == OutputType.JSON
 
 
 def _bind_final_assembler_prior_outputs(
@@ -699,6 +719,7 @@ def _bind_targeted_underlag_for_composer(
     *,
     composer_index: int,
     primary_source_ref: PreviousOutputRef | None,
+    returns_material_report: bool,
     include_text_priors: bool,
     allow_priority_fallback: bool,
 ) -> list[NewStepDraft]:
@@ -721,6 +742,7 @@ def _bind_targeted_underlag_for_composer(
 
     new_output_refs: list[PreviousOutputRef] = list(composer.uses_previous_outputs)
     seen_output_steps = {ref.from_step for ref in new_output_refs}
+    added_primary_source_ref = False
     if include_text_priors:
         for predecessor_index, predecessor in priors:
             if predecessor.output_type != OutputType.TEXT:
@@ -734,6 +756,7 @@ def _bind_targeted_underlag_for_composer(
                 and primary_source_ref.from_step == predecessor_index + 1
             ):
                 label = primary_source_ref.label
+                added_primary_source_ref = True
             new_output_refs.append(
                 PreviousOutputRef(
                     from_step=predecessor_index + 1,
@@ -741,12 +764,21 @@ def _bind_targeted_underlag_for_composer(
                 )
             )
 
+    updates: dict[str, object] = {
+        "input_source": InputSource.PREVIOUS_STEP,
+        "uses_previous_fields": new_field_refs,
+        "uses_previous_outputs": new_output_refs,
+    }
+    if added_primary_source_ref and _single_json_prior_needs_source_material(
+        steps=steps,
+        composer_index=composer_index,
+        primary_source_ref=primary_source_ref,
+        returns_material_report=returns_material_report,
+    ):
+        updates["input_type"] = InputType.TEXT
+
     rewritten = composer.model_copy(
-        update={
-            "input_source": InputSource.PREVIOUS_STEP,
-            "uses_previous_fields": new_field_refs,
-            "uses_previous_outputs": new_output_refs,
-        }
+        update=updates,
     )
     new_steps = list(steps)
     new_steps[composer_index] = rewritten

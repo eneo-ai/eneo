@@ -65,36 +65,6 @@ class SourceMaterialBindingStatus(str, Enum):
     NEEDS_COMPLETION = "needs_completion"
 
 
-def normalize_create_draft_source_material(draft: FlowCreateDraft) -> FlowCreateDraft:
-    if not _draft_returns_material_report(draft):
-        return draft
-
-    source_ref = primary_source_material_ref(draft)
-    if source_ref is None:
-        return draft
-
-    updated_steps = list(draft.steps)
-    changed = False
-    for step_index, step in enumerate(draft.steps):
-        if not _draft_step_needs_source_material_ref(
-            draft=draft,
-            step_index=step_index,
-            source_ref=source_ref,
-        ):
-            continue
-        updated_steps[step_index] = step.model_copy(
-            update={
-                "input_type": InputType.TEXT,
-                "uses_previous_outputs": [*step.uses_previous_outputs, source_ref],
-            }
-        )
-        changed = True
-
-    if not changed:
-        return draft
-    return draft.model_copy(update={"steps": updated_steps})
-
-
 def iter_compiled_source_material_boundaries(
     spec: FlowDraftSpecCore,
 ) -> Iterable[CompiledSourceMaterialBoundary]:
@@ -297,12 +267,12 @@ def _step_order_for(
     return None
 
 
-def _draft_returns_document_artifact(draft: FlowCreateDraft) -> bool:
+def _create_draft_returns_document_artifact(draft: FlowCreateDraft) -> bool:
     return any(step.output_type in _DOCUMENT_OUTPUT_TYPES for step in draft.steps)
 
 
-def _draft_returns_material_report(draft: FlowCreateDraft) -> bool:
-    if _draft_returns_document_artifact(draft):
+def create_draft_returns_material_report(draft: FlowCreateDraft) -> bool:
+    if _create_draft_returns_document_artifact(draft):
         return True
     return bool(draft.steps) and draft.steps[-1].output_type == OutputType.TEXT
 
@@ -381,35 +351,11 @@ def _compiled_primary_source_text_step(
     )
 
 
-def _draft_step_needs_source_material_ref(
-    *,
-    draft: FlowCreateDraft,
-    step_index: int,
-    source_ref: PreviousOutputRef,
-) -> bool:
-    step = draft.steps[step_index]
-    if step.input_source != InputSource.PREVIOUS_STEP:
-        return False
-    if step_index == 0:
-        return False
-    if source_ref.from_step >= step_index + 1:
-        return False
-    previous_step = draft.steps[step_index - 1]
-    if previous_step.output_type != OutputType.JSON:
-        return False
-    if any(
-        output_ref.from_step == source_ref.from_step
-        for output_ref in step.uses_previous_outputs
-    ):
-        return False
-    return True
-
-
 __all__ = [
     "CompiledSourceMaterialBoundary",
     "SourceMaterialBindingStatus",
+    "create_draft_returns_material_report",
     "iter_compiled_source_material_boundaries",
-    "normalize_create_draft_source_material",
     "primary_source_material_ref",
     "question_binding",
     "source_material_binding_status",
