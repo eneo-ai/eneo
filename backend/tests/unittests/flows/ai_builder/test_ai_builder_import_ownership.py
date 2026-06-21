@@ -146,14 +146,37 @@ PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
 PROPOSAL_SUBMISSION_METHODS = frozenset(
     {
         "active_submission_tool_schemas",
-        "_outline_flow_retry_config",
-        "_edit_flow_retry_config",
+        "_create_propose_flow_retry_config",
+        "_edit_propose_flow_retry_config",
         "_finalize_retry_compiled_proposal",
-        "_handle_outline_flow_tool_call",
-        "_handle_edit_flow",
+        "_handle_create_propose_flow_tool_call",
+        "_handle_edit_propose_flow_tool_call",
         "preflight_scoped_model_revision_if_requested",
         "retry_forced_proposal_after_text",
         "_active_submission_tool_schemas",
+    }
+)
+PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
+    {
+        "_active_submission_tool_schemas",
+        "_build_self_correction_request",
+        "_create_propose_flow_retry_config",
+        "_edit_propose_flow_retry_config",
+        "_finalize_retry_compiled_proposal",
+        "_handle_create_propose_flow_tool_call",
+        "_handle_edit_propose_flow_tool_call",
+        "_record_failed_proposal_attempt_repair",
+        "_resolve_submission_prerequisite_events",
+        "_retry_forced_proposal_after_text",
+        "_run_proposal_self_correction",
+    }
+)
+PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS = frozenset(
+    {
+        "_edit_flow_retry_config",
+        "_handle_edit_flow_tool_call",
+        "_handle_outline_flow_tool_call",
+        "_outline_flow_retry_config",
     }
 )
 PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
@@ -1506,6 +1529,22 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
                 f"{submission_path}:{submission_classes[0].lineno} public methods "
                 f"{sorted(public_methods)}"
             )
+        missing_private_methods = PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS - set(
+            submission_methods
+        )
+        if missing_private_methods:
+            violations.append(
+                f"{submission_path}:{submission_classes[0].lineno} missing private "
+                f"methods {sorted(missing_private_methods)}"
+            )
+        stale_private_methods = PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS & set(
+            submission_methods
+        )
+        if stale_private_methods:
+            violations.append(
+                f"{submission_path}:{submission_classes[0].lineno} stale private "
+                f"methods {sorted(stale_private_methods)}"
+            )
 
         retry_finalizers = [
             node
@@ -1517,7 +1556,10 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
                 f"{submission_path}:{submission_classes[0].lineno} "
                 f"retry finalizer count {len(retry_finalizers)}"
             )
-        for method_name in ("_outline_flow_retry_config", "_edit_flow_retry_config"):
+        for method_name in (
+            "_create_propose_flow_retry_config",
+            "_edit_propose_flow_retry_config",
+        ):
             method = submission_methods.get(method_name)
             if method is None:
                 violations.append(f"{submission_path}: missing {method_name}")

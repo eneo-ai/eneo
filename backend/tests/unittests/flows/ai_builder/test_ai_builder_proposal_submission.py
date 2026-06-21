@@ -281,7 +281,9 @@ async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision(
 
 
 @pytest.mark.asyncio
-async def test_outline_quality_failure_records_failed_first_attempt() -> None:
+async def test_create_propose_flow_quality_failure_records_failed_first_attempt() -> (
+    None
+):
     submission = _make_submission()
     tracker = ProposalTurnTelemetry(
         request_id="req-outline-quality",
@@ -364,7 +366,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_outline_flow_tool_call_returns_architecture_error_without_repair() -> (
+async def test_handle_create_propose_flow_tool_call_returns_architecture_error_without_repair() -> (
     None
 ):
     submission = _make_submission()
@@ -436,7 +438,174 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
 
 
 @pytest.mark.asyncio
-async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> None:
+async def test_edit_propose_flow_architecture_error_is_not_translated_to_create_error() -> (
+    None
+):
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "steps": []},
+        tool_call_id="call-edit-architecture",
+    )
+    ctx = _make_context(
+        flow=SimpleNamespace(id=uuid4(), steps=[]),
+        request_id="req-edit-architecture",
+    )
+    process_edit = AsyncMock(
+        side_effect=AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail="edit should not translate this",
+            log_context={"surface": "edit"},
+        )
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "run_tool_self_correction"
+        ) as repair,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            new=process_edit,
+        ),
+        pytest.raises(AIBuilderArchitectureError),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        _ = [event async for event in dispatched]
+
+    repair.assert_not_called()
+    process_edit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_propose_flow_user_message_emits_text_event() -> None:
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Need details",
+            "plan_rationale": "Ask for missing detail.",
+            "steps": [],
+        },
+        tool_call_id="call-create-user-message",
+    )
+    process_outline = AsyncMock(
+        return_value=ToolProcessingResult(user_message="I need one more detail.")
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            new=process_outline,
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(), tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert len(events) == 1
+    assert events[0]["event"] == "text"
+    assert json.loads(events[0]["data"]) == {"text": "I need one more detail."}
+
+
+@pytest.mark.asyncio
+async def test_create_propose_flow_plural_events_emit_in_order() -> None:
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Ready",
+            "plan_rationale": "Emit multiple events.",
+            "steps": [],
+        },
+        tool_call_id="call-create-events",
+    )
+    expected_events = (
+        {"event": "status", "data": '{"status":"one"}'},
+        {"event": "plan", "data": "{}"},
+    )
+    process_outline = AsyncMock(
+        return_value=ToolProcessingResult(events=expected_events)
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            new=process_outline,
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(), tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert events == list(expected_events)
+
+
+@pytest.mark.asyncio
+async def test_create_propose_flow_finalization_uses_default_assistant_content() -> (
+    None
+):
+    submission = _make_submission()
+    compiled = _compiled_outline_proposal()
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+    process_outline = AsyncMock(
+        return_value=ToolProcessingResult(compiled_proposal=compiled)
+    )
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Create",
+            "plan_rationale": "Create a flow.",
+            "steps": [],
+        },
+        tool_call_id="call-create-finalize",
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            new=process_outline,
+        ),
+        patch.object(
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(text_content="Provider prose"), tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    request = finalize.await_args.args[0]
+    assert request.assistant_content == "Här är mitt förslag:"
+
+
+@pytest.mark.asyncio
+async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_count() -> (
+    None
+):
     submission = _make_submission()
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
@@ -502,7 +671,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
 
 @pytest.mark.asyncio
-async def test_outline_retry_config_finalizes_compiled_proposal_with_invocation_context() -> (
+async def test_create_propose_flow_retry_config_finalizes_compiled_proposal_with_invocation_context() -> (
     None
 ):
     submission = _make_submission()
@@ -530,7 +699,7 @@ async def test_outline_retry_config_finalizes_compiled_proposal_with_invocation_
         tool_call_id="call-outline-retry-finalize",
     )
 
-    config = submission._outline_flow_retry_config(
+    config = submission._create_propose_flow_retry_config(
         request_id="req-outline-retry-finalize",
         planning_state=None,
         plan_edit_context=None,
@@ -572,7 +741,7 @@ async def test_outline_retry_config_finalizes_compiled_proposal_with_invocation_
 
 
 @pytest.mark.asyncio
-async def test_outline_self_correction_returns_typed_error_when_completion_raises() -> (
+async def test_create_propose_flow_self_correction_returns_typed_error_when_completion_raises() -> (
     None
 ):
     litellm_client = AsyncMock()
@@ -614,7 +783,7 @@ async def test_outline_self_correction_returns_typed_error_when_completion_raise
 
 
 @pytest.mark.asyncio
-async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
+async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() -> None:
     submission = _make_submission()
     tracker = ProposalTurnTelemetry(
         request_id="req-edit-parse",
@@ -656,7 +825,45 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_flow_retry_config_carries_invocation_context() -> None:
+async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
+    submission = _make_submission()
+    process_edit = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "steps": []},
+        tool_call_id="call-edit-no-prerequisites",
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state"
+        ) as requirements,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.build_discovery_runtime_result",
+            new=AsyncMock(),
+        ) as discovery,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            new=process_edit,
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(flow=SimpleNamespace(id=uuid4(), steps=[])),
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    requirements.assert_not_called()
+    discovery.assert_not_awaited()
+    process_edit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_edit_propose_flow_retry_config_carries_invocation_context() -> None:
     submission = _make_submission()
     assistant_snapshots = {uuid4(): {"name": "Analys"}}
     resource_catalog = MagicMock()
@@ -664,7 +871,7 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     plan_edit_context = MagicMock()
     prior_plan_for_revision = MagicMock()
 
-    config = submission._edit_flow_retry_config(
+    config = submission._edit_propose_flow_retry_config(
         assistant_snapshots=assistant_snapshots,
         request_id="req",
         plan_edit_context=plan_edit_context,
@@ -716,7 +923,7 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_flow_retry_preserves_description_advisory_without_completion() -> (
+async def test_edit_propose_flow_retry_preserves_description_advisory_without_completion() -> (
     None
 ):
     litellm_client = AsyncMock()
@@ -734,7 +941,7 @@ async def test_edit_flow_retry_preserves_description_advisory_without_completion
         advisories=[_description_update_advisory()],
     )
     flow = _flow_with_description("Old generated description")
-    config = submission._edit_flow_retry_config(
+    config = submission._edit_propose_flow_retry_config(
         assistant_snapshots=None,
         request_id="req-forced-retry-edit-advisory",
         plan_edit_context=None,
@@ -778,7 +985,7 @@ async def test_edit_flow_retry_preserves_description_advisory_without_completion
 
 
 @pytest.mark.asyncio
-async def test_handle_edit_flow_preserves_description_advisory_without_completion() -> (
+async def test_handle_edit_propose_flow_preserves_description_advisory_without_completion() -> (
     None
 ):
     litellm_client = AsyncMock()
@@ -837,10 +1044,11 @@ async def test_handle_edit_flow_preserves_description_advisory_without_completio
     assert [advisory.code for advisory in request.compiled.edit.advisories] == [
         "flow_description_update_required"
     ]
+    assert request.assistant_content == "Assistant text"
 
 
 @pytest.mark.asyncio
-async def test__retry_forced_proposal_after_text_uses_outline_flow_for_create_mode() -> (
+async def test__retry_forced_proposal_after_text_uses_create_target_for_create_mode() -> (
     None
 ):
     submission = _make_submission()
@@ -929,7 +1137,9 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
 
 
 @pytest.mark.asyncio
-async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None:
+async def test_handle_edit_propose_flow_parse_failure_triggers_self_correction() -> (
+    None
+):
     submission = _make_submission()
     tool_call = MagicMock()
     tool_call.id = "call_edit"

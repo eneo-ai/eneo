@@ -179,8 +179,10 @@ class ProposalSubmissionOwner:
         if tool_name != PROPOSE_FLOW_TOOL_NAME:
             return None
         if ctx.flow is None:
-            return self._handle_outline_flow_tool_call(ctx=ctx, tool_call=tool_call)
-        return self._handle_edit_flow_tool_call(ctx=ctx, tool_call=tool_call)
+            return self._handle_create_propose_flow_tool_call(
+                ctx=ctx, tool_call=tool_call
+            )
+        return self._handle_edit_propose_flow_tool_call(ctx=ctx, tool_call=tool_call)
 
     def contains_submission_tool_call(
         self,
@@ -404,7 +406,7 @@ class ProposalSubmissionOwner:
             )
         )
 
-    def _outline_flow_retry_config(
+    def _create_propose_flow_retry_config(
         self,
         *,
         request_id: str,
@@ -446,7 +448,7 @@ class ProposalSubmissionOwner:
             process_tool_invocation=_process_tool_invocation,
         )
 
-    def _edit_flow_retry_config(
+    def _edit_propose_flow_retry_config(
         self,
         *,
         assistant_snapshots: AssistantAuthoringSnapshots | None,
@@ -540,6 +542,51 @@ class ProposalSubmissionOwner:
             ),
         )
 
+    def _record_failed_proposal_attempt_repair(
+        self,
+        *,
+        usage_tracker: ProposalTurnTelemetry | None,
+        request_id: str,
+        reason: ProposalRepairReason,
+    ) -> None:
+        record_proposal_first_attempt(
+            usage_tracker,
+            request_id=request_id,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            success=False,
+            failure_kind=reason,
+        )
+        _record_proposal_repair_invocation(
+            usage_tracker,
+            request_id=request_id,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            reason=reason,
+        )
+
+    async def _run_proposal_self_correction(
+        self,
+        *,
+        ctx: ProposalTurnContext,
+        error_message: str,
+        tool_call: Any,
+        retry_config: ToolRetryConfig,
+        reason: ProposalRepairReason,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        self._record_failed_proposal_attempt_repair(
+            usage_tracker=ctx.usage_tracker,
+            request_id=ctx.request_id,
+            reason=reason,
+        )
+        async for event in run_tool_self_correction(
+            self._build_self_correction_request(
+                ctx=ctx,
+                error_message=error_message,
+                tool_call=tool_call,
+                retry_config=retry_config,
+            )
+        ):
+            yield event
+
     async def _resolve_submission_prerequisite_events(
         self,
         *,
@@ -589,7 +636,7 @@ class ProposalSubmissionOwner:
             )
         ]
 
-    async def _handle_outline_flow_tool_call(
+    async def _handle_create_propose_flow_tool_call(
         self,
         *,
         ctx: ProposalTurnContext,
@@ -607,7 +654,7 @@ class ProposalSubmissionOwner:
         if blocked:
             return
 
-        retry_config = self._outline_flow_retry_config(
+        retry_config = self._create_propose_flow_retry_config(
             request_id=ctx.request_id,
             planning_state=ctx.planning_state,
             plan_edit_context=ctx.plan_edit_context,
@@ -618,26 +665,12 @@ class ProposalSubmissionOwner:
         try:
             arguments = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
-            record_proposal_first_attempt(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                success=False,
-                failure_kind="parse",
-            )
-            _record_proposal_repair_invocation(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
+            async for event in self._run_proposal_self_correction(
+                ctx=ctx,
+                error_message=f"Invalid propose_flow arguments: {error}",
+                tool_call=tool_call,
+                retry_config=retry_config,
                 reason="parse",
-            )
-            async for event in run_tool_self_correction(
-                self._build_self_correction_request(
-                    ctx=ctx,
-                    error_message=f"Invalid propose_flow arguments: {error}",
-                    tool_call=tool_call,
-                    retry_config=retry_config,
-                )
             ):
                 yield event
             return
@@ -696,27 +729,12 @@ class ProposalSubmissionOwner:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 outline_result.failure_kind
             )
-            record_proposal_first_attempt(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                success=False,
-                failure_kind=proposal_repair_reason,
-            )
-            _record_proposal_repair_invocation(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
+            async for event in self._run_proposal_self_correction(
+                ctx=ctx,
+                error_message=outline_result.feedback or "Invalid propose_flow draft.",
+                tool_call=tool_call,
+                retry_config=retry_config,
                 reason=proposal_repair_reason,
-            )
-            async for event in run_tool_self_correction(
-                self._build_self_correction_request(
-                    ctx=ctx,
-                    error_message=outline_result.feedback
-                    or "Invalid propose_flow draft.",
-                    tool_call=tool_call,
-                    retry_config=retry_config,
-                )
             ):
                 yield event
             return
@@ -748,22 +766,13 @@ class ProposalSubmissionOwner:
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
         request_id = usage_tracker.request_id
-        target_tool_name = PROPOSE_FLOW_TOOL_NAME
-        record_proposal_first_attempt(
-            usage_tracker,
+        self._record_failed_proposal_attempt_repair(
+            usage_tracker=usage_tracker,
             request_id=request_id,
-            tool_name=target_tool_name,
-            success=False,
-            failure_kind="missing_submission_tool",
-        )
-        _record_proposal_repair_invocation(
-            usage_tracker,
-            request_id=request_id,
-            tool_name=target_tool_name,
             reason="missing_submission_tool",
         )
         retry_config = (
-            self._outline_flow_retry_config(
+            self._create_propose_flow_retry_config(
                 request_id=request_id,
                 planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
@@ -771,7 +780,7 @@ class ProposalSubmissionOwner:
                 usage_tracker=usage_tracker,
             )
             if flow is None
-            else self._edit_flow_retry_config(
+            else self._edit_propose_flow_retry_config(
                 assistant_snapshots=assistant_snapshots,
                 request_id=request_id,
                 plan_edit_context=plan_edit_context,
@@ -813,7 +822,7 @@ class ProposalSubmissionOwner:
         )
         return outcome.events
 
-    async def _handle_edit_flow_tool_call(
+    async def _handle_edit_propose_flow_tool_call(
         self,
         *,
         ctx: ProposalTurnContext,
@@ -821,7 +830,7 @@ class ProposalSubmissionOwner:
     ) -> AsyncGenerator[dict[str, str], None]:
         # Edit submissions operate on an existing flow; discovery prerequisites
         # belong to create submissions before the first plan exists.
-        retry_config = self._edit_flow_retry_config(
+        retry_config = self._edit_propose_flow_retry_config(
             assistant_snapshots=ctx.assistant_snapshots,
             request_id=ctx.request_id,
             plan_edit_context=ctx.plan_edit_context,
@@ -831,26 +840,12 @@ class ProposalSubmissionOwner:
         try:
             raw_args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
-            record_proposal_first_attempt(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                success=False,
-                failure_kind="parse",
-            )
-            _record_proposal_repair_invocation(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
+            async for event in self._run_proposal_self_correction(
+                ctx=ctx,
+                error_message=f"Invalid propose_flow arguments: {error}",
+                tool_call=tool_call,
+                retry_config=retry_config,
                 reason="parse",
-            )
-            async for event in run_tool_self_correction(
-                self._build_self_correction_request(
-                    ctx=ctx,
-                    error_message=f"Invalid propose_flow arguments: {error}",
-                    tool_call=tool_call,
-                    retry_config=retry_config,
-                )
             ):
                 yield event
             return
@@ -893,27 +888,12 @@ class ProposalSubmissionOwner:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 edit_result.failure_kind
             )
-            record_proposal_first_attempt(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                success=False,
-                failure_kind=proposal_repair_reason,
-            )
-            _record_proposal_repair_invocation(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
+            async for event in self._run_proposal_self_correction(
+                ctx=ctx,
+                error_message=edit_result.feedback or "Invalid propose_flow arguments.",
+                tool_call=tool_call,
+                retry_config=retry_config,
                 reason=proposal_repair_reason,
-            )
-            async for event in run_tool_self_correction(
-                self._build_self_correction_request(
-                    ctx=ctx,
-                    error_message=edit_result.feedback
-                    or "Invalid propose_flow arguments.",
-                    tool_call=tool_call,
-                    retry_config=retry_config,
-                )
             ):
                 yield event
             return
