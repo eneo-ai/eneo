@@ -9,7 +9,7 @@ from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
     compile_review_policy,
     compile_step_input_bindings,
-    derive_new_step_output_mode,
+    derive_output_mode,
     make_plan_step_ref,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
@@ -328,10 +328,7 @@ def _derive_existing_step_output_mode(
     *,
     document_delivery_mode: DocumentDeliveryMode | None,
 ) -> OutputMode:
-    output_mode_draft = NewStepDraft(
-        name=step.name or step.plan_step_ref,
-        instructions="Derive output mode.",
-        input_source=step.input_source,
+    return derive_output_mode(
         input_type=step.input_type,
         output_type=step.output_type,
         document_delivery_mode=(
@@ -340,7 +337,6 @@ def _derive_existing_step_output_mode(
             else _document_delivery_mode_for_existing_step(step)
         ),
     )
-    return derive_new_step_output_mode(output_mode_draft)
 
 
 def _document_delivery_mode_for_existing_step(

@@ -5,6 +5,7 @@ import string
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
     NewStepDraft,
     PreviousFieldRef,
     PreviousOutputRef,
@@ -99,18 +100,25 @@ def make_plan_step_ref(index: int) -> str:
     return f"step_{index + 1}"
 
 
-def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
-    if (
-        step_draft.input_type.value == "audio"
-        and step_draft.output_type.value == "text"
-    ):
+def derive_output_mode(
+    *,
+    input_type: InputType,
+    output_type: OutputType,
+    document_delivery_mode: DocumentDeliveryMode,
+) -> OutputMode:
+    if input_type == InputType.AUDIO and output_type == OutputType.TEXT:
         return OutputMode.TRANSCRIBE_ONLY
-    if (
-        step_draft.output_type == OutputType.DOCX
-        and step_draft.document_delivery_mode == "template_fill"
-    ):
+    if output_type == OutputType.DOCX and document_delivery_mode == "template_fill":
         return OutputMode.TEMPLATE_FILL
     return OutputMode.PASS_THROUGH
+
+
+def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
+    return derive_output_mode(
+        input_type=step_draft.input_type,
+        output_type=step_draft.output_type,
+        document_delivery_mode=step_draft.document_delivery_mode,
+    )
 
 
 def compile_input_config(step_draft: NewStepDraft) -> dict[str, Any] | None:
