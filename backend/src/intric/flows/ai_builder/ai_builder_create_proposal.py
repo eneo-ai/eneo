@@ -21,7 +21,6 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_outline_quality_feedback,
-    format_create_validation_feedback,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
@@ -29,7 +28,6 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     attach_selected_mcp_refs_to_explicit_outline_steps,
     safe_validation_issues,
 )
-from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -327,17 +325,6 @@ async def _process_create_draft(
         draft,
         aggregation_intent=aggregation_intent,
     )
-    create_validation = validate_create_draft(draft)
-    if create_validation.errors:
-        logger.info(
-            "Create draft validation failed: %s",
-            [error.message for error in create_validation.errors],
-        )
-        return ToolProcessingResult(
-            feedback=format_create_validation_feedback(create_validation),
-            failure_kind="validation",
-            failure_codes=frozenset(error.code for error in create_validation.errors),
-        )
 
     try:
         spec = compile_create_draft(

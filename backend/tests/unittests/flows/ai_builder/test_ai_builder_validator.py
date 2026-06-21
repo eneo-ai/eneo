@@ -848,6 +848,23 @@ class TestProductionParityValidation:
         assert not result.valid
         assert any("multiselect" in e.message.lower() for e in result.errors)
 
+    def test_select_without_options_follows_canonical_form_schema(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Form flow",
+            steps=[_step()],
+            form_fields=[
+                FormFieldSpec(
+                    name="Prioritet",
+                    type="select",
+                    label="Prioritet",
+                )
+            ],
+        )
+
+        result = validate_spec(spec)
+
+        assert result.valid
+
     def test_step_name_form_field_collision_maps_to_authored_step_ref(self) -> None:
         spec = FlowDraftSpecCore(
             flow_name="Form flow",

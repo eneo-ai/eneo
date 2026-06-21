@@ -30,7 +30,6 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     build_outline_flow_tool_schema,
     parse_outline_flow_arguments,
 )
-from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
     builder_output_type_values,
@@ -1848,40 +1847,24 @@ def test_normalize_create_draft_mechanics_strips_template_fill_from_text_output(
     assert validation.valid
 
 
-def test_validate_create_draft_rejects_unknown_previous_field_reference() -> None:
+def test_compile_create_draft_empty_steps_surfaces_canonical_empty_steps_error() -> (
+    None
+):
     draft = FlowCreateDraft(
-        flow_name="Ogiltig fältreferens",
-        plan_rationale="Testar fältvalidering.",
-        steps=[
-            NewStepDraft(
-                name="Extrahera risker",
-                instructions="Extrahera risker.",
-                input_source="flow_input",
-                input_type="document",
-                output_type="json",
-                runtime_upload=True,
-                output_fields=[_field("sammanfattning", "string")],
-            ),
-            NewStepDraft(
-                name="Sammanfatta",
-                instructions="Skriv sammanfattning.",
-                input_source="previous_step",
-                input_type="json",
-                output_type="text",
-                uses_previous_fields=[{"from_step": 1, "field_path": "okänd"}],
-            ),
-        ],
+        flow_name="Tomt flöde",
+        plan_rationale="Verifierar tomt stegfall.",
+        steps=[],
     )
 
-    validation = validate_create_draft(draft)
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
 
+    assert compiled.steps == []
     assert not validation.valid
-    assert any(
-        error.code == "unknown_previous_field_reference" for error in validation.errors
-    )
+    assert [error.code for error in validation.errors] == ["empty_steps"]
 
 
-def test_validate_create_draft_rejects_non_json_previous_field_source() -> None:
+def test_normalize_create_draft_prunes_non_json_previous_field_source() -> None:
     draft = FlowCreateDraft(
         flow_name="Ogiltig fältkälla",
         plan_rationale="Testar icke-json källa.",
@@ -1904,48 +1887,12 @@ def test_validate_create_draft_rejects_non_json_previous_field_source() -> None:
         ],
     )
 
-    validation = validate_create_draft(draft)
+    normalized = normalize_create_draft_mechanics(draft)
+    compiled = compile_create_draft(normalized)
+    validation = validate_spec(compiled)
 
-    assert not validation.valid
-    assert any(
-        error.code == "previous_field_source_requires_json_output"
-        for error in validation.errors
-    )
-
-
-def test_validate_create_draft_rejects_non_text_previous_output_source() -> None:
-    draft = FlowCreateDraft(
-        flow_name="Ogiltig textkälla",
-        plan_rationale="Testar icke-text källa.",
-        steps=[
-            NewStepDraft(
-                name="Extrahera fält",
-                instructions="Extrahera fält.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="json",
-                output_fields=[_field("titel", "string")],
-            ),
-            NewStepDraft(
-                name="Skriv rapport",
-                instructions="Skriv rapport.",
-                input_source="previous_step",
-                input_type="text",
-                output_type="text",
-                uses_previous_outputs=[
-                    {"from_step": 1, "label": "Källmaterial"},
-                ],
-            ),
-        ],
-    )
-
-    validation = validate_create_draft(draft)
-
-    assert not validation.valid
-    assert any(
-        error.code == "previous_output_source_requires_text_output"
-        for error in validation.errors
-    )
+    assert normalized.steps[1].uses_previous_fields == []
+    assert validation.valid
 
 
 def test_normalize_create_draft_mechanics_enables_file_flow_input_runtime_upload() -> (
@@ -1973,39 +1920,6 @@ def test_normalize_create_draft_mechanics_enables_file_flow_input_runtime_upload
 
     assert normalized.steps[0].runtime_upload is True
     assert validation.valid
-
-
-def test_validate_create_draft_rejects_future_previous_field_source() -> None:
-    draft = FlowCreateDraft(
-        flow_name="Ogiltig stegref",
-        plan_rationale="Testar framtida stegref.",
-        steps=[
-            NewStepDraft(
-                name="Steg 1",
-                instructions="Steg 1.",
-                input_source="flow_input",
-                input_type="document",
-                output_type="json",
-                runtime_upload=True,
-                output_fields=[_field("titel", "string")],
-            ),
-            NewStepDraft(
-                name="Steg 2",
-                instructions="Steg 2.",
-                input_source="previous_step",
-                input_type="text",
-                output_type="text",
-                uses_previous_fields=[{"from_step": 2, "field_path": "titel"}],
-            ),
-        ],
-    )
-
-    validation = validate_create_draft(draft)
-
-    assert not validation.valid
-    assert any(
-        error.code == "invalid_previous_field_source" for error in validation.errors
-    )
 
 
 def test_structured_field_depth_above_three_is_rejected() -> None:

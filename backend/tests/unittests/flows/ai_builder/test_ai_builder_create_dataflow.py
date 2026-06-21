@@ -1,13 +1,14 @@
+from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
     strip_malformed_previous_field_refs,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
+from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.flow_authoring_spec import FormFieldSpec
 
 
@@ -27,6 +28,10 @@ def _field(name: str) -> StructuredFieldDraft:
         field_type="string",
         description=f"{name} field.",
     )
+
+
+def _assert_compiles_to_valid_spec(draft: FlowCreateDraft) -> None:
+    assert validate_spec(compile_create_draft(draft)).valid
 
 
 def test_normalize_create_draft_mechanics_prunes_unknown_previous_field_refs() -> None:
@@ -59,11 +64,9 @@ def test_normalize_create_draft_mechanics_prunes_unknown_previous_field_refs() -
         ],
     )
 
-    assert not validate_create_draft(draft).valid
-
     normalized = normalize_create_draft_mechanics(draft)
 
-    assert validate_create_draft(normalized).valid
+    _assert_compiles_to_valid_spec(normalized)
     assert [ref.field_path for ref in normalized.steps[1].uses_previous_fields] == [
         "known_field"
     ]
@@ -108,11 +111,9 @@ def test_normalize_create_draft_mechanics_prunes_invalid_previous_output_refs() 
         ],
     )
 
-    assert not validate_create_draft(draft).valid
-
     normalized = normalize_create_draft_mechanics(draft)
 
-    assert validate_create_draft(normalized).valid
+    _assert_compiles_to_valid_spec(normalized)
     assert [
         (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
     ] == [(1, "Transkription")]
@@ -178,7 +179,7 @@ def test_normalize_create_draft_mechanics_restores_audio_source_material_underla
 
     normalized = normalize_create_draft_mechanics(draft)
 
-    assert validate_create_draft(normalized).valid
+    _assert_compiles_to_valid_spec(normalized)
     assert normalized.steps[2].input_type == "text"
     assert [
         (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
@@ -898,7 +899,7 @@ def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> No
 
     normalized = normalize_create_draft_mechanics(draft)
 
-    assert validate_create_draft(normalized).valid
+    _assert_compiles_to_valid_spec(normalized)
     assert normalized.steps[0].uses_form_fields == ["case_id"]
 
 
@@ -947,7 +948,7 @@ def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
     assert normalized.steps[1].document_delivery_mode == "not_applicable"
     assert normalized.steps[2].input_type == "text"
     assert normalized.steps[2].citations_requested is False
-    assert validate_create_draft(normalized).valid
+    _assert_compiles_to_valid_spec(normalized)
 
 
 def test_strip_malformed_previous_field_refs_removes_non_authorable_noise() -> None:
