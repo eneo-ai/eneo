@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
+from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
@@ -246,7 +247,6 @@ def _create_step_snapshot(
     return {
         "name": name,
         "instructions": instructions,
-        "assistant_spec": None,
         "input_source": input_source,
         "input_type": input_type,
         "output_type": output_type,
@@ -264,6 +264,19 @@ def _create_step_snapshot(
         "review_mode": review_mode,
         "output_fields": output_fields,
     }
+
+
+def test_new_step_draft_rejects_nested_assistant_spec() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        NewStepDraft.model_validate(
+            {
+                "name": "Extract",
+                "instructions": "Extract source facts.",
+                "assistant_spec": {"instructions": "Nested instructions."},
+            }
+        )
+
+    assert "assistant_spec" in str(exc_info.value)
 
 
 def _create_draft_snapshot(

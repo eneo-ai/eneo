@@ -5,7 +5,6 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from intric.flows.flow_authoring_spec import (
-    AssistantSpec,
     InputSource,
     InputType,
     OutputType,
@@ -113,7 +112,6 @@ class NewStepDraft(BaseModel):
 
     name: str
     instructions: str | None = None
-    assistant_spec: AssistantSpec | None = None
     input_source: InputSource | None = None
     input_type: InputType = InputType.TEXT
     output_type: OutputType = OutputType.TEXT
@@ -208,19 +206,8 @@ class NewStepDraft(BaseModel):
 
     @model_validator(mode="after")
     def _validate_structured_depth(self) -> "NewStepDraft":
-        if self.instructions is None and self.assistant_spec is not None:
-            self.instructions = self.assistant_spec.instructions
         if self.instructions is None:
             raise ValueError("Steps require non-empty text values.")
-        if self.assistant_spec is not None:
-            if self.model_ref is None:
-                self.model_ref = self.assistant_spec.model_ref
-            if not self.knowledge_refs:
-                self.knowledge_refs = list(self.assistant_spec.knowledge_refs)
-            if not self.mcp_server_refs:
-                self.mcp_server_refs = list(self.assistant_spec.mcp_server_refs)
-            if not self.mcp_tool_refs:
-                self.mcp_tool_refs = list(self.assistant_spec.mcp_tool_refs)
         if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
             raise ValueError(
                 "A step cannot use knowledge_refs and MCP refs at the same time."
