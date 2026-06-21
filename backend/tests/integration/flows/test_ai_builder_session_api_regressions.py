@@ -21,7 +21,6 @@ from intric.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -46,6 +45,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -535,7 +535,7 @@ async def _create_proposed_ai_builder_plan(
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id=f"call-revise-{uuid4()}",
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments={},
             compiled=_compiled_builder_plan(
                 _make_builder_plan_spec(existing_step_ref=None)
@@ -2360,7 +2360,7 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
                 new_messages_start=0,
                 assistant_content="stale plan ready",
                 tool_call_id="call-stale-1",
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 arguments={},
                 compiled=_compiled_builder_plan(
                     _make_builder_plan_spec(existing_step_ref=None)
@@ -2450,7 +2450,7 @@ async def test_store_plan_and_update_conversation_rejects_lost_session_send_leas
                 new_messages_start=0,
                 assistant_content="lost lease plan",
                 tool_call_id="call-lost-lease-1",
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 arguments={},
                 compiled=_compiled_builder_plan(
                     _make_builder_plan_spec(existing_step_ref=None)
@@ -2747,14 +2747,13 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
         )
         edit_flow_call = _make_tool_call(
             tool_call_id="call-edit-lost-lease",
-            name="edit_flow",
+            name=PROPOSE_FLOW_TOOL_NAME,
             arguments={
                 "plan_rationale": "Lägg till ett textsammanfattningssteg.",
-                "operations": [
+                "steps": [
                     {
-                        "op": "add",
-                        "placement": {"position": "append"},
-                        "add_payload": {
+                        "kind": "add",
+                        "step": {
                             "name": "Sammanfatta text",
                             "instructions": "Sammanfatta användarens text.",
                             "input_source": "flow_input",
@@ -2852,7 +2851,7 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-match-1",
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments={},
             compiled=_compiled_builder_plan(
                 _make_builder_plan_spec(existing_step_ref=None)
@@ -3042,7 +3041,7 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
                     new_messages_start=0,
                     assistant_content="simulated",
                     tool_call_id="call-1",
-                    tool_name=OUTLINE_FLOW_TOOL_NAME,
+                    tool_name=PROPOSE_FLOW_TOOL_NAME,
                     arguments={},
                     compiled=_compiled_builder_plan(spec),
                 )
@@ -3115,7 +3114,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-ps-1",
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments={},
             compiled=_compiled_builder_plan(spec),
             flow=None,
@@ -3201,7 +3200,7 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-identity-1",
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments={},
             compiled=_compiled_builder_plan(spec),
             flow=None,
@@ -3278,7 +3277,7 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
             new_messages_start=0,
             assistant_content="plan ready",
             tool_call_id="call-cmp-1",
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments={},
             compiled=_compiled_builder_plan(spec),
             flow=None,
@@ -3804,7 +3803,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
 
     outline_flow = _make_tool_call(
         tool_call_id="call_plan",
-        name=OUTLINE_FLOW_TOOL_NAME,
+        name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
@@ -3977,16 +3976,14 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
 
     edit_flow = _make_tool_call(
         tool_call_id="call_edit",
-        name="edit_flow",
+        name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "plan_rationale": "Byter bara slutformatet till DOCX och behåller övriga delar.",
-            "operations": [
+            "steps": [
                 {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {
-                        "output_type": "docx",
-                    },
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_type": "docx",
                 }
             ],
         },
@@ -4203,36 +4200,27 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
 
     edit_flow = _make_tool_call(
         tool_call_id="call_edit",
-        name="edit_flow",
+        name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "plan_rationale": "Lägger till ett transkriberingssteg före analysen och gör analyssteget textbaserat.",
-            "operations": [
+            "steps": [
                 {
-                    "op": "add",
-                    "placement": {
-                        "position": "before",
-                        "anchor_ref": "existing_step_1",
-                    },
-                    "add_payload": {
+                    "kind": "add",
+                    "step": {
                         "name": "Transkribera ljudfil",
                         "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
                         "input_source": "flow_input",
                         "input_type": "audio",
                         "output_type": "text",
-                        "runtime_upload": True,
                         "runtime_required": True,
                     },
                 },
                 {
-                    "op": "modify",
-                    "target_ref": "existing_step_1",
-                    "patch": {
-                        "input_source": "previous_step",
-                        "input_type": "text",
-                        "assistant_spec": {
-                            "instructions": "Analysera transkriberingen."
-                        },
-                    },
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "assistant_spec": {"instructions": "Analysera transkriberingen."},
                 },
             ],
         },
@@ -4325,7 +4313,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
 
     outline_flow = _make_tool_call(
         tool_call_id="call_plan",
-        name=OUTLINE_FLOW_TOOL_NAME,
+        name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
