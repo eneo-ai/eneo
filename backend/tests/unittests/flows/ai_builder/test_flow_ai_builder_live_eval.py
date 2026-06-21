@@ -1,9 +1,16 @@
+from argparse import Namespace
+from pathlib import Path
+
+import pytest
+
 from scripts.flow_ai_builder_live_eval import (
     ExpectedOutcome,
     ExpectedQuestionBinding,
     JsonObject,
     LiveEvalCase,
+    LiveEvalError,
     _cases,
+    _config_from_args,
     _evaluate_plan_case,
 )
 
@@ -63,6 +70,34 @@ def _case() -> LiveEvalCase:
             ),
         ),
     )
+
+
+def _args() -> Namespace:
+    return Namespace(
+        base_url="http://127.0.0.1:8123",
+        output_root=Path("/tmp/live-eval"),
+        ledger=Path("/tmp/live-eval.md"),
+        timeout_seconds=5.0,
+        max_stream_events=5,
+        inter_case_delay_seconds=0.0,
+    )
+
+
+def test_config_reports_missing_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ENEO_API_KEY", raising=False)
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("ENEO_FLOW_TEST_SPACE_ID", "space-id")
+
+    with pytest.raises(LiveEvalError, match="ENEO_API_KEY, API_KEY"):
+        _config_from_args(_args())
+
+
+def test_config_reports_missing_test_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("API_KEY", "api-key")
+    monkeypatch.delenv("ENEO_FLOW_TEST_SPACE_ID", raising=False)
+
+    with pytest.raises(LiveEvalError, match="ENEO_FLOW_TEST_SPACE_ID"):
+        _config_from_args(_args())
 
 
 def test_live_eval_accepts_selected_structured_field_and_source_text_refs() -> None:

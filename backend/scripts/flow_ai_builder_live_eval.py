@@ -1131,16 +1131,27 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _config_from_args(args: argparse.Namespace) -> RunnerConfig:
-    api_key = os.environ.get("ENEO_API_KEY") or os.environ["API_KEY"]
     return RunnerConfig(
         base_url=cast(str, args.base_url),
-        api_key=api_key,
-        space_id=os.environ["ENEO_FLOW_TEST_SPACE_ID"],
+        api_key=_required_env("ENEO_API_KEY", "API_KEY"),
+        space_id=_required_env("ENEO_FLOW_TEST_SPACE_ID"),
         output_root=cast(Path, args.output_root),
         ledger_path=cast(Path, args.ledger),
         per_case_timeout_seconds=cast(float, args.timeout_seconds),
         max_stream_events=cast(int, args.max_stream_events),
         inter_case_delay_seconds=cast(float, args.inter_case_delay_seconds),
+    )
+
+
+def _required_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    if len(names) == 1:
+        raise LiveEvalError(f"Missing required environment variable: {names[0]}")
+    raise LiveEvalError(
+        "Missing required environment variable: one of " + ", ".join(names)
     )
 
 
