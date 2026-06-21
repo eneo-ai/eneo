@@ -10,12 +10,9 @@ from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
     BackendQuestionPersistenceResult,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
-)
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    CompiledEditResult,
-    FlowEditDraft,
 )
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
@@ -110,12 +107,10 @@ def _compiled_outline_proposal_with_validation(
 
 
 def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProposal:
-    compiled_edit = CompiledEditResult(
-        compiled_spec=compiled_spec,
+    edit = FlowBuilderEditApproval(
         diff=FlowEditDiff(
             step_changes=[StepChange(kind="unchanged", step_name="Analys")]
         ),
-        original_draft=FlowEditDraft(operations=[]),
         base_flow_revision=3,
         advisories=[
             EditAdvisory(
@@ -132,7 +127,7 @@ def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProp
         plan_rationale="Update the flow.",
         reasoning=None,
         validation=SpecValidationResult(),
-        edit=compiled_edit,
+        edit=edit,
     )
 
 
@@ -379,10 +374,10 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
 ):
     finalizer = _make_finalizer()
     original_spec = _make_flow_spec()
-    captured_edits: list[CompiledEditResult | None] = []
+    captured_compiled: list[CompiledProposal] = []
 
     async def store_plan(**kwargs):
-        captured_edits.append(kwargs["compiled"].edit)
+        captured_compiled.append(kwargs["compiled"])
         return await _store_compiled_plan(**kwargs)
 
     with patch(
@@ -402,11 +397,10 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
         )
 
     assert result.event is not None
-    captured_edit = captured_edits[0]
+    captured = captured_compiled[0]
+    assert captured.spec.flow_description == original_spec.flow_description
+    captured_edit = captured.edit
     assert captured_edit is not None
-    assert (
-        captured_edit.compiled_spec.flow_description == original_spec.flow_description
-    )
     assert [advisory.code for advisory in captured_edit.advisories] == [
         "flow_description_update_required"
     ]

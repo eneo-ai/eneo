@@ -2377,9 +2377,7 @@ class TestExecuteEditFlow:
             },
             resource_catalog=resource_catalog,
         )
-        changeset = compile_flow_draft_changeset(
-            edit_result.compiled_spec, current_flow
-        )
+        changeset = compile_flow_draft_changeset(edit_result.spec, current_flow)
 
         mock_flow_service = AsyncMock()
         mock_flow_service.update_flow.return_value = current_flow
@@ -2474,9 +2472,7 @@ class TestExecuteEditFlow:
             },
             resource_catalog=resource_catalog,
         )
-        changeset = compile_flow_draft_changeset(
-            edit_result.compiled_spec, current_flow
-        )
+        changeset = compile_flow_draft_changeset(edit_result.spec, current_flow)
 
         created_assistant = MagicMock()
         created_assistant.id = created_assistant_id

@@ -6,14 +6,12 @@ from uuid import UUID, uuid4
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
+    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     PlanStatus,
 )
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    CompiledEditResult,
-    FlowEditDraft,
-)
+from intric.flows.ai_builder.ai_builder_edit_compiler import EditCompilationResult
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
@@ -153,12 +151,10 @@ def _compiled_edit_proposal(
     advisories: list[EditAdvisory] | None = None,
 ) -> CompiledProposal:
     compiled_spec = spec or _make_flow_spec(model_ref=None, knowledge_refs=[])
-    compiled_edit = CompiledEditResult(
-        compiled_spec=compiled_spec,
+    edit = FlowBuilderEditApproval(
         diff=FlowEditDiff(
             step_changes=[StepChange(kind="unchanged", step_name="Analys")]
         ),
-        original_draft=FlowEditDraft(operations=[]),
         base_flow_revision=7,
         advisories=advisories or [],
     )
@@ -168,7 +164,7 @@ def _compiled_edit_proposal(
         plan_rationale="Update the flow.",
         reasoning=None,
         validation=SpecValidationResult(),
-        edit=compiled_edit,
+        edit=edit,
     )
 
 
@@ -212,12 +208,19 @@ def _make_flow_spec(
     )
 
 
-def _make_compiled_edit_result(compiled_spec: FlowDraftSpecCore) -> CompiledEditResult:
-    return CompiledEditResult(
-        compiled_spec=compiled_spec,
+def _make_edit_approval() -> FlowBuilderEditApproval:
+    return FlowBuilderEditApproval(
         diff=FlowEditDiff(
             step_changes=[StepChange(kind="unchanged", step_name="Analys")]
         ),
-        original_draft=FlowEditDraft(operations=[]),
         base_flow_revision=7,
+    )
+
+
+def _make_edit_compilation(
+    compiled_spec: FlowDraftSpecCore,
+) -> EditCompilationResult:
+    return EditCompilationResult(
+        spec=compiled_spec,
+        approval=_make_edit_approval(),
     )

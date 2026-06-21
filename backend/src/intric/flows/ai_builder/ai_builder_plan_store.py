@@ -9,7 +9,6 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
-    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     LintSeverity,
@@ -67,40 +66,16 @@ def _is_user_visible_lint_warning(warning: LintWarning) -> bool:
 def build_flow_builder_proposal(
     compiled: CompiledProposal,
 ) -> FlowBuilderProposal:
-    edit = _edit_approval_from_compiled_proposal(compiled)
     return FlowBuilderProposal(
         content=FlowBuilderProposalContent(
             spec=compiled.spec,
             assumptions=list(compiled.assumptions),
             plan_rationale=compiled.plan_rationale,
             lint_warnings=build_lint_warnings(compiled.validation),
-            edit=edit,
+            edit=compiled.edit,
         ),
         reasoning=compiled.reasoning,
         resource_bindings=compiled.resource_bindings,
-    )
-
-
-def _edit_approval_from_compiled_proposal(
-    compiled: CompiledProposal,
-) -> FlowBuilderEditApproval | None:
-    compiled_edit = compiled.edit
-    if compiled_edit is None:
-        return None
-
-    removed_refs = frozenset(
-        change.step_ref
-        for change in compiled_edit.diff.step_changes
-        if change.kind == "removed" and change.step_ref is not None
-    )
-    return FlowBuilderEditApproval(
-        base_flow_revision=compiled_edit.base_flow_revision,
-        removed_existing_step_refs=removed_refs,
-        diff=compiled_edit.diff,
-        warnings=compiled_edit.warnings,
-        advisories=compiled_edit.advisories,
-        risk_flags=compiled_edit.risk_flags,
-        confidence=compiled_edit.confidence,
     )
 
 

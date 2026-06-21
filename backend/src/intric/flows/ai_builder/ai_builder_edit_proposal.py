@@ -158,7 +158,7 @@ async def process_edit_arguments(
             failure_kind="validation",
         )
 
-    compiled_spec = edit_result.compiled_spec
+    compiled_spec = edit_result.spec
     prepared = prepare_compiled_spec_for_session(
         spec=compiled_spec,
         target_kind=TargetKind.EDIT,
@@ -233,6 +233,6 @@ async def process_edit_arguments(
                 if resource_catalog is not None
                 else tuple()
             ),
-            edit=edit_result,
+            edit=edit_result.approval,
         ),
     )

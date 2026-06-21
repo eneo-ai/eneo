@@ -267,11 +267,11 @@ def test_compile_edit_draft_clears_all_previous_input_contract() -> None:
 
     result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
-    assert result.compiled_spec.steps[1].input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert result.compiled_spec.steps[1].input_contract is None
+    assert result.spec.steps[1].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert result.spec.steps[1].input_contract is None
     assert any(
         advisory.code == "all_previous_input_contract_cleared"
-        for advisory in result.advisories
+        for advisory in result.approval.advisories
     )
 
 
@@ -288,7 +288,7 @@ def test_compile_edit_draft_preserves_existing_review_policy() -> None:
 
     result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
-    assert result.compiled_spec.steps[0].review_policy == review_policy
+    assert result.spec.steps[0].review_policy == review_policy
 
 
 def test_compile_edit_draft_updates_review_policy_from_patch() -> None:
@@ -308,7 +308,7 @@ def test_compile_edit_draft_updates_review_policy_from_patch() -> None:
 
     result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
-    review_policy = result.compiled_spec.steps[0].review_policy
+    review_policy = result.spec.steps[0].review_policy
     assert review_policy is not None
     assert review_policy.mode is FlowStepReviewMode.EDIT
 
@@ -337,7 +337,7 @@ def test_compile_edit_draft_clears_review_policy_with_explicit_null_patch() -> N
     result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
     assert "review_mode" in patch.model_fields_set
-    assert result.compiled_spec.steps[0].review_policy is None
+    assert result.spec.steps[0].review_policy is None
 
 
 def test_compile_edit_draft_preserves_review_policy_when_patch_omits_review_mode() -> (
@@ -364,8 +364,8 @@ def test_compile_edit_draft_preserves_review_policy_when_patch_omits_review_mode
 
     result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
-    assert result.compiled_spec.steps[0].name == "Transkribera och granska"
-    assert result.compiled_spec.steps[0].review_policy == existing_review_policy
+    assert result.spec.steps[0].name == "Transkribera och granska"
+    assert result.spec.steps[0].review_policy == existing_review_policy
 
 
 def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step() -> (
@@ -419,7 +419,7 @@ def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step(
 
     assert [
         (step.input_source, step.input_type, step.output_type, step.output_mode)
-        for step in result.compiled_spec.steps
+        for step in result.spec.steps
     ] == [
         (
             InputSource.FLOW_INPUT,
@@ -452,20 +452,20 @@ def test_compile_edit_draft_repairs_audio_document_flow_missing_transcript_step(
             OutputMode.PASS_THROUGH,
         ),
     ]
-    assert result.compiled_spec.steps[1].input_bindings is None
-    assert result.compiled_spec.steps[1].input_contract is None
-    assert [step.plan_step_ref for step in result.compiled_spec.steps[:3]] == [
+    assert result.spec.steps[1].input_bindings is None
+    assert result.spec.steps[1].input_contract is None
+    assert [step.plan_step_ref for step in result.spec.steps[:3]] == [
         "step_a",
         "step_b",
         "step_c",
     ]
-    assert result.compiled_spec.steps[1].existing_step_ref == "existing_step_1"
-    assert result.compiled_spec.steps[2].input_bindings == {
+    assert result.spec.steps[1].existing_step_ref == "existing_step_1"
+    assert result.spec.steps[2].input_bindings == {
         "question": "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     }
     assert any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
-        for change in result.diff.step_changes
+        for change in result.approval.diff.step_changes
     )
 
 
@@ -493,7 +493,7 @@ def test_compile_edit_draft_does_not_repair_existing_audio_transcript_flow() -> 
 
     assert [
         (step.name, step.input_source, step.input_type, step.output_type)
-        for step in result.compiled_spec.steps
+        for step in result.spec.steps
     ] == [
         (
             "Transkribera ljud",
@@ -510,7 +510,7 @@ def test_compile_edit_draft_does_not_repair_existing_audio_transcript_flow() -> 
     ]
     assert not any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
-        for change in result.diff.step_changes
+        for change in result.approval.diff.step_changes
     )
 
 
@@ -539,7 +539,7 @@ def test_compile_edit_draft_does_not_repair_audio_flow_without_document_terminal
 
     assert [
         (step.name, step.input_source, step.input_type, step.output_type)
-        for step in result.compiled_spec.steps
+        for step in result.spec.steps
     ] == [
         (
             "Analysera ljud",
@@ -556,7 +556,7 @@ def test_compile_edit_draft_does_not_repair_audio_flow_without_document_terminal
     ]
     assert not any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
-        for change in result.diff.step_changes
+        for change in result.approval.diff.step_changes
     )
 
 
@@ -583,7 +583,7 @@ def test_compile_edit_draft_does_not_repair_non_audio_document_flow() -> None:
 
     assert [
         (step.name, step.input_source, step.input_type, step.output_type)
-        for step in result.compiled_spec.steps
+        for step in result.spec.steps
     ] == [
         (
             "Analysera dokument",
@@ -600,7 +600,7 @@ def test_compile_edit_draft_does_not_repair_non_audio_document_flow() -> None:
     ]
     assert not any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
-        for change in result.diff.step_changes
+        for change in result.approval.diff.step_changes
     )
 
 
@@ -642,24 +642,26 @@ class TestAddBeforeExistingStep:
             flow_name="Test Flow",
         )
 
-        assert len(result.compiled_spec.steps) == 2
+        assert len(result.spec.steps) == 2
         # New step is first
-        step1 = result.compiled_spec.steps[0]
+        step1 = result.spec.steps[0]
         assert step1.name == "Transkribera ljud"
         assert step1.existing_step_ref is None  # NEW step
         assert step1.input_source == InputSource.FLOW_INPUT
         assert step1.input_type == InputType.AUDIO
 
         # Existing step preserved at position 2
-        step2 = result.compiled_spec.steps[1]
+        step2 = result.spec.steps[1]
         assert step2.name == "Analysera dokument"
         assert step2.existing_step_ref == "existing_step_1"  # PRESERVED
 
         # Diff
-        assert result.diff.net_steps_added == 1
-        assert result.diff.net_steps_removed == 0
-        added = [c for c in result.diff.step_changes if c.kind == "added"]
-        unchanged = [c for c in result.diff.step_changes if c.kind == "unchanged"]
+        assert result.approval.diff.net_steps_added == 1
+        assert result.approval.diff.net_steps_removed == 0
+        added = [c for c in result.approval.diff.step_changes if c.kind == "added"]
+        unchanged = [
+            c for c in result.approval.diff.step_changes if c.kind == "unchanged"
+        ]
         assert len(added) == 1
         assert added[0].step_name == "Transkribera ljud"
         assert len(unchanged) == 1
@@ -707,7 +709,7 @@ class TestAddBeforeExistingStep:
             flow_name="Ljudanalys",
         )
 
-        step = result.compiled_spec.steps[0]
+        step = result.spec.steps[0]
         assert step.name == "Transkribera ljud"
         assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
         assert step.input_config == {
@@ -746,12 +748,12 @@ def test_edit_compiler_ignores_form_field_that_shadows_primary_text_input():
 
     result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
-    assert result.compiled_spec.form_fields is None
-    assert result.diff.form_changes == []
+    assert result.spec.form_fields is None
+    assert result.approval.diff.form_changes == []
     assert any(
         advisory.code == "form_field_shadows_primary_input"
         and advisory.field == "form_fields"
-        for advisory in result.advisories
+        for advisory in result.approval.advisories
     )
 
 
@@ -781,7 +783,7 @@ def test_edit_compiler_preserves_mcp_refs_when_patch_omits_resource_fields() -> 
         resource_catalog=resource_catalog,
     )
 
-    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assistant_spec = result.spec.steps[0].assistant_spec
     assert assistant_spec.instructions == "Use the case data."
     assert assistant_spec.mcp_server_refs == expected_snapshot_spec.mcp_server_refs
     assert assistant_spec.mcp_tool_refs == expected_snapshot_spec.mcp_tool_refs
@@ -817,7 +819,7 @@ def test_edit_compiler_clears_mcp_refs_when_patch_sets_empty_lists() -> None:
         resource_catalog=resource_catalog,
     )
 
-    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assistant_spec = result.spec.steps[0].assistant_spec
     assert assistant_spec.instructions == "No external case lookup is needed."
     assert assistant_spec.mcp_server_refs == []
     assert assistant_spec.mcp_tool_refs == []
@@ -852,7 +854,7 @@ def test_edit_compiler_switches_mcp_step_to_knowledge_without_stale_mcp_refs() -
         resource_catalog=resource_catalog,
     )
 
-    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assistant_spec = result.spec.steps[0].assistant_spec
     assert assistant_spec.knowledge_refs == ["kb-1"]
     assert assistant_spec.mcp_server_refs == []
     assert assistant_spec.mcp_tool_refs == []
@@ -888,7 +890,7 @@ def test_edit_compiler_switches_knowledge_step_to_mcp_without_stale_kb_refs() ->
         resource_catalog=resource_catalog,
     )
 
-    assistant_spec = result.compiled_spec.steps[0].assistant_spec
+    assistant_spec = result.spec.steps[0].assistant_spec
     assert assistant_spec.knowledge_refs == []
     assert assistant_spec.mcp_server_refs == ["server-1"]
     assert assistant_spec.mcp_tool_refs == ["tool-1"]
@@ -957,7 +959,7 @@ def test_edit_compiler_derives_transcribe_mode_when_modify_changes_audio_text_st
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.name == "Transkribera ljud"
     assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
 
@@ -984,7 +986,7 @@ def test_edit_compiler_derives_transcribe_mode_when_patch_changes_input_to_audio
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.input_type == InputType.AUDIO
     assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
 
@@ -1011,7 +1013,7 @@ def test_edit_compiler_preserves_template_fill_docx_when_patch_omits_output_mech
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.name == "Fyll beslutsmall"
     assert step.output_mode == OutputMode.TEMPLATE_FILL
     assert step.output_type == OutputType.DOCX
@@ -1049,7 +1051,7 @@ def test_edit_compiler_preserves_audio_transcription_mode_when_patch_only_rename
         resource_catalog=resource_catalog,
     )
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.name == "Transkribera ljud"
     assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
     assert step.output_type == OutputType.TEXT
@@ -1075,7 +1077,7 @@ def test_edit_compiler_preserves_generated_docx_mode_when_patch_only_renames() -
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.name == "Skapa DOCX"
     assert step.output_mode == OutputMode.PASS_THROUGH
     assert step.output_type == OutputType.DOCX
@@ -1103,7 +1105,7 @@ def test_edit_compiler_uses_document_delivery_mode_to_switch_template_docx_to_ge
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.output_mode == OutputMode.PASS_THROUGH
     assert step.output_type == OutputType.DOCX
     assert step.output_config is None
@@ -1130,7 +1132,7 @@ def test_edit_compiler_uses_document_delivery_mode_to_switch_generated_docx_to_t
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.output_mode == OutputMode.TEMPLATE_FILL
     assert step.output_type == OutputType.DOCX
 
@@ -1157,7 +1159,7 @@ def test_edit_compiler_derives_generated_pdf_when_template_fill_step_changes_to_
 
     result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
 
-    step = result.compiled_spec.steps[0]
+    step = result.spec.steps[0]
     assert step.output_mode == OutputMode.PASS_THROUGH
     assert step.output_type == OutputType.PDF
     assert step.output_config is None
@@ -1183,16 +1185,18 @@ class TestUntouchedStepsPreserved:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=2)
 
-        assert len(result.compiled_spec.steps) == 3
-        assert result.compiled_spec.steps[0].name == "First"
-        assert result.compiled_spec.steps[1].name == "Updated Second"
-        assert result.compiled_spec.steps[2].name == "Third"
+        assert len(result.spec.steps) == 3
+        assert result.spec.steps[0].name == "First"
+        assert result.spec.steps[1].name == "Updated Second"
+        assert result.spec.steps[2].name == "Third"
 
         # All existing refs preserved
-        for step in result.compiled_spec.steps:
+        for step in result.spec.steps:
             assert step.existing_step_ref is not None
 
-        unchanged = [c for c in result.diff.step_changes if c.kind == "unchanged"]
+        unchanged = [
+            c for c in result.approval.diff.step_changes if c.kind == "unchanged"
+        ]
         assert len(unchanged) == 2  # First and Third
 
     def test_modify_with_no_effect_is_collapsed_to_unchanged(self):
@@ -1213,11 +1217,13 @@ class TestUntouchedStepsPreserved:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=2)
 
-        assert [change.kind for change in result.diff.step_changes] == [
+        assert [change.kind for change in result.approval.diff.step_changes] == [
             "unchanged",
             "unchanged",
         ]
-        assert all(change.details is None for change in result.diff.step_changes)
+        assert all(
+            change.details is None for change in result.approval.diff.step_changes
+        )
 
     def test_modify_step_can_rebuild_input_bindings_from_typed_previous_fields(self):
         existing = [
@@ -1263,7 +1269,7 @@ class TestUntouchedStepsPreserved:
         result = compile_edit_draft(draft, existing, base_flow_revision=2)
 
         assert (
-            result.compiled_spec.steps[1].input_bindings["question"]
+            result.spec.steps[1].input_bindings["question"]
             == "Sammanfattning: {{ step_a.output.structured.sammanfattning }}"
         )
 
@@ -1308,9 +1314,12 @@ class TestUntouchedStepsPreserved:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=3)
 
-        assert result.compiled_spec.steps[1].input_bindings == {
+        assert result.spec.steps[1].input_bindings == {
             "question": "answer: {{ step_a.output.structured.answer }}"
         }
+        assert result.approval.removed_existing_step_refs == frozenset(
+            {"existing_step_1"}
+        )
 
     def test_modify_step_drops_previous_field_ref_to_removed_step(self):
         existing = [
@@ -1361,9 +1370,12 @@ class TestUntouchedStepsPreserved:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=3)
 
-        assert result.compiled_spec.steps[1].input_bindings == {
+        assert result.spec.steps[1].input_bindings == {
             "question": "{{ step_a.output.structured }}"
         }
+        assert result.approval.removed_existing_step_refs == frozenset(
+            {"existing_step_1"}
+        )
 
     def test_modify_step_form_fields_preserve_previous_source_in_underlag(self):
         existing = [
@@ -1413,10 +1425,10 @@ class TestUntouchedStepsPreserved:
             },
         )
 
-        assert result.compiled_spec.steps[1].input_bindings == {
+        assert result.spec.steps[1].input_bindings == {
             "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
         }
-        validation = validate_spec(result.compiled_spec)
+        validation = validate_spec(result.spec)
         assert validation.valid
 
     def test_modify_step_ignores_form_field_that_shadows_primary_text_input(self):
@@ -1469,13 +1481,13 @@ class TestUntouchedStepsPreserved:
             },
         )
 
-        assert result.compiled_spec.steps[1].input_bindings == {
+        assert result.spec.steps[1].input_bindings == {
             "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
         }
         assert any(
             advisory.code == "form_field_shadows_primary_input"
             and advisory.field == "form_fields"
-            for advisory in result.advisories
+            for advisory in result.approval.advisories
         )
 
     def test_modify_all_previous_step_keeps_fan_in_implicit_and_adds_hints(self):
@@ -1535,13 +1547,13 @@ class TestUntouchedStepsPreserved:
             },
         )
 
-        step = result.compiled_spec.steps[1]
+        step = result.spec.steps[1]
         assert step.input_bindings is None
         assert "Beakta särskilt följande strukturerade fält" in (
             step.assistant_spec.instructions
         )
         assert "case_id: {{ flow_input.case_id }}" in step.assistant_spec.instructions
-        validation = validate_spec(result.compiled_spec)
+        validation = validate_spec(result.spec)
         assert validation.valid
 
 
@@ -1571,14 +1583,16 @@ class TestTransitionNormalization:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=5)
 
-        step = result.compiled_spec.steps[0]
+        step = result.spec.steps[0]
         assert step.output_type == OutputType.PDF
         assert step.output_config is None
-        assert [change.kind for change in result.diff.step_changes] == ["modified"]
+        assert [change.kind for change in result.approval.diff.step_changes] == [
+            "modified"
+        ]
         assert any(
             advisory.code == "output_config_citation_mode_cleared"
             and advisory.field == "existing_step_1.output_config.citation_mode"
-            for advisory in result.advisories
+            for advisory in result.approval.advisories
         )
 
     def test_output_only_edit_does_not_flag_downstream_steps_modified_for_alias_rewrites(
@@ -1665,7 +1679,8 @@ class TestTransitionNormalization:
         result = compile_edit_draft(draft, existing, base_flow_revision=3)
 
         assert [
-            (change.step_ref, change.kind) for change in result.diff.step_changes
+            (change.step_ref, change.kind)
+            for change in result.approval.diff.step_changes
         ] == [
             ("existing_step_1", "unchanged"),
             ("existing_step_2", "unchanged"),
@@ -1673,7 +1688,7 @@ class TestTransitionNormalization:
             ("existing_step_4", "unchanged"),
             ("existing_step_5", "modified"),
         ]
-        assert result.diff.step_changes[-1].details == "output_type → pdf"
+        assert result.approval.diff.step_changes[-1].details == "output_type → pdf"
 
     def test_output_only_edit_does_not_flag_source_material_completion_as_modified(
         self,
@@ -1740,7 +1755,8 @@ class TestTransitionNormalization:
         result = compile_edit_draft(draft, existing, base_flow_revision=3)
 
         assert [
-            (change.step_ref, change.kind) for change in result.diff.step_changes
+            (change.step_ref, change.kind)
+            for change in result.approval.diff.step_changes
         ] == [
             ("existing_step_1", "unchanged"),
             ("existing_step_2", "unchanged"),
@@ -1748,9 +1764,9 @@ class TestTransitionNormalization:
             ("existing_step_4", "unchanged"),
             ("existing_step_5", "modified"),
         ]
-        step_3_question = result.compiled_spec.steps[2].input_bindings["question"]
+        step_3_question = result.spec.steps[2].input_bindings["question"]
         assert "Source material: {{ step_a.output.text }}" in step_3_question
-        assert result.diff.step_changes[-1].details == "output_type → pdf"
+        assert result.approval.diff.step_changes[-1].details == "output_type → pdf"
 
 
 class TestRemoveStep:
@@ -1767,20 +1783,23 @@ class TestRemoveStep:
 
         result = compile_edit_draft(draft, existing, base_flow_revision=1)
 
-        assert len(result.compiled_spec.steps) == 2
-        assert result.compiled_spec.steps[0].name == "First"
-        assert result.compiled_spec.steps[1].name == "Third"
+        assert len(result.spec.steps) == 2
+        assert result.spec.steps[0].name == "First"
+        assert result.spec.steps[1].name == "Third"
 
-        assert result.diff.net_steps_removed == 1
-        removed = [c for c in result.diff.step_changes if c.kind == "removed"]
+        assert result.approval.diff.net_steps_removed == 1
+        removed = [c for c in result.approval.diff.step_changes if c.kind == "removed"]
         assert len(removed) == 1
         assert removed[0].step_name == "Second"
-        assert "step_removal" in result.risk_flags
+        assert result.approval.removed_existing_step_refs == frozenset(
+            {"existing_step_2"}
+        )
+        assert "step_removal" in result.approval.risk_flags
 
 
-class TestCompiledResultApproval:
+class TestEditCompilationApproval:
     def test_stored_result_matches_preview(self):
-        """The compiled result should be deterministic — what you preview
+        """The compiled spec should be deterministic — what you preview
         is what gets applied."""
         existing = [
             _make_flow_step(step_order=1, user_description="Analysis"),
@@ -1814,13 +1833,13 @@ class TestCompiledResultApproval:
         )
 
         # Deterministic compilation
-        assert result1.compiled_spec.flow_name == result2.compiled_spec.flow_name
-        assert len(result1.compiled_spec.steps) == len(result2.compiled_spec.steps)
-        assert result1.base_flow_revision == 5
+        assert result1.spec.flow_name == result2.spec.flow_name
+        assert len(result1.spec.steps) == len(result2.spec.steps)
+        assert result1.approval.base_flow_revision == 5
 
         # Flow name change in diff
-        assert "flow_name" in result1.diff.flow_property_changes
-        old, new = result1.diff.flow_property_changes["flow_name"]
+        assert "flow_name" in result1.approval.diff.flow_property_changes
+        old, new = result1.approval.diff.flow_property_changes["flow_name"]
         assert old == "Old Name"
         assert new == "Renamed Flow"
 
@@ -1859,10 +1878,11 @@ class TestCompiledResultApproval:
         )
 
         # Description is NOT mutated — advisory instead
-        assert result.compiled_spec.flow_description == original_desc
-        assert "flow_description" not in result.diff.flow_property_changes
+        assert result.spec.flow_description == original_desc
+        assert "flow_description" not in result.approval.diff.flow_property_changes
         assert any(
-            a.code == "flow_description_update_required" for a in result.advisories
+            a.code == "flow_description_update_required"
+            for a in result.approval.advisories
         )
 
     def test_preserves_existing_form_fields_in_compiled_preview(self):
@@ -1896,7 +1916,7 @@ class TestCompiledResultApproval:
             },
         )
 
-        assert result.compiled_spec.form_fields == [
+        assert result.spec.form_fields == [
             FormFieldSpec(
                 name="Brukarens namn",
                 type="text",
@@ -1956,7 +1976,7 @@ class TestCompiledResultApproval:
             },
         )
 
-        assert result.compiled_spec.form_fields == [
+        assert result.spec.form_fields == [
             FormFieldSpec(
                 name="Brukarens namn",
                 type="text",
@@ -1971,7 +1991,8 @@ class TestCompiledResultApproval:
             ),
         ]
         assert [
-            (change.kind, change.field_name) for change in result.diff.form_changes
+            (change.kind, change.field_name)
+            for change in result.approval.diff.form_changes
         ] == [
             ("modified", "Brukarens namn"),
             ("added", "Uppföljningsperiod"),
@@ -2063,7 +2084,7 @@ class TestCompiledResultApproval:
             },
         )
 
-        generated_docx_step = result.compiled_spec.steps[2]
+        generated_docx_step = result.spec.steps[2]
         assert generated_docx_step.input_bindings is not None
         assert (
             generated_docx_step.input_bindings["question"]
@@ -2072,12 +2093,12 @@ class TestCompiledResultApproval:
             "Behov: {{ step_b.output.structured.brukare.kan_uttrycka_behov_sjalv }}"
         )
 
-        validation = validate_spec(result.compiled_spec)
+        validation = validate_spec(result.spec)
         assert validation.valid
 
         rewritten = rewrite_step_spec_variables(
             generated_docx_step,
-            build_ref_to_order(result.compiled_spec.steps),
+            build_ref_to_order(result.spec.steps),
         )
         assert rewritten.input_bindings is not None
         assert (
@@ -2128,7 +2149,7 @@ class TestConfidence:
             ],
         )
         result = compile_edit_draft(draft, existing, base_flow_revision=1)
-        assert result.confidence == "ready"
+        assert result.approval.confidence == "ready"
 
     def test_many_operations_needs_review(self):
         existing = [
@@ -2145,7 +2166,7 @@ class TestConfidence:
         ]
         draft = FlowEditDraft(operations=ops)
         result = compile_edit_draft(draft, existing, base_flow_revision=1)
-        assert result.confidence == "needs_review"
+        assert result.approval.confidence == "needs_review"
 
 
 class TestMixedOperations:
@@ -2193,13 +2214,16 @@ class TestMixedOperations:
         result = compile_edit_draft(draft, existing, base_flow_revision=3)
 
         # 3 existing - 1 removed + 1 added = 3 steps
-        assert len(result.compiled_spec.steps) == 3
-        assert result.compiled_spec.steps[0].name == "Transcribe"
-        assert result.compiled_spec.steps[1].name == "Deep Analysis"
-        assert result.compiled_spec.steps[2].name == "Classify"
+        assert len(result.spec.steps) == 3
+        assert result.spec.steps[0].name == "Transcribe"
+        assert result.spec.steps[1].name == "Deep Analysis"
+        assert result.spec.steps[2].name == "Classify"
 
-        assert result.diff.net_steps_added == 1
-        assert result.diff.net_steps_removed == 1
+        assert result.approval.diff.net_steps_added == 1
+        assert result.approval.diff.net_steps_removed == 1
+        assert result.approval.removed_existing_step_refs == frozenset(
+            {"existing_step_3"}
+        )
 
 
 class TestAssistantSnapshotPreservation:
@@ -2229,7 +2253,7 @@ class TestAssistantSnapshotPreservation:
             resource_catalog=resource_catalog,
         )
 
-        assistant_spec = result.compiled_spec.steps[0].assistant_spec
+        assistant_spec = result.spec.steps[0].assistant_spec
         expected_spec = resource_catalog.assistant_spec_from_snapshot(
             assistant_snapshots[existing[0].assistant_id]
         )
@@ -2267,7 +2291,7 @@ class TestAssistantSnapshotPreservation:
             resource_catalog=resource_catalog,
         )
 
-        assistant_spec = result.compiled_spec.steps[0].assistant_spec
+        assistant_spec = result.spec.steps[0].assistant_spec
         expected_spec = resource_catalog.assistant_spec_from_snapshot(
             assistant_snapshots[existing[0].assistant_id]
         )
@@ -2313,12 +2337,13 @@ class TestFlowDescriptionSemantics:
 
         # Description is NOT mutated — no regex replacement
         assert (
-            result.compiled_spec.flow_description
+            result.spec.flow_description
             == "Tar emot ljudfiler och transkriberar dem till text."
         )
         # Advisory tells the user the description may be stale
         assert any(
-            a.code == "flow_description_update_required" for a in result.advisories
+            a.code == "flow_description_update_required"
+            for a in result.approval.advisories
         )
 
     def test_semantic_change_with_description_no_advisory(self):
@@ -2349,12 +2374,10 @@ class TestFlowDescriptionSemantics:
             flow_description="Tar emot ljudfiler och transkriberar dem till text.",
         )
 
-        assert (
-            result.compiled_spec.flow_description
-            == "Tar emot dokument och analyserar dem."
-        )
+        assert result.spec.flow_description == "Tar emot dokument och analyserar dem."
         assert not any(
-            a.code == "flow_description_update_required" for a in result.advisories
+            a.code == "flow_description_update_required"
+            for a in result.approval.advisories
         )
 
     def test_preserves_description_when_no_semantic_change(self):
@@ -2385,9 +2408,10 @@ class TestFlowDescriptionSemantics:
             flow_description=original_desc,
         )
 
-        assert result.compiled_spec.flow_description == original_desc
+        assert result.spec.flow_description == original_desc
         assert not any(
-            a.code == "flow_description_update_required" for a in result.advisories
+            a.code == "flow_description_update_required"
+            for a in result.approval.advisories
         )
 
     def test_explicit_flow_description_in_draft_takes_precedence(self):
@@ -2417,7 +2441,7 @@ class TestFlowDescriptionSemantics:
             flow_description="Gamla beskrivningen med ljudfiler.",
         )
 
-        assert result.compiled_spec.flow_description == "Helt ny beskrivning från AI."
+        assert result.spec.flow_description == "Helt ny beskrivning från AI."
 
     def test_output_type_change_without_description_produces_advisory(self):
         """Terminal output type change → advisory when no description provided."""
@@ -2448,12 +2472,11 @@ class TestFlowDescriptionSemantics:
         )
 
         # Description NOT mutated
-        assert (
-            result.compiled_spec.flow_description == "Skapar slutrapport i textformat."
-        )
+        assert result.spec.flow_description == "Skapar slutrapport i textformat."
         # Advisory present
         assert any(
-            a.code == "flow_description_update_required" for a in result.advisories
+            a.code == "flow_description_update_required"
+            for a in result.approval.advisories
         )
 
     def test_unsupported_current_flow_input_source_still_raises(self):

@@ -1,8 +1,8 @@
 """Edit IR compiler for the AI Builder.
 
-Compiles FlowEditDraft operations into a CompiledEditResult: a concrete
-flow preview + diff that the user approves. The key principle is that
-the LLM describes the change, and the backend preserves everything else.
+Compiles FlowEditDraft operations into a canonical authoring spec plus the
+edit approval metadata the user approves. The key principle is that the LLM
+describes the change, and the backend preserves everything else.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     flow_step_to_authoring_spec,
     flow_steps_to_authoring_specs,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderEditApproval
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    CompiledEditResult,
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
@@ -91,6 +91,12 @@ class _OrderedEditBuildResult:
     shadowed_primary_input_fields: list[str]
 
 
+@dataclass(frozen=True, slots=True)
+class EditCompilationResult:
+    spec: FlowDraftSpecCore
+    approval: FlowBuilderEditApproval
+
+
 def compile_edit_draft(
     edit_draft: FlowEditDraft,
     current_steps: list[FlowStep],
@@ -101,10 +107,11 @@ def compile_edit_draft(
     current_metadata_json: dict[str, Any] | None = None,
     assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
-) -> CompiledEditResult:
+) -> EditCompilationResult:
     """Compile edit operations into a concrete flow preview + diff.
 
-    The user approves this compiled result, not the raw draft.
+    The user approves the compiled spec and edit approval metadata, not the
+    raw draft.
 
     Args:
         edit_draft: The LLM's edit operations.
@@ -222,15 +229,17 @@ def compile_edit_draft(
         risk_flags.append("step_removal")
     confidence = _compute_confidence(step_changes, ordered_edit.warnings, edit_draft)
 
-    return CompiledEditResult(
-        compiled_spec=compiled_spec,
-        diff=diff,
-        original_draft=edit_draft,
-        base_flow_revision=base_flow_revision,
-        warnings=ordered_edit.warnings,
-        advisories=advisories,
-        risk_flags=risk_flags,
-        confidence=confidence,
+    return EditCompilationResult(
+        spec=compiled_spec,
+        approval=FlowBuilderEditApproval(
+            base_flow_revision=base_flow_revision,
+            removed_existing_step_refs=ordered_edit.proposal.removed_existing_step_refs,
+            diff=diff,
+            warnings=ordered_edit.warnings,
+            advisories=advisories,
+            risk_flags=risk_flags,
+            confidence=confidence,
+        ),
     )
 
 

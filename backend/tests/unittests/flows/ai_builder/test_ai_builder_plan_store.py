@@ -11,14 +11,11 @@ import pytest
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
-)
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    CompiledEditResult,
-    FlowEditDraft,
 )
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
@@ -122,11 +119,10 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
         net_steps_removed=1,
         flow_property_changes={"flow_description": ("old", "new")},
     )
-    edit = CompiledEditResult(
-        compiled_spec=_make_turn_spec(),
+    edit = FlowBuilderEditApproval(
         diff=edit_diff,
-        original_draft=FlowEditDraft(operations=[]),
         base_flow_revision=7,
+        removed_existing_step_refs=frozenset({"existing_step_2"}),
         warnings=["Review before applying."],
         advisories=[
             EditAdvisory(

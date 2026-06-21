@@ -241,7 +241,7 @@ async def test_authoring_command_clears_stale_runtime_input_after_transcription_
             flow_service=flow_service,
             space_id=space.id,
             flow=flow,
-            spec=compiled.compiled_spec,
+            spec=compiled.spec,
             default_transcription_model_id=transcription_model.id,
         )
 
@@ -367,7 +367,7 @@ async def test_output_only_edit_updates_stale_flow_description_when_terminal_art
             flow_service=flow_service,
             space_id=space.id,
             flow=flow,
-            spec=compiled.compiled_spec,
+            spec=compiled.spec,
             resource_bindings=resource_bindings,
         )
 

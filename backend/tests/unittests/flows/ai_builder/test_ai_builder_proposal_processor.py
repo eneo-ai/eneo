@@ -75,8 +75,8 @@ from intric.flows.flow_authoring_spec import (
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _builder_plan,
     _compiled_outline_proposal,
-    _make_compiled_edit_result,
     _make_context,
+    _make_edit_compilation,
     _make_flow_spec,
     _make_turn,
 )
@@ -1260,7 +1260,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
         ],
     }
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1274,7 +1274,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ) as compile_edit,
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
@@ -1332,7 +1332,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
         }
     )
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1346,7 +1346,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
@@ -1405,7 +1405,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
         knowledge_refs=[],
         mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
     )
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1419,7 +1419,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
         ) as prepare_spec,
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
@@ -1485,7 +1485,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
         knowledge_refs=[],
         mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
     )
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
     with (
         patch(
@@ -1498,7 +1498,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
@@ -1557,7 +1557,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
         }
     )
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1571,7 +1571,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
@@ -1634,7 +1634,7 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
         ],
     }
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1648,7 +1648,7 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ) as compile_edit,
     ):
         result = await process_edit_arguments(
@@ -1769,7 +1769,7 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
         ],
     }
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit_result = _make_compiled_edit_result(compiled_spec)
+    edit = _make_edit_compilation(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1783,7 +1783,7 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
-            return_value=edit_result,
+            return_value=edit,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",

@@ -156,7 +156,6 @@ async def repair_compiled_edit_description_if_needed(
 
     repaired_edit = edit.model_copy(
         update={
-            "compiled_spec": repaired_spec,
             "advisories": [
                 advisory
                 for advisory in edit.advisories

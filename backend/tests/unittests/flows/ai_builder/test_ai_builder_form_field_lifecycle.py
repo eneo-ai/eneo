@@ -332,14 +332,14 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
             variable_name="audience", label="Audience"
         ),
     )
-    first_question = _question_binding(result.compiled_spec.steps[0].input_bindings)
-    final_question = _question_binding(result.compiled_spec.steps[-1].input_bindings)
+    first_question = _question_binding(result.spec.steps[0].input_bindings)
+    final_question = _question_binding(result.spec.steps[-1].input_bindings)
 
-    assert result.compiled_spec.form_fields is not None
-    assert [field.name for field in result.compiled_spec.form_fields] == ["audience"]
+    assert result.spec.form_fields is not None
+    assert [field.name for field in result.spec.form_fields] == ["audience"]
     assert first_question.count("{{ flow_input.audience }}") == 1
     assert final_question.count("{{ flow_input.audience }}") == 1
-    assert validate_spec(result.compiled_spec).valid
+    assert validate_spec(result.spec).valid
 
 
 def _form_field(*, variable_name: str, label: str) -> CreateFormFieldDraft:

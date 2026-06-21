@@ -1,8 +1,8 @@
 """Edit-mode domain models for the AI Builder.
 
 Defines the edit IR (Intermediate Representation) that separates what the LLM
-describes (operations on an existing flow) from what the backend compiles
-(a concrete preview + diff for user approval).
+describes (operations on an existing flow) from the canonical authoring spec
+and approval metadata compiled by the backend.
 
 Key principle: The LLM describes the *intended change*. The backend determines
 the *preserved state*, compiles the *concrete preview*, produces the *diff*,
@@ -20,11 +20,6 @@ from pydantic import (
     field_validator,
 )
 
-from intric.flows.ai_builder.ai_builder_edit_preview_models import (
-    EditAdvisory,
-    EditConfidence,
-    FlowEditDiff,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
@@ -33,7 +28,6 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 from intric.flows.flow_authoring_name import normalize_optional_flow_name
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
-    FlowDraftSpecCore,
     InputSource,
     InputType,
     MCPPolicy,
@@ -210,14 +204,6 @@ def _default_form_operations() -> list["FormFieldOperation"]:
     return []
 
 
-def _default_edit_warnings() -> list[str]:
-    return []
-
-
-def _default_edit_advisories() -> list["EditAdvisory"]:
-    return []
-
-
 class FlowEditDraft(BaseModel):
     """Edit-mode planner output. Compiled by backend into concrete preview."""
 
@@ -247,21 +233,3 @@ class FlowEditDraft(BaseModel):
     @classmethod
     def _normalize_plan_rationale(cls, value: str) -> str:
         return value.strip()
-
-
-# ---------------------------------------------------------------------------
-# Compiled result — what the user approves
-# ---------------------------------------------------------------------------
-
-
-class CompiledEditResult(BaseModel):
-    """Backend-compiled concrete result. This is what the user approves."""
-
-    compiled_spec: FlowDraftSpecCore
-    diff: FlowEditDiff
-    original_draft: FlowEditDraft
-    base_flow_revision: int  # Stale-plan protection
-    warnings: list[str] = Field(default_factory=_default_edit_warnings)
-    advisories: list[EditAdvisory] = Field(default_factory=_default_edit_advisories)
-    risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
-    confidence: EditConfidence = "ready"

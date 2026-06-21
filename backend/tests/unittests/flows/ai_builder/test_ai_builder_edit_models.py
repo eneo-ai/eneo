@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    CompiledEditResult,
     FlowEditDraft,
     FormFieldOperation,
     FormFieldSpec,
@@ -19,10 +18,8 @@ from intric.flows.ai_builder.ai_builder_edit_preview_models import (
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
-    FlowDraftSpecCore,
     InputSource,
     InputType,
-    StepSpec,
 )
 
 
@@ -38,45 +35,6 @@ def _make_add_payload(
         instructions=instructions,
         input_source=input_source,
         input_type=input_type,
-    )
-
-
-def _make_compiled_edit_result() -> CompiledEditResult:
-    spec = FlowDraftSpecCore(
-        flow_name="Test",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Step A",
-                assistant_spec=AssistantSpec(instructions="Do."),
-                input_source=InputSource.FLOW_INPUT,
-            )
-        ],
-    )
-    draft = FlowEditDraft(
-        operations=[
-            StepEditOperation(
-                op="add",
-                placement=StepPlacement(position="append"),
-                add_payload=_make_add_payload(
-                    name="Step A",
-                    instructions="Do.",
-                ),
-            ),
-        ],
-    )
-    diff = FlowEditDiff(
-        step_changes=[StepChange(kind="added", step_name="Step A")],
-        net_steps_added=1,
-    )
-    return CompiledEditResult(
-        compiled_spec=spec,
-        diff=diff,
-        original_draft=draft,
-        base_flow_revision=3,
-        warnings=["New step uses default model"],
-        risk_flags=[],
-        confidence="ready",
     )
 
 
@@ -353,17 +311,3 @@ class TestFlowEditDiff:
         assert diff.net_steps_added == 1
         added = [c for c in diff.step_changes if c.kind == "added"]
         assert len(added) == 1
-
-
-class TestCompiledEditResult:
-    def test_compiled_result_roundtrip(self):
-        result = _make_compiled_edit_result()
-        assert result.base_flow_revision == 3
-        assert result.confidence == "ready"
-        assert len(result.warnings) == 1
-
-        # Can serialize/deserialize
-        serialized = result.model_dump_json()
-        restored = CompiledEditResult.model_validate_json(serialized)
-        assert restored.base_flow_revision == 3
-        assert restored.diff.net_steps_added == 1
