@@ -1,45 +1,16 @@
 from __future__ import annotations
 
-from typing import cast
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from intric.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
 )
 from intric.flows.flow_authoring_name import normalize_flow_name
+from intric.flows.flow_authoring_spec import FormFieldSpec
 
 
-class CreateFormFieldDraft(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    variable_name: str
-    label: str
-    field_type: BuilderFormFieldType
-    required: bool = False
-    options: list[str] = Field(default_factory=list)
-
-    @field_validator("variable_name", "label")
-    @classmethod
-    def _normalize_text(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("Form fields require non-empty text values.")
-        return normalized
-
-    @field_validator("options")
-    @classmethod
-    def _normalize_options(cls, value: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for option in value:
-            candidate = option.strip()
-            if not candidate or candidate in seen:
-                continue
-            normalized.append(candidate)
-            seen.add(candidate)
-        return normalized
+def _default_form_fields() -> list[FormFieldSpec]:
+    return []
 
 
 class FlowCreateDraft(BaseModel):
@@ -49,9 +20,7 @@ class FlowCreateDraft(BaseModel):
     flow_description: str | None = None
     plan_rationale: str
     assumptions: list[str] = Field(default_factory=list)
-    form_fields: list[CreateFormFieldDraft] = Field(
-        default_factory=lambda: cast(list[CreateFormFieldDraft], [])
-    )
+    form_fields: list[FormFieldSpec] = Field(default_factory=_default_form_fields)
     steps: list[NewStepDraft]
     document_body_writer_step_indexes: tuple[int, ...] = Field(
         default_factory=tuple,

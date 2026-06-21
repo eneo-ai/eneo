@@ -315,6 +315,7 @@ CREATE_OUTLINE_BANNED_COMPILER_NAMES = frozenset(
         "resolve_step_skeleton_patterns",
     }
 )
+DELETED_CREATE_FORM_FIELD_DRAFT = "CreateFormFieldDraft"
 ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
     {
         "RequirementsSummaryRenderContext",
@@ -2094,6 +2095,35 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     compiler_text = compiler_path.read_text()
     if "build_outline_flow_tool_schema" in compiler_text:
         violations.append(f"{compiler_path}: builds outline LLM tool schema")
+
+    assert violations == []
+
+
+def test_create_form_fields_use_canonical_authoring_spec() -> None:
+    violations: list[str] = []
+
+    for path in _python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and (
+                node.name == DELETED_CREATE_FORM_FIELD_DRAFT
+            ):
+                violations.append(f"{path}:{node.lineno} defines {node.name}")
+            if isinstance(node, ast.ImportFrom):
+                imported_names = {
+                    alias.name
+                    for alias in node.names
+                    if alias.name == DELETED_CREATE_FORM_FIELD_DRAFT
+                }
+                if imported_names:
+                    violations.append(
+                        f"{path}:{node.lineno} imports {DELETED_CREATE_FORM_FIELD_DRAFT}"
+                    )
+            if (
+                isinstance(node, ast.Name)
+                and node.id == DELETED_CREATE_FORM_FIELD_DRAFT
+            ):
+                violations.append(f"{path}:{node.lineno} references {node.id}")
 
     assert violations == []
 

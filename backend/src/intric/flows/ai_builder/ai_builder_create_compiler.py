@@ -14,10 +14,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_create_models import (
-    CreateFormFieldDraft,
-    FlowCreateDraft,
-)
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     FlowCreateOutline,
     OutlineInputField,
@@ -139,7 +136,7 @@ def compile_outline_to_create_draft(
         runtime_input_type=runtime_input_type,
         referenced_hint_names=referenced_hint_names,
     )
-    known_field_order = [field.variable_name for field in form_fields]
+    known_field_order = [field.name for field in form_fields]
     known_field_names = set(known_field_order)
 
     final_output_mode = context.final_output_mode if context is not None else None
@@ -318,7 +315,7 @@ def compile_create_draft(
         flow_name=normalize_flow_name(draft.flow_name),
         flow_description=draft.flow_description or "",
         steps=compiled_steps,
-        form_fields=[_compile_form_field(field) for field in draft.form_fields] or None,
+        form_fields=list(draft.form_fields) or None,
         document_body_writer_step_refs=_document_body_writer_step_refs(
             compiled_steps=compiled_steps,
             step_indexes=draft.document_body_writer_step_indexes,
@@ -336,16 +333,6 @@ def _document_body_writer_step_refs(
         compiled_steps[index].plan_step_ref
         for index in step_indexes
         if 0 <= index < len(compiled_steps)
-    )
-
-
-def _compile_form_field(field: CreateFormFieldDraft) -> FormFieldSpec:
-    return FormFieldSpec(
-        name=field.variable_name,
-        type=field.field_type,
-        label=field.label,
-        required=field.required,
-        options=list(field.options) or None,
     )
 
 
@@ -560,7 +547,7 @@ def _compile_form_fields(
     context: OutlineCompileContext | None,
     runtime_input_type: InputType | None,
     referenced_hint_names: set[str],
-) -> tuple[list[CreateFormFieldDraft], list[str]]:
+) -> tuple[list[FormFieldSpec], list[str]]:
     runtime_metadata_state = (
         context.runtime_metadata_state if context is not None else None
     )
@@ -577,7 +564,7 @@ def _compile_form_fields(
         )
         return [], []
 
-    fields: list[CreateFormFieldDraft] = []
+    fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
     for field in outline_fields:
         if is_primary_runtime_input_shadow_field(
@@ -589,7 +576,7 @@ def _compile_form_fields(
             continue
         fields.append(_compile_input_field(field))
 
-    seen = {field.variable_name for field in fields}
+    seen = {field.name for field in fields}
     for hint in context.runtime_input_field_hints if context is not None else ():
         if is_primary_runtime_input_shadow_field(
             variable_name=hint.variable_name,
@@ -603,12 +590,12 @@ def _compile_form_fields(
         if hint.variable_name in seen:
             continue
         fields.append(
-            CreateFormFieldDraft(
-                variable_name=hint.variable_name,
+            FormFieldSpec(
+                name=hint.variable_name,
                 label=hint.label,
-                field_type=hint.field_type,
+                type=hint.field_type,
                 required=hint.required,
-                options=list(hint.options),
+                options=list(hint.options) or None,
             )
         )
         seen.add(hint.variable_name)
@@ -921,13 +908,13 @@ def _declared_output_type(step: "OutlineStep") -> OutputType:
         return OutputType.TEXT
 
 
-def _compile_input_field(field: OutlineInputField) -> CreateFormFieldDraft:
-    return CreateFormFieldDraft(
-        variable_name=field.variable_name,
+def _compile_input_field(field: OutlineInputField) -> FormFieldSpec:
+    return FormFieldSpec(
+        name=field.variable_name,
         label=field.label,
-        field_type=field.field_type,
+        type=field.field_type,
         required=field.required,
-        options=list(field.options),
+        options=list(field.options) or None,
     )
 
 

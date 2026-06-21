@@ -2,15 +2,13 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
     strip_malformed_previous_field_refs,
 )
-from intric.flows.ai_builder.ai_builder_create_models import (
-    CreateFormFieldDraft,
-    FlowCreateDraft,
-)
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
+from intric.flows.flow_authoring_spec import FormFieldSpec
 
 
 def test_create_dataflow_does_not_import_critic_invariants() -> None:
@@ -879,10 +877,10 @@ def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> No
         flow_name="Robust formulärflöde",
         plan_rationale="Använd runtime metadata om den finns.",
         form_fields=[
-            CreateFormFieldDraft(
-                variable_name="case_id",
+            FormFieldSpec(
+                name="case_id",
                 label="Case ID",
-                field_type="text",
+                type="text",
                 required=True,
             )
         ],

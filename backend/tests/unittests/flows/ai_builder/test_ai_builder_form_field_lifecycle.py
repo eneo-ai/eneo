@@ -10,10 +10,7 @@ from intric.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_draft,
     compile_outline_to_create_draft,
 )
-from intric.flows.ai_builder.ai_builder_create_models import (
-    CreateFormFieldDraft,
-    FlowCreateDraft,
-)
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     parse_outline_flow_arguments,
 )
@@ -39,6 +36,7 @@ from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
+    FormFieldSpec,
 )
 
 
@@ -83,7 +81,7 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
     draft = compile_outline_to_create_draft(outline)
     compiled = compile_create_draft(draft)
 
-    assert [field.variable_name for field in draft.form_fields] == ["priority"]
+    assert [field.name for field in draft.form_fields] == ["priority"]
     assert draft.steps[0].uses_form_fields == []
     assert draft.steps[-1].uses_form_fields == []
     assert compiled.form_fields is not None
@@ -339,11 +337,11 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
     assert validate_spec(result.spec).valid
 
 
-def _form_field(*, variable_name: str, label: str) -> CreateFormFieldDraft:
-    return CreateFormFieldDraft(
-        variable_name=variable_name,
+def _form_field(*, variable_name: str, label: str) -> FormFieldSpec:
+    return FormFieldSpec(
+        name=variable_name,
         label=label,
-        field_type="text",
+        type="text",
         required=True,
     )
 

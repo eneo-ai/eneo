@@ -22,10 +22,7 @@ from intric.flows.ai_builder.ai_builder_create_compiler import (
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_create_models import (
-    CreateFormFieldDraft,
-    FlowCreateDraft,
-)
+from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     MAX_OUTLINE_STEPS,
     OutlineFlowArgumentError,
@@ -74,6 +71,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.flow_authoring_spec import (
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
@@ -212,18 +210,18 @@ def _structured_field_snapshot(
 
 
 def _form_field_snapshot(
-    variable_name: str,
+    name: str,
     label: str,
     field_type: str,
     *,
     required: bool,
 ) -> dict[str, object]:
     return {
-        "variable_name": variable_name,
+        "name": name,
         "label": label,
-        "field_type": field_type,
+        "type": field_type,
         "required": required,
-        "options": [],
+        "options": None,
     }
 
 
@@ -324,7 +322,7 @@ class _CreateCompilerArchetypeCase:
     pattern_id: str
     steps: tuple[NewStepDraft, ...]
     expected_output_modes: tuple[str, ...]
-    form_fields: tuple[CreateFormFieldDraft, ...] = ()
+    form_fields: tuple[FormFieldSpec, ...] = ()
     expected_mcp_server_refs_by_step: tuple[tuple[str, ...], ...] | None = None
     expected_mcp_tool_refs_by_step: tuple[tuple[str, ...], ...] | None = None
 
@@ -334,7 +332,7 @@ def _case(
     pattern_id: str,
     steps: tuple[NewStepDraft, ...],
     expected_output_modes: tuple[str, ...],
-    form_fields: tuple[CreateFormFieldDraft, ...] = (),
+    form_fields: tuple[FormFieldSpec, ...] = (),
     expected_mcp_server_refs_by_step: tuple[tuple[str, ...], ...] | None = None,
     expected_mcp_tool_refs_by_step: tuple[tuple[str, ...], ...] | None = None,
 ) -> _CreateCompilerArchetypeCase:
@@ -607,16 +605,16 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
             ),
         ),
         form_fields=(
-            CreateFormFieldDraft(
-                variable_name="bakgrund",
+            FormFieldSpec(
+                name="bakgrund",
                 label="Bakgrund",
-                field_type="text",
+                type="text",
                 required=True,
             ),
-            CreateFormFieldDraft(
-                variable_name="analys",
+            FormFieldSpec(
+                name="analys",
                 label="Analys",
-                field_type="text",
+                type="text",
                 required=True,
             ),
         ),
@@ -635,16 +633,16 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
             ),
         ),
         form_fields=(
-            CreateFormFieldDraft(
-                variable_name="reference_id",
+            FormFieldSpec(
+                name="reference_id",
                 label="Referens-ID",
-                field_type="text",
+                type="text",
                 required=True,
             ),
-            CreateFormFieldDraft(
-                variable_name="owning_unit",
+            FormFieldSpec(
+                name="owning_unit",
                 label="Ansvarig enhet",
-                field_type="text",
+                type="text",
             ),
         ),
         expected_output_modes=("pass_through",),
@@ -760,16 +758,16 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
         plan_rationale="Strukturerad extraktion först för säkrare vidare analys.",
         assumptions=["PDF-paketet hör till ett och samma ärende."],
         form_fields=[
-            CreateFormFieldDraft(
-                variable_name="referensnummer",
+            FormFieldSpec(
+                name="referensnummer",
                 label="Referensnummer",
-                field_type="text",
+                type="text",
                 required=True,
             ),
-            CreateFormFieldDraft(
-                variable_name="ansvarig_enhet",
+            FormFieldSpec(
+                name="ansvarig_enhet",
                 label="Ansvarig enhet",
-                field_type="select",
+                type="select",
                 required=True,
                 options=["Avdelning A", "Avdelning B"],
             ),
@@ -878,10 +876,10 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
         flow_name="Dokumentanalys",
         plan_rationale="Återanvänd specifika fält i steg 3.",
         form_fields=[
-            CreateFormFieldDraft(
-                variable_name="referensnummer",
+            FormFieldSpec(
+                name="referensnummer",
                 label="Referensnummer",
-                field_type="text",
+                type="text",
                 required=True,
             )
         ],
@@ -2982,7 +2980,7 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [field.variable_name for field in draft.form_fields] == []
+    assert [field.name for field in draft.form_fields] == []
     assert draft.steps[-1].uses_form_fields == []
     assert compiled.form_fields is None or compiled.form_fields == []
     assert validation.valid
@@ -3026,10 +3024,11 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_inp
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert [field.name for field in draft.form_fields] == ["audience"]
     assert draft.steps[0].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["audience"]
+    assert compiled.form_fields[0].options is None
     first_question = compiled.steps[0].input_bindings or {}
     assert "{{ flow_input.audience }}" in str(first_question.get("question") or "")
     assert validation.valid
@@ -3087,7 +3086,7 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [field.variable_name for field in draft.form_fields] == [
+    assert [field.name for field in draft.form_fields] == [
         "audience",
         "report_type",
     ]
@@ -3155,7 +3154,7 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
     # The planner declared no `input_fields` and did not list any hint name
     # in `uses_input_fields`, so the server-derived hints stay out of
     # form_fields entirely. The flow validates without orphan UI controls.
-    assert [field.variable_name for field in draft.form_fields] == []
+    assert [field.name for field in draft.form_fields] == []
     assert draft.steps[-1].uses_form_fields == []
     assert compiled.form_fields is None or compiled.form_fields == []
     assert validation.valid
@@ -3208,7 +3207,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
     validation = validate_spec(compiled)
 
     # Field appears once and keeps the planner-declared label.
-    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert [field.name for field in draft.form_fields] == ["audience"]
     assert draft.form_fields[0].label == "Audience explicit"
     assert draft.steps[0].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
@@ -3251,7 +3250,7 @@ def test_compile_outline_flow_orphan_uses_input_fields_reference_is_dropped_sile
 
     # The orphan reference does not pull a field into form_fields and
     # does not poison the step's bindings with `{{ missing_field }}`.
-    assert [field.variable_name for field in draft.form_fields] == []
+    assert [field.name for field in draft.form_fields] == []
     assert draft.steps[0].uses_form_fields == []
     first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
     assert "{{ missing_field }}" not in first_question
@@ -3395,7 +3394,7 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert [field.name for field in draft.form_fields] == ["audience"]
     assert draft.steps[1].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
     assert compiled.steps[1].input_bindings == {
@@ -3588,7 +3587,7 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    assert [field.variable_name for field in draft.form_fields] == ["audience"]
+    assert [field.name for field in draft.form_fields] == ["audience"]
     assert draft.steps[1].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
     assert validation.valid

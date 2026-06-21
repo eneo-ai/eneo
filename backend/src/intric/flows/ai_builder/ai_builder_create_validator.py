@@ -32,9 +32,7 @@ def validate_create_draft(draft: FlowCreateDraft) -> SpecValidationResult:
             step=step,
             step_ref=step_ref,
             step_index=index,
-            available_form_fields={
-                form_field.variable_name for form_field in draft.form_fields
-            },
+            available_form_fields={form_field.name for form_field in draft.form_fields},
             result=result,
         )
         _validate_previous_field_references(
@@ -54,14 +52,14 @@ def validate_create_draft(draft: FlowCreateDraft) -> SpecValidationResult:
 def _validate_form_fields(draft: FlowCreateDraft, result: SpecValidationResult) -> None:
     seen_names: set[str] = set()
     for index, field in enumerate(draft.form_fields):
-        if field.variable_name in seen_names:
+        if field.name in seen_names:
             result.add_error(
                 step_ref=f"form_fields[{index}]",
                 code="duplicate_form_field",
-                message=f"Duplicate form field variable_name '{field.variable_name}'.",
+                message=f"Duplicate form field name '{field.name}'.",
             )
-        seen_names.add(field.variable_name)
-        if field.field_type in {"select", "multiselect"} and not field.options:
+        seen_names.add(field.name)
+        if field.type in {"select", "multiselect"} and not field.options:
             result.add_error(
                 step_ref=f"form_fields[{index}]",
                 code="select_field_missing_options",

@@ -239,7 +239,7 @@ def _normalize_create_draft_refs(draft: FlowCreateDraft) -> FlowCreateDraft:
         mechanically_normalized_steps.append(normalized_step)
 
     updated_steps: list[NewStepDraft] = []
-    known_form_fields = {field.variable_name for field in draft.form_fields}
+    known_form_fields = {field.name for field in draft.form_fields}
     for step_index, step in enumerate(mechanically_normalized_steps):
         normalized_refs = _compile_safe_previous_field_refs(
             steps=mechanically_normalized_steps,
