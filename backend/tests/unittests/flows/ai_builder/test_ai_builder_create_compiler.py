@@ -237,7 +237,6 @@ def _create_step_snapshot(
     input_source: str,
     input_type: str,
     output_type: str,
-    runtime_upload: bool = False,
     runtime_required: bool = False,
     document_delivery_mode: str = "not_applicable",
     uses_form_fields: list[str] | None = None,
@@ -255,7 +254,6 @@ def _create_step_snapshot(
         "knowledge_refs": [],
         "mcp_server_refs": [],
         "mcp_tool_refs": [],
-        "runtime_upload": runtime_upload,
         "runtime_required": runtime_required,
         "runtime_max_files": None,
         "uses_form_fields": uses_form_fields or [],
@@ -434,7 +432,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.TEXT,
-                runtime_upload=True,
             ),
         ),
         expected_output_modes=("pass_through",),
@@ -448,7 +445,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=(
                     _field("reference_id", "string", description="Referensnummer."),
                 ),
@@ -480,7 +476,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.PDF,
-                runtime_upload=True,
             ),
         ),
         expected_output_modes=("pass_through",),
@@ -494,7 +489,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.AUDIO,
                 output_type=OutputType.TEXT,
-                runtime_upload=True,
             ),
         ),
         expected_output_modes=("transcribe_only",),
@@ -508,7 +502,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.AUDIO,
                 output_type=OutputType.TEXT,
-                runtime_upload=True,
             ),
             NewStepDraft(
                 name="Skapa PDF-rapport",
@@ -542,7 +535,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=(
                     _field("topic", "string", description="Huvudämnet i dokumentet."),
                 ),
@@ -585,7 +577,6 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.TEXT,
-                runtime_upload=True,
             ),
         ),
         expected_output_modes=("pass_through",),
@@ -754,7 +745,7 @@ def test_positive_pattern_fixture_compiles_through_create_compiler(
         )
 
 
-def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields() -> (
+def test_compile_create_draft_generates_runtime_input_contracts_and_form_fields() -> (
     None
 ):
     draft = FlowCreateDraft(
@@ -784,7 +775,6 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
                 input_source="flow_input",
                 input_type="document",
                 output_type="json",
-                runtime_upload=True,
                 runtime_required=True,
                 runtime_max_files=5,
                 uses_form_fields=["referensnummer", "ansvarig_enhet"],
@@ -895,7 +885,6 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
                 input_source="flow_input",
                 input_type="document",
                 output_type="json",
-                runtime_upload=True,
                 runtime_required=True,
                 output_fields=[
                     _field(
@@ -1016,7 +1005,6 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
                 runtime_required=True,
             ),
             NewStepDraft(
@@ -1124,7 +1112,6 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
                 input_type="audio",
                 output_type="text",
                 model_ref="model.gpt-5-4-nano",
-                runtime_upload=True,
                 runtime_required=True,
             )
         ],
@@ -1151,7 +1138,6 @@ def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
                 runtime_required=True,
                 review_mode="view",
             )
@@ -1355,7 +1341,6 @@ def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
                 runtime_required=True,
                 review_mode="edit",
             ),
@@ -1420,7 +1405,6 @@ def test_compile_outline_parity_docx_template_snapshot() -> None:
                 input_source="flow_input",
                 input_type="document",
                 output_type="json",
-                runtime_upload=True,
                 runtime_required=True,
                 output_fields=_source_facts_fields_snapshot(),
             ),
@@ -1684,7 +1668,6 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
                 input_source="flow_input",
                 input_type="document",
                 output_type="json",
-                runtime_upload=True,
                 runtime_required=True,
                 output_fields=_source_facts_fields_snapshot(),
             ),
@@ -1909,7 +1892,6 @@ def test_compile_create_draft_derives_file_flow_input_runtime_config() -> None:
                 input_source="flow_input",
                 input_type="document",
                 output_type="json",
-                runtime_upload=False,
                 output_fields=[_field("sammanfattning", "string")],
             )
         ],
@@ -2495,7 +2477,6 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
                     "input_source": "all_previous_steps",
                     "input_type": "json",
                     "input_bindings": {"question": "{{ step_a.output.text }}"},
-                    "runtime_upload": True,
                     "uses_previous_fields": [{"from_step": 1, "field_path": "x"}],
                 }
             ],
@@ -2872,9 +2853,11 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     ]
     assert draft.steps[0].input_source.value == "flow_input"
     assert draft.steps[0].input_type.value == "document"
-    assert draft.steps[0].runtime_upload is True
     assert draft.steps[0].runtime_required is True
     assert draft.steps[0].runtime_max_files == 5
+    assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
+    assert compiled.steps[0].input_config["runtime_input"]["required"] is True
+    assert compiled.steps[0].input_config["runtime_input"]["max_files"] == 5
     assert draft.steps[0].output_type.value == "json"
     assert draft.steps[1].input_source.value == "previous_step"
     assert draft.steps[1].input_type.value == "text"
@@ -3721,7 +3704,6 @@ def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == ["Read documents", "Summarize"]
-    assert draft.steps[0].runtime_upload is True
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
     assert validation.valid
 
@@ -4020,7 +4002,6 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
         "pdf",
     ]
     assert draft.steps[0].input_type.value == "audio"
-    assert draft.steps[0].runtime_upload is True
     assert draft.steps[2].document_delivery_mode == "generated"
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "audio"
     assert compiled.steps[2].output_type.value == "pdf"
@@ -4072,7 +4053,6 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
     ]
     assert draft.steps[0].input_type.value == "audio"
     assert draft.steps[0].output_type.value == "text"
-    assert draft.steps[0].runtime_upload is True
     assert draft.steps[1].input_source.value == "previous_step"
     assert draft.steps[1].input_type.value == "text"
     assert draft.steps[1].output_type.value == "text"
@@ -5930,7 +5910,6 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.TEXT,
-                runtime_upload=True,
             ),
             NewStepDraft(
                 name="Extrahera centrala fakta ur underlaget",
@@ -6044,7 +6023,6 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=extraction_fields,
             ),
             NewStepDraft(
@@ -6122,7 +6100,6 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=extraction_fields,
             ),
             NewStepDraft(
@@ -6200,7 +6177,6 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=extraction_fields,
             ),
             NewStepDraft(
@@ -6260,7 +6236,6 @@ def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> No
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=[
                     _field("syfte", "string", description="Syfte och behov."),
                     _field("tidplan", "string", description="Planerad tidplan."),
@@ -6304,7 +6279,6 @@ def test_compile_create_draft_underlag_matching_handles_swedish_inflections() ->
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.DOCUMENT,
                 output_type=OutputType.JSON,
-                runtime_upload=True,
                 output_fields=[
                     _field("syfte", "string", description="Syfte och behov."),
                     _field("tidplan", "string", description="Planerad tidplan."),
@@ -6821,7 +6795,6 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
                     input_source="flow_input",
                     input_type="audio",
                     output_type="text",
-                    runtime_upload=True,
                     runtime_required=True,
                 ),
                 NewStepDraft(
@@ -6877,7 +6850,6 @@ def test_non_material_report_multi_json_keeps_json_input_when_source_prior_bound
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
             ),
             NewStepDraft(
                 name="Extrahera kontext",
@@ -6973,7 +6945,6 @@ def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() 
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
             ),
             NewStepDraft(
                 name="Extrahera möteskontext",
@@ -7171,7 +7142,6 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
                 runtime_required=True,
             ),
             NewStepDraft(
@@ -7253,7 +7223,6 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
                 runtime_required=True,
             ),
             NewStepDraft(
@@ -7359,7 +7328,6 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
-                runtime_upload=True,
                 runtime_required=True,
             ),
             NewStepDraft(
@@ -7786,8 +7754,8 @@ def test_compile_outline_flow_keeps_text_artifact_step_after_audio_transcription
         "Write report",
     ]
     assert draft.steps[0].input_type.value == "audio"
-    assert draft.steps[0].runtime_upload is True
     assert draft.steps[1].input_source.value == "previous_step"
+    assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "audio"
     assert compiled.steps[0].output_mode.value == "transcribe_only"
     assert compiled.steps[1].output_mode.value == "pass_through"
     assert validation.valid
@@ -7896,8 +7864,8 @@ def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> Non
         "text",
         "docx",
     ]
-    assert draft.steps[0].runtime_upload is True
     assert draft.steps[2].document_delivery_mode == "template_fill"
+    assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
     assert compiled.steps[2].output_mode.value == "template_fill"
     assert validation.valid
     assert_create_spec_prepares_through_authoring_command(compiled)
@@ -8150,8 +8118,8 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
         "text",
         "pdf",
     ]
-    assert draft.steps[0].runtime_upload is True
     assert draft.steps[0].output_fields is not None
+    assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
     assert compiled.steps[1].input_type.value == "json"
     assert compiled.steps[3].output_type.value == "pdf"
     assert validation.valid

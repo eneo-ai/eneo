@@ -58,11 +58,6 @@ def build_new_step_draft_schema(
             "enum": builder_output_type_values(),
             "default": OutputType.TEXT.value,
         },
-        "runtime_upload": {
-            "type": "boolean",
-            "default": False,
-            "description": "Whether this step should receive uploaded runtime files.",
-        },
         "runtime_required": {
             "type": "boolean",
             "default": False,

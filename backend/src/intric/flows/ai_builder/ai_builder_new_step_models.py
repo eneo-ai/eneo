@@ -121,7 +121,6 @@ class NewStepDraft(BaseModel):
     knowledge_refs: list[str] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)
     mcp_tool_refs: list[str] = Field(default_factory=list)
-    runtime_upload: bool = False
     runtime_required: bool = False
     runtime_max_files: int | None = None
     uses_form_fields: list[str] = Field(default_factory=list)

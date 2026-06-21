@@ -127,6 +127,19 @@ class TestBuildEditFlowToolSchema:
         assert "flow_description" in properties
         assert "metadata_patch" not in properties
 
+    def test_add_step_payload_does_not_expose_runtime_upload_flag(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        add_payload = _add_step_payload_schema(schema)
+        properties = add_payload["properties"]
+        assert "runtime_upload" not in properties
+        assert "runtime_required" in properties
+        assert "runtime_max_files" in properties
+
     def test_existing_step_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
         schema = build_edit_flow_tool_schema(

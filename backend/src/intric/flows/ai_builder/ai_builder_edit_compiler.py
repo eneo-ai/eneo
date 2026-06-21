@@ -341,7 +341,6 @@ def _repair_leading_audio_shape(
             input_source=InputSource.FLOW_INPUT,
             input_type=InputType.AUDIO,
             output_type=OutputType.TEXT,
-            runtime_upload=True,
             runtime_required=_runtime_input_required(first_step.input_config),
             runtime_max_files=_runtime_input_max_files(first_step.input_config),
         )

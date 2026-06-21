@@ -60,7 +60,6 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
         "plan_step_ref",
         "runtime_max_files",
         "runtime_required",
-        "runtime_upload",
         "uses_previous_fields",
         "uses_previous_outputs",
     }

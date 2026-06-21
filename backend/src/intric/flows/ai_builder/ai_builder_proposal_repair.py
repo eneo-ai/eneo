@@ -160,11 +160,7 @@ def _self_correction_user_message(
             "one concrete step, such as transcribing audio or summarizing text, "
             "then try again."
         )
-    if (
-        "input_source 'flow_input'" in details
-        or "runtime_upload" in details
-        or "first step" in details
-    ):
+    if "input_source 'flow_input'" in details or "first step" in details:
         return (
             "The corrected plan still could not connect the flow input to the "
             "first step. For audio or file flows, the first step must receive the "

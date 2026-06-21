@@ -687,6 +687,11 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
     assert steps[1].input_bindings is None
     assert steps[1].input_contract is None
     assert steps[1].input_config is None
+    assert steps[0].input_config is not None
+    runtime_input = steps[0].input_config["runtime_input"]
+    assert runtime_input["enabled"] is True
+    assert runtime_input["input_format"] == "audio"
+    assert runtime_input["required"] is True
     assert result.compiled_proposal.edit is not None
     assert any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
@@ -713,7 +718,6 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
                         "input_source": "flow_input",
                         "input_type": "audio",
                         "output_type": "text",
-                        "runtime_upload": True,
                     },
                 },
                 {

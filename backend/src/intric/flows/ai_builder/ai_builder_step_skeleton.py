@@ -235,7 +235,6 @@ class StepSkeleton:
     output_type: OutputType
     output_mode: OutputMode
     document_delivery_mode: DocumentDeliveryMode
-    runtime_upload: bool
     runtime_required: bool
     runtime_max_files: int | None
     output_fields: tuple[StructuredFieldDraft, ...] = ()
@@ -259,20 +258,17 @@ class StepSkeleton:
             raise ValueError("Backend-fixed skeleton slots require a chain token")
         if self.role != "backend_fixed" and self.chain_token is not None:
             raise ValueError("Only backend-fixed skeleton slots may carry chain tokens")
-        if self.slot_ordinal > 0 and (
-            self.runtime_upload
-            or self.runtime_required
-            or self.runtime_max_files is not None
-        ):
+        has_runtime_constraints = (
+            self.runtime_required or self.runtime_max_files is not None
+        )
+        if self.slot_ordinal > 0 and has_runtime_constraints:
             raise ValueError(
-                "Only the first skeleton slot may own runtime upload fields"
+                "Only the first skeleton slot may own runtime input constraints"
             )
-        if self.runtime_required and not self.runtime_upload:
-            raise ValueError("runtime_required requires runtime_upload")
-        if self.runtime_max_files is not None and not self.runtime_upload:
-            raise ValueError("runtime_max_files requires runtime_upload")
-        if self.runtime_upload and self.input_type not in _FILE_INPUT_TYPES:
-            raise ValueError("runtime_upload requires a file-capable input type")
+        if has_runtime_constraints and self.input_type not in _FILE_INPUT_TYPES:
+            raise ValueError(
+                "Runtime input constraints require a file-capable input type"
+            )
         if (
             self.document_delivery_mode == "template_fill"
             and self.output_type != OutputType.DOCX
@@ -385,9 +381,7 @@ class StepSkeletonPlan:
         return StepSkeletonComposition(
             steps=tuple(steps),
             output_type_drifts=tuple(output_type_drifts),
-            document_body_writer_step_indexes=tuple(
-                document_body_writer_step_indexes
-            ),
+            document_body_writer_step_indexes=tuple(document_body_writer_step_indexes),
         )
 
     def _semantic_slot_at(
@@ -408,7 +402,10 @@ class StepSkeletonPlan:
             input_source=input_source,
         )
         output_type = self._semantic_output_type(is_last=is_last)
-        runtime_upload = ordinal == 0 and input_type in _FILE_INPUT_TYPES
+        owns_runtime_input = _owns_runtime_input_constraints(
+            slot_ordinal=ordinal,
+            input_type=input_type,
+        )
         return replace(
             self.semantic_slot,
             slot_ordinal=ordinal,
@@ -425,9 +422,8 @@ class StepSkeletonPlan:
                 output_type=output_type,
                 final_output_mode=self.final_output_mode if is_last else None,
             ),
-            runtime_upload=runtime_upload,
-            runtime_required=runtime_upload and self.runtime_required,
-            runtime_max_files=self.runtime_max_files if runtime_upload else None,
+            runtime_required=owns_runtime_input and self.runtime_required,
+            runtime_max_files=self.runtime_max_files if owns_runtime_input else None,
         )
 
     def _semantic_input_source(
@@ -653,7 +649,6 @@ def _compose_step_skeleton_slot(
                 list(content.mcp_server_refs) if content is not None else []
             ),
             mcp_tool_refs=list(content.mcp_tool_refs) if content is not None else [],
-            runtime_upload=slot.runtime_upload,
             runtime_required=slot.runtime_required,
             runtime_max_files=slot.runtime_max_files,
             uses_form_fields=(
@@ -1436,6 +1431,10 @@ def _backend_fixed_slot(
     ui_language: str | None = None,
 ) -> StepSkeleton:
     template = _compiled_chain_step_template(chain_token, ui_language=ui_language)
+    owns_runtime_input = _owns_runtime_input_constraints(
+        slot_ordinal=slot_ordinal,
+        input_type=input_type,
+    )
     return StepSkeleton(
         slot_ordinal=slot_ordinal,
         slot_id=chain_token,
@@ -1450,15 +1449,8 @@ def _backend_fixed_slot(
         output_type=output_type,
         output_mode=output_mode,
         document_delivery_mode=document_delivery_mode,
-        runtime_upload=slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES,
-        runtime_required=(
-            slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES and runtime_required
-        ),
-        runtime_max_files=(
-            runtime_max_files
-            if slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES
-            else None
-        ),
+        runtime_required=owns_runtime_input and runtime_required,
+        runtime_max_files=runtime_max_files if owns_runtime_input else None,
         output_fields=output_fields,
     )
 
@@ -1478,6 +1470,10 @@ def _semantic_required_slot(
     default_instructions: str | None = None,
     ui_language: str | None = None,
 ) -> StepSkeleton:
+    owns_runtime_input = _owns_runtime_input_constraints(
+        slot_ordinal=slot_ordinal,
+        input_type=input_type,
+    )
     return StepSkeleton(
         slot_ordinal=slot_ordinal,
         slot_id=slot_id,
@@ -1494,15 +1490,8 @@ def _semantic_required_slot(
         output_type=output_type,
         output_mode=output_mode,
         document_delivery_mode=document_delivery_mode,
-        runtime_upload=slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES,
-        runtime_required=(
-            slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES and runtime_required
-        ),
-        runtime_max_files=(
-            runtime_max_files
-            if slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES
-            else None
-        ),
+        runtime_required=owns_runtime_input and runtime_required,
+        runtime_max_files=runtime_max_files if owns_runtime_input else None,
     )
 
 
@@ -1557,14 +1546,24 @@ def _slot_with_ordinal(
     runtime_required: bool,
     runtime_max_files: int | None,
 ) -> StepSkeleton:
-    runtime_upload = slot_ordinal == 0 and slot.input_type in _FILE_INPUT_TYPES
+    owns_runtime_input = _owns_runtime_input_constraints(
+        slot_ordinal=slot_ordinal,
+        input_type=slot.input_type,
+    )
     return replace(
         slot,
         slot_ordinal=slot_ordinal,
-        runtime_upload=runtime_upload,
-        runtime_required=runtime_upload and runtime_required,
-        runtime_max_files=runtime_max_files if runtime_upload else None,
+        runtime_required=owns_runtime_input and runtime_required,
+        runtime_max_files=runtime_max_files if owns_runtime_input else None,
     )
+
+
+def _owns_runtime_input_constraints(
+    *,
+    slot_ordinal: int,
+    input_type: InputType,
+) -> bool:
+    return slot_ordinal == 0 and input_type in _FILE_INPUT_TYPES
 
 
 def _final_output_mode(

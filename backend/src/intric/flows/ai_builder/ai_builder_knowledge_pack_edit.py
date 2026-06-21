@@ -42,7 +42,6 @@ Användaren: "Lägg till ett steg som transkriberar ljud innan analysen"
         "input_source": "flow_input",
         "input_type": "audio",
         "output_type": "text",
-        "runtime_upload": true,
         "runtime_required": true
       }
     }

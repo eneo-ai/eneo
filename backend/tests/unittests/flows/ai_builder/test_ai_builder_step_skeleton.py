@@ -51,7 +51,6 @@ def test_step_skeleton_rejects_illegal_policy_combinations() -> None:
             output_type=OutputType.TEXT,
             output_mode=OutputMode.TRANSCRIBE_ONLY,
             document_delivery_mode="not_applicable",
-            runtime_upload=True,
             runtime_required=True,
             runtime_max_files=None,
         )
@@ -73,7 +72,6 @@ def test_step_skeleton_rejects_runtime_fields_after_first_slot() -> None:
             output_type=OutputType.TEXT,
             output_mode=OutputMode.PASS_THROUGH,
             document_delivery_mode="not_applicable",
-            runtime_upload=True,
             runtime_required=True,
             runtime_max_files=None,
         )
@@ -104,7 +102,6 @@ def test_materialize_audio_text_transcribe_only_skeleton() -> None:
     ] == [("semantic_required", "audio", "transcribe_only")]
     assert skeleton[0].input_source == InputSource.FLOW_INPUT
     assert skeleton[0].output_type == OutputType.TEXT
-    assert skeleton[0].runtime_upload is True
     assert skeleton[0].runtime_required is True
 
 
@@ -133,7 +130,6 @@ def test_materialize_audio_artifact_skeleton() -> None:
         ("text", "text", "pass_through"),
         ("text", "pdf", "pass_through"),
     ]
-    assert skeleton[0].runtime_upload is True
     assert skeleton[0].runtime_required is True
     assert skeleton[2].document_delivery_mode == "generated"
 
@@ -302,7 +298,8 @@ def test_materialize_text_to_json_skeleton() -> None:
     assert skeleton[0].input_type == InputType.TEXT
     assert skeleton[0].output_type == OutputType.JSON
     assert skeleton[0].output_fields == ()
-    assert skeleton[0].runtime_upload is False
+    assert skeleton[0].runtime_required is False
+    assert skeleton[0].runtime_max_files is None
 
 
 def test_materialize_linear_skeleton_expands_semantic_step_count() -> None:
@@ -373,8 +370,11 @@ def test_materialize_comparison_skeleton_places_fan_in_on_last_semantic() -> Non
         "previous_step",
         "all_previous_steps",
     ]
-    assert two_step_skeleton[0].runtime_upload is True
-    assert all(slot.runtime_upload is False for slot in two_step_skeleton[1:])
+    assert two_step_skeleton[0].runtime_required is True
+    assert all(
+        slot.runtime_required is False and slot.runtime_max_files is None
+        for slot in two_step_skeleton[1:]
+    )
 
 
 def test_skeleton_composition_records_output_type_drift() -> None:
@@ -717,7 +717,6 @@ def _skeleton_mechanics(
             slot.output_type.value,
             slot.output_mode.value,
             slot.document_delivery_mode,
-            slot.runtime_upload,
             slot.runtime_required,
             slot.runtime_max_files,
             bool(slot.output_fields),
@@ -735,7 +734,6 @@ def _draft_mechanics(draft: FlowCreateDraft) -> tuple[tuple[object, ...], ...]:
             draft_step.output_type.value,
             compiled_step.output_mode.value,
             draft_step.document_delivery_mode,
-            draft_step.runtime_upload,
             draft_step.runtime_required,
             draft_step.runtime_max_files,
             bool(draft_step.output_fields),
