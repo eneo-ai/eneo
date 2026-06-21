@@ -593,7 +593,6 @@ def test_linear_skeleton_matches_current_compiler_mechanics(
             "flow_name": "Structured text",
             "plan_rationale": "Analyze document material and return JSON.",
             "runtime_input": {"input_type": "document", "required": True},
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": f"Text step {index}",
@@ -604,7 +603,10 @@ def test_linear_skeleton_matches_current_compiler_mechanics(
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=OutlineCompileContext(final_output_type=OutputType.JSON),
+    )
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.JSON,

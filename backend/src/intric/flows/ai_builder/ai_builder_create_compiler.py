@@ -120,7 +120,7 @@ def compile_outline_to_create_draft(
     final_output_type = (
         context.final_output_type
         if context is not None and context.final_output_type is not None
-        else OutputType(outline.final_output_type)
+        else OutputType.TEXT
     )
     referenced_hint_names = {
         field_name

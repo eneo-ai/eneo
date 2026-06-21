@@ -65,7 +65,7 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
     }
 )
 logger = logging.getLogger(__name__)
-_OUTLINE_ROOT_COMPATIBILITY_IGNORED_KEYS = frozenset({"reasoning"})
+_OUTLINE_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
 _OUTLINE_ASSUMPTIONS_FIELD = "assumptions"
 _OUTLINE_STEP_ROOT_RECOVERED_KEYS = frozenset({_OUTLINE_ASSUMPTIONS_FIELD})
 
@@ -231,7 +231,6 @@ class FlowCreateOutline(BaseModel):
     flow_description: str | None = None
     plan_rationale: str
     runtime_input: OutlineRuntimeInput = Field(default_factory=OutlineRuntimeInput)
-    final_output_type: str = OutputType.TEXT.value
     input_fields: list[OutlineInputField] = Field(
         default_factory=_empty_outline_input_fields
     )
@@ -257,15 +256,6 @@ class FlowCreateOutline(BaseModel):
         if "{{" in normalized or "}}" in normalized:
             raise ValueError("flow_description must not contain template variables.")
         return normalized or None
-
-    @field_validator("final_output_type")
-    @classmethod
-    def _validate_final_output_type(cls, value: str) -> str:
-        normalized = value.strip()
-        if normalized not in builder_output_type_values():
-            allowed = ", ".join(builder_output_type_values())
-            raise ValueError(f"final_output_type must be one of: {allowed}")
-        return normalized
 
     @field_validator("steps")
     @classmethod
@@ -357,7 +347,7 @@ def _outline_root_ignored_keys() -> frozenset[str]:
     return (
         _OUTLINE_STEP_BACKEND_OWNED_KEYS
         | _outline_step_only_keys()
-        | _OUTLINE_ROOT_COMPATIBILITY_IGNORED_KEYS
+        | _OUTLINE_ROOT_IGNORED_KEYS
     )
 
 

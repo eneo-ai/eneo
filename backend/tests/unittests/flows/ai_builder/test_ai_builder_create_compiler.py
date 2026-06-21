@@ -1730,7 +1730,6 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
             "flow_name": "Fold text hop",
             "plan_rationale": "Avoid zero-contract first step.",
             "runtime_input": {"input_type": "text"},
-            "final_output_type": "pdf",
             "steps": [
                 {
                     "name": "Receive text",
@@ -1745,7 +1744,10 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=OutlineCompileContext(final_output_type=OutputType.PDF),
+    )
 
     assert draft.model_dump(mode="json") == _create_draft_snapshot(
         flow_name="Fold text hop",
@@ -2069,7 +2071,6 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Separera MCP-hämtning från slutlig strukturering.",
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Hämta aktuell tid med Time MCP",
@@ -2140,7 +2141,6 @@ def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Använd bara relevant MCP-verktyg.",
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Hämta tid med Time MCP",
@@ -2185,7 +2185,6 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Verktygsnamnet räcker när användaren redan valt servern.",
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Hämta aktuell tid",
@@ -2234,7 +2233,6 @@ def test_selected_mcp_attachment_skips_knowledge_steps() -> None:
         {
             "flow_name": "Policy och tid",
             "plan_rationale": "Knowledge och MCP får inte blandas på samma steg.",
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Grounda i policy",
@@ -2273,7 +2271,6 @@ def test_selected_mcp_attachment_does_not_infer_from_domain_words() -> None:
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Domänord räcker inte för MCP-koppling.",
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Hämta aktuell tid",
@@ -2411,7 +2408,32 @@ def test_parse_outline_flow_allows_server_owned_core_shape_defaults() -> None:
     )
 
     assert outline.runtime_input.input_type == "text"
-    assert outline.final_output_type == "text"
+
+
+def test_parse_outline_flow_ignores_model_supplied_final_output_type() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Minimal outline",
+            "plan_rationale": "Let the backend apply the committed architecture.",
+            "final_output_type": "docx",
+            "steps": [
+                {
+                    "name": "Do the work",
+                    "task": "Follow the user's confirmed requirements.",
+                }
+            ],
+        }
+    )
+
+    assert not hasattr(outline, "final_output_type")
+    default_draft = compile_outline_to_create_draft(outline)
+    context_draft = compile_outline_to_create_draft(
+        outline,
+        context=OutlineCompileContext(final_output_type=OutputType.PDF),
+    )
+
+    assert default_draft.steps[-1].output_type == OutputType.TEXT
+    assert context_draft.steps[-1].output_type == OutputType.PDF
 
 
 def test_parse_outline_flow_accepts_create_resource_refs() -> None:
@@ -2816,7 +2838,6 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
                 "required": True,
                 "max_files": 5,
             },
-            "final_output_type": "docx",
             "input_fields": [
                 {
                     "variable_name": "case_id",
@@ -2856,7 +2877,10 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=OutlineCompileContext(final_output_type=OutputType.DOCX),
+    )
     compiled = compile_create_draft(draft)
 
     assert [step.name for step in draft.steps] == [
@@ -3062,7 +3086,6 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
             "flow_name": "Utvecklingssamtal",
             "plan_rationale": "Transkribera samtal och skapa en strukturerad bedömning.",
             "runtime_input": {"input_type": "audio", "required": True},
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Transkribera samtal",
@@ -3358,7 +3381,6 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
             "flow_name": "Kommunstyrelsemöte till DOCX",
             "plan_rationale": "Transkribera och strukturera mötet innan DOCX skapas.",
             "runtime_input": {"input_type": "audio", "required": True},
-            "final_output_type": "docx",
             "input_fields": [
                 {
                     "variable_name": "language",
@@ -3548,7 +3570,6 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
             "flow_name": "Customer reply",
             "plan_rationale": "Classify first, then draft the reply.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Receive question",
@@ -3611,7 +3632,6 @@ def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> N
             "flow_name": "Structured intake",
             "plan_rationale": "Extract structured fields before writing.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Extract intake",
@@ -3650,7 +3670,6 @@ def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> 
             "flow_name": "Audience reply",
             "plan_rationale": "Use runtime audience metadata while drafting.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "input_fields": [
                 {
                     "variable_name": "audience",
@@ -3696,7 +3715,6 @@ def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
             "flow_name": "Document summary",
             "plan_rationale": "Prepare uploaded documents before summarizing.",
             "runtime_input": {"input_type": "document", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Read documents",
@@ -3727,7 +3745,6 @@ def test_compile_outline_flow_preserves_leading_step_with_model_ref() -> None:
             "flow_name": "Specialized first pass",
             "plan_rationale": "Use a selected model for the first pass.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Specialized reading",
@@ -3762,7 +3779,6 @@ def test_compile_outline_flow_preserves_leading_step_with_knowledge_refs() -> No
             "flow_name": "Policy grounded reply",
             "plan_rationale": "Ground the first pass in a selected knowledge base.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Ground in policy",
@@ -3794,7 +3810,6 @@ def test_compile_outline_flow_folds_before_final_artifact_append() -> None:
             "flow_name": "DOCX report",
             "plan_rationale": "Prepare source text and generate a report.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "docx",
             "steps": [
                 {
                     "name": "Receive text",
@@ -3810,7 +3825,10 @@ def test_compile_outline_flow_folds_before_final_artifact_append() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=OutlineCompileContext(final_output_type=OutputType.DOCX),
+    )
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
@@ -3971,7 +3989,6 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
             "flow_name": "Audio report",
             "plan_rationale": "Transcribe and summarize.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Transcribe",
@@ -7494,7 +7511,6 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Analysera transkriberat ljud och skapa rapport.",
             "runtime_input": {"input_type": "audio", "required": True},
-            "final_output_type": final_output_type,
             "steps": [
                 {
                     "name": "Etablera gemensam möteskontext",
@@ -7549,7 +7565,10 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
 
     draft = compile_outline_to_create_draft(
         outline,
-        context=OutlineCompileContext(ui_language="sv"),
+        context=OutlineCompileContext(
+            final_output_type=OutputType(final_output_type),
+            ui_language="sv",
+        ),
     )
     normalized = normalize_create_draft_mechanics(draft)
     compiled = compile_create_draft(draft)
@@ -7603,7 +7622,6 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Transkribera ljud och skapa rapport.",
             "runtime_input": {"input_type": "audio", "required": True},
-            "final_output_type": "pdf",
             "steps": [
                 {
                     "name": "Transkribera ljud",
@@ -7620,7 +7638,10 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
 
     draft = compile_outline_to_create_draft(
         outline,
-        context=OutlineCompileContext(ui_language="sv"),
+        context=OutlineCompileContext(
+            final_output_type=OutputType.PDF,
+            ui_language="sv",
+        ),
     )
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
@@ -8366,7 +8387,6 @@ def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> Non
             "flow_name": "Structured extraction",
             "plan_rationale": "Extract fields, then summarize.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Extract fields",
@@ -8401,7 +8421,6 @@ def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
             "flow_name": "Structured intermediate",
             "plan_rationale": "Create an intermediate JSON result before prose.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {
                     "name": "Build structure",
@@ -8503,7 +8522,6 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
             "flow_name": "DOCX report",
             "plan_rationale": "Backend owns the artifact output.",
             "runtime_input": {"input_type": "document", "required": True},
-            "final_output_type": "docx",
             "steps": [
                 {
                     "name": "Write report",
@@ -8518,7 +8536,10 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(outline)
+        draft = compile_outline_to_create_draft(
+            outline,
+            context=OutlineCompileContext(final_output_type=OutputType.DOCX),
+        )
     drift_records = [
         record
         for record in caplog.records
@@ -8539,7 +8560,6 @@ def test_compile_outline_flow_default_outline_stays_linear() -> None:
             "flow_name": "Synthesis",
             "plan_rationale": "Analyze two branches and synthesize.",
             "runtime_input": {"input_type": "text", "required": True},
-            "final_output_type": "text",
             "steps": [
                 {"name": "Branch A", "task": "Analyze from angle A."},
                 {"name": "Branch B", "task": "Analyze from angle B."},
@@ -8673,7 +8693,6 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
         {
             "flow_name": "Multi-document report",
             "plan_rationale": "Extract facts, analyze them, and write a report.",
-            "final_output_type": "docx",
             "steps": [
                 {
                     "name": "Extract source facts",
