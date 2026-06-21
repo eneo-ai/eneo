@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
-    OrderedEditSubmission,
+    OrderedEditProposal,
 )
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -68,7 +68,7 @@ async def process_edit_arguments(
         )
 
     try:
-        submission = OrderedEditSubmission.model_validate(arguments)
+        proposal = OrderedEditProposal.model_validate(arguments)
     except Exception as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
         return ToolProcessingResult(
@@ -79,7 +79,7 @@ async def process_edit_arguments(
 
     try:
         edit_result = compile_edit_proposal(
-            submission.to_proposal(),
+            proposal,
             current_steps=list(flow.steps),
             base_flow_revision=flow.draft_revision,
             flow_name=flow.name,
@@ -177,8 +177,8 @@ async def process_edit_arguments(
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
             spec=compiled_spec,
-            assumptions=tuple(submission.assumptions),
-            plan_rationale=submission.plan_rationale,
+            assumptions=tuple(proposal.assumptions),
+            plan_rationale=proposal.plan_rationale,
             reasoning=None,
             validation=validation,
             resource_bindings=(

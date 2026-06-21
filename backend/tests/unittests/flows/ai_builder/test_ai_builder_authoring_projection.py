@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
     AddStep,
@@ -33,10 +35,22 @@ from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPo
 from intric.main.exceptions import BadRequestException
 
 
+def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
+    return OrderedEditProposal(plan_rationale="Update the flow.", **kwargs)
+
+
+def test_ordered_edit_proposal_requires_plan_rationale() -> None:
+    with pytest.raises(ValidationError, match="plan_rationale"):
+        OrderedEditProposal.model_validate({"steps": []})
+
+    with pytest.raises(ValidationError, match="plan_rationale must not be empty"):
+        OrderedEditProposal(plan_rationale=" ", steps=[])
+
+
 def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(
                     existing_step_ref="existing_step_1",
@@ -57,13 +71,13 @@ def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
 def test_edit_overlay_explicit_model_clear_is_not_omission() -> None:
     preserved = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
         ),
     )
     cleared = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(
                     existing_step_ref="existing_step_1",
@@ -80,7 +94,7 @@ def test_edit_overlay_explicit_model_clear_is_not_omission() -> None:
 def test_edit_overlay_explicit_resource_detach_and_mcp_selection() -> None:
     detached = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(
                     existing_step_ref="existing_step_1",
@@ -91,7 +105,7 @@ def test_edit_overlay_explicit_resource_detach_and_mcp_selection() -> None:
     )
     mcp_selected = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(
                     existing_step_ref="existing_step_1",
@@ -111,7 +125,7 @@ def test_edit_overlay_omitted_review_mode_preserves_existing_policy() -> None:
 
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(_step_with_review_policy(review_policy)),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
         ),
     )
@@ -124,7 +138,7 @@ def test_edit_overlay_explicit_null_review_mode_clears_existing_policy() -> None
         base_spec=_base_spec(
             _step_with_review_policy(FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW))
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep.model_validate(
                     {
@@ -144,7 +158,7 @@ def test_edit_overlay_review_mode_replaces_existing_policy() -> None:
         base_spec=_base_spec(
             _step_with_review_policy(FlowStepReviewPolicy(mode=FlowStepReviewMode.VIEW))
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(
                     existing_step_ref="existing_step_1",
@@ -189,7 +203,7 @@ def test_edit_overlay_compiles_form_field_refs_without_shadow_policy() -> None:
                 input_source=InputSource.PREVIOUS_STEP,
             ),
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(existing_step_ref="existing_step_1"),
                 ModifyExistingStep(
@@ -214,7 +228,7 @@ def test_edit_overlay_requires_step_coverage_or_removal() -> None:
     with pytest.raises(BadRequestException) as missing_exc:
         compile_ordered_edit_proposal(
             base_spec=base,
-            proposal=OrderedEditProposal(
+            proposal=_edit_proposal(
                 steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
             ),
         )
@@ -226,7 +240,7 @@ def test_edit_overlay_requires_step_coverage_or_removal() -> None:
     with pytest.raises(BadRequestException) as overlap_exc:
         compile_ordered_edit_proposal(
             base_spec=base,
-            proposal=OrderedEditProposal(
+            proposal=_edit_proposal(
                 steps=[
                     ModifyExistingStep(existing_step_ref="existing_step_1"),
                     ModifyExistingStep(existing_step_ref="existing_step_2"),
@@ -249,7 +263,7 @@ def test_edit_overlay_step_order_and_insertion() -> None:
     )
     result = compile_ordered_edit_proposal(
         base_spec=base,
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 AddStep(step=_new_step("Inserted first")),
                 ModifyExistingStep(existing_step_ref="existing_step_2"),
@@ -284,7 +298,7 @@ def test_edit_overlay_add_step_uses_form_field_with_shared_new_step_compiler() -
                 )
             ],
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(existing_step_ref="existing_step_1"),
                 AddStep(
@@ -314,7 +328,7 @@ def test_edit_overlay_add_first_step_uses_form_field_without_source_reference() 
                 )
             ],
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 AddStep(
                     step=_new_step(
@@ -349,7 +363,7 @@ def test_edit_overlay_modify_step_uses_form_field_with_shared_input_compiler() -
                 )
             ],
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep.model_validate(
                     {
@@ -382,7 +396,7 @@ def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_ste
                 },
             )
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(existing_step_ref="existing_step_1"),
                 AddStep(
@@ -425,7 +439,7 @@ def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder()
                 input_source=InputSource.PREVIOUS_STEP,
             ),
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep(existing_step_ref="existing_step_2"),
                 ModifyExistingStep.model_validate(
@@ -449,7 +463,7 @@ def test_edit_overlay_modify_step_uses_compiled_prior_step_frame_after_reorder()
 def test_edit_overlay_add_step_derives_audio_output_mode_with_shared_compiler() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 AddStep(
                     step=_new_step(
@@ -478,7 +492,7 @@ def test_edit_overlay_modify_step_uses_document_delivery_mode_derivation() -> No
                 output_type=OutputType.DOCX,
             )
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[
                 ModifyExistingStep.model_validate(
                     {
@@ -502,7 +516,7 @@ def test_edit_overlay_drops_document_body_writer_ref_when_writer_step_is_removed
             _step("step_b", "existing_step_2", "Writer"),
             document_body_writer_step_refs=("step_b",),
         ),
-        proposal=OrderedEditProposal(
+        proposal=_edit_proposal(
             steps=[ModifyExistingStep(existing_step_ref="existing_step_1")],
             removed_existing_step_refs=frozenset({"existing_step_2"}),
         ),

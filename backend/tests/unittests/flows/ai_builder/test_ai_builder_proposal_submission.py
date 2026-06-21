@@ -1175,5 +1175,5 @@ async def test_handle_edit_propose_flow_parse_failure_triggers_self_correction()
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
-    assert "OrderedEditSubmission" in request.error_message
+    assert "OrderedEditProposal" in request.error_message
     assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME

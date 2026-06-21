@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
@@ -38,6 +39,10 @@ from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
 )
+
+
+def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
+    return OrderedEditProposal(plan_rationale="Update the flow.", **kwargs)
 
 
 def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repair() -> (
@@ -306,7 +311,7 @@ def test_edit_form_field_multi_reference_feeds_two_step_bindings_once_each() -> 
             output_type="text",
         ),
     ]
-    proposal = OrderedEditProposal(
+    proposal = _edit_proposal(
         steps=[
             ModifyExistingStep(
                 existing_step_ref="existing_step_1",

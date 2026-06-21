@@ -71,6 +71,10 @@ from intric.main.exceptions import BadRequestException
 # ---------------------------------------------------------------------------
 
 
+def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
+    return OrderedEditProposal(plan_rationale="Update the flow.", **kwargs)
+
+
 async def execute_draft_materialization(
     *,
     changeset: FlowDraftChangeSet,
@@ -2340,7 +2344,7 @@ class TestExecuteEditFlow:
             ],
         )
         edit_result = compile_edit_proposal(
-            OrderedEditProposal(
+            _edit_proposal(
                 steps=[
                     ModifyExistingStep(
                         existing_step_ref="existing_step_1",
@@ -2439,7 +2443,7 @@ class TestExecuteEditFlow:
             available_kbs=[],
         )
         edit_result = compile_edit_proposal(
-            OrderedEditProposal(
+            _edit_proposal(
                 steps=[
                     ModifyExistingStep(existing_step_ref="existing_step_1"),
                     AddStep(

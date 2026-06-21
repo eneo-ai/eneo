@@ -85,16 +85,6 @@ OrderedEditStep = Annotated[ModifyExistingStep | AddStep, Field(discriminator="k
 class OrderedEditProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    flow_name: str | None = None
-    flow_description: str | None = None
-    steps: list[OrderedEditStep]
-    removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
-    form_fields: list[FormFieldSpec] | None = None
-
-
-class OrderedEditSubmission(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     plan_rationale: str
     assumptions: list[str] = Field(default_factory=list)
     flow_name: str | None = None
@@ -120,16 +110,6 @@ class OrderedEditSubmission(BaseModel):
             if assumption:
                 normalized.append(assumption)
         return normalized
-
-    def to_proposal(self) -> OrderedEditProposal:
-        payload: dict[str, object] = {
-            "steps": self.steps,
-            "removed_existing_step_refs": self.removed_existing_step_refs,
-        }
-        for field_name in ("flow_name", "flow_description", "form_fields"):
-            if field_name in self.model_fields_set:
-                payload[field_name] = getattr(self, field_name)
-        return OrderedEditProposal.model_validate(payload)
 
 
 def flow_step_to_authoring_spec(
@@ -504,7 +484,6 @@ __all__ = [
     "AddStep",
     "AssistantSpecPatch",
     "ModifyExistingStep",
-    "OrderedEditSubmission",
     "OrderedEditProposal",
     "compile_ordered_edit_proposal",
     "current_flow_authoring_spec",
