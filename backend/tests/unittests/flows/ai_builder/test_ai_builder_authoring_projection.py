@@ -287,6 +287,70 @@ def test_edit_overlay_step_order_and_insertion() -> None:
     assert result.document_body_writer_step_refs == ("step_b",)
 
 
+def test_edit_overlay_add_first_step_derives_flow_input_when_omitted() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(_step("step_a", "existing_step_1", "Remove")),
+        proposal=_edit_proposal(
+            steps=[
+                AddStep(
+                    step=NewStepDraft.model_validate(
+                        {
+                            "name": "New first",
+                            "instructions": "New prompt",
+                        }
+                    )
+                )
+            ],
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        ),
+    )
+
+    assert result.steps[0].input_source == InputSource.FLOW_INPUT
+
+
+def test_edit_overlay_add_later_step_derives_previous_step_when_omitted() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(_step("step_a", "existing_step_1", "First")),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+                AddStep(
+                    step=NewStepDraft.model_validate(
+                        {
+                            "name": "New second",
+                            "instructions": "New prompt",
+                        }
+                    )
+                ),
+            ],
+        ),
+    )
+
+    assert result.steps[1].input_source == InputSource.PREVIOUS_STEP
+
+
+def test_edit_overlay_add_step_preserves_explicit_all_previous_steps() -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(_step("step_a", "existing_step_1", "First")),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep(existing_step_ref="existing_step_1"),
+                AddStep(
+                    step=NewStepDraft.model_validate(
+                        {
+                            "name": "Summarize all",
+                            "instructions": "New prompt",
+                            "input_source": "all_previous_steps",
+                        }
+                    )
+                ),
+            ],
+        ),
+    )
+
+    assert result.steps[1].input_source == InputSource.ALL_PREVIOUS_STEPS
+
+
 def test_edit_overlay_add_step_uses_form_field_with_shared_new_step_compiler() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(

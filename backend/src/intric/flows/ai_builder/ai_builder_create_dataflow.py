@@ -9,6 +9,11 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
 from intric.flows.ai_builder.ai_builder_mechanical_refs import (
     clean_raw_previous_field_refs,
 )
+from intric.flows.ai_builder.ai_builder_new_step_compiler import (
+    derive_position_input_source,
+    require_resolved_input_source,
+    resolve_omitted_input_source,
+)
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
@@ -283,15 +288,16 @@ def _normalize_step_mechanics(
     step_index: int,
 ) -> NewStepDraft:
     updates: dict[str, Any] = {}
-    input_source = step.input_source
+    step = resolve_omitted_input_source(step, step_index=step_index)
+    input_source = require_resolved_input_source(step)
     input_type = step.input_type
     output_type = step.output_type
+    positional_input_source = derive_position_input_source(step_index)
 
-    if step_index == 0 and input_source != InputSource.FLOW_INPUT:
-        input_source = InputSource.FLOW_INPUT
-        updates["input_source"] = input_source
-    elif step_index > 0 and input_source == InputSource.FLOW_INPUT:
-        input_source = InputSource.PREVIOUS_STEP
+    if input_source != positional_input_source and (
+        step_index == 0 or input_source == InputSource.FLOW_INPUT
+    ):
+        input_source = positional_input_source
         updates["input_source"] = input_source
 
     if input_source == InputSource.ALL_PREVIOUS_STEPS and input_type == InputType.JSON:
@@ -506,7 +512,7 @@ def _underlag_step_signals_for_draft(
     """Draft mode has no compiled question, so it cannot count existing refs."""
     return tuple(
         TargetedUnderlagStepSignal(
-            input_source=step.input_source,
+            input_source=require_resolved_input_source(step),
             input_type=step.input_type,
             output_type=step.output_type,
             is_renderer=_is_renderer_draft(step),
@@ -516,7 +522,7 @@ def _underlag_step_signals_for_draft(
             already_targets_previous_fields=bool(step.uses_previous_fields),
             question_targets_prior_structured_field=False,
             is_source_surfacing_text=is_source_surfacing_text(
-                input_source=step.input_source,
+                input_source=require_resolved_input_source(step),
                 input_type=step.input_type,
                 output_type=step.output_type,
             ),
@@ -637,7 +643,7 @@ def _bind_final_assembler_prior_outputs(
         if predecessor.output_type != OutputType.TEXT:
             continue
         if is_source_surfacing_text(
-            input_source=predecessor.input_source,
+            input_source=require_resolved_input_source(predecessor),
             input_type=predecessor.input_type,
             output_type=predecessor.output_type,
         ):

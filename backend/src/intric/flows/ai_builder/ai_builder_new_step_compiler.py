@@ -27,12 +27,33 @@ from intric.flows.flow_variable_definitions import form_field_reference_expressi
 logger = logging.getLogger(__name__)
 
 
+def derive_position_input_source(step_index: int) -> InputSource:
+    return InputSource.FLOW_INPUT if step_index == 0 else InputSource.PREVIOUS_STEP
+
+
+def resolve_omitted_input_source(
+    step_draft: NewStepDraft,
+    *,
+    step_index: int,
+) -> NewStepDraft:
+    if step_draft.input_source is not None:
+        return step_draft
+    return step_draft.model_copy(
+        update={"input_source": derive_position_input_source(step_index)}
+    )
+
+
 def compile_new_step_draft(
     *,
     step_draft: NewStepDraft,
     plan_step_ref: str,
     prior_steps: list[StepSpec],
 ) -> StepSpec:
+    step_draft = resolve_omitted_input_source(
+        step_draft,
+        step_index=len(prior_steps),
+    )
+    input_source = require_resolved_input_source(step_draft)
     output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
     input_config = compile_input_config(step_draft)
@@ -59,7 +80,7 @@ def compile_new_step_draft(
             mcp_tool_refs=list(step_draft.mcp_tool_refs),
         ),
         mcp_policy=MCPPolicy.INHERIT,
-        input_source=step_draft.input_source,
+        input_source=input_source,
         input_type=step_draft.input_type,
         output_mode=output_mode,
         output_type=step_draft.output_type,
@@ -76,6 +97,12 @@ def compile_new_step_draft(
         source="draft",
     )
     return step
+
+
+def require_resolved_input_source(step_draft: NewStepDraft) -> InputSource:
+    if step_draft.input_source is None:
+        raise ValueError("New step input_source must be resolved before compilation.")
+    return step_draft.input_source
 
 
 def _log_transcribe_only_model_ref_stripped(
@@ -160,8 +187,9 @@ def compile_input_bindings(
     the compiler should leave bindings empty for normal chains and broad fan-in
     steps unless it must compose material from multiple sources.
     """
+    input_source = require_resolved_input_source(step_draft)
     return compile_step_input_bindings(
-        input_source=step_draft.input_source,
+        input_source=input_source,
         input_type=step_draft.input_type,
         uses_form_fields=step_draft.uses_form_fields,
         uses_previous_fields=step_draft.uses_previous_fields,
@@ -352,7 +380,10 @@ def _derive_input_contract(
         # Explicit underlag replaces the implicit previous-step JSON input, so a
         # contract copied from the previous step would validate the wrong shape.
         return None
-    if step_draft.input_source.value != "previous_step" or not prior_steps:
+    if (
+        require_resolved_input_source(step_draft).value != "previous_step"
+        or not prior_steps
+    ):
         return None
     return prior_steps[-1].output_contract
 

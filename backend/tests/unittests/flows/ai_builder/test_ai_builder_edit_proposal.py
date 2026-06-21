@@ -107,6 +107,33 @@ async def test_ordered_submission_rejects_step_preserved_and_removed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ordered_submission_rejects_unknown_ref_before_omitted_add() -> None:
+    flow = _flow(_flow_step(step_order=1, user_description="Remove"))
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Replace the current step.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_99"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Replacement",
+                        "instructions": "Start from the flow input.",
+                    },
+                },
+            ],
+            "removed_existing_step_refs": ["existing_step_1"],
+        },
+    )
+
+    assert result.failure_kind == "validation"
+    assert result.feedback is not None
+    assert "existing_step_99" in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_ordered_submission_reports_unknown_resource_refs() -> None:
     flow = _flow(_flow_step(step_order=1, user_description="Analyze text"))
 
@@ -294,6 +321,57 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
     assert edit.diff.net_steps_added == 1
     assert edit.diff.net_steps_removed == 1
     assert edit.confidence == "ready"
+
+
+@pytest.mark.asyncio
+async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() -> None:
+    first_result = await _process(
+        flow=_flow(_flow_step(step_order=1, user_description="Remove")),
+        arguments={
+            "plan_rationale": "Replace the first step.",
+            "steps": [
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "New first",
+                        "instructions": "Start from the flow input.",
+                    },
+                }
+            ],
+            "removed_existing_step_refs": ["existing_step_1"],
+        },
+    )
+
+    assert first_result.failure_kind is None
+    assert first_result.compiled_proposal is not None
+    assert (
+        first_result.compiled_proposal.spec.steps[0].input_source
+        == InputSource.FLOW_INPUT
+    )
+
+    later_result = await _process(
+        flow=_flow(_flow_step(step_order=1, user_description="Keep")),
+        arguments={
+            "plan_rationale": "Append a follow-up step.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "New second",
+                        "instructions": "Continue from the previous step.",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert later_result.failure_kind is None
+    assert later_result.compiled_proposal is not None
+    assert (
+        later_result.compiled_proposal.spec.steps[1].input_source
+        == InputSource.PREVIOUS_STEP
+    )
 
 
 @pytest.mark.asyncio

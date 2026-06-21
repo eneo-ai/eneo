@@ -114,7 +114,7 @@ class NewStepDraft(BaseModel):
     name: str
     instructions: str | None = None
     assistant_spec: AssistantSpec | None = None
-    input_source: InputSource
+    input_source: InputSource | None = None
     input_type: InputType = InputType.TEXT
     output_type: OutputType = OutputType.TEXT
     model_ref: str | None = None

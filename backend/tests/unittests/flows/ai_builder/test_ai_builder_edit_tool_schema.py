@@ -270,10 +270,12 @@ class TestBuildEditFlowToolSchema:
         add_payload = _add_step_payload_schema(schema)
 
         assert "assistant_spec" not in add_payload["properties"]
+        assert "input_source" in add_payload["properties"]
         assert "output_mode" not in add_payload["properties"]
         assert "input_bindings" not in add_payload["properties"]
         assert "output_contract" not in add_payload["properties"]
         assert "output_config" not in add_payload["properties"]
+        assert "input_source" not in add_payload["required"]
         assert "instructions" in add_payload["properties"]
         assert "document_delivery_mode" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]

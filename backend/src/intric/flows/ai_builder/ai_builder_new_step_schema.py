@@ -27,6 +27,7 @@ def build_new_step_draft_schema(
     mcp_server_refs: list[str] | None = None,
     mcp_tool_refs: list[str] | None = None,
     expose_previous_field_refs: bool = True,
+    require_input_source: bool = True,
 ) -> dict[str, Any]:
     properties: dict[str, Any] = {
         "name": {
@@ -161,10 +162,14 @@ def build_new_step_draft_schema(
             "when a downstream step should reuse specific structured fields."
         )
 
+    required = ["name", "instructions"]
+    if require_input_source:
+        required.append("input_source")
+
     return {
         "type": "object",
         "description": step_description,
-        "required": ["name", "instructions", "input_source"],
+        "required": required,
         "properties": properties,
         "additionalProperties": False,
     }

@@ -258,11 +258,13 @@ def _build_step_payload_schema(
             "bindings, contracts, and low-level config."
         ),
         input_source_description=(
-            "Where the new step gets its primary input. Use 'flow_input' only when "
-            "the added step becomes the new entry step; otherwise use 'previous_step' "
-            "or 'all_previous_steps'."
+            "Optional advanced override for where the new step gets its primary "
+            "input. Omit it for the backend to derive 'flow_input' for the first "
+            "ordered step and 'previous_step' for later ordered steps. Use "
+            "'all_previous_steps' only when the new step must read every prior step."
         ),
         expose_previous_field_refs=True,
+        require_input_source=False,
     )
 
 
