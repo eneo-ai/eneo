@@ -375,6 +375,66 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
 
 
 @pytest.mark.asyncio
+async def test_ordered_add_first_document_step_derives_runtime_input_config() -> None:
+    result = await _process(
+        flow=_flow(_flow_step(step_order=1, user_description="Remove")),
+        arguments={
+            "plan_rationale": "Replace the first step with document analysis.",
+            "steps": [
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Analyze document",
+                        "instructions": "Analyze the uploaded document.",
+                        "input_type": "document",
+                    },
+                }
+            ],
+            "removed_existing_step_refs": ["existing_step_1"],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    step = result.compiled_proposal.spec.steps[0]
+    assert step.input_source == InputSource.FLOW_INPUT
+    assert step.input_type == InputType.DOCUMENT
+    assert step.input_config is not None
+    runtime_input = step.input_config["runtime_input"]
+    assert runtime_input["enabled"] is True
+    assert runtime_input["input_format"] == "document"
+    assert runtime_input["required"] is False
+
+
+@pytest.mark.asyncio
+async def test_ordered_add_later_document_step_compiles_to_text_input() -> None:
+    result = await _process(
+        flow=_flow(_flow_step(step_order=1, user_description="Keep")),
+        arguments={
+            "plan_rationale": "Append a document-derived follow-up.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Use previous output",
+                        "instructions": "Continue from the previous step.",
+                        "input_type": "document",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    step = result.compiled_proposal.spec.steps[1]
+    assert step.input_source == InputSource.PREVIOUS_STEP
+    assert step.input_type == InputType.TEXT
+    assert step.input_config is None
+
+
+@pytest.mark.asyncio
 async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only() -> (
     None
 ):

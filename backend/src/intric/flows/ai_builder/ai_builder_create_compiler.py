@@ -57,9 +57,6 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
 )
 from intric.flows.flow_authoring_name import normalize_flow_name
-from intric.flows.flow_authoring_runtime_input import (
-    normalize_flow_draft_runtime_inputs,
-)
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -321,7 +318,7 @@ def compile_create_draft(
             step_indexes=draft.document_body_writer_step_indexes,
         ),
     )
-    return normalize_flow_draft_runtime_inputs(compiled)
+    return compiled
 
 
 def _document_body_writer_step_refs(

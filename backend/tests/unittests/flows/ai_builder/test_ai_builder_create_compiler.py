@@ -1895,9 +1895,7 @@ def test_normalize_create_draft_prunes_non_json_previous_field_source() -> None:
     assert validation.valid
 
 
-def test_normalize_create_draft_mechanics_enables_file_flow_input_runtime_upload() -> (
-    None
-):
+def test_compile_create_draft_derives_file_flow_input_runtime_config() -> None:
     draft = FlowCreateDraft(
         flow_name="Ogiltig filindata",
         plan_rationale="Testar runtime upload-krav.",
@@ -1917,8 +1915,11 @@ def test_normalize_create_draft_mechanics_enables_file_flow_input_runtime_upload
     normalized = normalize_create_draft_mechanics(draft)
     compiled = compile_create_draft(normalized)
     validation = validate_spec(compiled)
+    runtime_input = compiled.steps[0].input_config["runtime_input"]
 
-    assert normalized.steps[0].runtime_upload is True
+    assert runtime_input["enabled"] is True
+    assert runtime_input["input_format"] == "document"
+    assert runtime_input["required"] is False
     assert validation.valid
 
 

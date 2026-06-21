@@ -153,10 +153,26 @@ class TestInputFormatSyncsWithInputType:
         ri = result["runtime_input"]
         assert ri["enabled"] is True
         assert ri["input_format"] == "audio"
+        assert ri["required"] is False
         assert (
             ri["description"]
             == "Ladda upp ljudfiler som detta steg ska transkribera eller analysera."
         )
+
+    def test_required_only_runtime_input_base_gets_canonical_fields(self) -> None:
+        result = resolve_runtime_input_config(
+            step_spec=_step(
+                input_type=InputType.DOCUMENT,
+                input_config={"runtime_input": {"required": True}},
+            ),
+        )
+
+        assert result is not None
+        ri = result["runtime_input"]
+        assert ri["enabled"] is True
+        assert ri["input_format"] == "document"
+        assert ri["required"] is True
+        assert ri["description"] == "Ladda upp dokument som detta steg ska analysera."
 
     def test_existing_config_from_parameter_used_when_spec_has_none(self) -> None:
         """When step_spec.input_config is None, existing_input_config is used as base."""

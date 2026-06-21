@@ -939,10 +939,13 @@ def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
     )
 
     normalized = normalize_create_draft_mechanics(draft)
+    compiled = compile_create_draft(normalized)
+    runtime_input = compiled.steps[0].input_config["runtime_input"]
 
     assert normalized.steps[0].input_source == "flow_input"
-    assert normalized.steps[0].runtime_upload is True
-    assert normalized.steps[0].runtime_required is True
+    assert runtime_input["enabled"] is True
+    assert runtime_input["input_format"] == "document"
+    assert runtime_input["required"] is True
     assert normalized.steps[1].input_source == "previous_step"
     assert normalized.steps[1].input_type == "json"
     assert normalized.steps[1].document_delivery_mode == "not_applicable"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from intric.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
 from intric.flows.flow_authoring_spec import (
-    FlowDraftSpecCore,
     InputSource,
     InputType,
     StepSpec,
@@ -25,20 +24,6 @@ _DEFAULT_RUNTIME_INPUT_DESCRIPTIONS: dict[InputType, str] = {
 }
 
 
-def normalize_flow_draft_runtime_inputs(
-    spec: FlowDraftSpecCore,
-) -> FlowDraftSpecCore:
-    updated_steps = [
-        step
-        if step.existing_step_ref is not None
-        else step.model_copy(
-            update={"input_config": resolve_runtime_input_config(step_spec=step)}
-        )
-        for step in spec.steps
-    ]
-    return spec.model_copy(update={"steps": updated_steps})
-
-
 def resolve_runtime_input_config(
     *,
     step_spec: StepSpec,
@@ -57,6 +42,7 @@ def resolve_runtime_input_config(
         clone_json_object(effective_config.get("runtime_input")) or {}
     )
     runtime_input_config["enabled"] = True
+    runtime_input_config.setdefault("required", False)
 
     previous_format = runtime_input_config.get("input_format")
     runtime_input_config["input_format"] = step_spec.input_type.value

@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     PreviousOutputRef,
     StructuredFieldDraft,
 )
+from intric.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
@@ -25,6 +26,7 @@ from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPo
 from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 logger = logging.getLogger(__name__)
+_FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 
 
 def derive_position_input_source(step_index: int) -> InputSource:
@@ -43,20 +45,46 @@ def resolve_omitted_input_source(
     )
 
 
+def normalize_new_step_input_shape(
+    step_draft: NewStepDraft,
+    *,
+    step_index: int,
+) -> NewStepDraft:
+    step_draft = resolve_omitted_input_source(step_draft, step_index=step_index)
+    input_source = require_resolved_input_source(step_draft)
+    input_type = step_draft.input_type
+
+    if input_source == InputSource.ALL_PREVIOUS_STEPS and input_type == InputType.JSON:
+        input_type = InputType.TEXT
+    if (
+        input_source != InputSource.FLOW_INPUT
+        and step_draft.output_type == OutputType.TEXT
+        and input_type == InputType.JSON
+        and (step_draft.uses_previous_fields or step_draft.uses_previous_outputs)
+    ):
+        input_type = InputType.TEXT
+    if input_source != InputSource.FLOW_INPUT and input_type in _FILE_INPUT_TYPES:
+        input_type = InputType.TEXT
+
+    if input_type == step_draft.input_type:
+        return step_draft
+    return step_draft.model_copy(update={"input_type": input_type})
+
+
 def compile_new_step_draft(
     *,
     step_draft: NewStepDraft,
     plan_step_ref: str,
     prior_steps: list[StepSpec],
 ) -> StepSpec:
-    step_draft = resolve_omitted_input_source(
+    step_draft = normalize_new_step_input_shape(
         step_draft,
         step_index=len(prior_steps),
     )
     input_source = require_resolved_input_source(step_draft)
     output_mode = derive_new_step_output_mode(step_draft)
     output_contract = compile_output_contract(step_draft.output_fields)
-    input_config = compile_input_config(step_draft)
+    input_config = compile_runtime_input_overrides(step_draft)
     input_bindings = compile_input_bindings(step_draft, prior_steps)
     input_contract = _derive_input_contract(
         step_draft,
@@ -90,6 +118,9 @@ def compile_new_step_draft(
         input_config=input_config,
         output_config=output_config,
         review_policy=compile_review_policy(step_draft.review_mode),
+    )
+    step = step.model_copy(
+        update={"input_config": resolve_runtime_input_config(step_spec=step)}
     )
     _log_transcribe_only_model_ref_stripped(
         supplied_model_ref=step_draft.model_ref,
@@ -148,15 +179,11 @@ def derive_new_step_output_mode(step_draft: NewStepDraft) -> OutputMode:
     )
 
 
-def compile_input_config(step_draft: NewStepDraft) -> dict[str, Any] | None:
-    if not step_draft.runtime_upload:
+def compile_runtime_input_overrides(step_draft: NewStepDraft) -> dict[str, Any] | None:
+    if not step_draft.runtime_required and step_draft.runtime_max_files is None:
         return None
 
-    runtime_input: dict[str, Any] = {
-        "enabled": True,
-        "required": step_draft.runtime_required,
-        "input_format": step_draft.input_type.value,
-    }
+    runtime_input: dict[str, Any] = {"required": step_draft.runtime_required}
     if step_draft.runtime_max_files is not None:
         runtime_input["max_files"] = step_draft.runtime_max_files
     return {"runtime_input": runtime_input}

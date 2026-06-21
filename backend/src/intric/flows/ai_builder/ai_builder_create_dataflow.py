@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_mechanical_refs import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_position_input_source,
+    normalize_new_step_input_shape,
     require_resolved_input_source,
     resolve_omitted_input_source,
 )
@@ -45,7 +46,6 @@ from intric.flows.flow_authoring_spec import (
 if TYPE_CHECKING:
     from intric.flows.ai_builder.planning_state import AggregationIntent
 
-_FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
 TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP = 3
 TARGETED_UNDERLAG_TOTAL_FIELD_CAP = 8
@@ -290,8 +290,6 @@ def _normalize_step_mechanics(
     updates: dict[str, Any] = {}
     step = resolve_omitted_input_source(step, step_index=step_index)
     input_source = require_resolved_input_source(step)
-    input_type = step.input_type
-    output_type = step.output_type
     positional_input_source = derive_position_input_source(step_index)
 
     if input_source != positional_input_source and (
@@ -300,35 +298,12 @@ def _normalize_step_mechanics(
         input_source = positional_input_source
         updates["input_source"] = input_source
 
-    if input_source == InputSource.ALL_PREVIOUS_STEPS and input_type == InputType.JSON:
-        input_type = InputType.TEXT
-        updates["input_type"] = input_type
-
-    if (
-        input_source != InputSource.FLOW_INPUT
-        and output_type == OutputType.TEXT
-        and input_type == InputType.JSON
-        and (step.uses_previous_fields or step.uses_previous_outputs)
-    ):
-        # Explicit refs compile into input_bindings.question, which the runtime
-        # treats as complete text input rather than augmenting structured JSON.
-        input_type = InputType.TEXT
-        updates["input_type"] = input_type
-
-    if input_source != InputSource.FLOW_INPUT and input_type in _FILE_INPUT_TYPES:
-        input_type = InputType.TEXT
-        updates["input_type"] = input_type
-
-    if input_source == InputSource.FLOW_INPUT and input_type in _FILE_INPUT_TYPES:
-        if not step.runtime_upload:
-            updates["runtime_upload"] = True
-    elif step.runtime_upload:
-        updates["runtime_upload"] = False
-        updates["runtime_required"] = False
-        updates["runtime_max_files"] = None
-    elif step.runtime_required or step.runtime_max_files is not None:
-        updates["runtime_required"] = False
-        updates["runtime_max_files"] = None
+    if updates:
+        step = step.model_copy(update=updates)
+    step = normalize_new_step_input_shape(step, step_index=step_index)
+    input_type = step.input_type
+    output_type = step.output_type
+    updates = {}
 
     if (
         step.document_delivery_mode == "template_fill"

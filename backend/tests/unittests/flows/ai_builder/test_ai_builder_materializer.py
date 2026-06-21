@@ -396,6 +396,7 @@ class TestCompileCreateFlow:
         assert step.input_config == {
             "runtime_input": {
                 "enabled": True,
+                "required": False,
                 "input_format": "document",
                 "description": "Ladda upp dokument som detta steg ska analysera.",
             }
