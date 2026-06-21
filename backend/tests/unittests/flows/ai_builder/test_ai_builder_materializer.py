@@ -378,7 +378,7 @@ class TestCompileCreateFlow:
         assert step.input_contract == contract
         assert step.output_contract == contract
 
-    def test_document_flow_input_defaults_runtime_upload_config(self) -> None:
+    def test_document_flow_input_defaults_runtime_input_config(self) -> None:
         spec = _make_spec(
             steps=[
                 _make_step_spec(
@@ -402,7 +402,7 @@ class TestCompileCreateFlow:
             }
         }
 
-    def test_explicit_runtime_upload_config_is_preserved(self) -> None:
+    def test_explicit_runtime_input_config_is_preserved(self) -> None:
         spec = _make_spec(
             steps=[
                 _make_step_spec(

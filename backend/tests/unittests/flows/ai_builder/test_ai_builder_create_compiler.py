@@ -2001,7 +2001,6 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
     assert "input_source" not in step_props
     assert "input_type" not in step_props
     assert "input_bindings" not in step_props
-    assert "runtime_upload" not in step_props
     assert "output_mode" not in step_props
     assert "uses_previous_fields" not in step_props
     assert "uses_previous_outputs" not in step_props

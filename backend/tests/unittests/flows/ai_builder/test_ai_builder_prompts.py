@@ -166,7 +166,6 @@ class TestBuildSystemPrompt:
         # Create-mode IR surface (what the planner DOES emit) stays present.
         assert "output_fields" in prompt
         assert "runtime_input" in prompt
-        assert "runtime_upload" not in prompt
 
     def test_edit_mode_prompt_keeps_canonical_variable_documentation(self) -> None:
         prompt = build_system_prompt(
@@ -788,7 +787,7 @@ class TestBuildClarificationHints:
         assert "pdf_generation_mode" in hints
         assert "docx_output_mode" not in hints
 
-    def test_includes_runtime_upload_hint_for_pdf_flows(self) -> None:
+    def test_includes_runtime_input_hint_for_pdf_flows(self) -> None:
         hints = build_clarification_hints(
             conversation=[],
             latest_user_message="Låt användaren ladda upp PDF-filer som ska analyseras.",
@@ -797,7 +796,6 @@ class TestBuildClarificationHints:
         assert hints is not None
         assert "Ta emot filer vid körning" in hints
         assert "låsta arkitekturen" in hints
-        assert "runtime_upload" not in hints
 
     def test_includes_form_field_and_contract_hints_for_structured_analysis_flows(
         self,

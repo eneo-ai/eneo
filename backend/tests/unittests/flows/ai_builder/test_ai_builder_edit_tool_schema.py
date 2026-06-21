@@ -127,7 +127,7 @@ class TestBuildEditFlowToolSchema:
         assert "flow_description" in properties
         assert "metadata_patch" not in properties
 
-    def test_add_step_payload_does_not_expose_runtime_upload_flag(self):
+    def test_add_step_payload_exposes_runtime_input_constraints(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=_empty_catalog(),
@@ -136,7 +136,6 @@ class TestBuildEditFlowToolSchema:
 
         add_payload = _add_step_payload_schema(schema)
         properties = add_payload["properties"]
-        assert "runtime_upload" not in properties
         assert "runtime_required" in properties
         assert "runtime_max_files" in properties
 
