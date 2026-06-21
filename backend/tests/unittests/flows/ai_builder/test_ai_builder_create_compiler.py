@@ -4133,6 +4133,7 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
     assert compiled.steps[0].output_mode.value == "transcribe_only"
     assert compiled.steps[2].output_type.value == "pdf"
     assert validation.valid
+    assert_create_spec_prepares_through_authoring_command(compiled)
 
 
 def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> None:
@@ -7044,6 +7045,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
     assert "Källmaterial: {{ step_a.output.text }}" in protocol_question
     assert "{{ step_d.output.structured }}" not in protocol_question
     assert validation.valid
+    assert_create_spec_prepares_through_authoring_command(compiled)
 
 
 def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag() -> (
@@ -7877,6 +7879,7 @@ def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None
     assert draft.steps[-1].input_source.value == "previous_step"
     assert draft.steps[-1].document_delivery_mode == "template_fill"
     assert validation.valid
+    assert_create_spec_prepares_through_authoring_command(compiled)
 
 
 def test_compile_outline_flow_docx_chain_still_wraps_rich_template_outline() -> None:
@@ -8738,3 +8741,4 @@ def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sou
     assert not any(
         warning.code == "all_previous_overuse" for warning in validation.warnings
     )
+    assert_create_spec_prepares_through_authoring_command(compiled)
