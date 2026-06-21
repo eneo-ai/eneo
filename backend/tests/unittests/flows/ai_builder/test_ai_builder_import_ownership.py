@@ -83,16 +83,10 @@ BACKEND_QUESTION_PERSISTENCE_PUBLIC_NAMES = frozenset(
 FINALIZATION_OWNER_NAMES = frozenset(
     {"CompiledProposalFinalizationRequest", "CompiledProposalFinalizer"}
 )
-FINALIZATION_REPAIR_IMPORT_NAMES = frozenset(
-    {
-        "attempt_description_repair",
-        "extract_description_provenance",
-        "ProposalCompletionFn",
-        "replace",
-        "should_attempt_description_repair",
-    }
+FINALIZATION_FORBIDDEN_COMPLETION_NAMES = frozenset(
+    {"ProposalCompletionFn", "ProposalCompletionRequest"}
 )
-FINALIZATION_REQUEST_REPAIR_FIELD_NAMES = frozenset(
+FINALIZATION_REQUEST_COMPLETION_FIELD_NAMES = frozenset(
     {"litellm_model", "litellm_kwargs", "max_output_tokens"}
 )
 QUESTION_RECOVERY_METHODS = frozenset(
@@ -701,7 +695,7 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
     assert violations == []
 
 
-def test_compiled_proposal_finalization_does_not_own_edit_repair() -> None:
+def test_compiled_proposal_finalization_has_no_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     finalization_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
@@ -716,7 +710,7 @@ def test_compiled_proposal_finalization_does_not_own_edit_repair() -> None:
             imported_names = {
                 alias.name
                 for alias in node.names
-                if alias.name in FINALIZATION_REPAIR_IMPORT_NAMES
+                if alias.name in FINALIZATION_FORBIDDEN_COMPLETION_NAMES
             }
             if imported_names:
                 names = ", ".join(sorted(imported_names))
@@ -730,11 +724,11 @@ def test_compiled_proposal_finalization_does_not_own_edit_repair() -> None:
                 for stmt in node.body
                 if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
             }
-            repair_field_names = sorted(
-                request_field_names & FINALIZATION_REQUEST_REPAIR_FIELD_NAMES
+            completion_field_names = sorted(
+                request_field_names & FINALIZATION_REQUEST_COMPLETION_FIELD_NAMES
             )
-            if repair_field_names:
-                fields = ", ".join(repair_field_names)
+            if completion_field_names:
+                fields = ", ".join(completion_field_names)
                 violations.append(
                     f"{finalization_path}:{node.lineno} request fields {fields}"
                 )
@@ -1059,7 +1053,6 @@ def test_proposal_completion_has_single_request_boundary() -> None:
         "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
     )
     proposal_callers = [
-        backend_root / Path("src/intric/flows/ai_builder/ai_builder_edit_repair.py"),
         backend_root
         / Path("src/intric/flows/ai_builder/ai_builder_proposal_repair.py"),
         submission_path,
@@ -1585,7 +1578,6 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
     for banned_import in {
         "process_outline_arguments",
         "process_edit_arguments",
-        "repair_compiled_edit_description_if_needed",
         "build_outline_flow_tool_schema",
         "build_edit_flow_tool_schema",
         "OUTLINE_FLOW_FORCED_TOOL_PROMPT",

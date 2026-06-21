@@ -37,9 +37,6 @@ from intric.flows.ai_builder.ai_builder_edit_proposal import (
     EDIT_FLOW_FORCED_TOOL_PROMPT,
     process_edit_arguments,
 )
-from intric.flows.ai_builder.ai_builder_edit_repair import (
-    repair_compiled_edit_description_if_needed,
-)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     EDIT_FLOW_TOOL_NAME,
     build_edit_flow_tool_schema,
@@ -461,9 +458,6 @@ class ProposalSubmissionOwner:
         self,
         *,
         assistant_snapshots: AssistantAuthoringSnapshots | None,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
         request_id: str,
         plan_edit_context: AIBuilderPlanEditContext | None,
         prior_plan_for_revision: BuilderPlan | None,
@@ -486,21 +480,10 @@ class ProposalSubmissionOwner:
             )
             if result.compiled_proposal is None:
                 return result
-            compiled = await repair_compiled_edit_description_if_needed(
-                compiled=result.compiled_proposal,
-                flow=invocation.flow,
-                call_proposal_completion=make_usage_tracked_proposal_completion(
-                    litellm_client=self.litellm_client,
-                    usage_tracker=usage_tracker,
-                ),
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
-            )
             return await self._finalize_retry_compiled_proposal(
                 invocation=invocation,
                 tool_name=EDIT_FLOW_TOOL_NAME,
-                compiled=compiled,
+                compiled=result.compiled_proposal,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
             )
@@ -793,9 +776,6 @@ class ProposalSubmissionOwner:
             if flow is None
             else self._edit_flow_retry_config(
                 assistant_snapshots=assistant_snapshots,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
                 request_id=request_id,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
@@ -846,9 +826,6 @@ class ProposalSubmissionOwner:
         # belong to create submissions before the first plan exists.
         retry_config = self._edit_flow_retry_config(
             assistant_snapshots=ctx.assistant_snapshots,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            max_output_tokens=ctx.max_output_tokens,
             request_id=ctx.request_id,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
@@ -894,17 +871,6 @@ class ProposalSubmissionOwner:
             prior_plan_for_revision=ctx.prior_plan_for_revision,
         )
         if edit_result.compiled_proposal is not None:
-            compiled = await repair_compiled_edit_description_if_needed(
-                compiled=edit_result.compiled_proposal,
-                flow=ctx.flow,
-                call_proposal_completion=make_usage_tracked_proposal_completion(
-                    litellm_client=self.litellm_client,
-                    usage_tracker=ctx.usage_tracker,
-                ),
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-                max_output_tokens=ctx.max_output_tokens,
-            )
             edit_result = (
                 await self._compiled_proposal_finalizer.finalize_compiled_proposal(
                     CompiledProposalFinalizationRequest(
@@ -917,7 +883,7 @@ class ProposalSubmissionOwner:
                         assistant_metadata=ctx.assistant_metadata,
                         tool_call_id=tool_call.id,
                         metadata_tool_call=tool_call,
-                        compiled=compiled,
+                        compiled=edit_result.compiled_proposal,
                         resource_catalog=ctx.resource_catalog,
                         flow=ctx.flow,
                         request_id=ctx.request_id,
