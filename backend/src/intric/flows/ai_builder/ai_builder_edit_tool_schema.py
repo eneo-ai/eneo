@@ -139,28 +139,6 @@ def build_edit_flow_tool_schema(
     }
 
 
-def build_edit_mode_tool_schemas(
-    current_steps: list[FlowStep],
-    *,
-    resource_catalog: AIBuilderResourceCatalog,
-) -> list[dict[str, Any]]:
-    from intric.flows.ai_builder.ai_builder_tools import (
-        PROPOSE_FLOW_TOOL_NAME,
-        build_ask_structured_question_tool_schema,
-        build_confirm_requirements_tool_schema,
-    )
-
-    return [
-        build_edit_flow_tool_schema(
-            current_steps,
-            resource_catalog=resource_catalog,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        ),
-        build_ask_structured_question_tool_schema(),
-        build_confirm_requirements_tool_schema(),
-    ]
-
-
 # ---------------------------------------------------------------------------
 # Internal schema builders
 # ---------------------------------------------------------------------------

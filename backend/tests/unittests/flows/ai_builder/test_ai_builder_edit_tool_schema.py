@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
-    build_edit_mode_tool_schemas,
 )
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_source_values,
@@ -375,14 +374,3 @@ class TestBuildEditFlowToolSchema:
             None,
         ]
         assert props["review_mode"]["enum"] == ["view", "edit", None]
-
-
-class TestBuildEditModeToolSchemas:
-    def test_includes_edit_flow_and_discovery_tools(self):
-        schemas = build_edit_mode_tool_schemas(
-            [_make_step(1)], resource_catalog=_empty_catalog()
-        )
-        names = [s["function"]["name"] for s in schemas]
-        assert PROPOSE_FLOW_TOOL_NAME in names
-        assert "ask_structured_question" in names
-        assert "confirm_requirements" in names
