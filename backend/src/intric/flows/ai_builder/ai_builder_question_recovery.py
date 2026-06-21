@@ -52,7 +52,7 @@ from intric.flows.ai_builder.ai_builder_tool_turn_persistence import (
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    active_submission_tool_name,
+    PROPOSE_FLOW_TOOL_NAME,
     build_discovery_complete_tool_schemas,
     parse_structured_question,
 )
@@ -223,9 +223,7 @@ async def _stream_non_question_continuation(
     request: StructuredQuestionRecoveryRequest,
     original_question_id: str | None,
 ) -> AsyncGenerator[QuestionRecoveryItem, None]:
-    submission_tool_name = active_submission_tool_name(
-        is_edit_mode=request.flow is not None
-    )
+    submission_tool_name = PROPOSE_FLOW_TOOL_NAME
     filtered_tool_schemas = [
         schema
         for schema in request.tool_schemas

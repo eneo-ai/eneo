@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
@@ -33,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
@@ -117,8 +117,9 @@ class TestBuildSystemPrompt:
     def test_basic_prompt_contains_role(self) -> None:
         prompt = build_system_prompt()
         assert "expert" in prompt.lower()
-        assert OUTLINE_FLOW_TOOL_NAME in prompt
-        assert "propose_flow" not in prompt
+        assert PROPOSE_FLOW_TOOL_NAME in prompt
+        assert "outline_flow" not in prompt
+        assert "edit_flow" not in prompt
 
     def test_prompt_contains_knowledge_pack_sections(self) -> None:
         # Discovery phase (no confirmed requirements) — core sections only
@@ -127,7 +128,7 @@ class TestBuildSystemPrompt:
         assert "Instruktioner vs Underlag" not in prompt
 
         # Confirmed requirements still use the compact server-state prompt;
-        # final proposal has its own task-specific outline_flow prompt.
+        # final proposal has its own task-specific propose_flow prompt.
         prompt_confirmed = build_system_prompt(
             confirmed_requirements=_requirements(),
         )
@@ -184,7 +185,7 @@ class TestBuildSystemPrompt:
 
     def test_create_mode_prompt_contains_semantic_flow_contract(self) -> None:
         prompt = build_system_prompt()
-        assert "outline_flow" in prompt
+        assert "propose_flow" in prompt
         assert "backend derives step topology" in prompt
         assert "do not emit input_source in create mode" in prompt
         assert '"input_source":' not in prompt
@@ -253,7 +254,7 @@ class TestBuildSystemPrompt:
             is_edit_mode=True,
         )
 
-        assert "edit_flow" in prompt
+        assert "propose_flow" in prompt
         assert "create_flow" not in prompt
 
     def test_prompt_keeps_architecture_commit_server_derived(self) -> None:
@@ -826,7 +827,7 @@ class TestBuildClarificationHints:
         assert "form_fields" in hints
         assert "ett textfält per rubrik" in hints
 
-    def test_create_mode_hints_reference_outline_flow_instead_of_legacy_submission_tool(
+    def test_create_mode_hints_reference_single_propose_flow_submission_tool(
         self,
     ) -> None:
         hints = build_clarification_hints(
@@ -835,8 +836,9 @@ class TestBuildClarificationHints:
         )
 
         assert hints is not None
-        assert OUTLINE_FLOW_TOOL_NAME in hints
-        assert "propose_flow" not in hints
+        assert PROPOSE_FLOW_TOOL_NAME in hints
+        assert "outline_flow" not in hints
+        assert "edit_flow" not in hints
 
     def test_pdf_scope_hint_uses_v2_ask_question_vocabulary(self) -> None:
         hints = build_clarification_hints(
@@ -1202,7 +1204,7 @@ class TestTrimConversation:
                     {
                         "id": "call_1",
                         "type": "function",
-                        "function": {"name": "outline_flow", "arguments": "{}"},
+                        "function": {"name": "propose_flow", "arguments": "{}"},
                     }
                 ],
             },
@@ -1232,7 +1234,7 @@ class TestTrimConversation:
                     {
                         "id": "call_x",
                         "type": "function",
-                        "function": {"name": "outline_flow", "arguments": "{}"},
+                        "function": {"name": "propose_flow", "arguments": "{}"},
                     }
                 ],
             },
@@ -1268,7 +1270,7 @@ class TestTrimConversation:
                     {
                         "id": "call_latest",
                         "type": "function",
-                        "function": {"name": "outline_flow", "arguments": "{}"},
+                        "function": {"name": "propose_flow", "arguments": "{}"},
                     }
                 ],
             },

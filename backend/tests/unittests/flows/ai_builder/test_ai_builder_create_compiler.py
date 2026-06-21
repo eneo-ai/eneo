@@ -58,6 +58,7 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
     extract_runtime_input_field_hints,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.ai_builder.pattern_registry import (
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
@@ -1161,7 +1162,9 @@ def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
 
 
 def test_outline_flow_schema_exposes_review_mode_on_steps() -> None:
-    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
+    schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
+    )
     parameters = cast(dict[str, object], schema["function"])["parameters"]
     properties = cast(dict[str, object], parameters)["properties"]
     steps = cast(dict[str, object], cast(dict[str, object], properties)["steps"])
@@ -2042,8 +2045,10 @@ def test_canonicalize_create_draft_resources_resolves_names_to_refs() -> None:
 
 
 def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
-    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
-    assert schema["function"]["name"] == "outline_flow"
+    schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
+    )
+    assert schema["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
     ]
@@ -2060,7 +2065,9 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
 
 
 def test_outline_flow_schema_uses_flow_derived_enums() -> None:
-    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
+    schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
+    )
     parameters = schema["function"]["parameters"]
     properties = parameters["properties"]
     step_props = properties["steps"]["items"]["properties"]
@@ -2086,6 +2093,7 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_for_small_catalog() -> Non
         ]
     )
     schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
@@ -2351,6 +2359,7 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
         available_kbs=[_kb_resource("kb-1", "Risk KB")],
     )
     schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
@@ -2362,7 +2371,9 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
 
 
 def test_outline_flow_schema_form_field_enum_matches_builder_values() -> None:
-    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
+    schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
+    )
     parameters = cast(dict[str, object], schema["function"])["parameters"]
     properties = cast(dict[str, object], parameters)["properties"]
     input_fields = cast(dict[str, object], properties["input_fields"])
@@ -2384,6 +2395,7 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() ->
         ]
     )
     schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
@@ -2405,6 +2417,7 @@ def test_outline_flow_schema_omits_mcp_ref_enums_for_large_catalog() -> None:
         ]
     )
     schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
@@ -2429,6 +2442,7 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_when_tool_catalog_is_large
         ]
     )
     schema = build_outline_flow_tool_schema(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][

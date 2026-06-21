@@ -117,6 +117,7 @@ def _empty_repair_reasons() -> list[ProposalRepairReason]:
 class ProposalTurnTelemetry:
     request_id: str
     model: str
+    target_kind: TargetKind
     token_usages: list[CompletionTokenUsage] = field(
         default_factory=_empty_token_usages
     )
@@ -200,6 +201,7 @@ class ProposalTurnTelemetry:
             parse_repair_attempts=0,
             architecture_commit_populated=False,
             proposal_first_attempt_tool=self.proposal_first_attempt_tool,
+            proposal_target_kind=self.target_kind.value,
             proposal_first_attempt_success=self.proposal_first_attempt_success,
             proposal_first_attempt_failure_kind=(
                 self.proposal_first_attempt_failure_kind

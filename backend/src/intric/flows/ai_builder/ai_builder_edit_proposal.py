@@ -42,8 +42,8 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
-EDIT_FLOW_FORCED_TOOL_PROMPT = (
-    "Return one valid edit_flow tool call that keeps the flow coherent. "
+PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT = (
+    "Return one valid propose_flow tool call that keeps the flow coherent. "
     "Do not answer with prose."
 )
 
@@ -63,16 +63,16 @@ async def process_edit_arguments(
 ) -> ToolProcessingResult:
     if flow is None:
         return ToolProcessingResult(
-            feedback="edit_flow requires an existing flow context.",
+            feedback="propose_flow requires an existing flow context.",
             failure_kind="validation",
         )
 
     try:
         submission = OrderedEditSubmission.model_validate(arguments)
     except Exception as exc:
-        logger.warning("Failed to parse edit_flow arguments: %s", exc)
+        logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
         return ToolProcessingResult(
-            feedback=f"Invalid edit_flow arguments: {exc}",
+            feedback=f"Invalid propose_flow arguments: {exc}",
             failure_kind="parse",
         )
     valid_step_refs = [f"existing_step_{step.step_order}" for step in flow.steps]

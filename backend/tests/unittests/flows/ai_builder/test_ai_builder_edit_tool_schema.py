@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
-    EDIT_FLOW_TOOL_NAME,
     build_edit_flow_tool_schema,
     build_edit_mode_tool_schemas,
 )
@@ -20,6 +19,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowMcpPolicy
 
@@ -84,9 +84,11 @@ def _add_step_payload_schema(schema):
 class TestBuildEditFlowToolSchema:
     def test_schema_has_correct_name(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1)], resource_catalog=_empty_catalog()
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
-        assert schema["function"]["name"] == EDIT_FLOW_TOOL_NAME
+        assert schema["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
         assert "complete ordered step list" in schema["function"]["description"]
         assert "removed_existing_step_refs" in schema["function"]["description"]
 
@@ -94,6 +96,7 @@ class TestBuildEditFlowToolSchema:
         schema = build_edit_flow_tool_schema(
             [_make_step(1), _make_step(2)],
             resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
 
         params = schema["function"]["parameters"]
@@ -115,7 +118,9 @@ class TestBuildEditFlowToolSchema:
 
     def test_schema_exposes_direct_flow_metadata_fields_not_metadata_patch(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1)], resource_catalog=_empty_catalog()
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
 
         properties = schema["function"]["parameters"]["properties"]
@@ -125,7 +130,11 @@ class TestBuildEditFlowToolSchema:
 
     def test_existing_step_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
-        schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
+        schema = build_edit_flow_tool_schema(
+            steps,
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
 
         existing_ref = _modify_step_schema(schema)["properties"]["existing_step_ref"]
         assert existing_ref["enum"] == [
@@ -136,7 +145,11 @@ class TestBuildEditFlowToolSchema:
 
     def test_removed_existing_step_refs_match_valid_refs(self):
         steps = [_make_step(1), _make_step(2)]
-        schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
+        schema = build_edit_flow_tool_schema(
+            steps,
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
 
         removed_refs = schema["function"]["parameters"]["properties"][
             "removed_existing_step_refs"
@@ -165,7 +178,11 @@ class TestBuildEditFlowToolSchema:
                 },
             ]
         )
-        schema = build_edit_flow_tool_schema([_make_step(1)], resource_catalog=catalog)
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
 
         add_payload = _add_step_payload_schema(schema)
         model_ref = add_payload["properties"]["model_ref"]
@@ -185,7 +202,11 @@ class TestBuildEditFlowToolSchema:
                 for i in range(20)
             ]
         )
-        schema = build_edit_flow_tool_schema([_make_step(1)], resource_catalog=catalog)
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
 
         add_payload = _add_step_payload_schema(schema)
         model_ref = add_payload["properties"]["model_ref"]
@@ -193,7 +214,9 @@ class TestBuildEditFlowToolSchema:
 
     def test_step_kind_variants_are_add_and_modify(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1)], resource_catalog=_empty_catalog()
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
         variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
             "oneOf"
@@ -205,7 +228,9 @@ class TestBuildEditFlowToolSchema:
 
     def test_form_fields_schema_teaches_complete_state_edits(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1)], resource_catalog=_empty_catalog()
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
 
         form_fields = schema["function"]["parameters"]["properties"]["form_fields"]
@@ -238,7 +263,9 @@ class TestBuildEditFlowToolSchema:
 
     def test_add_payload_uses_shared_new_step_authoring_shape(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1)], resource_catalog=_empty_catalog()
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
 
         add_payload = _add_step_payload_schema(schema)
@@ -275,6 +302,7 @@ class TestBuildEditFlowToolSchema:
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
 
         add_payload = _add_step_payload_schema(schema)
@@ -305,6 +333,7 @@ class TestBuildEditFlowToolSchema:
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
 
         add_payload = _add_step_payload_schema(schema)
@@ -314,7 +343,9 @@ class TestBuildEditFlowToolSchema:
 
     def test_modify_step_schema_exposes_typed_previous_field_refs(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1), _make_step(2)], resource_catalog=_empty_catalog()
+            [_make_step(1), _make_step(2)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
         modify_step = _modify_step_schema(schema)
 
@@ -325,7 +356,9 @@ class TestBuildEditFlowToolSchema:
 
     def test_modify_step_schema_uses_generated_flow_schema_values(self):
         schema = build_edit_flow_tool_schema(
-            [_make_step(1), _make_step(2)], resource_catalog=_empty_catalog()
+            [_make_step(1), _make_step(2)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
         props = _modify_step_schema(schema)["properties"]
 
@@ -350,6 +383,6 @@ class TestBuildEditModeToolSchemas:
             [_make_step(1)], resource_catalog=_empty_catalog()
         )
         names = [s["function"]["name"] for s in schemas]
-        assert EDIT_FLOW_TOOL_NAME in names
+        assert PROPOSE_FLOW_TOOL_NAME in names
         assert "ask_structured_question" in names
         assert "confirm_requirements" in names

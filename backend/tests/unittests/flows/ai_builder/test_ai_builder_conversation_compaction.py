@@ -74,7 +74,7 @@ def test_compaction_keeps_latest_tool_trace_pair() -> None:
             _msg(
                 "assistant",
                 content="plan",
-                tool_calls=[{"id": "call-1", "name": "outline_flow", "arguments": {}}],
+                tool_calls=[{"id": "call-1", "name": "propose_flow", "arguments": {}}],
             ),
             _msg("tool", content="plan summary", tool_call_id="call-1"),
         ]
@@ -96,7 +96,7 @@ def test_compaction_preserves_tool_trace_atomically_after_final_slice() -> None:
         _msg(
             "assistant",
             content="plan",
-            tool_calls=[{"id": "call-42", "name": "outline_flow", "arguments": {}}],
+            tool_calls=[{"id": "call-42", "name": "propose_flow", "arguments": {}}],
         ),
     )
     conversation.insert(11, _msg("tool", content="summary", tool_call_id="call-42"))

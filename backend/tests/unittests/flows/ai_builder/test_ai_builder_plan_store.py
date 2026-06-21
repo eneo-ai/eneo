@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderEditApproval,
@@ -36,6 +35,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
@@ -175,7 +175,7 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
     ]
 
 
-def test_append_plan_messages_uses_active_submission_tool_name() -> None:
+def test_append_plan_messages_uses_single_active_submission_tool_name() -> None:
     conversation: list[ConversationMessage] = []
     spec = FlowDraftSpecCore(
         flow_name="Kommunärende",
@@ -193,14 +193,14 @@ def test_append_plan_messages_uses_active_submission_tool_name() -> None:
         conversation=conversation,
         assistant_content="Här är planen.",
         tool_call_id="call_create",
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={"plan_rationale": "Struktur först."},
         spec=spec,
         assumptions=["Antagande"],
     )
 
     assert conversation[0].tool_calls is not None
-    assert conversation[0].tool_calls[0]["name"] == OUTLINE_FLOW_TOOL_NAME
+    assert conversation[0].tool_calls[0]["name"] == PROPOSE_FLOW_TOOL_NAME
 
 
 @asynccontextmanager
@@ -293,7 +293,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
         new_messages_start=0,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={},
         compiled=_compiled_proposal(spec=spec),
     )
@@ -321,7 +321,7 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
         new_messages_start=0,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={},
         compiled=_compiled_proposal(resource_bindings=(binding,)),
     )

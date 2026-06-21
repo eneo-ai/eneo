@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     FlowBuilderEditApproval,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -153,6 +154,7 @@ class ToolRetryInvocation:
 @dataclass(frozen=True)
 class ToolRetryConfig:
     target_tool_name: str
+    target_kind: TargetKind
     forced_tool_prompt: str
     process_tool_invocation: Callable[
         [ToolRetryInvocation], Awaitable[ToolProcessingResult]

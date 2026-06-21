@@ -101,7 +101,7 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
 
 _HEADER = "# Outline-flow-kompilering"
 _LEAD = (
-    "I create-läge beskriver modellen bara avsikten i `outline_flow`. "
+    "I create-läge beskriver modellen bara avsikten i `propose_flow`. "
     "Backend kompilerar outline till kanonisk flödesspecifikation."
 )
 

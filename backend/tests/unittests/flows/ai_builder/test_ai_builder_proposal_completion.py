@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_domain_models import TargetKind
 from intric.flows.ai_builder.ai_builder_proposal_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 
 def _make_response_with_text(
@@ -51,7 +52,7 @@ async def test_call_proposal_completion_strips_planner_response_format_kwargs() 
         litellm_client=litellm_client,
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={
                 "response_format": {"type": "json_object"},
@@ -81,7 +82,7 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
         litellm_client=litellm_client,
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={"drop_params": False},
             max_output_tokens=1024,
@@ -102,7 +103,7 @@ async def test_call_proposal_completion_passes_string_tool_choice() -> None:
         litellm_client=litellm_client,
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             max_output_tokens=1024,
@@ -125,7 +126,7 @@ async def test_call_proposal_completion_ignores_malformed_usage_shape() -> None:
         litellm_client=litellm_client,
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             max_output_tokens=1024,
@@ -147,7 +148,7 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
                         {
                             "id": "call_outline",
                             "function": {
-                                "name": OUTLINE_FLOW_TOOL_NAME,
+                                "name": PROPOSE_FLOW_TOOL_NAME,
                                 "arguments": '{"flow_name":"Test"}',
                             },
                         }
@@ -163,7 +164,7 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
         litellm_client=litellm_client,
         request=ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             max_output_tokens=1024,
@@ -173,7 +174,7 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
 
     tool_call = result.choices[0].message.tool_calls[0]
     assert tool_call.id == "call_outline"
-    assert tool_call.function.name == OUTLINE_FLOW_TOOL_NAME
+    assert tool_call.function.name == PROPOSE_FLOW_TOOL_NAME
     assert tool_call.function.arguments == '{"flow_name":"Test"}'
 
 
@@ -189,6 +190,7 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-non-repair",
         model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
     )
     completion = make_usage_tracked_proposal_completion(
         litellm_client=litellm_client,
@@ -198,7 +200,7 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
     result = await completion(
         ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Build a flow"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             max_output_tokens=1024,
@@ -227,6 +229,7 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-repair",
         model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
     )
     completion = make_usage_tracked_proposal_completion(
         litellm_client=litellm_client,
@@ -236,7 +239,7 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
     result = await completion(
         ProposalCompletionRequest(
             messages=[{"role": "user", "content": "Repair the proposal"}],
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             max_output_tokens=1024,

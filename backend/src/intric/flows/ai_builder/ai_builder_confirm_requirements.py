@@ -15,7 +15,10 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     DiscoveryRuntimeResult,
     build_discovery_runtime_result,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
@@ -77,6 +80,7 @@ class ConfirmRequirementsRetryConfigRequest:
     tenant_id: UUID
     litellm_model: str
     litellm_kwargs: dict[str, Any]
+    target_kind: TargetKind
 
 
 async def process_confirm_requirements(
@@ -203,6 +207,7 @@ def build_confirm_requirements_retry_config(
 
     return ToolRetryConfig(
         target_tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
+        target_kind=request.target_kind,
         forced_tool_prompt=(
             "Return one valid confirm_requirements tool call. Do not answer with prose."
         ),

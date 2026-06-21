@@ -12,9 +12,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
-    OUTLINE_FLOW_TOOL_NAME,
     parse_outline_flow_arguments,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import TargetKind
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     _build_retry_feedback,
@@ -34,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads import (
     expected_root_assumption_strings,
     expected_step_assumption_strings,
@@ -58,7 +59,7 @@ def _bad_tool_response(call_index: int) -> SimpleNamespace:
     tool_call = SimpleNamespace(
         id=f"retry_{call_index}",
         function=SimpleNamespace(
-            name="outline_flow",
+            name=PROPOSE_FLOW_TOOL_NAME,
             arguments=json.dumps(
                 {"flow_name": "T", "plan_rationale": "R", "steps": []}
             ),
@@ -71,7 +72,7 @@ def _bad_tool_response(call_index: int) -> SimpleNamespace:
 def _original_tool_call() -> SimpleNamespace:
     return SimpleNamespace(
         id="orig",
-        function=SimpleNamespace(name="outline_flow", arguments="{}"),
+        function=SimpleNamespace(name=PROPOSE_FLOW_TOOL_NAME, arguments="{}"),
     )
 
 
@@ -88,7 +89,7 @@ def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
     tool_call = SimpleNamespace(
         id="call_1",
         function=SimpleNamespace(
-            name=OUTLINE_FLOW_TOOL_NAME,
+            name=PROPOSE_FLOW_TOOL_NAME,
             arguments='{"flow_name":"Draft"}',
         ),
     )
@@ -101,7 +102,7 @@ def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
 
     assert messages[0] == {"role": "system", "content": "Prompt"}
     assert messages[1]["role"] == "assistant"
-    assert messages[1]["tool_calls"][0]["function"]["name"] == OUTLINE_FLOW_TOOL_NAME
+    assert messages[1]["tool_calls"][0]["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
     assert messages[2] == {
         "role": "tool",
         "tool_call_id": "call_1",
@@ -115,7 +116,7 @@ def test_build_tool_retry_messages_normalizes_oversized_tool_call_ids() -> None:
     tool_call = SimpleNamespace(
         id=legacy_id,
         function=SimpleNamespace(
-            name=OUTLINE_FLOW_TOOL_NAME,
+            name=PROPOSE_FLOW_TOOL_NAME,
             arguments='{"flow_name":"Draft"}',
         ),
     )
@@ -150,7 +151,7 @@ async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
         assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=turn,
@@ -159,12 +160,12 @@ async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=AsyncMock(
             return_value=_tool_response(
-                tool_name="outline_flow",
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
             )
         ),
@@ -197,7 +198,7 @@ async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
         assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=_make_turn(),
@@ -206,12 +207,12 @@ async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=AsyncMock(
             return_value=_tool_response(
-                tool_name="outline_flow",
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
             )
         ),
@@ -247,7 +248,7 @@ async def test_retry_forced_tool_after_text_accepts_diagnostic_json_text_with_st
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
         assistant_text=assistant_text,
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=_make_turn(),
@@ -256,8 +257,8 @@ async def test_retry_forced_tool_after_text_accepts_diagnostic_json_text_with_st
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
@@ -297,7 +298,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
                 "steps": [{"name": "Analyze", "task": "Analyze the input."}],
             }
         ),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=turn,
@@ -306,8 +307,8 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
@@ -343,7 +344,7 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
                 "steps": [],
             }
         ),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=turn,
@@ -352,8 +353,8 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
@@ -375,7 +376,7 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
     turn = _make_turn()
     tool_call = SimpleNamespace(
         id="call_invalid",
-        function=SimpleNamespace(name="outline_flow", arguments="{not json"),
+        function=SimpleNamespace(name=PROPOSE_FLOW_TOOL_NAME, arguments="{not json"),
     )
     response = SimpleNamespace(
         choices=[
@@ -388,7 +389,7 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
         assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=turn,
@@ -397,8 +398,8 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=AsyncMock(return_value=response),
         process_tool_invocation=AsyncMock(),
@@ -422,7 +423,7 @@ async def test_retry_forced_tool_after_text_preserves_information_request_empty_
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
         assistant_text="Vilken modell ska jag använda?",
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         turn=turn,
@@ -431,8 +432,8 @@ async def test_retry_forced_tool_after_text_preserves_information_request_empty_
         available_model_refs=None,
         available_kb_refs=None,
         max_output_tokens=1024,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        forced_tool_prompt="Call propose_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=AsyncMock(),
@@ -449,7 +450,8 @@ def test_max_self_correction_retries_budgets_three_retries() -> None:
 
 def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name="outline_flow",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
         feedback="missing field X",
         failure_kind="validation",
         retry_count=1,
@@ -460,7 +462,8 @@ def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
 
 def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name="outline_flow",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
         feedback="missing field X",
         failure_kind="validation",
         retry_count=2,
@@ -471,12 +474,39 @@ def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -
 
 def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name="outline_flow",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
         feedback="missing field X",
         failure_kind="validation",
         retry_count=3,
     )
     assert feedback.startswith("FINAL CORRECTION ATTEMPT")
+
+
+def test_build_retry_feedback_keeps_create_outline_rules_out_of_edit_mode() -> None:
+    create_feedback = _build_retry_feedback(
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        feedback="duplicate name",
+        failure_kind="validation",
+        failure_codes=frozenset({"duplicate_step_name"}),
+    )
+    edit_feedback = _build_retry_feedback(
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.EDIT,
+        feedback="duplicate name",
+        failure_kind="validation",
+        failure_codes=frozenset({"duplicate_step_name"}),
+    )
+
+    assert (
+        "Every steps[] item must be one complete semantic outline step"
+        in create_feedback
+    )
+    assert "Every steps[] name must be unique case-insensitively" in create_feedback
+    assert "semantic outline step" not in edit_feedback
+    assert "unique case-insensitively" not in edit_feedback
+    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call" in edit_feedback
 
 
 async def _run_repair_capturing(
@@ -517,7 +547,7 @@ async def _run_repair_capturing(
         error_message="original invalid",
         llm_messages=[{"role": "user", "content": "go"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -529,8 +559,9 @@ async def _run_repair_capturing(
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)
@@ -661,7 +692,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         error_message="Structured field nesting depth cannot exceed 3.",
         llm_messages=[{"role": "user", "content": "build flow"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -673,8 +704,9 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)
@@ -715,7 +747,7 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
         ]
     )
     tool_response = _tool_response(
-        tool_name="outline_flow",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Invalid",
             "plan_rationale": "Invalid step reference.",
@@ -743,10 +775,10 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
         request_id="req-repair-feedback",
         conversation=[],
         new_messages_start=0,
-        error_message="Invalid outline_flow draft.",
+        error_message="Invalid propose_flow draft.",
         llm_messages=[{"role": "user", "content": "build flow"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -758,8 +790,9 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)
@@ -784,10 +817,10 @@ async def test_request_self_correction_handles_empty_completion_choices() -> Non
         request_id="req-empty-choices",
         conversation=[],
         new_messages_start=0,
-        error_message="Invalid outline_flow draft.",
+        error_message="Invalid propose_flow draft.",
         llm_messages=[{"role": "user", "content": "build flow"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -799,8 +832,9 @@ async def test_request_self_correction_handles_empty_completion_choices() -> Non
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=AsyncMock(),
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)
@@ -826,7 +860,7 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         ]
     )
     invalid_tool_response = _tool_response(
-        tool_name="outline_flow",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Invalid repaired flow",
             "plan_rationale": "Repair duplicate names.",
@@ -834,7 +868,7 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         },
     )
     valid_tool_response = _tool_response(
-        tool_name="outline_flow",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Valid repaired flow",
             "plan_rationale": "Repair duplicate names.",
@@ -871,10 +905,10 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
-        error_message="Invalid edit_flow draft.",
+        error_message="Invalid propose_flow draft.",
         llm_messages=[{"role": "user", "content": "edit flow"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -886,8 +920,9 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.EDIT,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)
@@ -913,7 +948,7 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         ]
     )
     invalid_tool_response = _tool_response(
-        tool_name="outline_flow",
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         arguments={
             "flow_name": "Invalid repaired flow",
             "plan_rationale": "Still duplicate.",
@@ -950,10 +985,10 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
-        error_message="Invalid edit_flow draft.",
+        error_message="Invalid propose_flow draft.",
         llm_messages=[{"role": "user", "content": "edit flow"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -965,8 +1000,9 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.EDIT,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)
@@ -1016,7 +1052,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         error_message="original invalid",
         llm_messages=[{"role": "user", "content": "go"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -1028,8 +1064,9 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
-        target_tool_name="outline_flow",
-        forced_tool_prompt="Call outline_flow.",
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Call propose_flow.",
         flow=None,
     ):
         events.append(event)

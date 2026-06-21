@@ -10,14 +10,13 @@ import pytest
 from intric.flows.ai_builder import (
     ai_builder_proposal_processor as proposal_processor_module,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_USE_SERVER_PREFIX,
@@ -57,6 +56,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
 )
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
@@ -144,7 +144,7 @@ def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message
 
 def test_self_correction_parse_error_uses_actionable_user_message() -> None:
     event = build_self_correction_error_event(
-        feedback="Invalid edit_flow arguments: operations.0.add_payload.knowledge_refs",
+        feedback="Invalid propose_flow arguments: operations.0.add_payload.knowledge_refs",
         failure_kind="parse",
     )
 
@@ -162,11 +162,12 @@ def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-tracker",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
 
     tracker.record_response(
         _make_response_with_tool_calls(
-            _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {"flow_name": "Initial"}),
+            _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {"flow_name": "Initial"}),
             prompt_tokens=10,
             completion_tokens=2,
             total_tokens=12,
@@ -175,7 +176,7 @@ def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
     )
     tracker.record_response(
         _make_response_with_tool_calls(
-            _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {"flow_name": "Auxiliary"}),
+            _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {"flow_name": "Auxiliary"}),
             prompt_tokens=4,
             completion_tokens=1,
             total_tokens=5,
@@ -184,7 +185,7 @@ def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
     )
     tracker.record_response(
         _make_response_with_tool_calls(
-            _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {"flow_name": "Repaired"}),
+            _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {"flow_name": "Repaired"}),
             prompt_tokens=3,
             completion_tokens=2,
             total_tokens=5,
@@ -262,7 +263,7 @@ async def test_dispatch_known_tool_call_routes_outline_flow_handler() -> None:
     submission = MagicMock(spec=ProposalSubmissionOwner)
     processor = _make_processor(proposal_submission=submission)
     tool_call = MagicMock()
-    tool_call.function.name = OUTLINE_FLOW_TOOL_NAME
+    tool_call.function.name = PROPOSE_FLOW_TOOL_NAME
     ctx = _make_context()
 
     async def _events():
@@ -283,7 +284,7 @@ async def test_dispatch_known_tool_call_routes_outline_flow_handler() -> None:
 async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     processor = _make_processor()
     outline_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Document analysis",
             "plan_rationale": "Analyze the document and produce a summary.",
@@ -336,12 +337,12 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     assert [event["event"] for event in events] == ["plan"]
     assert call_completion.await_args.kwargs["request"].tool_choice == {
         "type": "function",
-        "function": {"name": OUTLINE_FLOW_TOOL_NAME},
+        "function": {"name": PROPOSE_FLOW_TOOL_NAME},
     }
     assert [
         schema["function"]["name"]
         for schema in call_completion.await_args.kwargs["request"].tool_schemas
-    ] == [OUTLINE_FLOW_TOOL_NAME]
+    ] == [PROPOSE_FLOW_TOOL_NAME]
 
 
 @pytest.mark.asyncio
@@ -702,7 +703,7 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> 
 async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
     processor = _make_processor()
     outline_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Time fallback",
             "plan_rationale": "Respond without external tools.",
@@ -856,7 +857,7 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
 async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
     processor = _make_processor()
     tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Simple flow",
             "plan_rationale": "Classify incoming text.",
@@ -929,7 +930,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
     assert planner_telemetry["llm_calls_made"] == 1
     assert planner_telemetry["token_usage_source"] == "provider"
     assert planner_telemetry["token_usage_estimated"] is False
-    assert planner_telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert planner_telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
     assert planner_telemetry["proposal_first_attempt_success"] is True
     assert planner_telemetry["proposal_first_attempt_failure_kind"] is None
     assert planner_telemetry["proposal_repair_invocation_count"] == 0
@@ -943,12 +944,12 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
 async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> None:
     processor = _make_processor()
     failed_tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {"flow_name": "Broken"},
         tool_call_id="call-outline-bad",
     )
     repaired_tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Repaired flow",
             "plan_rationale": "Classify incoming text.",
@@ -1034,7 +1035,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
     assert planner_telemetry["total_tokens"] == 24
     assert planner_telemetry["llm_calls_made"] == 2
     assert planner_telemetry["repair_attempts"] == 1
-    assert planner_telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert planner_telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
     assert planner_telemetry["proposal_first_attempt_success"] is False
     assert planner_telemetry["proposal_first_attempt_failure_kind"] == "parse"
     assert planner_telemetry["proposal_repair_invocation_count"] == 1
@@ -1054,7 +1055,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         tool_call_id="call-unexpected-confirm",
     )
     repaired_tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Recovered flow",
             "plan_rationale": "Classify incoming text.",
@@ -1065,7 +1066,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
     processor.litellm_client.acompletion.side_effect = [
         _make_response_with_tool_calls(
             _make_tool_call(
-                OUTLINE_FLOW_TOOL_NAME,
+                PROPOSE_FLOW_TOOL_NAME,
                 {
                     "flow_name": "Unexpected first flow",
                     "plan_rationale": "This should be retried because tool calls were parallel.",
@@ -1138,7 +1139,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
     planner_telemetry = metadata["planner_telemetry"]
     assert planner_telemetry["llm_calls_made"] == 2
     assert planner_telemetry["repair_attempts"] == 1
-    assert planner_telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert planner_telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
     assert planner_telemetry["proposal_first_attempt_success"] is False
     assert (
         planner_telemetry["proposal_first_attempt_failure_kind"]
@@ -1633,7 +1634,7 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
     flow = MagicMock()
     snapshots = {uuid4(): {"name": "Assistant"}}
     tool_call = _make_tool_call(
-        EDIT_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "plan_rationale": "Byt slutformatet.",
             "steps": [],
@@ -1660,7 +1661,7 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
             tool_calls=[tool_call],
             text_content="draft",
             llm_messages=[{"role": "system", "content": "Prompt"}],
-            tool_schemas=[{"function": {"name": EDIT_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={"api_key": "sk-test"},
             available_model_refs={"model_a"},

@@ -13,13 +13,13 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderEditApproval,
     FlowBuilderProposal,
     FlowBuilderProposalContent,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     EditAdvisory,
     FlowEditDiff,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
@@ -29,12 +29,13 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    ToolProcessingResult,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
-from intric.flows.ai_builder.ai_builder_tools import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -164,7 +165,8 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
         "turn": _make_turn(),
         "conversation": [],
         "new_messages_start": 0,
-        "tool_name": OUTLINE_FLOW_TOOL_NAME,
+        "tool_name": PROPOSE_FLOW_TOOL_NAME,
+        "target_kind": TargetKind.CREATE,
         "arguments": {"flow_name": "Test", "steps": []},
         "assistant_content": "Här är mitt förslag:",
         "assistant_metadata": None,
@@ -177,6 +179,7 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
         "usage_tracker": ProposalTurnTelemetry(
             request_id="req-finalize",
             model="openai/gpt-5.4",
+            target_kind=TargetKind.CREATE,
         ),
     }
     defaults.update(overrides)
@@ -195,7 +198,11 @@ def test_finalization_request_is_frozen_without_retry_snapshot_payload() -> None
 @pytest.mark.asyncio
 async def test_finalize_compiled_proposal_records_success_once_when_persisted() -> None:
     finalizer = _make_finalizer()
-    tracker = ProposalTurnTelemetry(request_id="req-success", model="openai/gpt-5.4")
+    tracker = ProposalTurnTelemetry(
+        request_id="req-success",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     captured_metadata: list[dict[str, object] | None] = []
 
     async def store_plan(**kwargs):
@@ -216,7 +223,7 @@ async def test_finalize_compiled_proposal_records_success_once_when_persisted() 
     assert result.event is not None
     assert result.event["event"] == "plan"
     assert tracker.proposal_first_attempt_success is True
-    assert tracker.proposal_first_attempt_tool == OUTLINE_FLOW_TOOL_NAME
+    assert tracker.proposal_first_attempt_tool == PROPOSE_FLOW_TOOL_NAME
     assert captured_metadata[0] is not None
     assert captured_metadata[0]["planner_telemetry"]["proposal_first_attempt_success"]
 
@@ -232,7 +239,11 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
         code="quality_issue",
         message="The plan should be improved before persistence.",
     )
-    tracker = ProposalTurnTelemetry(request_id="req-quality", model="openai/gpt-5.4")
+    tracker = ProposalTurnTelemetry(
+        request_id="req-quality",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     store_plan = AsyncMock(return_value=_stored_plan_result())
 
     with patch(
@@ -254,11 +265,42 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
 
 
 @pytest.mark.asyncio
+async def test_finalize_compiled_proposal_uses_target_kind_for_quality_branch() -> None:
+    finalizer = _make_finalizer()
+    create_quality = MagicMock(
+        return_value=ToolProcessingResult(feedback="create", failure_kind="quality")
+    )
+    edit_quality = MagicMock(
+        return_value=ToolProcessingResult(feedback="edit", failure_kind="quality")
+    )
+
+    with (
+        patch.object(finalizer, "_create_quality_result", new=create_quality),
+        patch.object(finalizer, "_edit_quality_result", new=edit_quality),
+    ):
+        result = await finalizer.finalize_compiled_proposal(
+            _make_request(
+                target_kind=TargetKind.EDIT,
+                compiled=_compiled_edit_proposal(compiled_spec=_make_flow_spec()),
+                flow=MagicMock(),
+            )
+        )
+
+    assert result.feedback == "edit"
+    create_quality.assert_not_called()
+    edit_quality.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_finalize_compiled_proposal_accepts_retry_metadata_without_recorder() -> (
     None
 ):
     finalizer = _make_finalizer()
-    tracker = ProposalTurnTelemetry(request_id="req-retry", model="openai/gpt-5.4")
+    tracker = ProposalTurnTelemetry(
+        request_id="req-retry",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     retry_metadata = {"planner_telemetry": {"request_id": "req-retry"}}
     captured_metadata: list[dict[str, object] | None] = []
 
@@ -386,7 +428,7 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
     ):
         result = await finalizer.finalize_compiled_proposal(
             _make_request(
-                tool_name=EDIT_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 compiled=_compiled_edit_proposal(compiled_spec=original_spec),
                 flow=SimpleNamespace(
                     description="Old generated description.",

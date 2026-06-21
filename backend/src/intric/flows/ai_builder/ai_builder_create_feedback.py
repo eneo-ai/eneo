@@ -7,7 +7,7 @@ from intric.flows.ai_builder.ai_builder_feedback_formatting import (
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
 # Raw critic remediations stay mechanics-oriented for edit/compiled contexts.
-# Create mode translates them here because outline_flow only accepts semantic steps.
+# Create mode translates them here because propose_flow only accepts semantic create steps.
 CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "runtime_metadata_requires_form_fields": (
         "Beskriv vilka extra inmatningsfält användaren ska fylla i vid körning och vilka semantiska steg som behöver värdena."

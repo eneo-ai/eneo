@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntim
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_events import (
     build_text_event,
@@ -45,8 +46,6 @@ from intric.flows.ai_builder.ai_builder_proposal_repair_runtime import (
     run_tool_self_correction,
 )
 from intric.flows.ai_builder.ai_builder_proposal_submission import (
-    EDIT_FLOW_TOOL_NAME,
-    OUTLINE_FLOW_TOOL_NAME,
     ProposalSubmissionOwner,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -69,6 +68,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -259,7 +259,7 @@ class AIBuilderProposalProcessor:
                 ctx=ctx,
                 tool_call=tool_call,
             )
-        if tool_name == OUTLINE_FLOW_TOOL_NAME:
+        if tool_name == PROPOSE_FLOW_TOOL_NAME:
             return self._proposal_submission.dispatch_submission_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
@@ -267,10 +267,6 @@ class AIBuilderProposalProcessor:
             return self._handle_confirm_requirements(
                 ctx=ctx,
                 tool_call=tool_call,
-            )
-        if tool_name == EDIT_FLOW_TOOL_NAME:
-            return self._proposal_submission.dispatch_submission_tool_call(
-                ctx=ctx, tool_call=tool_call
             )
         return None
 
@@ -392,6 +388,9 @@ class AIBuilderProposalProcessor:
                 tenant_id=self.user.tenant_id,
                 litellm_model=ctx.litellm_model,
                 litellm_kwargs=ctx.litellm_kwargs,
+                target_kind=TargetKind.EDIT
+                if ctx.flow is not None
+                else TargetKind.CREATE,
             )
         )
         try:

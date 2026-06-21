@@ -61,6 +61,7 @@ def build_planner_telemetry(
     parse_repair_attempts: int = 0,
     architecture_commit_populated: bool = False,
     proposal_first_attempt_tool: str | None = None,
+    proposal_target_kind: str | None = None,
     proposal_first_attempt_success: bool | None = None,
     proposal_first_attempt_failure_kind: str | None = None,
     proposal_repair_invocation_count: int | None = None,
@@ -95,6 +96,7 @@ def build_planner_telemetry(
         telemetry["proposal_first_attempt_tool"] = _safe_str(
             proposal_first_attempt_tool
         )
+        telemetry["proposal_target_kind"] = _safe_str(proposal_target_kind)
         telemetry["proposal_first_attempt_success"] = proposal_first_attempt_success
         telemetry["proposal_first_attempt_failure_kind"] = _safe_str(
             proposal_first_attempt_failure_kind

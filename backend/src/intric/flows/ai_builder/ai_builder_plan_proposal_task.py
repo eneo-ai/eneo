@@ -28,7 +28,7 @@ from intric.flows.ai_builder.ai_builder_result_contract import (
     derive_result_contract,
     render_result_contract_prompt_block,
 )
-from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.planning_state import PlanningState
 
 
@@ -44,7 +44,7 @@ def build_plan_proposal_system_prompt(
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
 ) -> str:
-    submission_tool = active_submission_tool_name(is_edit_mode=is_edit_mode)
+    submission_tool = PROPOSE_FLOW_TOOL_NAME
     selected_mcp_server_refs = mcp_selected_server_refs_from_values(
         set(mcp_selection_values or ())
     )
@@ -54,11 +54,11 @@ def build_plan_proposal_system_prompt(
     )
     create_mode_rules = (
         [
-            "- In create mode, describe semantic flow intent in outline_flow; do not choose Flow mechanics.",
+            "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
             "- Use input_fields only for secondary inmatningsfält/input variables the user fills in at runtime.",
             "- Do not add an input_field for the primary text, document, file, or audio material being processed; the backend supplies that from the committed architecture.",
             "- Runtime metadata policy is enforced by the compiler; leave input_fields empty unless resolved slots or confirmed requirements clearly ask for runtime metadata.",
-            "- For committed audio input, the backend inserts the first transcription/upload step; start outline_flow steps with the analysis, structuring, or synthesis work after transcription unless the user explicitly asks to review, approve, or edit the transcript itself.",
+            "- For committed audio input, the backend inserts the first transcription/upload step; start propose_flow steps with the analysis, structuring, or synthesis work after transcription unless the user explicitly asks to review, approve, or edit the transcript itself.",
             "- For that transcript-review case, include the leading transcription step with review_mode; the backend attaches the checkpoint to its inserted transcription/upload step.",
             "- When the user explicitly asks to review, approve, or edit a step output before later steps continue, set that step's review_mode. Do not model human review as a separate AI step or as instruction prose.",
             "- The backend compiles step topology, underlag/input_bindings, runtime uploads, step refs, output modes, and document delivery.",

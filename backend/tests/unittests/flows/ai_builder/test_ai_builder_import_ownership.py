@@ -145,7 +145,6 @@ PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
 )
 PROPOSAL_SUBMISSION_METHODS = frozenset(
     {
-        "active_submission_tool_name",
         "active_submission_tool_schemas",
         "_outline_flow_retry_config",
         "_edit_flow_retry_config",
@@ -164,18 +163,10 @@ PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
         "run_active_submission_attempt",
     }
 )
-SUBMISSION_TOOL_NAME_EXPRESSIONS = frozenset(
-    {
-        "edit_flow",
-        "outline_flow",
-        "EDIT_FLOW_TOOL_NAME",
-        "OUTLINE_FLOW_TOOL_NAME",
-    }
+LEGACY_SUBMISSION_TOOL_CONSTANTS = frozenset(
+    {"EDIT_FLOW_TOOL_NAME", "OUTLINE_FLOW_TOOL_NAME"}
 )
-SUBMISSION_TOOL_SELECTION_VALUES = frozenset({"edit_flow", "outline_flow"})
-ACTIVE_SUBMISSION_TOOL_NAME_OWNER = Path(
-    "src/intric/flows/ai_builder/ai_builder_tools.py"
-)
+PROPOSE_FLOW_TOOL_NAME_OWNER = Path("src/intric/flows/ai_builder/ai_builder_tools.py")
 PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES = frozenset(
     {
         "arguments",
@@ -829,46 +820,16 @@ def test_proposal_completion_dependency_direction_stays_leaf_owned() -> None:
     assert violations == []
 
 
-def _submission_tool_name_value(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        if node.value in SUBMISSION_TOOL_SELECTION_VALUES:
-            return node.value
-        return None
-    if isinstance(node, ast.Name):
-        if node.id == "EDIT_FLOW_TOOL_NAME":
-            return "edit_flow"
-        if node.id == "OUTLINE_FLOW_TOOL_NAME":
-            return "outline_flow"
-    return None
+def _assignment_target_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return [target.id for target in targets if isinstance(target, ast.Name)]
 
 
-def _selection_assignment_values(statements: list[ast.stmt]) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for statement in statements:
-        targets: list[ast.AST]
-        value: ast.AST
-        if isinstance(statement, ast.Assign):
-            targets = list(statement.targets)
-            value = statement.value
-        elif isinstance(statement, ast.AnnAssign):
-            targets = [statement.target]
-            value = statement.value
-        else:
-            continue
-        tool_name = _submission_tool_name_value(value)
-        if tool_name is None:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name):
-                values[target.id] = tool_name
-    return values
-
-
-def test_active_submission_tool_name_has_single_owner() -> None:
+def test_propose_flow_tool_name_has_single_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     src_root = backend_root / Path("src/intric/flows/ai_builder")
     violations: list[str] = []
-    helper_definitions: list[str] = []
+    owner_definitions: list[str] = []
 
     for path in src_root.rglob("*.py"):
         rel_path = path.relative_to(backend_root)
@@ -881,49 +842,29 @@ def test_active_submission_tool_name_has_single_owner() -> None:
                 "active_submission_tool_name",
                 "_active_submission_tool_name",
             }:
-                helper_definitions.append(f"{rel_path}:{node.lineno}:{node.name}")
-                if rel_path != ACTIVE_SUBMISSION_TOOL_NAME_OWNER:
-                    violations.append(f"{rel_path}:{node.lineno} defines {node.name}")
+                violations.append(f"{rel_path}:{node.lineno} defines {node.name}")
 
-            if rel_path == ACTIVE_SUBMISSION_TOOL_NAME_OWNER:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue
 
-            if isinstance(node, ast.IfExp):
-                selected = {
-                    value
-                    for value in (
-                        _submission_tool_name_value(node.body),
-                        _submission_tool_name_value(node.orelse),
-                    )
-                    if value is not None
-                }
-                if selected == SUBMISSION_TOOL_SELECTION_VALUES:
-                    violations.append(
-                        f"{rel_path}:{node.lineno} selects active submission tool "
-                        "with a ternary"
-                    )
+            target_names = set(_assignment_target_names(node))
+            for legacy_name in sorted(target_names & LEGACY_SUBMISSION_TOOL_CONSTANTS):
+                violations.append(f"{rel_path}:{node.lineno} defines {legacy_name}")
 
-            if isinstance(node, ast.If):
-                body_values = _selection_assignment_values(node.body)
-                else_values = _selection_assignment_values(node.orelse)
-                for target_name, body_value in body_values.items():
-                    else_value = else_values.get(target_name)
-                    if {body_value, else_value} == SUBMISSION_TOOL_SELECTION_VALUES:
-                        violations.append(
-                            f"{rel_path}:{node.lineno} selects active submission "
-                            f"tool in if/else assignment to {target_name}"
-                        )
+            if "PROPOSE_FLOW_TOOL_NAME" not in target_names:
+                continue
 
-    owner_definitions = [
-        definition
-        for definition in helper_definitions
-        if definition.startswith(f"{ACTIVE_SUBMISSION_TOOL_NAME_OWNER}:")
-        and definition.endswith(":active_submission_tool_name")
-    ]
+            definition = f"{rel_path}:{node.lineno}:PROPOSE_FLOW_TOOL_NAME"
+            owner_definitions.append(definition)
+            if rel_path != PROPOSE_FLOW_TOOL_NAME_OWNER:
+                violations.append(
+                    f"{rel_path}:{node.lineno} defines PROPOSE_FLOW_TOOL_NAME"
+                )
+
     if len(owner_definitions) != 1:
         violations.append(
-            "active_submission_tool_name must have exactly one owner definition; "
-            f"found {helper_definitions}"
+            "PROPOSE_FLOW_TOOL_NAME must have exactly one owner definition; "
+            f"found {owner_definitions}"
         )
 
     assert violations == []

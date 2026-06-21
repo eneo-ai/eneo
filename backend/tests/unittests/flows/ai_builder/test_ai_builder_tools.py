@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-from typing import get_args
-
 import pytest
 
 from intric.flows.ai_builder import ai_builder_tools
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    OUTLINE_FLOW_TOOL_NAME,
-    build_outline_flow_tool_schema,
-)
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -19,10 +12,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    ActiveSubmissionToolName,
-    active_submission_tool_name,
+    PROPOSE_FLOW_TOOL_NAME,
     build_all_tool_schemas,
     build_ask_structured_question_tool_schema,
+    build_propose_flow_tool_schema,
     extract_assumptions,
     extract_plan_rationale,
     extract_reasoning,
@@ -39,30 +32,29 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
 
 
 class TestBuildToolSchema:
-    def test_active_submission_tool_name_uses_create_and_edit_tool_constants(
-        self,
-    ) -> None:
-        assert active_submission_tool_name(is_edit_mode=False) == OUTLINE_FLOW_TOOL_NAME
-        assert active_submission_tool_name(is_edit_mode=True) == EDIT_FLOW_TOOL_NAME
-        assert set(get_args(ActiveSubmissionToolName)) == {
-            OUTLINE_FLOW_TOOL_NAME,
-            EDIT_FLOW_TOOL_NAME,
-        }
-        assert "active_submission_tool_name" in ai_builder_tools.__all__
+    def test_single_active_submission_tool_name_is_canonical(self) -> None:
+        assert PROPOSE_FLOW_TOOL_NAME == "propose_flow"
+        assert "PROPOSE_FLOW_TOOL_NAME" in ai_builder_tools.__all__
+        assert "active_submission_tool_name" not in ai_builder_tools.__all__
+        assert "ActiveSubmissionToolName" not in ai_builder_tools.__all__
+        assert "OUTLINE_FLOW_TOOL_NAME" not in ai_builder_tools.__all__
+        assert "EDIT_FLOW_TOOL_NAME" not in ai_builder_tools.__all__
 
     def test_all_tools_expose_only_active_create_contract(self) -> None:
         names = {schema["function"]["name"] for schema in build_all_tool_schemas()}
 
         assert names == {
-            OUTLINE_FLOW_TOOL_NAME,
+            PROPOSE_FLOW_TOOL_NAME,
             ASK_STRUCTURED_QUESTION_TOOL_NAME,
             CONFIRM_REQUIREMENTS_TOOL_NAME,
         }
         assert "create_flow" not in names
+        assert "outline_flow" not in names
+        assert "edit_flow" not in names
 
     def test_outline_schema_hides_backend_owned_mechanics(self) -> None:
-        schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
-        assert schema["function"]["name"] == OUTLINE_FLOW_TOOL_NAME
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        assert schema["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
 
         properties = schema["function"]["parameters"]["properties"]
         step_properties = properties["steps"]["items"]["properties"]

@@ -20,7 +20,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     make_provider_safe_server_tool_call_id,
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
-    OUTLINE_FLOW_FORCED_TOOL_PROMPT,
+    PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
     process_outline_arguments,
     process_scoped_step_revision_if_requested,
     scoped_step_revision_assistant_text,
@@ -32,14 +32,11 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
-    EDIT_FLOW_FORCED_TOOL_PROMPT,
+    PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT,
     process_edit_arguments,
-)
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
-    EDIT_FLOW_TOOL_NAME,
-    build_edit_flow_tool_schema,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
@@ -93,9 +90,8 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
-    OUTLINE_FLOW_TOOL_NAME,
-    active_submission_tool_name,
-    build_outline_flow_tool_schema,
+    PROPOSE_FLOW_TOOL_NAME,
+    build_propose_flow_tool_schema,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -107,7 +103,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 EventBatch = tuple[dict[str, str], ...]
-SUBMISSION_TOOL_NAMES = frozenset({OUTLINE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
 
 
 @dataclass(frozen=True)
@@ -121,7 +116,7 @@ def _forced_submission_response(
     message: ProposalCompletionMessage,
     submission_tool_name: str,
 ) -> ForcedSubmissionResponse | None:
-    if submission_tool_name not in SUBMISSION_TOOL_NAMES:
+    if submission_tool_name != PROPOSE_FLOW_TOOL_NAME:
         return None
 
     tool_calls = tuple(message.tool_calls or ())
@@ -167,15 +162,9 @@ class ProposalSubmissionOwner:
         flow: "Flow | None",
         resource_catalog: AIBuilderResourceCatalog,
     ) -> list[dict[str, Any]]:
-        if flow is None:
-            return [
-                build_outline_flow_tool_schema(
-                    resource_catalog=resource_catalog,
-                )
-            ]
         return [
-            build_edit_flow_tool_schema(
-                list(flow.steps),
+            build_propose_flow_tool_schema(
+                current_steps=None if flow is None else list(flow.steps),
                 resource_catalog=resource_catalog,
             )
         ]
@@ -187,17 +176,17 @@ class ProposalSubmissionOwner:
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None] | None:
         tool_name = tool_call.function.name
-        if tool_name == OUTLINE_FLOW_TOOL_NAME:
+        if tool_name != PROPOSE_FLOW_TOOL_NAME:
+            return None
+        if ctx.flow is None:
             return self._handle_outline_flow_tool_call(ctx=ctx, tool_call=tool_call)
-        if tool_name == EDIT_FLOW_TOOL_NAME:
-            return self._handle_edit_flow_tool_call(ctx=ctx, tool_call=tool_call)
-        return None
+        return self._handle_edit_flow_tool_call(ctx=ctx, tool_call=tool_call)
 
     def contains_submission_tool_call(
         self,
         tool_calls: Sequence[RuntimeToolCall],
     ) -> bool:
-        return any(call.function.name in SUBMISSION_TOOL_NAMES for call in tool_calls)
+        return any(call.function.name == PROPOSE_FLOW_TOOL_NAME for call in tool_calls)
 
     async def run_active_submission_attempt(
         self,
@@ -222,9 +211,8 @@ class ProposalSubmissionOwner:
         prior_plan_for_revision: BuilderPlan | None = None,
         discovery_runtime: DiscoveryRuntimeResult | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
-        submission_tool_name = active_submission_tool_name(
-            is_edit_mode=flow is not None
-        )
+        target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
+        submission_tool_name = PROPOSE_FLOW_TOOL_NAME
         tool_schemas = self._active_submission_tool_schemas(
             flow=flow,
             resource_catalog=resource_catalog,
@@ -232,6 +220,7 @@ class ProposalSubmissionOwner:
         usage_tracker = ProposalTurnTelemetry(
             request_id=request_id,
             model=litellm_model,
+            target_kind=target_kind,
         )
         ctx = ProposalTurnContext(
             turn=turn,
@@ -394,7 +383,8 @@ class ProposalSubmissionOwner:
                 turn=ctx.turn,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
+                target_kind=TargetKind.CREATE,
                 arguments={
                     "plan_rationale": result.compiled_proposal.plan_rationale or "",
                     "revision_kind": "scoped_step_direct",
@@ -442,15 +432,17 @@ class ProposalSubmissionOwner:
                 return result
             return await self._finalize_retry_compiled_proposal(
                 invocation=invocation,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
+                target_kind=TargetKind.CREATE,
                 compiled=result.compiled_proposal,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
             )
 
         return ToolRetryConfig(
-            target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-            forced_tool_prompt=OUTLINE_FLOW_FORCED_TOOL_PROMPT,
+            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=TargetKind.CREATE,
+            forced_tool_prompt=PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
             process_tool_invocation=_process_tool_invocation,
         )
 
@@ -482,15 +474,17 @@ class ProposalSubmissionOwner:
                 return result
             return await self._finalize_retry_compiled_proposal(
                 invocation=invocation,
-                tool_name=EDIT_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
+                target_kind=TargetKind.EDIT,
                 compiled=result.compiled_proposal,
                 request_id=request_id,
                 usage_tracker=usage_tracker,
             )
 
         return ToolRetryConfig(
-            target_tool_name=EDIT_FLOW_TOOL_NAME,
-            forced_tool_prompt=EDIT_FLOW_FORCED_TOOL_PROMPT,
+            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=TargetKind.EDIT,
+            forced_tool_prompt=PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT,
             process_tool_invocation=_process_tool_invocation,
         )
 
@@ -499,6 +493,7 @@ class ProposalSubmissionOwner:
         *,
         invocation: ToolRetryInvocation,
         tool_name: str,
+        target_kind: TargetKind,
         compiled: CompiledProposal,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
@@ -509,6 +504,7 @@ class ProposalSubmissionOwner:
                 conversation=invocation.conversation,
                 new_messages_start=invocation.new_messages_start,
                 tool_name=tool_name,
+                target_kind=target_kind,
                 arguments=invocation.arguments,
                 assistant_content=invocation.assistant_content,
                 assistant_metadata=invocation.assistant_metadata,
@@ -625,20 +621,20 @@ class ProposalSubmissionOwner:
             record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 success=False,
                 failure_kind="parse",
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 reason="parse",
             )
             async for event in run_tool_self_correction(
                 self._build_self_correction_request(
                     ctx=ctx,
-                    error_message=f"Invalid outline_flow arguments: {error}",
+                    error_message=f"Invalid propose_flow arguments: {error}",
                     tool_call=tool_call,
                     retry_config=retry_config,
                 )
@@ -666,7 +662,8 @@ class ProposalSubmissionOwner:
                             turn=ctx.turn,
                             conversation=ctx.conversation,
                             new_messages_start=ctx.new_messages_start,
-                            tool_name=OUTLINE_FLOW_TOOL_NAME,
+                            tool_name=PROPOSE_FLOW_TOOL_NAME,
+                            target_kind=TargetKind.CREATE,
                             arguments=arguments,
                             assistant_content="Här är mitt förslag:",
                             assistant_metadata=ctx.assistant_metadata,
@@ -684,12 +681,12 @@ class ProposalSubmissionOwner:
             record_proposal_architecture_failure(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
             )
             yield build_proposal_architecture_error_event(
                 error,
                 request_id=ctx.request_id,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
             )
             return
         if outline_result.user_message is not None:
@@ -702,21 +699,21 @@ class ProposalSubmissionOwner:
             record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 success=False,
                 failure_kind=proposal_repair_reason,
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 reason=proposal_repair_reason,
             )
             async for event in run_tool_self_correction(
                 self._build_self_correction_request(
                     ctx=ctx,
                     error_message=outline_result.feedback
-                    or "Invalid outline_flow draft.",
+                    or "Invalid propose_flow draft.",
                     tool_call=tool_call,
                     retry_config=retry_config,
                 )
@@ -751,7 +748,7 @@ class ProposalSubmissionOwner:
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
         request_id = usage_tracker.request_id
-        target_tool_name = active_submission_tool_name(is_edit_mode=flow is not None)
+        target_tool_name = PROPOSE_FLOW_TOOL_NAME
         record_proposal_first_attempt(
             usage_tracker,
             request_id=request_id,
@@ -837,20 +834,20 @@ class ProposalSubmissionOwner:
             record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=EDIT_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 success=False,
                 failure_kind="parse",
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=EDIT_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 reason="parse",
             )
             async for event in run_tool_self_correction(
                 self._build_self_correction_request(
                     ctx=ctx,
-                    error_message=f"Invalid edit_flow arguments: {error}",
+                    error_message=f"Invalid propose_flow arguments: {error}",
                     tool_call=tool_call,
                     retry_config=retry_config,
                 )
@@ -877,7 +874,8 @@ class ProposalSubmissionOwner:
                         turn=ctx.turn,
                         conversation=ctx.conversation,
                         new_messages_start=ctx.new_messages_start,
-                        tool_name=EDIT_FLOW_TOOL_NAME,
+                        tool_name=PROPOSE_FLOW_TOOL_NAME,
+                        target_kind=TargetKind.EDIT,
                         arguments=raw_args,
                         assistant_content=ctx.text_content or "",
                         assistant_metadata=ctx.assistant_metadata,
@@ -898,21 +896,21 @@ class ProposalSubmissionOwner:
             record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=EDIT_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 success=False,
                 failure_kind=proposal_repair_reason,
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=EDIT_FLOW_TOOL_NAME,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 reason=proposal_repair_reason,
             )
             async for event in run_tool_self_correction(
                 self._build_self_correction_request(
                     ctx=ctx,
                     error_message=edit_result.feedback
-                    or "Invalid edit_flow arguments.",
+                    or "Invalid propose_flow arguments.",
                     tool_call=tool_call,
                     retry_config=retry_config,
                 )

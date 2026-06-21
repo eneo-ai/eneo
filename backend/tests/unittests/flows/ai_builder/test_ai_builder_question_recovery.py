@@ -13,7 +13,10 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from intric.flows.ai_builder.ai_builder_question_recovery import (
@@ -503,7 +506,11 @@ async def test_handle_structured_question_persists_fallback_text_for_invalid_que
 
 @pytest.mark.asyncio
 async def test_question_recovery_completion_counts_as_repair() -> None:
-    tracker = ProposalTurnTelemetry(request_id="req-question", model="openai/gpt-5.4")
+    tracker = ProposalTurnTelemetry(
+        request_id="req-question",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     litellm_client = SimpleNamespace(
         acompletion=AsyncMock(return_value=_make_response_with_text("Förtydliga."))
     )

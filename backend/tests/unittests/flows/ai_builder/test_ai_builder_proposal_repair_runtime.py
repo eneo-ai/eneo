@@ -10,7 +10,10 @@ import pytest
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_proposal_repair_runtime import (
     ForcedToolAfterTextRequest,
     ProposalSelfCorrectionRequest,
@@ -29,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 
 def _make_turn() -> SessionSendTurn:
@@ -60,7 +64,7 @@ def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNam
 def _original_tool_call() -> SimpleNamespace:
     return SimpleNamespace(
         id="call_original",
-        function=SimpleNamespace(name="outline_flow", arguments="{}"),
+        function=SimpleNamespace(name=PROPOSE_FLOW_TOOL_NAME, arguments="{}"),
     )
 
 
@@ -71,6 +75,7 @@ async def test_forced_tool_runtime_architecture_error_uses_sanitized_event_and_t
     tracker = ProposalTurnTelemetry(
         request_id="req-forced-runtime",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
 
     async def process_invocation(
@@ -85,7 +90,7 @@ async def test_forced_tool_runtime_architecture_error_uses_sanitized_event_and_t
         ForcedToolAfterTextRequest(
             correction_messages=[{"role": "user", "content": "Build"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": "outline_flow"}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             turn=_make_turn(),
@@ -95,14 +100,15 @@ async def test_forced_tool_runtime_architecture_error_uses_sanitized_event_and_t
             available_kb_refs=None,
             max_output_tokens=4096,
             retry_config=ToolRetryConfig(
-                target_tool_name="outline_flow",
-                forced_tool_prompt="Now call outline_flow.",
+                target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+                target_kind=TargetKind.CREATE,
+                forced_tool_prompt="Now call propose_flow.",
                 process_tool_invocation=process_invocation,
             ),
             forced_proposal_temperature=0.3,
             repair_completion=AsyncMock(
                 return_value=_tool_response(
-                    tool_name="outline_flow",
+                    tool_name=PROPOSE_FLOW_TOOL_NAME,
                     arguments={
                         "flow_name": "Broken",
                         "plan_rationale": "R",
@@ -131,6 +137,7 @@ async def test_self_correction_runtime_architecture_error_uses_sanitized_event_a
     tracker = ProposalTurnTelemetry(
         request_id="req-self-correction-runtime",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
 
     async def process_invocation(
@@ -149,7 +156,7 @@ async def test_self_correction_runtime_architecture_error_uses_sanitized_event_a
         error_message="Invalid flow",
         llm_messages=[{"role": "user", "content": "Build"}],
         tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
         available_model_refs=None,
@@ -160,13 +167,14 @@ async def test_self_correction_runtime_architecture_error_uses_sanitized_event_a
         max_self_correction_retries=3,
         repair_completion=AsyncMock(
             return_value=_tool_response(
-                tool_name="outline_flow",
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
                 arguments={"flow_name": "Broken", "plan_rationale": "R", "steps": []},
             )
         ),
         retry_config=ToolRetryConfig(
-            target_tool_name="outline_flow",
-            forced_tool_prompt="Now call outline_flow.",
+            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=TargetKind.CREATE,
+            forced_tool_prompt="Now call propose_flow.",
             process_tool_invocation=process_invocation,
         ),
         forced_proposal_temperature=0.3,

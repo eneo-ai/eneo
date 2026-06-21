@@ -11,11 +11,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     APPLY_TELEMETRY_LOG_KEY,
     APPLY_TELEMETRY_SCHEMA_VERSION,
@@ -33,6 +31,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _FAILURE_KIND_SOURCE_FILES = (
@@ -95,13 +94,14 @@ def test_proposal_turn_telemetry_extends_canonical_planner_payload() -> None:
     telemetry = ProposalTurnTelemetry(
         request_id="req-telemetry",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
     telemetry.record_response(
         _make_response(prompt_tokens=10, completion_tokens=3, total_tokens=13),
         messages=[{"role": "user", "content": "Build"}],
     )
     assert telemetry.record_first_attempt(
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         success=False,
         failure_kind="validation",
     )
@@ -111,7 +111,8 @@ def test_proposal_turn_telemetry_extends_canonical_planner_payload() -> None:
 
     assert payload["request_id"] == "req-telemetry"
     assert payload["total_tokens"] == 13
-    assert payload["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert payload["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
+    assert payload["proposal_target_kind"] == TargetKind.CREATE.value
     assert payload["proposal_first_attempt_success"] is False
     assert payload["proposal_first_attempt_failure_kind"] == "validation"
     assert payload["proposal_repair_invocation_count"] == 1
@@ -122,15 +123,16 @@ def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:
     telemetry = ProposalTurnTelemetry(
         request_id="req-first-write",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
 
     assert telemetry.record_first_attempt(
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         success=False,
         failure_kind="missing_submission_tool",
     )
     assert not telemetry.record_first_attempt(
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         success=True,
     )
 
@@ -157,7 +159,7 @@ def test_proposal_first_attempt_log_uses_nested_payload() -> None:
 
     log_proposal_first_attempt(
         request_id="req-log",
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         success=False,
         failure_kind="quality",
         event_logger=event_logger,
@@ -172,7 +174,7 @@ def test_proposal_first_attempt_log_uses_nested_payload() -> None:
         "schema_version": PROPOSAL_TELEMETRY_SCHEMA_VERSION,
         "operation": "first_attempt",
         "request_id": "req-log",
-        "tool_name": OUTLINE_FLOW_TOOL_NAME,
+        "tool_name": PROPOSE_FLOW_TOOL_NAME,
         "success": False,
         "failure_kind": "quality",
     }
@@ -183,7 +185,7 @@ def test_successful_proposal_first_attempt_log_omits_failure_kind() -> None:
 
     log_proposal_first_attempt(
         request_id="req-log",
-        tool_name=OUTLINE_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         success=True,
         failure_kind=None,
         event_logger=event_logger,
@@ -198,7 +200,7 @@ def test_proposal_repair_log_uses_nested_payload() -> None:
 
     log_proposal_repair_invoked(
         request_id="req-log",
-        tool_name=EDIT_FLOW_TOOL_NAME,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
         reason="parse",
         event_logger=event_logger,
     )
@@ -212,7 +214,7 @@ def test_proposal_repair_log_uses_nested_payload() -> None:
         "schema_version": PROPOSAL_TELEMETRY_SCHEMA_VERSION,
         "operation": "repair_invoked",
         "request_id": "req-log",
-        "tool_name": EDIT_FLOW_TOOL_NAME,
+        "tool_name": PROPOSE_FLOW_TOOL_NAME,
         "reason": "parse",
     }
 

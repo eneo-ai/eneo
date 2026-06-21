@@ -64,16 +64,16 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
-    OUTLINE_FLOW_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
     parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
-OUTLINE_FLOW_FORCED_TOOL_PROMPT = (
+PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Your previous reply was prose only. "
-    "Now call outline_flow with one complete semantic outline. "
+    "Now call propose_flow with one complete semantic outline. "
     "Do not answer with prose."
 )
 
@@ -257,7 +257,7 @@ async def process_outline_arguments(
             list(error.issues),
         )
         return ToolProcessingResult(
-            feedback=f"Invalid outline_flow arguments: {error}",
+            feedback=f"Invalid propose_flow arguments: {error}",
             failure_kind="parse",
         )
     except AIBuilderArchitectureError:
@@ -277,7 +277,7 @@ async def process_outline_arguments(
         )
         detail = "; ".join(issues) if issues else str(error)
         return ToolProcessingResult(
-            feedback=f"Invalid outline_flow arguments: {detail}",
+            feedback=f"Invalid propose_flow arguments: {detail}",
             failure_kind="parse",
         )
 
@@ -347,7 +347,7 @@ async def _process_create_draft(
     except Exception as error:
         logger.error("Create draft compilation failed: %s", error, exc_info=error)
         return ToolProcessingResult(
-            feedback=f"Failed to compile {OUTLINE_FLOW_TOOL_NAME} draft: {error}",
+            feedback=f"Failed to compile {PROPOSE_FLOW_TOOL_NAME} draft: {error}",
             failure_kind="validation",
         )
 

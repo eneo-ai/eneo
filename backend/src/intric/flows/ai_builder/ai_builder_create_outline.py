@@ -40,7 +40,6 @@ from intric.flows.flow_authoring_spec import (
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
-OUTLINE_FLOW_TOOL_NAME = "outline_flow"
 # Safety guard against runaway tool output. This should not be a practical
 # product cap for legitimate advanced flows.
 MAX_OUTLINE_STEPS = 256
@@ -273,10 +272,10 @@ class FlowCreateOutline(BaseModel):
     @classmethod
     def _validate_steps(cls, value: list[OutlineStep]) -> list[OutlineStep]:
         if not value:
-            raise ValueError("outline_flow requires at least one step.")
+            raise ValueError("propose_flow requires at least one step.")
         if len(value) > MAX_OUTLINE_STEPS:
             raise ValueError(
-                f"outline_flow supports at most {MAX_OUTLINE_STEPS} semantic steps."
+                f"propose_flow supports at most {MAX_OUTLINE_STEPS} semantic steps."
             )
         return value
 
@@ -325,7 +324,7 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
         message = str(item.get("msg") or "Validation failed")
         issue_type = str(item.get("type") or "validation_error")
         issues.append(f"{loc}: {message} [{issue_type}]")
-    return tuple(issues) or ("outline_flow validation failed [validation_error]",)
+    return tuple(issues) or ("propose_flow validation failed [validation_error]",)
 
 
 def _normalize_outline_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -414,14 +413,16 @@ def _strip_ignored_outline_step_keys(
     recovered_keys = frozenset(
         key for key in raw if key in _OUTLINE_STEP_ROOT_RECOVERED_KEYS
     )
-    misplaced_assumptions = _assumption_strings(
-        raw.get(_OUTLINE_ASSUMPTIONS_FIELD)
+    misplaced_assumptions = _assumption_strings(raw.get(_OUTLINE_ASSUMPTIONS_FIELD))
+    return (
+        {
+            key: step_value
+            for key, step_value in raw.items()
+            if key not in _outline_step_ignored_keys()
+        },
+        misplaced_assumptions,
+        recovered_keys,
     )
-    return {
-        key: step_value
-        for key, step_value in raw.items()
-        if key not in _outline_step_ignored_keys()
-    }, misplaced_assumptions, recovered_keys
 
 
 def _merge_outline_assumptions(
@@ -577,6 +578,7 @@ def _tool_refs_for_servers(
 def build_outline_flow_tool_schema(
     *,
     resource_catalog: AIBuilderResourceCatalog,
+    tool_name: str,
 ) -> dict[str, Any]:
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
@@ -588,7 +590,7 @@ def build_outline_flow_tool_schema(
     return {
         "type": "function",
         "function": {
-            "name": OUTLINE_FLOW_TOOL_NAME,
+            "name": tool_name,
             "description": (
                 "Submit a semantic create-flow outline. Describe what the flow "
                 "should do; the backend will compile Flow mechanics such as "
@@ -762,7 +764,6 @@ def _outline_step_schema(
 
 __all__ = [
     "FlowCreateOutline",
-    "OUTLINE_FLOW_TOOL_NAME",
     "OutlineFlowArgumentError",
     "attach_selected_mcp_refs_to_explicit_outline_steps",
     "build_outline_flow_tool_schema",

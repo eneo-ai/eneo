@@ -118,7 +118,7 @@ def _sanitize_ai_builder_litellm_kwargs(
     """Keep provider credentials separate from AI Builder tool-call control.
 
     Proposal generation intentionally uses LiteLLM tool calls for the internal
-    `outline_flow` / edit tools. Those schemas are passed by the proposal
+    `propose_flow` tool. That schema is passed by the proposal
     boundary itself, not by tenant model credential resolution. Dropping inherited
     tool-call keys here prevents accidental provider/MCP tool execution during
     planner turns and avoids duplicate keyword conflicts in proposal calls.

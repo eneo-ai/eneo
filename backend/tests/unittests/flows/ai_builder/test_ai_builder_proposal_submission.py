@@ -14,9 +14,10 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_WITHOUT,
@@ -45,6 +46,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.flow_authoring_spec import OutputType
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _builder_plan,
@@ -100,28 +102,21 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
 @pytest.mark.parametrize(
     ("message", "submission_tool_name"),
     [
-        (SimpleNamespace(tool_calls=None, content="text"), OUTLINE_FLOW_TOOL_NAME),
-        (SimpleNamespace(tool_calls=[], content="text"), OUTLINE_FLOW_TOOL_NAME),
+        (SimpleNamespace(tool_calls=None, content="text"), PROPOSE_FLOW_TOOL_NAME),
+        (SimpleNamespace(tool_calls=[], content="text"), PROPOSE_FLOW_TOOL_NAME),
         (
             SimpleNamespace(
                 tool_calls=[
-                    _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {}),
-                    _make_tool_call(EDIT_FLOW_TOOL_NAME, {}),
+                    _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {}),
+                    _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {}),
                 ],
                 content="text",
             ),
-            OUTLINE_FLOW_TOOL_NAME,
+            PROPOSE_FLOW_TOOL_NAME,
         ),
         (
             SimpleNamespace(
-                tool_calls=[_make_tool_call(EDIT_FLOW_TOOL_NAME, {})],
-                content="text",
-            ),
-            OUTLINE_FLOW_TOOL_NAME,
-        ),
-        (
-            SimpleNamespace(
-                tool_calls=[_make_tool_call(OUTLINE_FLOW_TOOL_NAME, {})],
+                tool_calls=[_make_tool_call(PROPOSE_FLOW_TOOL_NAME, {})],
                 content="text",
             ),
             "confirm_requirements",
@@ -141,11 +136,11 @@ def test_forced_submission_response_rejects_missing_parallel_wrong_or_unsupporte
 
 
 def test_forced_submission_response_accepts_one_active_submission_tool() -> None:
-    tool_call = _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {})
+    tool_call = _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {})
 
     response = _forced_submission_response(
         message=SimpleNamespace(tool_calls=[tool_call], content="Här är planen."),
-        submission_tool_name=OUTLINE_FLOW_TOOL_NAME,
+        submission_tool_name=PROPOSE_FLOW_TOOL_NAME,
     )
 
     assert response is not None
@@ -291,6 +286,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-outline-quality",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
@@ -316,7 +312,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
         )
     ]
     tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Time flow",
             "plan_rationale": "Use MCP despite the user's decline.",
@@ -360,7 +356,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     telemetry = tracker.build_planner_telemetry()
-    assert telemetry["proposal_first_attempt_tool"] == OUTLINE_FLOW_TOOL_NAME
+    assert telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
     assert telemetry["proposal_first_attempt_success"] is False
     assert telemetry["proposal_first_attempt_failure_kind"] == "quality"
     assert telemetry["proposal_repair_invocation_count"] == 1
@@ -375,9 +371,10 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
     tracker = ProposalTurnTelemetry(
         request_id="req-architecture",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
     )
     tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Audio report",
             "plan_rationale": "Create a report from audio.",
@@ -442,7 +439,7 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
 async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> None:
     submission = _make_submission()
     tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {
             "flow_name": "Document analysis",
             "plan_rationale": "Analyze documents.",
@@ -461,7 +458,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
     )
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(
-            feedback="Invalid outline_flow arguments: bad shape",
+            feedback="Invalid propose_flow arguments: bad shape",
             failure_kind="parse",
         )
     )
@@ -498,6 +495,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
     assert list(process_signature.parameters) == ["invocation"]
     assert set(ToolRetryConfig.__dataclass_fields__) == {
         "target_tool_name",
+        "target_kind",
         "forced_tool_prompt",
         "process_tool_invocation",
     }
@@ -518,6 +516,7 @@ async def test_outline_retry_config_finalizes_compiled_proposal_with_invocation_
     tracker = ProposalTurnTelemetry(
         request_id="req-outline-retry-finalize",
         model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
     )
     resource_catalog = MagicMock()
     flow = MagicMock()
@@ -558,7 +557,8 @@ async def test_outline_retry_config_finalizes_compiled_proposal_with_invocation_
     assert request.turn is invocation.turn
     assert request.conversation is invocation.conversation
     assert request.new_messages_start == 3
-    assert request.tool_name == OUTLINE_FLOW_TOOL_NAME
+    assert request.tool_name == PROPOSE_FLOW_TOOL_NAME
+    assert request.target_kind == TargetKind.CREATE
     assert request.arguments is invocation.arguments
     assert request.assistant_content == invocation.assistant_content
     assert request.assistant_metadata is invocation.assistant_metadata
@@ -579,14 +579,14 @@ async def test_outline_self_correction_returns_typed_error_when_completion_raise
     submission = _make_submission(litellm_client=litellm_client)
     tool_call = MagicMock()
     tool_call.id = "call_retry"
-    tool_call.function.name = OUTLINE_FLOW_TOOL_NAME
+    tool_call.function.name = PROPOSE_FLOW_TOOL_NAME
     tool_call.function.arguments = "{"
     ctx = _make_context(
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         new_messages_start=1,
         request_id="req-self-correction",
         llm_messages=[{"role": "system", "content": "Prompt"}],
-        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
     )
 
     with (
@@ -619,10 +619,11 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-edit-parse",
         model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.EDIT,
     )
     tool_call = MagicMock()
     tool_call.id = "call-edit"
-    tool_call.function.name = EDIT_FLOW_TOOL_NAME
+    tool_call.function.name = PROPOSE_FLOW_TOOL_NAME
     tool_call.function.arguments = "{not-json"
     ctx = _make_context(
         usage_tracker=tracker,
@@ -647,7 +648,7 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
 
     assert events == [{"event": "error", "data": "{}"}]
     telemetry = tracker.build_planner_telemetry()
-    assert telemetry["proposal_first_attempt_tool"] == EDIT_FLOW_TOOL_NAME
+    assert telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
     assert telemetry["proposal_first_attempt_success"] is False
     assert telemetry["proposal_first_attempt_failure_kind"] == "parse"
     assert telemetry["proposal_repair_invocation_count"] == 1
@@ -672,15 +673,17 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     )
 
     assert isinstance(config, ToolRetryConfig)
-    assert config.target_tool_name == EDIT_FLOW_TOOL_NAME
+    assert config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
+    assert config.target_kind == TargetKind.EDIT
     process_signature = signature(config.process_tool_invocation)
     assert list(process_signature.parameters) == ["invocation"]
     assert set(ToolRetryConfig.__dataclass_fields__) == {
         "target_tool_name",
+        "target_kind",
         "forced_tool_prompt",
         "process_tool_invocation",
     }
-    assert "valid edit_flow tool call" in config.forced_tool_prompt
+    assert "valid propose_flow tool call" in config.forced_tool_prompt
 
     process_edit = AsyncMock(
         return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
@@ -721,6 +724,7 @@ async def test_edit_flow_retry_preserves_description_advisory_without_completion
     tracker = ProposalTurnTelemetry(
         request_id="req-forced-retry-edit-advisory",
         model="openai/gpt-5.4",
+        target_kind=TargetKind.EDIT,
     )
     original = _compiled_edit_proposal(
         spec=_make_flow_spec(
@@ -795,7 +799,7 @@ async def test_handle_edit_flow_preserves_description_advisory_without_completio
         max_output_tokens=2048,
     )
     tool_call = _make_tool_call(
-        EDIT_FLOW_TOOL_NAME,
+        PROPOSE_FLOW_TOOL_NAME,
         {"plan_rationale": "Edit", "operations": []},
         tool_call_id="call-edit-advisory",
     )
@@ -843,6 +847,7 @@ async def test__retry_forced_proposal_after_text_uses_outline_flow_for_create_mo
     tracker = ProposalTurnTelemetry(
         request_id="req-forced-retry-create",
         model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
     )
 
     with patch(
@@ -856,7 +861,7 @@ async def test__retry_forced_proposal_after_text_uses_outline_flow_for_create_mo
         result = await submission._retry_forced_proposal_after_text(
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             turn=_make_turn(),
@@ -872,19 +877,23 @@ async def test__retry_forced_proposal_after_text_uses_outline_flow_for_create_mo
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = retry_forced_tool.await_args.args[0]
-    assert request.retry_config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
+    assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
+    assert request.retry_config.target_kind == TargetKind.CREATE
     process_signature = signature(request.retry_config.process_tool_invocation)
     assert list(process_signature.parameters) == ["invocation"]
     assert isinstance(request.turn, SessionSendTurn)
-    assert "Now call outline_flow" in request.retry_config.forced_tool_prompt
+    assert "Now call propose_flow" in request.retry_config.forced_tool_prompt
 
 
 @pytest.mark.asyncio
-async def test__retry_forced_proposal_after_text_uses_edit_flow_for_edit_mode() -> None:
+async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode() -> (
+    None
+):
     submission = _make_submission()
     tracker = ProposalTurnTelemetry(
         request_id="req-forced-retry-edit",
         model="openai/gpt-5.4",
+        target_kind=TargetKind.EDIT,
     )
 
     with patch(
@@ -898,7 +907,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_flow_for_edit_mode() 
         result = await submission._retry_forced_proposal_after_text(
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": EDIT_FLOW_TOOL_NAME}}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             turn=_make_turn(),
@@ -914,7 +923,9 @@ async def test__retry_forced_proposal_after_text_uses_edit_flow_for_edit_mode() 
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = retry_forced_tool.await_args.args[0]
-    assert request.retry_config.target_tool_name == EDIT_FLOW_TOOL_NAME
+    assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
+    assert request.retry_config.target_kind == TargetKind.EDIT
+    assert "propose_flow" in request.retry_config.forced_tool_prompt
 
 
 @pytest.mark.asyncio
@@ -922,7 +933,7 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
     submission = _make_submission()
     tool_call = MagicMock()
     tool_call.id = "call_edit"
-    tool_call.function.name = EDIT_FLOW_TOOL_NAME
+    tool_call.function.name = PROPOSE_FLOW_TOOL_NAME
     tool_call.function.arguments = json.dumps(
         {
             "plan_rationale": "Lägg till citerande textsteg.",
@@ -955,4 +966,4 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
     assert "OrderedEditSubmission" in request.error_message
-    assert request.retry_config.target_tool_name == EDIT_FLOW_TOOL_NAME
+    assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME

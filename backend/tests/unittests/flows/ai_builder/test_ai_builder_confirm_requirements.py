@@ -21,7 +21,10 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryAnalysis,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
@@ -330,10 +333,12 @@ async def test_confirm_requirements_retry_config_carries_invocation_context() ->
             repo=repo,
             litellm_client=AsyncMock(),
             tenant_id=tenant_id,
+            target_kind=TargetKind.CREATE,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={"timeout": 30},
         )
     )
+    assert config.target_kind == TargetKind.CREATE
     turn = _make_turn()
     invocation = ToolRetryInvocation(
         turn=turn,

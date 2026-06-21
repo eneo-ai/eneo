@@ -1,9 +1,4 @@
-"""Dynamic edit-mode tool schema builder for the AI Builder.
-
-Builds the `edit_flow` tool schema with dynamic constraints based on the
-current flow state. By injecting valid step refs as enum values, the LLM
-cannot generate an invalid ref — the API layer rejects it before validation.
-"""
+"""Dynamic edit-mode proposal schema builder for the AI Builder."""
 
 from __future__ import annotations
 
@@ -28,13 +23,12 @@ from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowMcpPolicy
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 
-EDIT_FLOW_TOOL_NAME = "edit_flow"
-
 
 def build_edit_flow_tool_schema(
     current_steps: list[FlowStep],
     *,
     resource_catalog: AIBuilderResourceCatalog,
+    tool_name: str,
 ) -> dict[str, Any]:
     valid_refs = [f"existing_step_{s.step_order}" for s in current_steps]
 
@@ -63,7 +57,7 @@ def build_edit_flow_tool_schema(
     return {
         "type": "function",
         "function": {
-            "name": EDIT_FLOW_TOOL_NAME,
+            "name": tool_name,
             "description": (
                 "Edit an existing flow by returning the complete ordered step list. "
                 "Every existing step must appear once in steps unless its ref appears "
@@ -151,6 +145,7 @@ def build_edit_mode_tool_schemas(
     resource_catalog: AIBuilderResourceCatalog,
 ) -> list[dict[str, Any]]:
     from intric.flows.ai_builder.ai_builder_tools import (
+        PROPOSE_FLOW_TOOL_NAME,
         build_ask_structured_question_tool_schema,
         build_confirm_requirements_tool_schema,
     )
@@ -159,6 +154,7 @@ def build_edit_mode_tool_schemas(
         build_edit_flow_tool_schema(
             current_steps,
             resource_catalog=resource_catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         ),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),

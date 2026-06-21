@@ -45,7 +45,6 @@ from intric.files.file_models import File, FileType
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
@@ -78,6 +77,7 @@ from intric.flows.ai_builder.ai_builder_service import (
     PreparedMessageContext,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendLease
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -374,7 +374,7 @@ def _make_llm_response(
 def _make_tool_call(
     *,
     tool_call_id: str = "call_123",
-    name: str = OUTLINE_FLOW_TOOL_NAME,
+    name: str = PROPOSE_FLOW_TOOL_NAME,
     arguments: dict[str, Any] | None = None,
 ) -> MagicMock:
     """Create a mock tool call."""
@@ -391,7 +391,7 @@ def _normalize_tool_arguments(
     name: str,
     arguments: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if name != OUTLINE_FLOW_TOOL_NAME:
+    if name != PROPOSE_FLOW_TOOL_NAME:
         return arguments or {}
     if arguments is None:
         return {
@@ -1380,7 +1380,7 @@ class TestSendMessageToolCall:
                 tool_calls=[
                     {
                         "id": "call_prior",
-                        "name": OUTLINE_FLOW_TOOL_NAME,
+                        "name": PROPOSE_FLOW_TOOL_NAME,
                         "arguments": {"flow_name": "Old"},
                     }
                 ],
@@ -1417,7 +1417,7 @@ class TestSendMessageToolCall:
                 tool_calls=[
                     {
                         "id": legacy_id,
-                        "name": OUTLINE_FLOW_TOOL_NAME,
+                        "name": PROPOSE_FLOW_TOOL_NAME,
                         "arguments": {"revision_kind": "scoped_step_model"},
                     }
                 ],
@@ -2155,7 +2155,7 @@ class TestReasoningLeakRegression:
             conversation=conversation,
             assistant_content="Here is a flow.",
             tool_call_id="call_123",
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
             arguments=arguments,
             spec=spec,
             assumptions=["Test"],
@@ -2183,7 +2183,7 @@ class TestReasoningLeakRegression:
                 tool_calls=[
                     {
                         "id": "call_123",
-                        "name": OUTLINE_FLOW_TOOL_NAME,
+                        "name": PROPOSE_FLOW_TOOL_NAME,
                         "arguments": {
                             "flow_name": "Test",
                             "step_count": 1,

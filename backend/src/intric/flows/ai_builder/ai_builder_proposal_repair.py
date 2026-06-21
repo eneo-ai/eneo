@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
@@ -36,6 +37,7 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -269,6 +271,7 @@ def append_text_retry_feedback_turn(
 def _build_retry_feedback(
     *,
     target_tool_name: str,
+    target_kind: TargetKind,
     feedback: str,
     failure_kind: ToolProcessingFailureKind | None,
     failure_codes: frozenset[str] = frozenset(),
@@ -281,7 +284,8 @@ def _build_retry_feedback(
             "Do not include comments, placeholders, status notes, or quoted fragments inside arrays. "
             f"Rebuild any broken array entries as normal JSON objects and return one complete {target_tool_name} call."
         )
-    if target_tool_name == "outline_flow":
+    # target_kind is session-scoped; outline repair rules only belong to propose_flow.
+    if target_tool_name == PROPOSE_FLOW_TOOL_NAME and target_kind == TargetKind.CREATE:
         outline_rules = [
             "Every steps[] item must be one complete semantic outline step with at least name and task.",
             "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_input_fields.",
@@ -293,7 +297,7 @@ def _build_retry_feedback(
             )
         suffix = (
             " ".join(outline_rules)
-            + " Keep valid semantic parts and fix only the listed issues. Return one complete outline_flow call."
+            + f" Keep valid semantic parts and fix only the listed issues. Return one complete {target_tool_name} call."
         )
     if retry_count >= 2:
         preamble = (
@@ -330,6 +334,7 @@ async def request_self_correction(
         [ToolRetryInvocation], Awaitable[ToolProcessingResult]
     ],
     target_tool_name: str,
+    target_kind: TargetKind,
     forced_tool_prompt: str,
     resource_catalog: AIBuilderResourceCatalog | None = None,
     flow: "Flow | None" = None,
@@ -403,6 +408,7 @@ async def request_self_correction(
                             correction_tool_call,
                             _build_retry_feedback(
                                 target_tool_name=target_tool_name,
+                                target_kind=target_kind,
                                 feedback=_invalid_tool_arguments_message(error),
                                 failure_kind="parse",
                                 failure_codes=frozenset(),
@@ -441,6 +447,7 @@ async def request_self_correction(
                             correction_tool_call,
                             _build_retry_feedback(
                                 target_tool_name=target_tool_name,
+                                target_kind=target_kind,
                                 feedback=tool_result.feedback
                                 or "Invalid tool payload.",
                                 failure_kind=tool_result.failure_kind,
@@ -512,6 +519,7 @@ async def request_self_correction(
             ):
                 text_retry_feedback = _build_retry_feedback(
                     target_tool_name=target_tool_name,
+                    target_kind=target_kind,
                     feedback=forced_outcome.feedback,
                     failure_kind=forced_failure_kind,
                     retry_count=retry_state.next_retry_count,

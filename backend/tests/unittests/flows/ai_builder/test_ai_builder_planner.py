@@ -1009,7 +1009,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
 
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
-    assert "Call exactly one `outline_flow` tool" in prepared.llm_messages[0]["content"]
+    assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
     build_system_prompt.assert_not_called()
 
 

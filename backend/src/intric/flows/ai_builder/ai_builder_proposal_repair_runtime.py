@@ -152,6 +152,7 @@ async def run_tool_self_correction(
             call_proposal_completion=request.repair_completion,
             process_tool_invocation=request.retry_config.process_tool_invocation,
             target_tool_name=request.retry_config.target_tool_name,
+            target_kind=request.retry_config.target_kind,
             forced_tool_prompt=request.retry_config.forced_tool_prompt,
             resource_catalog=request.resource_catalog,
             flow=request.flow,

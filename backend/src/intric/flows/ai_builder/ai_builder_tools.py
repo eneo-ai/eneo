@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_create_outline import (
-    OUTLINE_FLOW_TOOL_NAME,
     build_outline_flow_tool_schema,
     parse_outline_flow_arguments,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
+    build_edit_flow_tool_schema,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     supported_structured_question_ids,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_tool_parsing import (
@@ -24,15 +26,11 @@ from intric.flows.ai_builder.ai_builder_tool_parsing import (
     parse_structured_question,
 )
 
+if TYPE_CHECKING:
+    from intric.flows.domain.flow import FlowStep
+
 ASK_STRUCTURED_QUESTION_TOOL_NAME = "ask_structured_question"
-ActiveSubmissionToolName: TypeAlias = Literal["outline_flow", "edit_flow"]
-
-
-def active_submission_tool_name(
-    *,
-    is_edit_mode: bool,
-) -> ActiveSubmissionToolName:
-    return EDIT_FLOW_TOOL_NAME if is_edit_mode else OUTLINE_FLOW_TOOL_NAME
+PROPOSE_FLOW_TOOL_NAME = "propose_flow"
 
 
 ASK_STRUCTURED_QUESTION_DESCRIPTION = (
@@ -46,7 +44,7 @@ CONFIRM_REQUIREMENTS_TOOL_NAME = "confirm_requirements"
 CONFIRM_REQUIREMENTS_DESCRIPTION = (
     "Present your understanding of the user's needs for confirmation before building a plan. "
     "Call this after discovery to summarize what you understood. "
-    "The user must confirm before you call outline_flow or edit_flow."
+    "The user must confirm before you call propose_flow."
 )
 
 
@@ -181,6 +179,23 @@ def build_confirm_requirements_tool_schema() -> dict[str, Any]:
     }
 
 
+def build_propose_flow_tool_schema(
+    *,
+    resource_catalog: AIBuilderResourceCatalog,
+    current_steps: list["FlowStep"] | None = None,
+) -> dict[str, Any]:
+    if current_steps is None:
+        return build_outline_flow_tool_schema(
+            resource_catalog=resource_catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+    return build_edit_flow_tool_schema(
+        current_steps,
+        resource_catalog=resource_catalog,
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+    )
+
+
 def build_all_tool_schemas() -> list[dict[str, Any]]:
     empty_catalog = build_ai_builder_resource_catalog(
         available_models=[],
@@ -188,7 +203,7 @@ def build_all_tool_schemas() -> list[dict[str, Any]]:
         available_mcps=[],
     )
     return [
-        build_outline_flow_tool_schema(resource_catalog=empty_catalog),
+        build_propose_flow_tool_schema(resource_catalog=empty_catalog),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),
     ]
@@ -205,17 +220,15 @@ def build_free_discovery_tool_schemas() -> list[dict[str, Any]]:
 __all__ = [
     "ASK_STRUCTURED_QUESTION_DESCRIPTION",
     "ASK_STRUCTURED_QUESTION_TOOL_NAME",
-    "ActiveSubmissionToolName",
     "CONFIRM_REQUIREMENTS_DESCRIPTION",
     "CONFIRM_REQUIREMENTS_TOOL_NAME",
-    "OUTLINE_FLOW_TOOL_NAME",
-    "active_submission_tool_name",
+    "PROPOSE_FLOW_TOOL_NAME",
     "build_all_tool_schemas",
     "build_ask_structured_question_tool_schema",
     "build_confirm_requirements_tool_schema",
-    "build_outline_flow_tool_schema",
     "build_discovery_complete_tool_schemas",
     "build_free_discovery_tool_schemas",
+    "build_propose_flow_tool_schema",
     "extract_assumptions",
     "extract_plan_rationale",
     "extract_reasoning",

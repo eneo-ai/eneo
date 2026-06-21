@@ -61,7 +61,7 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    OUTLINE_FLOW_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
 )
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -315,7 +315,7 @@ class TestProposalGating:
             ),
         ]
         tool_call = _make_tool_call(
-            OUTLINE_FLOW_TOOL_NAME,
+            PROPOSE_FLOW_TOOL_NAME,
             {
                 "flow_name": "Test Flow",
                 "plan_rationale": "Extraktion först.",

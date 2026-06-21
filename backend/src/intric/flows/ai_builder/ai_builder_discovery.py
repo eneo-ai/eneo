@@ -590,9 +590,10 @@ def _build_structured_analysis_need_issue(
 ) -> DiscoveryIssue | None:
     if not _structured_analysis_need_is_vague(profile):
         return None
-    if (
-        question_exposure_for_id("structured_analysis_need") != "user_requirement"
-        and not _should_surface_structured_analysis_question(profile)
+    if question_exposure_for_id(
+        "structured_analysis_need"
+    ) != "user_requirement" and not _should_surface_structured_analysis_question(
+        profile
     ):
         return None
     return DiscoveryIssue(
@@ -910,7 +911,7 @@ def build_discovery_guidance(
     suggestion = next_issue.suggestion
     lines = [
         "- Discovery protocol: there is still blocking ambiguity or a contradiction.",
-        "- Ask exactly ONE structured question now. Do not call `confirm_requirements`, `outline_flow`, or `edit_flow` yet.",
+        "- Ask exactly ONE structured question now. Do not call `confirm_requirements` or `propose_flow` yet.",
         f"- Highest-priority blocker: {next_issue.message}",
         f'- Use `question_id="{suggestion.question_id}"`.',
         f"- Ask this question: {suggestion.question}",

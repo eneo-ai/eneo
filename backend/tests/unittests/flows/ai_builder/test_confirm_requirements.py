@@ -15,7 +15,7 @@ from intric.flows.ai_builder.ai_builder_events import (
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    OUTLINE_FLOW_TOOL_NAME,
+    PROPOSE_FLOW_TOOL_NAME,
     build_all_tool_schemas,
     build_confirm_requirements_tool_schema,
     parse_confirm_requirements,
@@ -57,7 +57,7 @@ class TestBuildAllToolSchemasIncludesConfirmRequirements:
         schemas = build_all_tool_schemas()
         names = {s["function"]["name"] for s in schemas}
         assert CONFIRM_REQUIREMENTS_TOOL_NAME in names
-        assert OUTLINE_FLOW_TOOL_NAME in names
+        assert PROPOSE_FLOW_TOOL_NAME in names
         assert "create_flow" not in names
 
     def test_returns_three_tools(self) -> None:

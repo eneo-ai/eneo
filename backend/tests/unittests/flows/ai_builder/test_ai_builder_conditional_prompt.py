@@ -55,7 +55,7 @@ class TestConditionalKnowledgePackInjection:
             confirmed_requirements=None,  # Discovery phase
         )
         # Create mode exposes semantic outline authoring, not raw Flow wiring.
-        assert "outline_flow" in prompt
+        assert "propose_flow" in prompt
         assert "backend derives step topology" in prompt
         # Heavy sections should be excluded in discovery
         assert "Planner patterns (positive archetypes)" not in prompt
@@ -89,7 +89,7 @@ class TestConditionalKnowledgePackInjection:
     def test_prompt_always_includes_core(self):
         """Core sections must always be present regardless of phase."""
         prompt = build_system_prompt()
-        assert "outline_flow" in prompt
+        assert "propose_flow" in prompt
         assert "backend derives step topology" in prompt
 
 

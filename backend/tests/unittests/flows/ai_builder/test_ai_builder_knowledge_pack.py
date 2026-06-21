@@ -199,10 +199,10 @@ def test_role_and_reference_blocks_switch_submission_tool_by_mode() -> None:
     create_reference = build_structured_reference_block(is_edit_mode=False)
     edit_reference = build_structured_reference_block(is_edit_mode=True)
 
-    assert "outline_flow" in create_role
-    assert "edit_flow" in edit_role
-    assert '"submission_tool": "outline_flow"' in create_reference
-    assert '"submission_tool": "edit_flow"' in edit_reference
+    assert "propose_flow" in create_role
+    assert "propose_flow" in edit_role
+    assert '"submission_tool": "propose_flow"' in create_reference
+    assert '"submission_tool": "propose_flow"' in edit_reference
 
 
 def test_structured_reference_is_generated_from_flow_capability_sources() -> None:

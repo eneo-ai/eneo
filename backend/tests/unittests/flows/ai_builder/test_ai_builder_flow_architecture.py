@@ -74,7 +74,7 @@ class TestRenderFlowArchitecture:
         bullets."""
         rendered = render_flow_architecture()
         assert (
-            "I create-läge beskriver modellen bara avsikten i `outline_flow`. "
+            "I create-läge beskriver modellen bara avsikten i `propose_flow`. "
             "Backend kompilerar outline till kanonisk flödesspecifikation."
         ) in rendered
 
@@ -127,7 +127,7 @@ class TestRenderFlowArchitecture:
                 "# Outline-flow-kompilering",
                 "",
                 (
-                    "I create-läge beskriver modellen bara avsikten i `outline_flow`. "
+                    "I create-läge beskriver modellen bara avsikten i `propose_flow`. "
                     "Backend kompilerar outline till kanonisk flödesspecifikation."
                 ),
                 "",

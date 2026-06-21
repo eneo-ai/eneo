@@ -65,7 +65,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceReferenceMaterial,
     render_resource_reference_block,
 )
-from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
+from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.domain.flow import Flow
 
 __all__ = [
@@ -244,7 +244,7 @@ def build_clarification_hints(
     resolved_output = output_intent.terminal_output
     resolved_docx_mode = output_intent.docx_output_mode
     resolved_pdf_mode = output_intent.pdf_generation_mode
-    submission_tool = active_submission_tool_name(is_edit_mode=flow is not None)
+    submission_tool = PROPOSE_FLOW_TOOL_NAME
     json_contract_term = "output_contract" if flow is not None else "output_fields"
 
     if _needs_pdf_scope_question(text, answered_ids):

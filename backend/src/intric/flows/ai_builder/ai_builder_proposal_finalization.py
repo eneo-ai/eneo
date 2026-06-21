@@ -14,8 +14,10 @@ from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_outline_quality_feedback,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_events import build_plan_event
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -49,7 +51,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from intric.flows.ai_builder.ai_builder_tools import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.flow_authoring_spec import FlowDraftSpecCore
 from intric.main.logging import get_logger
 
@@ -65,6 +66,7 @@ class CompiledProposalFinalizationRequest:
     conversation: list[ConversationMessage]
     new_messages_start: int
     tool_name: str
+    target_kind: TargetKind
     arguments: dict[str, Any]
     assistant_content: str
     assistant_metadata: dict[str, Any] | None
@@ -137,7 +139,7 @@ class CompiledProposalFinalizer:
             spec=request.compiled.spec,
         )
         compiled = request.compiled
-        if request.tool_name == OUTLINE_FLOW_TOOL_NAME:
+        if request.target_kind == TargetKind.CREATE:
             create_result = self._create_quality_result(
                 request=request,
                 compiled=compiled,
@@ -145,7 +147,7 @@ class CompiledProposalFinalizer:
             )
             if create_result is not None:
                 return create_result
-        elif request.tool_name == EDIT_FLOW_TOOL_NAME:
+        elif request.target_kind == TargetKind.EDIT:
             edit_result = self._edit_quality_result(
                 request=request,
                 compiled=compiled,
