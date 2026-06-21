@@ -214,6 +214,9 @@ def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCo
 
     for step in spec.steps:
         updated_step = step
+        if step.existing_step_ref is not None:
+            updated_steps.append(updated_step)
+            continue
         contract = step.output_contract
         if isinstance(contract, dict):
             property_names = _contract_property_names(contract)

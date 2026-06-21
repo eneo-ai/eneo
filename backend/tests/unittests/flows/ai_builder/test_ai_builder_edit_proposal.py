@@ -9,6 +9,10 @@ from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_argume
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from intric.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
+)
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     FormFieldSpec,
@@ -293,6 +297,102 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
 
 
 @pytest.mark.asyncio
+async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only() -> (
+    None
+):
+    assistant_id = uuid4()
+    model_id = "11111111-1111-4111-8111-111111111111"
+    kb_id = "22222222-2222-4222-8222-222222222222"
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            assistant_id=assistant_id,
+            user_description="Extract case",
+            input_source="flow_input",
+            input_type="json",
+            output_type="json",
+            input_config={"runtime_input": {"enabled": True, "required": True}},
+            output_contract={
+                "type": "object",
+                "properties": {"case_id": {"type": "string"}},
+            },
+        ),
+        metadata_json=_form_metadata(
+            {
+                "name": "case_id",
+                "type": "text",
+                "label": "Case ID",
+                "required": True,
+            }
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Keep the existing flow unchanged.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_1"}],
+        },
+        assistant_snapshots={
+            assistant_id: AssistantAuthoringSnapshot(
+                instructions="Extract case data.",
+                model=AssistantAuthoringResourceRef(local_ref=model_id, label="GPT"),
+                knowledge_refs=(
+                    AssistantAuthoringResourceRef(local_ref=kb_id, label="Policy"),
+                ),
+            )
+        },
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[
+                {
+                    "id": model_id,
+                    "ref": model_id,
+                    "name": "GPT",
+                    "display_name": "GPT",
+                    "provider": "test",
+                }
+            ],
+            available_kbs=[
+                {
+                    "id": kb_id,
+                    "ref": kb_id,
+                    "name": "Policy",
+                    "display_name": "Policy",
+                    "description": "Case policy",
+                }
+            ],
+        ),
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    edit = result.compiled_proposal.edit
+    assert edit is not None
+    assert [(change.kind, change.step_ref) for change in edit.diff.step_changes] == [
+        ("unchanged", "existing_step_1")
+    ]
+    assert edit.diff.net_steps_added == 0
+    assert edit.diff.net_steps_removed == 0
+    assert edit.diff.form_changes == []
+    assert edit.diff.metadata_changes == []
+    assert edit.diff.flow_property_changes == {}
+
+    spec_step = result.compiled_proposal.spec.steps[0]
+    assert spec_step.assistant_spec.instructions == "Extract case data."
+    assert spec_step.assistant_spec.model_ref == "model.gpt"
+    assert spec_step.assistant_spec.knowledge_refs == ["knowledge.policy"]
+    assert spec_step.input_config == flow.steps[0].input_config
+    assert result.compiled_proposal.spec.form_fields == [
+        FormFieldSpec(
+            name="case_id",
+            type="text",
+            label="Case ID",
+            required=True,
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ordered_edit_confidence_needs_review_for_many_changes() -> None:
     flow = _flow(
         *[
@@ -508,6 +608,7 @@ async def _process(
     *,
     flow: SimpleNamespace,
     arguments: dict[str, object],
+    assistant_snapshots=None,
     resource_catalog=None,
 ):
     return await process_edit_arguments(
@@ -517,7 +618,7 @@ async def _process(
         available_model_refs=None,
         available_kb_refs=None,
         flow=flow,
-        assistant_snapshots=None,
+        assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
 
@@ -535,6 +636,7 @@ def _flow(*steps: FlowStep, metadata_json: dict | None = None) -> SimpleNamespac
 def _flow_step(
     *,
     step_order: int,
+    assistant_id=None,
     user_description: str,
     input_source: str = "flow_input",
     input_type: str = "text",
@@ -544,12 +646,13 @@ def _flow_step(
     input_contract: dict | None = None,
     output_contract: dict | None = None,
     input_config: dict | None = None,
+    output_config: dict | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
-        assistant_id=uuid4(),
+        assistant_id=assistant_id or uuid4(),
         step_order=step_order,
         user_description=user_description,
         input_source=input_source,
@@ -560,6 +663,7 @@ def _flow_step(
         input_contract=input_contract,
         output_contract=output_contract,
         input_config=input_config,
+        output_config=output_config,
         mcp_policy="inherit",
     )
 

@@ -422,6 +422,49 @@ def test_prepare_compiled_spec_normalizes_output_contract_prompt_metadata() -> N
     assert "contract_instruction_mismatch" not in warning_codes
 
 
+def test_prepare_compiled_spec_preserves_existing_edit_prompt_metadata() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Structured extraction",
+        flow_description="Extract structured meeting facts.",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                existing_step_ref="existing_step_1",
+                name="Extract meeting facts",
+                assistant_spec=AssistantSpec(
+                    instructions="Extract the important meeting facts.",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "meeting_context": {"type": "string"},
+                    },
+                },
+                mcp_policy=MCPPolicy.INHERIT,
+            )
+        ],
+    )
+
+    result = prepare_compiled_spec_for_session(
+        spec=spec,
+        target_kind=TargetKind.EDIT,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        valid_existing_step_refs=["existing_step_1"],
+    )
+
+    assert result.spec is not None
+    assert (
+        result.spec.steps[0].assistant_spec.instructions
+        == "Extract the important meeting facts."
+    )
+
+
 def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() -> None:
     spec = _make_spec()
 
