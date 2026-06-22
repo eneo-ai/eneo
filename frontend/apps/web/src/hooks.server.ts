@@ -2,6 +2,7 @@ import { dev } from "$app/environment";
 import { DASHBOARD_URL } from "$lib/core/constants";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
+import { shouldSerializeBackendResponseHeader } from "$lib/core/serializedBackendResponseHeaders";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
 import { IntricError, type IntricErrorCode } from "@intric/intric-js";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
@@ -68,6 +69,7 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 
 const headerFilterHandle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event, {
+    filterSerializedResponseHeaders: shouldSerializeBackendResponseHeader,
     preload: () => false
   });
   return response;
