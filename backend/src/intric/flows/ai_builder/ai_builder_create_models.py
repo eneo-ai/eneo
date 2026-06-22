@@ -9,10 +9,6 @@ from intric.flows.flow_authoring_name import normalize_flow_name
 from intric.flows.flow_authoring_spec import FormFieldSpec
 
 
-def _default_form_fields() -> list[FormFieldSpec]:
-    return []
-
-
 class FlowCreateDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -20,7 +16,7 @@ class FlowCreateDraft(BaseModel):
     flow_description: str | None = None
     plan_rationale: str
     assumptions: list[str] = Field(default_factory=list)
-    form_fields: list[FormFieldSpec] = Field(default_factory=_default_form_fields)
+    form_fields: list[FormFieldSpec] = Field(default_factory=list[FormFieldSpec])
     steps: list[NewStepDraft]
     document_body_writer_step_indexes: tuple[int, ...] = Field(
         default_factory=tuple,

@@ -357,7 +357,6 @@ __all__ = [
     "create_draft_returns_material_report",
     "iter_compiled_source_material_boundaries",
     "primary_source_material_ref",
-    "question_binding",
     "source_material_binding_status",
     "source_material_label_for_text",
     "source_material_question_for_boundary",

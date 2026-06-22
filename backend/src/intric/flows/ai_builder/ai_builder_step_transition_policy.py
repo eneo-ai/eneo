@@ -12,7 +12,6 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
 from intric.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
-    question_binding,
     source_material_binding_status,
     source_material_question_for_boundary,
 )
@@ -29,6 +28,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.flows.input_binding_contract_rules import question_binding
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,

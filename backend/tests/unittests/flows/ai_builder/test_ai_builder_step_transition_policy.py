@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_source_material import (
-    question_binding,
-)
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
@@ -17,6 +14,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.flows.input_binding_contract_rules import question_binding
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -127,9 +125,7 @@ def _question_metrics(
         )
     }
     question_step = next(
-        step
-        for step in spec.steps
-        if question_binding(step.input_bindings) == question
+        step for step in spec.steps if question_binding(step.input_bindings) == question
     )
     return {
         "binding_byte_size": len(question.encode("utf-8")),
