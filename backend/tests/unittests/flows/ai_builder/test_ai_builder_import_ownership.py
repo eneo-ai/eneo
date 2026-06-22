@@ -294,8 +294,8 @@ CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
         "OutlineCompileContext",
         "RuntimeInputFieldHintSource",
-        "compile_create_draft",
-        "compile_outline_to_create_draft",
+        "compile_create_steps_to_spec",
+        "compile_outline_to_create_spec",
         "outline_compile_context_from_planning_state",
     }
 )
@@ -305,10 +305,9 @@ CREATE_OUTLINE_BANNED_COMPILER_NAMES = frozenset(
         "ArchitectureCommitDraft",
         "ArchitectureEnvelope",
         "AIBuilderArchitectureError",
-        "FlowCreateDraft",
         "OutlineCompileContext",
         "PlanningState",
-        "compile_outline_to_create_draft",
+        "compile_outline_to_create_spec",
         "derive_architecture_commit_draft",
         "materialize_step_skeleton",
         "outline_compile_context_from_planning_state",

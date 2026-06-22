@@ -1,4 +1,4 @@
-"""Create-mode compile pipeline. Owns outline -> draft -> spec."""
+"""Create-mode compile pipeline. Owns outline -> spec."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     FlowCreateOutline,
     OutlineInputField,
@@ -115,11 +114,11 @@ class RuntimeInputFieldHintSource:
     aggregated_conversation_text: str
 
 
-def compile_outline_to_create_draft(
+def compile_outline_to_create_spec(
     outline: FlowCreateOutline,
     *,
     context: OutlineCompileContext | None = None,
-) -> FlowCreateDraft:
+) -> FlowDraftSpecCore:
     runtime_input_type = (
         context.runtime_input_type
         if context is not None and context.runtime_input_type is not None
@@ -202,6 +201,7 @@ def compile_outline_to_create_draft(
             )
         )
 
+    aggregation_intent = context.aggregation_intent if context is not None else "linear"
     try:
         skeleton_plan = materialize_step_skeleton(
             runtime_input_type=runtime_input_type,
@@ -209,9 +209,7 @@ def compile_outline_to_create_draft(
             final_output_mode=final_output_mode,
             pattern_ids=pattern_ids,
             chain_steps=chain_steps,
-            aggregation_intent=(
-                context.aggregation_intent if context is not None else "linear"
-            ),
+            aggregation_intent=aggregation_intent,
             runtime_required=context.runtime_required if context is not None else True,
             runtime_max_files=(
                 context.runtime_max_files if context is not None else None
@@ -250,14 +248,13 @@ def compile_outline_to_create_draft(
         field_names=dropped_primary_input_field_names,
         runtime_input_type=runtime_input_type,
     )
-    return FlowCreateDraft(
+    return compile_create_steps_to_spec(
         flow_name=outline.flow_name,
         flow_description=outline.flow_description,
-        plan_rationale=outline.plan_rationale,
-        assumptions=outline.assumptions,
         form_fields=form_fields,
         steps=steps,
         document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
+        aggregation_intent=aggregation_intent,
     )
 
 
@@ -299,20 +296,24 @@ def _log_skeleton_output_type_drifts(
         )
 
 
-def compile_create_draft(
-    draft: FlowCreateDraft,
+def compile_create_steps_to_spec(
     *,
+    flow_name: str,
+    flow_description: str | None = None,
+    form_fields: list[FormFieldSpec] | None = None,
+    steps: list[NewStepDraft],
+    document_body_writer_step_indexes: tuple[int, ...] = (),
     aggregation_intent: AggregationIntent = "linear",
 ) -> FlowDraftSpecCore:
-    steps = normalize_create_step_mechanics(
-        steps=draft.steps,
-        form_fields=draft.form_fields,
-        flow_name=draft.flow_name,
-        flow_description=draft.flow_description,
+    normalized_steps = normalize_create_step_mechanics(
+        steps=steps,
+        form_fields=form_fields or [],
+        flow_name=flow_name,
+        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
     )
     compiled_steps: list[StepSpec] = []
-    for index, step_draft in enumerate(steps):
+    for index, step_draft in enumerate(normalized_steps):
         compiled_steps.append(
             compile_new_step_draft(
                 step_draft=step_draft,
@@ -322,13 +323,13 @@ def compile_create_draft(
         )
 
     compiled = FlowDraftSpecCore(
-        flow_name=normalize_flow_name(draft.flow_name),
-        flow_description=draft.flow_description or "",
+        flow_name=normalize_flow_name(flow_name),
+        flow_description=flow_description or "",
         steps=compiled_steps,
-        form_fields=list(draft.form_fields) or None,
+        form_fields=list(form_fields or []) or None,
         document_body_writer_step_refs=_document_body_writer_step_refs(
             compiled_steps=compiled_steps,
-            step_indexes=draft.document_body_writer_step_indexes,
+            step_indexes=document_body_writer_step_indexes,
         ),
     )
     return compiled

@@ -571,7 +571,7 @@ class TestRule6FlowApiBoundary:
         )
         assert not offenders, (
             "The retired materialization bridge names must not be reintroduced. "
-            "Use compile_create_draft, FlowAuthoringCommandService, or "
+            "Use compile_create_steps_to_spec, FlowAuthoringCommandService, or "
             f"AIBuilderRepository directly.\nOffenders: {offenders}"
         )
 

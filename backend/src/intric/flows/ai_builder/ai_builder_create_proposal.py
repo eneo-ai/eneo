@@ -12,15 +12,14 @@ from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     RuntimeInputFieldHintSource,
-    compile_create_draft,
-    compile_outline_to_create_draft,
+    compile_outline_to_create_spec,
     outline_compile_context_from_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_outline_quality_feedback,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
+    FlowCreateOutline,
     OutlineFlowArgumentError,
     attach_selected_mcp_refs_to_explicit_outline_steps,
     safe_validation_issues,
@@ -56,11 +55,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from intric.flows.ai_builder.ai_builder_tools import (
-    PROPOSE_FLOW_TOOL_NAME,
-    parse_outline_flow_arguments,
-)
+from intric.flows.ai_builder.ai_builder_tools import parse_outline_flow_arguments
 from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
+from intric.flows.flow_authoring_spec import FlowDraftSpecCore
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -238,7 +235,7 @@ async def process_outline_arguments(
                 else None
             ),
         )
-        draft = compile_outline_to_create_draft(
+        spec = compile_outline_to_create_spec(
             outline,
             context=compile_context,
         )
@@ -274,10 +271,11 @@ async def process_outline_arguments(
             failure_kind="parse",
         )
 
-    return await _process_create_draft(
+    return await _process_create_spec(
         turn=turn,
         conversation=conversation,
-        draft=draft,
+        outline=outline,
+        spec=spec,
         tool_call_id=tool_call_id,
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
@@ -292,11 +290,12 @@ async def process_outline_arguments(
     )
 
 
-async def _process_create_draft(
+async def _process_create_spec(
     *,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
-    draft: FlowCreateDraft,
+    outline: FlowCreateOutline,
+    spec: FlowDraftSpecCore,
     tool_call_id: str,
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
@@ -305,18 +304,6 @@ async def _process_create_draft(
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
-    try:
-        spec = compile_create_draft(
-            draft,
-            aggregation_intent=aggregation_intent,
-        )
-    except Exception as error:
-        logger.error("Create draft compilation failed: %s", error, exc_info=error)
-        return ToolProcessingResult(
-            feedback=f"Failed to compile {PROPOSE_FLOW_TOOL_NAME} draft: {error}",
-            failure_kind="validation",
-        )
-
     prepared = prepare_compiled_spec_for_session(
         spec=spec,
         target_kind=TargetKind.CREATE,
@@ -379,8 +366,8 @@ async def _process_create_draft(
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
             spec=spec,
-            assumptions=tuple(draft.assumptions),
-            plan_rationale=draft.plan_rationale,
+            assumptions=tuple(outline.assumptions),
+            plan_rationale=outline.plan_rationale,
             reasoning=None,
             validation=validation,
             resource_bindings=(

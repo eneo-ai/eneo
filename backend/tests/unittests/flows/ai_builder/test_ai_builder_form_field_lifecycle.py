@@ -9,10 +9,9 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     OutlineCompileContext,
-    compile_create_draft,
-    compile_outline_to_create_draft,
+    compile_create_steps_to_spec,
+    compile_outline_to_create_spec,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     parse_outline_flow_arguments,
 )
@@ -84,12 +83,8 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    compiled = compile_outline_to_create_spec(outline)
 
-    assert [field.name for field in draft.form_fields] == ["priority"]
-    assert draft.steps[0].uses_form_fields == []
-    assert draft.steps[-1].uses_form_fields == []
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["priority"]
     assert compiled.steps[-1].input_bindings is None
@@ -140,16 +135,14 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    compiled = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.PDF,
         ),
     )
-    compiled = compile_create_draft(draft)
 
-    assert [step.uses_form_fields for step in draft.steps] == [[], [], [], []]
     assert find_unused_form_fields(compiled) == ["focus_area"]
     assert "form_fields_declared_must_be_referenced" in _critic_issue_ids(compiled)
     validation = validate_spec(compiled)
@@ -180,63 +173,59 @@ def test_single_step_outline_form_field_fallback_binds_only_available_step() -> 
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    compiled = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(final_output_type=OutputType.PDF),
     )
-    compiled = compile_create_draft(draft)
     question = _question_binding(compiled.steps[-1].input_bindings)
 
-    assert [step.uses_form_fields for step in draft.steps] == [[], ["report_title"]]
     assert "report_title: {{ flow_input.report_title }}" in question
     assert find_unused_form_fields(compiled) == []
     assert validate_spec(compiled).valid
 
 
 def test_intermediate_form_field_use_flows_through_structured_previous_field() -> None:
-    draft = FlowCreateDraft(
-        flow_name="Case assessment",
-        plan_rationale="Extract a scored intermediate result before writing.",
-        form_fields=[_form_field(variable_name="case_id", label="Case ID")],
-        steps=[
-            NewStepDraft(
-                name="Score case",
-                instructions="Score the case using the runtime identifier.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="json",
-                uses_form_fields=["case_id"],
-                output_fields=[
-                    _structured_field(
-                        name="risk_score",
-                        field_type="number",
-                        description="Risk score.",
-                    )
-                ],
-            ),
-            NewStepDraft(
-                name="Write assessment",
-                instructions="Write the assessment from the structured score.",
-                input_source="previous_step",
-                input_type="json",
-                output_type="text",
-                uses_previous_fields=[
-                    {
-                        "from_step": 1,
-                        "field_path": "risk_score",
-                        "label": "Risk score",
-                    }
-                ],
-            ),
-        ],
-    )
+    form_fields = [_form_field(variable_name="case_id", label="Case ID")]
+    steps = [
+        NewStepDraft(
+            name="Score case",
+            instructions="Score the case using the runtime identifier.",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            uses_form_fields=["case_id"],
+            output_fields=[
+                _structured_field(
+                    name="risk_score",
+                    field_type="number",
+                    description="Risk score.",
+                )
+            ],
+        ),
+        NewStepDraft(
+            name="Write assessment",
+            instructions="Write the assessment from the structured score.",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+            uses_previous_fields=[
+                {
+                    "from_step": 1,
+                    "field_path": "risk_score",
+                    "label": "Risk score",
+                }
+            ],
+        ),
+    ]
 
-    compiled = compile_create_draft(draft)
+    compiled = compile_create_steps_to_spec(
+        flow_name="Case assessment",
+        form_fields=form_fields,
+        steps=steps,
+    )
     first_question = _question_binding(compiled.steps[0].input_bindings)
     final_question = _question_binding(compiled.steps[-1].input_bindings)
 
-    assert draft.steps[0].uses_form_fields == ["case_id"]
-    assert draft.steps[-1].uses_form_fields == []
     assert first_question.count("{{ flow_input.case_id }}") == 1
     assert final_question == "Risk score: {{ step_a.output.structured.risk_score }}"
     assert "{{ flow_input.case_id }}" not in final_question
@@ -280,13 +269,10 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    compiled = compile_outline_to_create_spec(outline)
     first_question = _question_binding(compiled.steps[0].input_bindings)
     final_question = _question_binding(compiled.steps[-1].input_bindings)
 
-    assert draft.steps[0].uses_form_fields == ["audience"]
-    assert draft.steps[-1].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["audience"]
     assert first_question.count("{{ flow_input.audience }}") == 1

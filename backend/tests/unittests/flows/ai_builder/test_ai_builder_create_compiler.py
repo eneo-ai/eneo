@@ -16,8 +16,8 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     OutlineCompileContext,
     RuntimeInputFieldHintSource,
-    compile_create_draft,
-    compile_outline_to_create_draft,
+    compile_create_steps_to_spec,
+    compile_outline_to_create_spec,
     outline_compile_context_from_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
@@ -26,7 +26,6 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     MAX_OUTLINE_STEPS,
     OutlineFlowArgumentError,
@@ -98,35 +97,53 @@ CREATE_OUTLINE_LOGGER = "intric.flows.ai_builder.ai_builder_create_outline"
 CREATE_COMPILER_LOGGER = "intric.flows.ai_builder.ai_builder_create_compiler"
 
 
-# Test-only bridge while existing assertions still construct FlowCreateDraft.
-# Delete it when the create proposal model is removed.
-def normalize_create_draft_mechanics(
-    draft: FlowCreateDraft,
+def _normalize_create_steps(
     *,
+    flow_name: str,
+    steps: list[NewStepDraft],
+    form_fields: list[FormFieldSpec] | None = None,
+    flow_description: str | None = None,
     aggregation_intent: AggregationIntent = "linear",
-) -> FlowCreateDraft:
-    return draft.model_copy(
-        update={
-            "steps": normalize_create_step_mechanics(
-                steps=draft.steps,
-                form_fields=draft.form_fields,
-                flow_name=draft.flow_name,
-                flow_description=draft.flow_description,
-                aggregation_intent=aggregation_intent,
-            )
-        }
+) -> list[NewStepDraft]:
+    return normalize_create_step_mechanics(
+        steps=steps,
+        form_fields=form_fields or [],
+        flow_name=flow_name,
+        flow_description=flow_description,
+        aggregation_intent=aggregation_intent,
+    )
+
+
+def _compile_create_steps(
+    *,
+    flow_name: str = "Test flow",
+    flow_description: str | None = None,
+    form_fields: list[FormFieldSpec] | None = None,
+    steps: list[NewStepDraft],
+    document_body_writer_step_indexes: tuple[int, ...] = (),
+    aggregation_intent: AggregationIntent = "linear",
+) -> FlowDraftSpecCore:
+    return compile_create_steps_to_spec(
+        flow_name=flow_name,
+        flow_description=flow_description,
+        form_fields=form_fields,
+        steps=steps,
+        document_body_writer_step_indexes=document_body_writer_step_indexes,
+        aggregation_intent=aggregation_intent,
     )
 
 
 def auto_bind_targeted_underlag_for_text_composer(
-    draft: FlowCreateDraft,
+    steps: list[NewStepDraft],
     *,
+    flow_name: str = "Auto-bind test",
+    flow_description: str | None = None,
     aggregation_intent: AggregationIntent,
 ) -> list[NewStepDraft]:
     return _auto_bind_targeted_underlag_for_text_composer(
-        steps=draft.steps,
-        flow_name=draft.flow_name,
-        flow_description=draft.flow_description,
+        steps=steps,
+        flow_name=flow_name,
+        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
     )
 
@@ -179,12 +196,11 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     )
 
 
-def _compile_and_canonicalize_create_draft(
-    draft: FlowCreateDraft,
+def _canonicalize_create_spec(
+    spec: FlowDraftSpecCore,
     *,
     catalog: AIBuilderResourceCatalog,
 ) -> FlowDraftSpecCore:
-    spec = compile_create_draft(draft)
     canonicalized, issues = canonicalize_flow_spec_resources(spec, catalog=catalog)
     assert issues == []
     return canonicalized
@@ -206,14 +222,6 @@ def _field(
         required=required,
         fields=fields,
         item_fields=item_fields,
-    )
-
-
-def _draft_with_steps(steps: list[NewStepDraft]) -> FlowCreateDraft:
-    return FlowCreateDraft(
-        flow_name="Auto-bind test",
-        plan_rationale="Exercise targeted underlag mechanics.",
-        steps=steps,
     )
 
 
@@ -327,22 +335,23 @@ def test_new_step_draft_rejects_nested_assistant_spec() -> None:
     assert "assistant_spec" in str(exc_info.value)
 
 
-def _create_draft_snapshot(
+def _create_spec_snapshot(
     *,
     flow_name: str,
-    plan_rationale: str,
     steps: list[dict[str, object]],
     flow_description: str | None = None,
     form_fields: list[dict[str, object]] | None = None,
+    document_body_writer_step_indexes: tuple[int, ...] = (),
 ) -> dict[str, object]:
-    return {
-        "flow_name": flow_name,
-        "flow_description": flow_description,
-        "plan_rationale": plan_rationale,
-        "assumptions": [],
-        "form_fields": form_fields or [],
-        "steps": steps,
-    }
+    return _compile_create_steps(
+        flow_name=flow_name,
+        flow_description=flow_description,
+        form_fields=[
+            FormFieldSpec.model_validate(field) for field in form_fields or []
+        ],
+        steps=[NewStepDraft.model_validate(step) for step in steps],
+        document_body_writer_step_indexes=document_body_writer_step_indexes,
+    ).model_dump(mode="json")
 
 
 def _source_facts_fields_snapshot() -> list[dict[str, object]]:
@@ -751,11 +760,10 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
 )
 
 
-def _draft_for_archetype_case(case: _CreateCompilerArchetypeCase) -> FlowCreateDraft:
-    return FlowCreateDraft(
+def _compile_archetype_case(case: _CreateCompilerArchetypeCase) -> FlowDraftSpecCore:
+    return _compile_create_steps(
         flow_name=f"{case.pattern_id} flow",
         flow_description=f"Create compiler fixture for {case.pattern_id}.",
-        plan_rationale=f"Canonical {case.pattern_id} realization.",
         form_fields=list(case.form_fields),
         steps=list(case.steps),
     )
@@ -788,7 +796,7 @@ def test_every_positive_pattern_has_create_compiler_fixture() -> None:
 def test_positive_pattern_fixture_compiles_through_create_compiler(
     case: _CreateCompilerArchetypeCase,
 ) -> None:
-    compiled = compile_create_draft(_draft_for_archetype_case(case))
+    compiled = _compile_archetype_case(case)
 
     assert len(compiled.steps) == len(case.steps)
     assert tuple(step.output_mode.value for step in compiled.steps) == (
@@ -806,14 +814,12 @@ def test_positive_pattern_fixture_compiles_through_create_compiler(
         )
 
 
-def test_compile_create_draft_generates_runtime_input_contracts_and_form_fields() -> (
+def test_compile_create_steps_to_spec_generates_runtime_input_contracts_and_form_fields() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    compiled = _compile_create_steps(
         flow_name="Dokumentanalys",
         flow_description="Analyserar dokumentpaket.",
-        plan_rationale="Strukturerad extraktion först för säkrare vidare analys.",
-        assumptions=["PDF-paketet hör till ett och samma ärende."],
         form_fields=[
             FormFieldSpec(
                 name="referensnummer",
@@ -875,8 +881,6 @@ def test_compile_create_draft_generates_runtime_input_contracts_and_form_fields(
         ],
     )
 
-    compiled = compile_create_draft(draft)
-
     assert compiled.flow_name == "Dokumentanalys"
     assert [step.plan_step_ref for step in compiled.steps] == ["step_a", "step_b"]
     assert compiled.form_fields is not None
@@ -925,12 +929,11 @@ def test_compile_create_draft_generates_runtime_input_contracts_and_form_fields(
     )
 
 
-def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindings() -> (
+def test_compile_create_steps_to_spec_uses_previous_fields_to_generate_field_level_bindings() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    compiled = _compile_create_steps(
         flow_name="Dokumentanalys",
-        plan_rationale="Återanvänd specifika fält i steg 3.",
         form_fields=[
             FormFieldSpec(
                 name="referensnummer",
@@ -984,8 +987,6 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
         ],
     )
 
-    compiled = compile_create_draft(draft)
-
     second_step = compiled.steps[1]
     assert second_step.input_bindings is not None
     assert second_step.input_bindings["question"] == (
@@ -995,12 +996,11 @@ def test_compile_create_draft_uses_previous_fields_to_generate_field_level_bindi
     )
 
 
-def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent() -> (
+def test_compile_create_steps_to_spec_keeps_previous_json_when_field_ref_is_non_adjacent() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    compiled = _compile_create_steps(
         flow_name="Protokoll",
-        plan_rationale="Kombinera transkription och metadata.",
         steps=[
             NewStepDraft(
                 name="Strukturera transkription",
@@ -1043,8 +1043,6 @@ def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent
         ],
     )
 
-    compiled = compile_create_draft(draft)
-
     third_step = compiled.steps[2]
     assert third_step.input_bindings is not None
     assert third_step.input_bindings["question"] == (
@@ -1053,12 +1051,11 @@ def test_compile_create_draft_keeps_previous_json_when_field_ref_is_non_adjacent
     )
 
 
-def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacent() -> (
+def test_compile_create_steps_to_spec_keeps_previous_json_when_output_ref_is_non_adjacent() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    compiled = _compile_create_steps(
         flow_name="Protokoll",
-        plan_rationale="Kombinera källtext och metadata.",
         steps=[
             NewStepDraft(
                 name="Transkribera ljud",
@@ -1094,8 +1091,6 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
         ],
     )
 
-    compiled = compile_create_draft(draft)
-
     third_step = compiled.steps[2]
     assert third_step.input_bindings is not None
     assert third_step.input_bindings["question"] == (
@@ -1104,12 +1099,11 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
     )
 
 
-def test_compile_create_draft_all_previous_owns_source_over_previous_field_refs() -> (
+def test_compile_create_steps_to_spec_all_previous_owns_source_over_previous_field_refs() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    compiled = _compile_create_steps(
         flow_name="Samlad analys",
-        plan_rationale="Ett brett syntessteg ska använda implicit fan-in.",
         steps=[
             NewStepDraft(
                 name="Extrahera fakta",
@@ -1147,7 +1141,6 @@ def test_compile_create_draft_all_previous_owns_source_over_previous_field_refs(
         ],
     )
 
-    compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
     third_step = compiled.steps[2]
@@ -1161,10 +1154,11 @@ def test_compile_create_draft_all_previous_owns_source_over_previous_field_refs(
     assert validation.valid
 
 
-def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_derives_transcribe_only_for_audio_upload() -> (
+    None
+):
+    compiled = _compile_create_steps(
         flow_name="Transkribera ljud",
-        plan_rationale="Starta med transkribering.",
         steps=[
             NewStepDraft(
                 name="Transkribera",
@@ -1178,8 +1172,6 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
         ],
     )
 
-    compiled = compile_create_draft(draft)
-
     step = compiled.steps[0]
     assert step.output_mode.value == "transcribe_only"
     assert step.assistant_spec.model_ref is None
@@ -1188,10 +1180,9 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
     assert step.input_config["runtime_input"]["input_format"] == "audio"
 
 
-def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_sets_review_policy_from_review_mode() -> None:
+    compiled = _compile_create_steps(
         flow_name="Granska transkribering",
-        plan_rationale="Låt användaren granska transkriberingen innan analys.",
         steps=[
             NewStepDraft(
                 name="Transkribera",
@@ -1204,8 +1195,6 @@ def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
             )
         ],
     )
-
-    compiled = compile_create_draft(draft)
 
     assert compiled.steps[0].review_policy is not None
     assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.VIEW
@@ -1316,10 +1305,8 @@ def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    compiled = compile_outline_to_create_spec(outline)
 
-    assert draft.steps[0].review_mode is FlowStepReviewMode.EDIT
     assert compiled.steps[0].review_policy is not None
     assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
 
@@ -1338,11 +1325,10 @@ def test_compile_outline_parity_plain_text_snapshot() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    spec = compile_outline_to_create_spec(outline)
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Text summary",
-        plan_rationale="Summarize supplied text.",
         steps=[
             _create_step_snapshot(
                 name="Summarize text",
@@ -1382,14 +1368,13 @@ def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
         required_capabilities=["input_audio", "output_mode_pass_through"],
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Meeting minutes",
-        plan_rationale="Transcribe meeting audio and produce a PDF report.",
         steps=[
             _create_step_snapshot(
                 name="Transcribe audio",
@@ -1446,14 +1431,13 @@ def test_compile_outline_parity_docx_template_snapshot() -> None:
         required_capabilities=["input_document", "output_mode_template_fill"],
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Template report",
-        plan_rationale="Fill a DOCX template from source material.",
         steps=[
             _create_step_snapshot(
                 name="Extract template variables",
@@ -1523,14 +1507,13 @@ def test_compile_outline_parity_json_intermediate_snapshot() -> None:
         required_capabilities=["input_text", "output_mode_pass_through"],
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Customer report",
-        plan_rationale="Extract structured facts and write a report.",
         steps=[
             _create_step_snapshot(
                 name="Extract facts",
@@ -1598,14 +1581,13 @@ def test_compile_outline_parity_form_field_chain_snapshot() -> None:
         required_capabilities=["input_text", "output_mode_pass_through"],
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Audience report",
-        plan_rationale="Use requested form fields.",
         form_fields=[
             _form_field_snapshot("audience", "Audience", "text", required=True),
             _form_field_snapshot("tone", "Tone", "text", required=False),
@@ -1659,11 +1641,10 @@ def test_compile_outline_parity_single_step_field_attachment_snapshot() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    spec = compile_outline_to_create_spec(outline)
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Single field report",
-        plan_rationale="One step uses all fields implicitly.",
         form_fields=[
             _form_field_snapshot("audience", "Audience", "text", required=True),
             _form_field_snapshot("deadline", "Deadline", "date", required=False),
@@ -1708,14 +1689,13 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
         aggregation_intent="aggregate",
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Aggregate documents",
-        plan_rationale="Aggregate multiple documents into a PDF.",
         steps=[
             _create_step_snapshot(
                 name="Extract structured foundation",
@@ -1766,6 +1746,7 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
                 document_delivery_mode="generated",
             ),
         ],
+        document_body_writer_step_indexes=(3,),
     )
 
 
@@ -1788,14 +1769,13 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(final_output_type=OutputType.PDF),
     )
 
-    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+    assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Fold text hop",
-        plan_rationale="Avoid zero-contract first step.",
         steps=[
             _create_step_snapshot(
                 name="Create PDF",
@@ -1819,10 +1799,11 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
     )
 
 
-def test_compile_create_draft_derives_template_fill_for_docx_templates() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_derives_template_fill_for_docx_templates() -> (
+    None
+):
+    compiled = _compile_create_steps(
         flow_name="Mallstyrd rapport",
-        plan_rationale="Använd DOCX-mall för sista steget.",
         steps=[
             NewStepDraft(
                 name="Generera rapport",
@@ -1835,73 +1816,64 @@ def test_compile_create_draft_derives_template_fill_for_docx_templates() -> None
         ],
     )
 
-    compiled = compile_create_draft(draft)
-
     assert compiled.steps[0].output_mode.value == "template_fill"
 
 
-def test_normalize_create_draft_mechanics_strips_template_fill_from_non_docx() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_strips_template_fill_from_non_docx() -> None:
+    steps = [
+        NewStepDraft(
+            name="PDF-steg",
+            instructions="Generera PDF med mall.",
+            input_source="flow_input",
+            input_type="text",
+            output_type="pdf",
+            document_delivery_mode="template_fill",
+        )
+    ]
+    normalized = _normalize_create_steps(
         flow_name="Ogiltig mall",
-        plan_rationale="Ogiltig kombination.",
-        steps=[
-            NewStepDraft(
-                name="PDF-steg",
-                instructions="Generera PDF med mall.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="pdf",
-                document_delivery_mode="template_fill",
-            )
-        ],
+        steps=steps,
     )
-
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(normalized)
+    compiled = _compile_create_steps(flow_name="Ogiltig mall", steps=normalized)
     validation = validate_spec(compiled)
 
-    assert normalized.steps[0].document_delivery_mode == "generated"
+    assert normalized[0].document_delivery_mode == "generated"
     assert compiled.steps[0].output_mode == OutputMode.PASS_THROUGH
     assert validation.valid
 
 
-def test_normalize_create_draft_mechanics_strips_template_fill_from_text_output() -> (
+def test_normalize_create_step_mechanics_strips_template_fill_from_text_output() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    steps = [
+        NewStepDraft(
+            name="Textsteg",
+            instructions="Skriv en text.",
+            input_source="flow_input",
+            input_type="text",
+            output_type="text",
+            document_delivery_mode="template_fill",
+        )
+    ]
+    normalized = _normalize_create_steps(
         flow_name="Ogiltig textmall",
-        plan_rationale="Ogiltig kombination.",
-        steps=[
-            NewStepDraft(
-                name="Textsteg",
-                instructions="Skriv en text.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="text",
-                document_delivery_mode="template_fill",
-            )
-        ],
+        steps=steps,
     )
-
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(normalized)
+    compiled = _compile_create_steps(flow_name="Ogiltig textmall", steps=normalized)
     validation = validate_spec(compiled)
 
-    assert normalized.steps[0].document_delivery_mode == "not_applicable"
+    assert normalized[0].document_delivery_mode == "not_applicable"
     assert compiled.steps[0].output_mode == OutputMode.PASS_THROUGH
     assert validation.valid
 
 
-def test_compile_create_draft_empty_steps_surfaces_canonical_empty_steps_error() -> (
+def test_compile_create_steps_to_spec_empty_steps_surfaces_canonical_empty_steps_error() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    compiled = _compile_create_steps(
         flow_name="Tomt flöde",
-        plan_rationale="Verifierar tomt stegfall.",
         steps=[],
     )
-
-    compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
     assert compiled.steps == []
@@ -1909,55 +1881,50 @@ def test_compile_create_draft_empty_steps_surfaces_canonical_empty_steps_error()
     assert [error.code for error in validation.errors] == ["empty_steps"]
 
 
-def test_normalize_create_draft_prunes_non_json_previous_field_source() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_prunes_non_json_previous_field_source() -> (
+    None
+):
+    steps = [
+        NewStepDraft(
+            name="Skriv text",
+            instructions="Skriv text.",
+            input_source="flow_input",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Sammanfatta",
+            instructions="Sammanfatta.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+            uses_previous_fields=[{"from_step": 1, "field_path": "titel"}],
+        ),
+    ]
+    normalized = _normalize_create_steps(
         flow_name="Ogiltig fältkälla",
-        plan_rationale="Testar icke-json källa.",
-        steps=[
-            NewStepDraft(
-                name="Skriv text",
-                instructions="Skriv text.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="text",
-            ),
-            NewStepDraft(
-                name="Sammanfatta",
-                instructions="Sammanfatta.",
-                input_source="previous_step",
-                input_type="text",
-                output_type="text",
-                uses_previous_fields=[{"from_step": 1, "field_path": "titel"}],
-            ),
-        ],
+        steps=steps,
     )
-
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(normalized)
+    compiled = _compile_create_steps(flow_name="Ogiltig fältkälla", steps=normalized)
     validation = validate_spec(compiled)
 
-    assert normalized.steps[1].uses_previous_fields == []
+    assert normalized[1].uses_previous_fields == []
     assert validation.valid
 
 
-def test_compile_create_draft_derives_file_flow_input_runtime_config() -> None:
-    draft = FlowCreateDraft(
-        flow_name="Ogiltig filindata",
-        plan_rationale="Testar runtime input-krav.",
-        steps=[
-            NewStepDraft(
-                name="Analysera dokument",
-                instructions="Analysera dokumentet.",
-                input_source="flow_input",
-                input_type="document",
-                output_type="json",
-                output_fields=[_field("sammanfattning", "string")],
-            )
-        ],
-    )
-
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(normalized)
+def test_compile_create_steps_to_spec_derives_file_flow_input_runtime_config() -> None:
+    steps = [
+        NewStepDraft(
+            name="Analysera dokument",
+            instructions="Analysera dokumentet.",
+            input_source="flow_input",
+            input_type="document",
+            output_type="json",
+            output_fields=[_field("sammanfattning", "string")],
+        )
+    ]
+    normalized = _normalize_create_steps(flow_name="Ogiltig filindata", steps=steps)
+    compiled = _compile_create_steps(flow_name="Ogiltig filindata", steps=normalized)
     validation = validate_spec(compiled)
     runtime_input = compiled.steps[0].input_config["runtime_input"]
 
@@ -1969,34 +1936,28 @@ def test_compile_create_draft_derives_file_flow_input_runtime_config() -> None:
 
 def test_structured_field_depth_above_three_is_rejected() -> None:
     with pytest.raises(ValueError, match="nesting depth"):
-        FlowCreateDraft(
-            flow_name="För djup struktur",
-            plan_rationale="Test",
-            steps=[
-                NewStepDraft(
-                    name="Extrahera",
-                    instructions="Extrahera struktur.",
-                    input_source="flow_input",
-                    input_type="text",
-                    output_type="json",
-                    output_fields=[
+        NewStepDraft(
+            name="Extrahera",
+            instructions="Extrahera struktur.",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[
+                _field(
+                    "nivå_ett",
+                    "object",
+                    fields=[
                         _field(
-                            "nivå_ett",
+                            "nivå_två",
                             "object",
                             fields=[
                                 _field(
-                                    "nivå_två",
+                                    "nivå_tre",
                                     "object",
                                     fields=[
-                                        _field(
-                                            "nivå_tre",
-                                            "object",
-                                            fields=[
-                                                _field("nivå_fyra", "string"),
-                                            ],
-                                        ),
+                                        _field("nivå_fyra", "string"),
                                     ],
-                                )
+                                ),
                             ],
                         )
                     ],
@@ -2106,8 +2067,8 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
-    spec = _compile_and_canonicalize_create_draft(
-        compile_outline_to_create_draft(updated),
+    spec = _canonicalize_create_spec(
+        compile_outline_to_create_spec(updated),
         catalog=catalog,
     )
 
@@ -2172,8 +2133,8 @@ def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
-    spec = _compile_and_canonicalize_create_draft(
-        compile_outline_to_create_draft(updated),
+    spec = _canonicalize_create_spec(
+        compile_outline_to_create_spec(updated),
         catalog=catalog,
     )
 
@@ -2222,8 +2183,8 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
-    spec = _compile_and_canonicalize_create_draft(
-        compile_outline_to_create_draft(updated),
+    spec = _canonicalize_create_spec(
+        compile_outline_to_create_spec(updated),
         catalog=catalog,
     )
 
@@ -2427,11 +2388,10 @@ def test_parse_outline_flow_allows_server_owned_core_shape_defaults() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
     assert draft.steps[0].input_type is InputType.TEXT
-    assert draft.steps[0].runtime_required is False
-    assert draft.steps[0].runtime_max_files is None
+    assert draft.steps[0].input_config is None
 
 
 def test_parse_outline_flow_rejects_model_supplied_runtime_input() -> None:
@@ -2478,8 +2438,8 @@ def test_parse_outline_flow_ignores_model_supplied_final_output_type() -> None:
     )
 
     assert not hasattr(outline, "final_output_type")
-    default_draft = compile_outline_to_create_draft(outline)
-    context_draft = compile_outline_to_create_draft(
+    default_draft = compile_outline_to_create_spec(outline)
+    context_draft = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(final_output_type=OutputType.PDF),
     )
@@ -2504,10 +2464,10 @@ def test_parse_outline_flow_accepts_create_resource_refs() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
-    assert draft.steps[0].model_ref == "model-1"
-    assert draft.steps[0].knowledge_refs == ["kb-1"]
+    assert draft.steps[0].assistant_spec.model_ref == "model-1"
+    assert draft.steps[0].assistant_spec.knowledge_refs == ["kb-1"]
 
 
 def test_parse_outline_flow_rejects_knowledge_and_mcp_on_same_step() -> None:
@@ -2570,7 +2530,7 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
     assert draft.steps[0].input_source.value == "flow_input"
     assert draft.steps[0].input_type.value == "text"
@@ -2739,16 +2699,15 @@ def test_outline_flow_truncates_over_deep_structured_fields_before_draft_validat
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
-    assert draft.steps[0].output_fields is not None
-    level_one = draft.steps[0].output_fields[0]
-    assert level_one.fields is not None
-    level_two = level_one.fields[0]
-    assert level_two.fields is not None
-    level_three = level_two.fields[0]
-    assert level_three.field_type == "string"
-    assert level_three.fields is None
+    output_contract = draft.steps[0].output_contract
+    assert output_contract is not None
+    level_one = output_contract["properties"]["level_one"]
+    level_two = level_one["properties"]["level_two"]
+    level_three = level_two["properties"]["level_three"]
+    assert level_three["type"] == "string"
+    assert "properties" not in level_three
 
 
 def test_parse_outline_flow_allows_advanced_step_counts_above_old_limit() -> None:
@@ -2766,8 +2725,8 @@ def test_parse_outline_flow_allows_advanced_step_counts_above_old_limit() -> Non
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert len(outline.steps) == 20
@@ -2793,7 +2752,7 @@ def test_parse_outline_flow_allows_advanced_step_counts_above_old_soft_cap() -> 
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
     assert len(outline.steps) == 80
     assert len(draft.steps) == 80
@@ -2924,7 +2883,7 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(
             runtime_input_type=InputType.DOCUMENT,
@@ -2933,7 +2892,7 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
             runtime_max_files=5,
         ),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
 
     assert [step.name for step in draft.steps] == [
         "Extract facts",
@@ -2942,17 +2901,16 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
     ]
     assert draft.steps[0].input_source.value == "flow_input"
     assert draft.steps[0].input_type.value == "document"
-    assert draft.steps[0].runtime_required is True
-    assert draft.steps[0].runtime_max_files == 5
-    assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
-    assert compiled.steps[0].input_config["runtime_input"]["required"] is True
-    assert compiled.steps[0].input_config["runtime_input"]["max_files"] == 5
+    assert compiled.steps[0].input_config is not None
+    runtime_input = compiled.steps[0].input_config["runtime_input"]
+    assert runtime_input["input_format"] == "document"
+    assert runtime_input["required"] is True
+    assert runtime_input["max_files"] == 5
     assert draft.steps[0].output_type.value == "json"
     assert draft.steps[1].input_source.value == "previous_step"
     assert draft.steps[1].input_type.value == "text"
-    assert draft.steps[1].uses_form_fields == ["case_id"]
     assert draft.steps[2].output_type.value == "docx"
-    assert draft.steps[2].document_delivery_mode == "generated"
+    assert draft.steps[2].output_mode == OutputMode.PASS_THROUGH
 
     assert compiled.form_fields is not None
     assert compiled.form_fields[0].name == "case_id"
@@ -2999,12 +2957,11 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
         ),
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline, context=context)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    assert [field.name for field in draft.form_fields] == []
-    assert draft.steps[-1].uses_form_fields == []
+    assert [field.name for field in (draft.form_fields or [])] == []
     assert compiled.form_fields is None or compiled.form_fields == []
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
@@ -3043,14 +3000,13 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_inp
         ),
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline, context=context)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    assert [field.name for field in draft.form_fields] == ["audience"]
-    assert draft.steps[0].uses_form_fields == ["audience"]
+    assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == ["audience"]
+    assert [field.name for field in (compiled.form_fields or [])] == ["audience"]
     assert compiled.form_fields[0].options is None
     first_question = compiled.steps[0].input_bindings or {}
     assert "{{ flow_input.audience }}" in str(first_question.get("question") or "")
@@ -3105,21 +3061,25 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
         ),
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline, context=context)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    assert [field.name for field in draft.form_fields] == [
+    assert [field.name for field in (draft.form_fields or [])] == [
         "audience",
         "report_type",
     ]
-    assert draft.steps[0].uses_form_fields == ["report_type"]
-    assert draft.steps[1].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == [
+    assert [field.name for field in (compiled.form_fields or [])] == [
         "audience",
         "report_type",
     ]
+    first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
+    second_question = str(
+        (compiled.steps[1].input_bindings or {}).get("question") or ""
+    )
+    assert "{{ flow_input.report_type }}" in first_question
+    assert "{{ flow_input.audience }}" in second_question
     assert find_unused_form_fields(compiled) == []
     assert validation.valid
 
@@ -3167,8 +3127,8 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
         runtime_input_field_hints=field_hints,
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline, context=context)
+    compiled = draft
     validation = validate_spec(compiled)
 
     from intric.flows.ai_builder.ai_builder_form_field_usage import (
@@ -3178,8 +3138,7 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
     # The planner declared no `input_fields` and did not list any hint name
     # in `uses_input_fields`, so the server-derived hints stay out of
     # form_fields entirely. The flow validates without orphan UI controls.
-    assert [field.name for field in draft.form_fields] == []
-    assert draft.steps[-1].uses_form_fields == []
+    assert [field.name for field in (draft.form_fields or [])] == []
     assert compiled.form_fields is None or compiled.form_fields == []
     assert validation.valid
     assert find_unused_form_fields(compiled) == []
@@ -3226,16 +3185,15 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
         ),
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline, context=context)
+    compiled = draft
     validation = validate_spec(compiled)
 
     # Field appears once and keeps the planner-declared label.
-    assert [field.name for field in draft.form_fields] == ["audience"]
+    assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert draft.form_fields[0].label == "Audience explicit"
-    assert draft.steps[0].uses_form_fields == ["audience"]
     assert compiled.form_fields is not None
-    assert [field.name for field in compiled.form_fields] == ["audience"]
+    assert [field.name for field in (compiled.form_fields or [])] == ["audience"]
     first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
     assert first_question.count("{{ flow_input.audience }}") == 1
     assert validation.valid
@@ -3268,14 +3226,13 @@ def test_compile_outline_flow_orphan_uses_input_fields_reference_is_dropped_sile
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     # The orphan reference does not pull a field into form_fields and
     # does not poison the step's bindings with `{{ missing_field }}`.
-    assert [field.name for field in draft.form_fields] == []
-    assert draft.steps[0].uses_form_fields == []
+    assert [field.name for field in (draft.form_fields or [])] == []
     first_question = str((compiled.steps[0].input_bindings or {}).get("question") or "")
     assert "{{ missing_field }}" not in first_question
     assert validation.valid
@@ -3338,11 +3295,11 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(
+        draft = compile_outline_to_create_spec(
             outline,
             context=outline_compile_context_from_planning_state(state),
         )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     shadow_records = [
@@ -3353,8 +3310,7 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
     assert shadow_records
     assert getattr(shadow_records[0], "field_names") == ["text"]
     assert getattr(shadow_records[0], "runtime_input_type") == "text"
-    assert draft.form_fields == []
-    assert draft.steps[1].uses_form_fields == []
+    assert draft.form_fields is None
     assert draft.steps[1].input_type.value == "json"
     assert compiled.form_fields is None
     assert compiled.steps[1].input_bindings is None
@@ -3411,15 +3367,14 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    assert [field.name for field in draft.form_fields] == ["audience"]
-    assert draft.steps[1].uses_form_fields == ["audience"]
+    assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert compiled.form_fields is not None
     assert compiled.steps[1].input_bindings == {
         "question": "{{ step_a.output.structured }}\n\naudience: {{ flow_input.audience }}"
@@ -3509,11 +3464,11 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(
+        draft = compile_outline_to_create_spec(
             outline,
             context=outline_compile_context_from_planning_state(state),
         )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     metadata_records = [
@@ -3530,8 +3485,7 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
     assert getattr(metadata_records[0], "runtime_metadata_state") == (
         NO_EXTRA_RUNTIME_METADATA
     )
-    assert draft.form_fields == []
-    assert all(step.uses_form_fields == [] for step in draft.steps)
+    assert draft.form_fields is None
     assert compiled.form_fields is None
     question_bindings = [
         step.input_bindings["question"]
@@ -3539,9 +3493,19 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
         if step.input_bindings is not None
     ]
     assert not any("{{ language }}" in binding for binding in question_bindings)
+    assert not any(
+        "{{ flow_input.language }}" in binding for binding in question_bindings
+    )
     assert not any("{{ output_style }}" in binding for binding in question_bindings)
     assert not any(
+        "{{ flow_input.output_style }}" in binding for binding in question_bindings
+    )
+    assert not any(
         "{{ include_timestamps }}" in binding for binding in question_bindings
+    )
+    assert not any(
+        "{{ flow_input.include_timestamps }}" in binding
+        for binding in question_bindings
     )
     assert validation.valid
 
@@ -3602,16 +3566,18 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    assert [field.name for field in draft.form_fields] == ["audience"]
-    assert draft.steps[1].uses_form_fields == ["audience"]
+    assert [field.name for field in (draft.form_fields or [])] == ["audience"]
     assert compiled.form_fields is not None
+    assert "{{ flow_input.audience }}" in str(
+        (compiled.steps[1].input_bindings or {}).get("question") or ""
+    )
     assert validation.valid
 
 
@@ -3652,8 +3618,8 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+        draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     folded_records = [
@@ -3666,9 +3632,11 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     assert getattr(folded_records[0], "target_step_name") == "Classify request"
     assert [step.name for step in draft.steps] == ["Classify request", "Draft reply"]
     assert (
-        draft.steps[0].instructions
+        draft.steps[0].assistant_spec.instructions
         == "Use the customer question as the source material.\n\n"
-        "Classify the incoming request."
+        "Classify the incoming request.\n\n"
+        "Required JSON fields:\n"
+        "- category: Request category."
     )
     assert draft.steps[0].input_source.value == "flow_input"
     assert draft.steps[0].input_type.value == "text"
@@ -3705,12 +3673,12 @@ def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> N
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == ["Extract intake", "Write answer"]
-    assert draft.steps[0].output_fields is not None
+    assert draft.steps[0].output_contract is not None
     assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
     assert validation.valid
 
@@ -3744,15 +3712,14 @@ def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> 
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
         "Prepare audience context",
         "Write answer",
     ]
-    assert draft.steps[0].uses_form_fields == ["audience"]
     assert compiled.steps[0].input_bindings == {
         "question": "{{ indata_text }}\n\naudience: {{ flow_input.audience }}"
     }
@@ -3779,11 +3746,11 @@ def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(runtime_input_type=InputType.DOCUMENT),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == ["Read documents", "Summarize"]
@@ -3812,15 +3779,15 @@ def test_compile_outline_flow_preserves_leading_step_with_model_ref() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
         "Specialized reading",
         "Write answer",
     ]
-    assert draft.steps[0].model_ref == "model-specialist"
+    assert draft.steps[0].assistant_spec.model_ref == "model-specialist"
     assert validation.valid
 
 
@@ -3845,12 +3812,12 @@ def test_compile_outline_flow_preserves_leading_step_with_knowledge_refs() -> No
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == ["Ground in policy", "Write answer"]
-    assert draft.steps[0].knowledge_refs == ["kb-policy"]
+    assert draft.steps[0].assistant_spec.knowledge_refs == ["kb-policy"]
     assert validation.valid
 
 
@@ -3874,18 +3841,18 @@ def test_compile_outline_flow_folds_before_final_artifact_append() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(final_output_type=OutputType.DOCX),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
         "Draft report content",
         "Create DOCX",
     ]
-    assert draft.steps[0].instructions == (
+    assert draft.steps[0].assistant_spec.instructions == (
         "Use the submitted text as report source.\n\nDraft the report body."
     )
     assert draft.steps[-1].output_type.value == "docx"
@@ -4082,11 +4049,11 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.output_type.value for step in draft.steps] == [
@@ -4095,7 +4062,7 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
         "pdf",
     ]
     assert draft.steps[0].input_type.value == "audio"
-    assert draft.steps[2].document_delivery_mode == "generated"
+    assert draft.steps[2].output_mode == OutputMode.PASS_THROUGH
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "audio"
     assert compiled.steps[2].output_type.value == "pdf"
     assert validation.valid
@@ -4132,11 +4099,11 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -4190,11 +4157,11 @@ def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> N
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -4202,8 +4169,9 @@ def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> N
         "Create report",
         "Create PDF",
     ]
-    assert draft.steps[0].review_mode is FlowStepReviewMode.EDIT
-    assert draft.steps[1].review_mode is None
+    assert draft.steps[0].review_policy is not None
+    assert draft.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
+    assert draft.steps[1].review_policy is None
     assert compiled.steps[0].review_policy is not None
     assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
     assert compiled.steps[1].review_policy is None
@@ -4242,11 +4210,11 @@ def test_compile_outline_flow_does_not_leak_review_to_backend_audio_transcriptio
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -4254,8 +4222,9 @@ def test_compile_outline_flow_does_not_leak_review_to_backend_audio_transcriptio
         "Analyze transcript",
         "Create PDF",
     ]
-    assert draft.steps[0].review_mode is None
-    assert draft.steps[1].review_mode is FlowStepReviewMode.EDIT
+    assert draft.steps[0].review_policy is None
+    assert draft.steps[1].review_policy is not None
+    assert draft.steps[1].review_policy.mode is FlowStepReviewMode.EDIT
     assert compiled.steps[0].review_policy is None
     assert compiled.steps[1].review_policy is not None
     assert compiled.steps[1].review_policy.mode is FlowStepReviewMode.EDIT
@@ -4327,11 +4296,11 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(
+        draft = compile_outline_to_create_spec(
             outline,
             context=outline_compile_context_from_planning_state(state),
         )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -4390,7 +4359,7 @@ def test_compile_outline_flow_drops_task_only_audio_to_text_transcription_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(
+        draft = compile_outline_to_create_spec(
             outline,
             context=outline_compile_context_from_planning_state(state),
         )
@@ -4468,15 +4437,15 @@ def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(
+        draft = compile_outline_to_create_spec(
             outline,
             context=outline_compile_context_from_planning_state(state),
         )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert draft.steps[1].name == "Strukturera transkription"
-    assert "redan transkriberade texten" in draft.steps[1].instructions
+    assert "redan transkriberade texten" in draft.steps[1].assistant_spec.instructions
     assert "Transkribera mötesljud" not in [step.name for step in draft.steps]
     rewrite_records = [
         record
@@ -4516,11 +4485,11 @@ def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() ->
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -4587,11 +4556,11 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -4604,7 +4573,6 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
         "text",
         "docx",
     ]
-    assert draft.steps[1].output_fields is None
     assert compiled.steps[1].output_contract is None
     assert compiled.steps[-1].input_type.value == "text"
     assert compiled.steps[-1].input_bindings is None
@@ -4651,11 +4619,11 @@ def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
     feedback = build_conversation_aware_quality_feedback(
         [
@@ -4671,8 +4639,8 @@ def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction
 
     extraction_step = draft.steps[1]
     assert extraction_step.output_type == OutputType.JSON
-    assert extraction_step.output_fields is not None
-    assert {field.name for field in extraction_step.output_fields} == {
+    assert extraction_step.output_contract is not None
+    assert set(extraction_step.output_contract["properties"]) == {
         "source_facts",
         "uncertainties",
     }
@@ -4749,27 +4717,24 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    normalized = normalize_create_draft_mechanics(draft)
-    body_step = normalized.steps[-2]
+    body_step = compiled.steps[-2]
     assert body_step.name == "Bygg dokument med rubriker och innehåll"
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
-    assert body_step.uses_previous_fields, (
-        "body composer must auto-bind explicit field refs when JSON predecessors exist"
-    )
-    field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
-    assert "sections" in field_paths
-    assert "overall_summary" in field_paths
+    assert body_step.input_bindings is not None
+    body_question = body_step.input_bindings["question"]
+    assert ".output.structured.sections" in body_question
+    assert ".output.structured.overall_summary" in body_question
     assert compiled.steps[-2].input_contract is None
-    assert normalized.steps[-1].output_type.value == final_output_type
+    assert compiled.steps[-1].output_type.value == final_output_type
     assert validation.valid
 
 
@@ -4837,27 +4802,23 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    normalized = normalize_create_draft_mechanics(draft)
-    body_step = normalized.steps[-2]
+    body_step = compiled.steps[-2]
     assert body_step.name == "Bygg DOCX-dokument"
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
     assert body_step.output_type.value == "text"
-    assert body_step.uses_previous_fields, (
-        "body composer must auto-bind explicit field refs when JSON predecessors exist"
-    )
-    field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
-    assert "sections" in field_paths
-    assert "overall_summary" in field_paths
-    transcript_refs = {ref.from_step for ref in body_step.uses_previous_outputs}
-    assert transcript_refs, "uses_previous_outputs must include text predecessors"
+    assert body_step.input_bindings is not None
+    body_question = body_step.input_bindings["question"]
+    assert ".output.structured.sections" in body_question
+    assert ".output.structured.overall_summary" in body_question
+    assert "Source material: {{ step_a.output.text }}" in body_question
     assert compiled.steps[-2].input_contract is None
     assert validation.valid
 
@@ -4940,25 +4901,22 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    normalized = normalize_create_draft_mechanics(draft)
-    body_step = normalized.steps[-2]
+    body_step = compiled.steps[-2]
     assert body_step.name == "Skriv strukturerad rapport"
     assert body_step.output_type.value == "text"
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
-    assert body_step.uses_previous_fields, (
-        "body step must auto-bind uses_previous_fields when JSON predecessors exist"
-    )
-    field_paths = {ref.field_path for ref in body_step.uses_previous_fields}
-    assert "meeting_title" in field_paths
-    assert "decisions_summary" in field_paths
+    assert body_step.input_bindings is not None
+    body_question = body_step.input_bindings["question"]
+    assert "meeting_title" in body_question
+    assert "decisions_summary" in body_question
 
     composer = compiled.steps[-2]
     assert composer.input_bindings is not None
@@ -5016,21 +4974,21 @@ def test_auto_bind_targeted_underlag_rewrites_aggregate_but_not_compare() -> Non
     ]
 
     for intent in ("aggregate", "compare"):
-        draft = _draft_with_steps(steps_before)
+        draft = steps_before
         result = auto_bind_targeted_underlag_for_text_composer(
             draft,
             aggregation_intent=cast(AggregationIntent, intent),
         )
         composer = result[2]
         if intent == "compare":
-            assert result is draft.steps
+            assert result is draft
             assert result == steps_before, (
                 f"intent={intent!r} should be a no-op, but the composer was rewritten"
             )
             assert composer.input_source.value == "all_previous_steps"
             assert composer.uses_previous_fields == []
         else:
-            assert result is not draft.steps
+            assert result is not draft
             assert composer.input_source.value == "previous_step"
             assert {
                 (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
@@ -5066,11 +5024,11 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
         ),
     ]
 
-    draft = _draft_with_steps(steps_before)
+    draft = steps_before
     result = auto_bind_targeted_underlag_for_text_composer(
         draft, aggregation_intent="linear"
     )
-    assert result is draft.steps
+    assert result is draft
     assert result == steps_before, "2-step linear flow must be a no-op"
     composer = result[1]
     assert composer.input_source.value == "previous_step"
@@ -5112,11 +5070,11 @@ def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() ->
     )
     steps_before = [*text_priors, json_anchor, composer]
 
-    draft = _draft_with_steps(steps_before)
+    draft = steps_before
     result = auto_bind_targeted_underlag_for_text_composer(
         draft, aggregation_intent="linear"
     )
-    assert result is draft.steps
+    assert result is draft
     assert result == steps_before, "over-cap text priors should bail out"
     assert result[-1].input_source.value == "all_previous_steps"
 
@@ -5160,7 +5118,7 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     steps_before = [transcription, *json_extractions, composer]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
 
@@ -5240,7 +5198,7 @@ def test_auto_bind_targeted_underlag_rewrites_nonterminal_all_previous_composer(
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
 
@@ -5303,7 +5261,7 @@ def test_auto_bind_targeted_underlag_rewrites_multiple_eligible_composers() -> N
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
 
@@ -5347,12 +5305,12 @@ def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() ->
         ),
     ]
 
-    draft = _draft_with_steps(steps_before)
+    draft = steps_before
     result = auto_bind_targeted_underlag_for_text_composer(
         draft, aggregation_intent="linear"
     )
 
-    assert result is draft.steps
+    assert result is draft
     assert result == steps_before
     assert result[-1].input_source.value == "all_previous_steps"
     assert result[-1].uses_previous_fields == []
@@ -5418,15 +5376,12 @@ def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() ->
         ),
     ]
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps),
+        steps,
         aggregation_intent="linear",
     )
-    spec = compile_create_draft(
-        FlowCreateDraft(
-            flow_name="PDF-rapport",
-            plan_rationale="Skapar en PDF-rapport med granskningssteg.",
-            steps=rebound_steps,
-        )
+    spec = _compile_create_steps(
+        flow_name="PDF-rapport",
+        steps=rebound_steps,
     )
     context = CriticContext(
         spec=spec,
@@ -5506,7 +5461,7 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
 
@@ -5590,7 +5545,7 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
     )
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
 
@@ -5616,12 +5571,9 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
         (4, "required_4_1"),
     ]
 
-    spec = compile_create_draft(
-        FlowCreateDraft(
-            flow_name="Fältbegränsad rapport",
-            plan_rationale="Skriv rapport från flera JSON-priorer.",
-            steps=result,
-        )
+    spec = _compile_create_steps(
+        flow_name="Fältbegränsad rapport",
+        steps=result,
     )
     from intric.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
@@ -5656,56 +5608,52 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
     assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
 
 
-def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer_as_text_input() -> (
+def test_normalize_create_step_mechanics_treats_prebound_targeted_text_composer_as_text_input() -> (
     None
 ):
     from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 
-    draft = FlowCreateDraft(
-        flow_name="Förbunden rapport",
-        plan_rationale="LLM-authored targeted refs should normalize to text input.",
-        steps=[
-            NewStepDraft(
-                name="Extrahera produktdata",
-                instructions="x",
-                input_source="flow_input",
-                input_type="text",
-                output_type="json",
-                output_fields=[_field("product_name", "string")],
-            ),
-            NewStepDraft(
-                name="Extrahera kunddata",
-                instructions="x",
-                input_source="previous_step",
-                input_type="json",
-                output_type="json",
-                output_fields=[_field("customer_segment", "string")],
-            ),
-            NewStepDraft(
-                name="Skriv sammanfattning",
-                instructions="x",
-                input_source="previous_step",
-                input_type="json",
-                output_type="text",
-                uses_previous_fields=[
-                    PreviousFieldRef(
-                        from_step=1,
-                        field_path="product_name",
-                        label="Produktnamn",
-                    ),
-                    PreviousFieldRef(
-                        from_step=2,
-                        field_path="customer_segment",
-                        label="Kundsegment",
-                    ),
-                ],
-            ),
-        ],
-    )
+    steps = [
+        NewStepDraft(
+            name="Extrahera produktdata",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("product_name", "string")],
+        ),
+        NewStepDraft(
+            name="Extrahera kunddata",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("customer_segment", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv sammanfattning",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+            uses_previous_fields=[
+                PreviousFieldRef(
+                    from_step=1,
+                    field_path="product_name",
+                    label="Produktnamn",
+                ),
+                PreviousFieldRef(
+                    from_step=2,
+                    field_path="customer_segment",
+                    label="Kundsegment",
+                ),
+            ],
+        ),
+    ]
 
-    normalized = normalize_create_draft_mechanics(draft)
+    normalized = _normalize_create_steps(flow_name="Förbunden rapport", steps=steps)
 
-    composer = normalized.steps[-1]
+    composer = normalized[-1]
     assert composer.input_type.value == "text", (
         "explicit targeted underlag is text prompt material even when the "
         "immediate predecessor emits JSON"
@@ -5715,46 +5663,43 @@ def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer
     } == {(1, "product_name"), (2, "customer_segment")}
 
 
-def test_normalize_create_draft_mechanics_treats_previous_output_text_composer_as_text_input() -> (
+def test_normalize_create_step_mechanics_treats_previous_output_text_composer_as_text_input() -> (
     None
 ):
     from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
 
-    draft = FlowCreateDraft(
+    steps = [
+        NewStepDraft(
+            name="Förbered text",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera struktur",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("summary", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv sluttext",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+            uses_previous_outputs=[PreviousOutputRef(from_step=1, label="Källtext")],
+        ),
+    ]
+
+    normalized = _normalize_create_steps(
         flow_name="Förbunden textsammanfattning",
-        plan_rationale="LLM-authored output refs should normalize to text input.",
-        steps=[
-            NewStepDraft(
-                name="Förbered text",
-                instructions="x",
-                input_source="flow_input",
-                input_type="text",
-                output_type="text",
-            ),
-            NewStepDraft(
-                name="Extrahera struktur",
-                instructions="x",
-                input_source="previous_step",
-                input_type="text",
-                output_type="json",
-                output_fields=[_field("summary", "string")],
-            ),
-            NewStepDraft(
-                name="Skriv sluttext",
-                instructions="x",
-                input_source="previous_step",
-                input_type="json",
-                output_type="text",
-                uses_previous_outputs=[
-                    PreviousOutputRef(from_step=1, label="Källtext")
-                ],
-            ),
-        ],
+        steps=steps,
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
-    composer = normalized.steps[-1]
+    composer = normalized[-1]
     assert composer.input_type.value == "text"
     assert [(ref.from_step, ref.label) for ref in composer.uses_previous_outputs] == [
         (1, "Källtext")
@@ -5788,12 +5733,12 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
         ),
     ]
 
-    draft = _draft_with_steps(steps_before)
+    draft = steps_before
     result = auto_bind_targeted_underlag_for_text_composer(
         draft, aggregation_intent="linear"
     )
 
-    assert result is draft.steps
+    assert result is draft
     assert result == steps_before, (
         "single-JSON-prior + previous_step composer must remain a no-op"
     )
@@ -5925,7 +5870,7 @@ def test_auto_bind_targeted_underlag_routes_single_json_source_to_section_writer
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
 
@@ -5950,10 +5895,11 @@ def test_auto_bind_targeted_underlag_routes_single_json_source_to_section_writer
         assert step.uses_previous_outputs == []
 
 
-def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_section_writers_use_json_schema_as_underlag() -> (
+    None
+):
+    draft = _compile_create_steps(
         flow_name="Utvecklingsärende från Word",
-        plan_rationale="Skapar ett Word-dokument med flera avsnitt.",
         steps=[
             NewStepDraft(
                 name="Läs underlag",
@@ -6010,7 +5956,7 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
         ],
     )
 
-    spec = compile_create_draft(draft)
+    spec = draft
 
     extraction = spec.steps[1]
     assert extraction.output_type == OutputType.JSON
@@ -6047,7 +5993,9 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
     )
 
 
-def test_compile_create_draft_broad_document_composers_use_full_json_schema() -> None:
+def test_compile_create_steps_to_spec_broad_document_composers_use_full_json_schema() -> (
+    None
+):
     extraction_fields = [
         _field(name, "string", description=description)
         for name, description in [
@@ -6064,9 +6012,8 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
             ("nyttorealisering", "Plan för nyttorealisering."),
         ]
     ]
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Dokument till verksamhetsunderlag",
-        plan_rationale="Skriver flera rubriker i ett Word-dokument.",
         steps=[
             NewStepDraft(
                 name="Extrahera centrala fakta",
@@ -6103,7 +6050,7 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
         ],
     )
 
-    spec = compile_create_draft(draft)
+    spec = draft
 
     expected_selectors = {
         f"step_a.output.structured.{field.name}" for field in extraction_fields
@@ -6123,7 +6070,7 @@ def test_compile_create_draft_broad_document_composers_use_full_json_schema() ->
     assert spec.steps[3].input_bindings is None
 
 
-def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema() -> (
+def test_compile_create_steps_to_spec_section_writers_do_not_duplicate_full_json_schema() -> (
     None
 ):
     extraction_fields = [
@@ -6141,9 +6088,8 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
             ("nyttorealisering", "Plan för nyttorealisering."),
         ]
     ]
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Analys och utkast till verksamhetsunderlag",
-        plan_rationale="Skriver flera avsnitt från samma Word-underlag.",
         steps=[
             NewStepDraft(
                 name="Extrahera centrala fakta",
@@ -6183,7 +6129,7 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
         ],
     )
 
-    spec = compile_create_draft(draft)
+    spec = draft
 
     first_writer_question = spec.steps[1].input_bindings["question"]
     second_writer_question = spec.steps[2].input_bindings["question"]
@@ -6207,7 +6153,9 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
     assert "{{ step_c.output.text }}" in final_question
 
 
-def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> None:
+def test_compile_create_steps_to_spec_section_writers_ignore_passing_broad_markers() -> (
+    None
+):
     extraction_fields = [
         _field("nulage", "string", description="Nuläge, problem och behov."),
         _field(
@@ -6218,9 +6166,8 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
         _field("tidplan", "string", description="Planerad tidplan."),
         _field("finansiering", "string", description="Föreslagen finansiering."),
     ]
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Verksamhetsunderlag",
-        plan_rationale="Skriver avsnitt och exporterar senare till DOCX.",
         steps=[
             NewStepDraft(
                 name="Extrahera centrala fakta",
@@ -6260,7 +6207,7 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
         ],
     )
 
-    spec = compile_create_draft(draft)
+    spec = draft
 
     nulage_question = spec.steps[1].input_bindings["question"]
     solution_question = spec.steps[2].input_bindings["question"]
@@ -6276,10 +6223,11 @@ def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> 
     assert all_selectors.issubset(set(final_question.split()))
 
 
-def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_unmatched_section_writer_uses_source_floor() -> (
+    None
+):
+    draft = _compile_create_steps(
         flow_name="Verksamhetsunderlag",
-        plan_rationale="Skriver flera avsnitt från ett dokument.",
         steps=[
             NewStepDraft(
                 name="Extrahera centrala fakta",
@@ -6309,7 +6257,7 @@ def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> No
         ],
     )
 
-    spec = compile_create_draft(draft)
+    spec = draft
 
     first_question = spec.steps[1].input_bindings["question"]
     second_question = spec.steps[2].input_bindings["question"]
@@ -6319,10 +6267,11 @@ def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> No
     assert "step_a.output.structured.tidplan" not in second_question
 
 
-def test_compile_create_draft_underlag_matching_handles_swedish_inflections() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_underlag_matching_handles_swedish_inflections() -> (
+    None
+):
+    draft = _compile_create_steps(
         flow_name="Verksamhetsunderlag",
-        plan_rationale="Skriver avsnitt från ett dokument.",
         steps=[
             NewStepDraft(
                 name="Extrahera centrala fakta",
@@ -6369,7 +6318,7 @@ def test_compile_create_draft_underlag_matching_handles_swedish_inflections() ->
         ],
     )
 
-    spec = compile_create_draft(draft)
+    spec = draft
 
     timeline_question = spec.steps[1].input_bindings["question"]
     resources_question = spec.steps[2].input_bindings["question"]
@@ -6774,11 +6723,11 @@ def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:
     ]
 
     once = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(steps_before),
+        steps_before,
         aggregation_intent="linear",
     )
     twice = auto_bind_targeted_underlag_for_text_composer(
-        _draft_with_steps(once),
+        once,
         aggregation_intent="linear",
     )
 
@@ -6824,53 +6773,48 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
             ],
         }
     )
-    outline_compiled = compile_create_draft(
-        compile_outline_to_create_draft(
-            outline,
-            context=OutlineCompileContext(
-                runtime_input_type=InputType.AUDIO,
-                ui_language="sv",
-            ),
-        )
+    outline_compiled = compile_outline_to_create_spec(
+        outline,
+        context=OutlineCompileContext(
+            runtime_input_type=InputType.AUDIO,
+            ui_language="sv",
+        ),
     )
-    direct_compiled = compile_create_draft(
-        FlowCreateDraft(
-            flow_name="Mötesrapport från ljud",
-            plan_rationale="Transkribera ljud och skapa rapport.",
-            steps=[
-                NewStepDraft(
-                    name="Transkribera ljud",
-                    instructions="Transkribera mötesljud.",
-                    input_source="flow_input",
-                    input_type="audio",
-                    output_type="text",
-                    runtime_required=True,
-                ),
-                NewStepDraft(
-                    name="Etablera möteskontext",
-                    instructions="Skapa möteskontext.",
-                    input_source="previous_step",
-                    input_type="text",
-                    output_type="json",
-                    output_fields=[_field("meeting_context", "string")],
-                ),
-                NewStepDraft(
-                    name="Analysera beslut",
-                    instructions="Extrahera beslut.",
-                    input_source="previous_step",
-                    input_type="json",
-                    output_type="json",
-                    output_fields=[_field("decisions", "string")],
-                ),
-                NewStepDraft(
-                    name="Skriv rapport",
-                    instructions="Skriv rapporten från underlaget.",
-                    input_source="previous_step",
-                    input_type="json",
-                    output_type="text",
-                ),
-            ],
-        )
+    direct_compiled = _compile_create_steps(
+        flow_name="Mötesrapport från ljud",
+        steps=[
+            NewStepDraft(
+                name="Transkribera ljud",
+                instructions="Transkribera mötesljud.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_required=True,
+            ),
+            NewStepDraft(
+                name="Etablera möteskontext",
+                instructions="Skapa möteskontext.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("meeting_context", "string")],
+            ),
+            NewStepDraft(
+                name="Analysera beslut",
+                instructions="Extrahera beslut.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("decisions", "string")],
+            ),
+            NewStepDraft(
+                name="Skriv rapport",
+                instructions="Skriv rapporten från underlaget.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+        ],
     )
 
     outline_question = outline_compiled.steps[-1].input_bindings["question"]
@@ -6889,9 +6833,8 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
 def test_non_material_report_multi_json_keeps_json_input_when_source_prior_bound() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="JSON-analys från ljud",
-        plan_rationale="Transkribera ljud och skapa strukturerad JSON-analys.",
         steps=[
             NewStepDraft(
                 name="Transkribera ljud",
@@ -6927,7 +6870,7 @@ def test_non_material_report_multi_json_keeps_json_input_when_source_prior_bound
         ],
     )
 
-    compiled = compile_create_draft(draft)
+    compiled = draft
 
     composer = compiled.steps[3]
     assert composer.input_type == InputType.JSON
@@ -6941,81 +6884,73 @@ def test_non_material_report_multi_json_keeps_json_input_when_source_prior_bound
     }
 
 
-def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() -> None:
-    ordinary = FlowCreateDraft(
-        flow_name="Enkel sammanfattning",
-        plan_rationale="Sammanfatta text.",
-        steps=[
-            NewStepDraft(
-                name="Sammanfatta",
-                instructions="Sammanfatta texten.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="text",
-            )
-        ],
-    )
-    multi_json = FlowCreateDraft(
-        flow_name="Flera fält",
-        plan_rationale="Sammanfatta flera JSON-priorer.",
-        steps=[
-            NewStepDraft(
-                name="Extrahera a",
-                instructions="x",
-                input_source="flow_input",
-                input_type="text",
-                output_type="json",
-                output_fields=[_field("a", "string")],
-            ),
-            NewStepDraft(
-                name="Extrahera b",
-                instructions="x",
-                input_source="previous_step",
-                input_type="json",
-                output_type="json",
-                output_fields=[_field("b", "string")],
-            ),
-            NewStepDraft(
-                name="Skriv rapport",
-                instructions="x",
-                input_source="previous_step",
-                input_type="json",
-                output_type="text",
-            ),
-        ],
-    )
-    source_report = FlowCreateDraft(
-        flow_name="Mötesrapport från ljud",
-        plan_rationale="Transkribera ljud och skriv rapport.",
-        steps=[
-            NewStepDraft(
-                name="Transkribera mötesljud",
-                instructions="Transkribera mötesljudet.",
-                input_source="flow_input",
-                input_type="audio",
-                output_type="text",
-            ),
-            NewStepDraft(
-                name="Extrahera möteskontext",
-                instructions="Extrahera kontext.",
-                input_source="previous_step",
-                input_type="text",
-                output_type="json",
-                output_fields=[_field("meeting_context", "string")],
-            ),
-            NewStepDraft(
-                name="Skriv rapport",
-                instructions="Skriv rapport.",
-                input_source="previous_step",
-                input_type="json",
-                output_type="text",
-            ),
-        ],
-    )
+def test_normalize_create_step_mechanics_is_idempotent_for_targeted_underlag() -> None:
+    ordinary = [
+        NewStepDraft(
+            name="Sammanfatta",
+            instructions="Sammanfatta texten.",
+            input_source="flow_input",
+            input_type="text",
+            output_type="text",
+        )
+    ]
+    multi_json = [
+        NewStepDraft(
+            name="Extrahera a",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("a", "string")],
+        ),
+        NewStepDraft(
+            name="Extrahera b",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("b", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv rapport",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+    source_report = [
+        NewStepDraft(
+            name="Transkribera mötesljud",
+            instructions="Transkribera mötesljudet.",
+            input_source="flow_input",
+            input_type="audio",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera möteskontext",
+            instructions="Extrahera kontext.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("meeting_context", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv rapport",
+            instructions="Skriv rapport.",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
 
-    for draft in (ordinary, multi_json, source_report):
-        once = normalize_create_draft_mechanics(draft)
-        twice = normalize_create_draft_mechanics(once)
+    for flow_name, steps in (
+        ("Enkel sammanfattning", ordinary),
+        ("Flera fält", multi_json),
+        ("Mötesrapport från ljud", source_report),
+    ):
+        once = _normalize_create_steps(flow_name=flow_name, steps=steps)
+        twice = _normalize_create_steps(flow_name=flow_name, steps=once)
         assert twice == once
 
 
@@ -7117,19 +7052,15 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state, ui_language="sv"),
     )
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    metadata_step = normalized.steps[2]
+    metadata_step = compiled.steps[2]
     assert metadata_step.input_type.value == "text"
-    assert [
-        (ref.from_step, ref.label) for ref in metadata_step.uses_previous_outputs
-    ] == [(1, "Källmaterial")]
     assert compiled.steps[2].input_bindings is not None
     metadata_question = compiled.steps[2].input_bindings["question"]
     assert (
@@ -7143,20 +7074,10 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
     assert "Källmaterial: {{ step_a.output.text }}" in metadata_question
     assert "{{ step_b.output.structured }}" not in metadata_question
 
-    body_step = normalized.steps[4]
+    body_step = compiled.steps[4]
     assert body_step.name == "Förbered DOCX-innehåll"
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
-    assert {
-        (ref.from_step, ref.field_path) for ref in body_step.uses_previous_fields
-    } >= {
-        (2, "transcription_text"),
-        (3, "meeting_title"),
-        (4, "protocol_sections"),
-    }
-    assert [(ref.from_step, ref.label) for ref in body_step.uses_previous_outputs] == [
-        (1, "Källmaterial")
-    ]
 
     compiled_body_step = compiled.steps[4]
     assert compiled_body_step.input_bindings is not None
@@ -7178,12 +7099,11 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
     assert_create_spec_prepares_through_authoring_command(compiled)
 
 
-def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag() -> (
+def test_compile_create_steps_to_spec_direct_audio_docx_bad_shape_gets_source_underlag() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Mötesprotokoll från ljud till Word",
-        plan_rationale="Transkribera ljud och skapa DOCX.",
         steps=[
             NewStepDraft(
                 name="Transkribera ljud",
@@ -7228,7 +7148,7 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
         ],
     )
 
-    compiled = compile_create_draft(draft)
+    compiled = draft
     normalized_compiled, _changes = normalize_ai_builder_spec(
         compiled,
         terminal_output_type=OutputType.DOCX,
@@ -7259,12 +7179,11 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
     assert validate_spec(compiled).valid
 
 
-def test_compile_create_draft_audio_report_section_extractors_keep_transcript_underlag() -> (
+def test_compile_create_steps_to_spec_audio_report_section_extractors_keep_transcript_underlag() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Mötesrapport från ljud",
-        plan_rationale="Transkribera ljud och skapa en strukturerad mötesrapport.",
         steps=[
             NewStepDraft(
                 name="Transkribera mötesljud",
@@ -7319,7 +7238,7 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
         ],
     )
 
-    compiled = compile_create_draft(draft)
+    compiled = draft
     normalized_compiled, _changes = normalize_ai_builder_spec(
         compiled,
         terminal_output_type=OutputType.DOCX,
@@ -7364,12 +7283,11 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
     assert validate_spec(compiled).valid
 
 
-def test_compile_create_draft_text_report_keeps_source_and_structured_underlag() -> (
+def test_compile_create_steps_to_spec_text_report_keeps_source_and_structured_underlag() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Mötesrapport från ljud",
-        plan_rationale="Transkribera ljud och skapa en textbaserad mötesrapport.",
         steps=[
             NewStepDraft(
                 name="Transkribera mötesljud",
@@ -7405,7 +7323,7 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
         ],
     )
 
-    compiled = compile_create_draft(draft)
+    compiled = draft
 
     analysis_step = compiled.steps[2]
     report_step = compiled.steps[3]
@@ -7501,23 +7419,21 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state, ui_language="sv"),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
-    normalized = normalize_create_draft_mechanics(draft)
-    protocol_step = normalized.steps[3]
+    protocol_step = compiled.steps[3]
     assert protocol_step.input_source.value == "previous_step"
     assert protocol_step.input_type.value == "text"
     assert protocol_step.output_type.value == "text"
-    field_paths = {ref.field_path for ref in protocol_step.uses_previous_fields}
-    assert "transcription_text" in field_paths
-    assert "meeting_title" in field_paths
     assert compiled.steps[3].input_bindings is not None
-    assert "output.structured" in compiled.steps[3].input_bindings["question"]
+    protocol_question = compiled.steps[3].input_bindings["question"]
+    assert "transcription_text" in protocol_question
+    assert "meeting_title" in protocol_question
     assert validation.valid
 
 
@@ -7581,7 +7497,7 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(
             runtime_input_type=InputType.AUDIO,
@@ -7589,13 +7505,12 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
             ui_language="sv",
         ),
     )
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [
         (step.input_source.value, step.input_type.value, step.output_type.value)
-        for step in normalized.steps
+        for step in compiled.steps
     ] == [
         ("flow_input", "audio", "text"),
         ("previous_step", "text", "json"),
@@ -7624,13 +7539,10 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         )
     }
     assert compiled.steps[3].input_source == InputSource.PREVIOUS_STEP
-    body_field_paths = {
-        ref.field_path for ref in normalized.steps[3].uses_previous_fields
-    }
-    assert "meeting_context" in body_field_paths
-    assert "background_points" in body_field_paths
     assert compiled.steps[3].input_bindings is not None
-    assert "output.structured" in compiled.steps[3].input_bindings["question"]
+    body_question = compiled.steps[3].input_bindings["question"]
+    assert "meeting_context" in body_question
+    assert "background_points" in body_question
     assert compiled.steps[4].input_source == InputSource.PREVIOUS_STEP
     assert validation.valid
 
@@ -7654,7 +7566,7 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(
             runtime_input_type=InputType.AUDIO,
@@ -7662,7 +7574,7 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
             ui_language="sv",
         ),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert compiled.steps[0].input_source == InputSource.FLOW_INPUT
@@ -7705,7 +7617,7 @@ def test_compile_outline_wraps_skeleton_materialization_failure(
     )
 
     with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_outline_to_create_draft(outline)
+        compile_outline_to_create_spec(outline)
 
     assert exc_info.value.public_code == "architecture_materialization_failed"
     assert exc_info.value.detail == "invalid skeleton tuple"
@@ -7714,7 +7626,7 @@ def test_compile_outline_wraps_skeleton_materialization_failure(
     assert exc_info.value.log_context["semantic_step_count"] == 1
 
 
-def test_compile_outline_flow_audio_artifact_aggregate_fan_in_lands_on_terminal() -> (
+def test_compile_outline_flow_audio_artifact_aggregate_keeps_synthesis_before_terminal() -> (
     None
 ):
     outline = parse_outline_flow_arguments(
@@ -7744,11 +7656,11 @@ def test_compile_outline_flow_audio_artifact_aggregate_fan_in_lands_on_terminal(
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft, aggregation_intent="aggregate")
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -7758,7 +7670,9 @@ def test_compile_outline_flow_audio_artifact_aggregate_fan_in_lands_on_terminal(
         "Synthesize",
         "Create PDF",
     ]
-    assert draft.steps[-1].input_source.value == "all_previous_steps"
+    assert draft.steps[-2].input_source.value == "previous_step"
+    assert draft.steps[-2].input_type.value == "text"
+    assert draft.steps[-1].input_source.value == "previous_step"
     assert draft.steps[-1].input_type.value == "text"
     assert compiled.steps[-1].input_bindings is None
     assert validation.valid
@@ -7795,11 +7709,11 @@ def test_compile_outline_flow_keeps_text_artifact_step_after_audio_transcription
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -7900,11 +7814,11 @@ def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> Non
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -7917,7 +7831,7 @@ def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> Non
         "text",
         "docx",
     ]
-    assert draft.steps[2].document_delivery_mode == "template_fill"
+    assert draft.steps[2].output_mode == OutputMode.TEMPLATE_FILL
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
     assert compiled.steps[2].output_mode.value == "template_fill"
     assert validation.valid
@@ -7956,11 +7870,11 @@ def test_compile_outline_flow_docx_chain_preserves_all_semantic_steps() -> None:
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8006,11 +7920,11 @@ def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft, aggregation_intent="compare")
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8022,7 +7936,7 @@ def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None
     assert draft.steps[-2].input_source.value == "all_previous_steps"
     assert compiled.steps[-2].input_bindings is None
     assert draft.steps[-1].input_source.value == "previous_step"
-    assert draft.steps[-1].document_delivery_mode == "template_fill"
+    assert draft.steps[-1].output_mode == OutputMode.TEMPLATE_FILL
     assert validation.valid
     assert_create_spec_prepares_through_authoring_command(compiled)
 
@@ -8056,11 +7970,11 @@ def test_compile_outline_flow_docx_chain_still_wraps_rich_template_outline() -> 
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8107,8 +8021,8 @@ def test_compile_outline_flow_uses_committed_template_fill_mode_without_pattern(
     )
 
     context = outline_compile_context_from_planning_state(state)
-    draft = compile_outline_to_create_draft(outline, context=context)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline, context=context)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert context is not None
@@ -8119,7 +8033,7 @@ def test_compile_outline_flow_uses_committed_template_fill_mode_without_pattern(
         "Prepare report",
         "Fill DOCX template",
     ]
-    assert draft.steps[-1].document_delivery_mode == "template_fill"
+    assert draft.steps[-1].output_mode == OutputMode.TEMPLATE_FILL
     assert compiled.steps[-1].output_mode.value == "template_fill"
     assert validation.valid
 
@@ -8152,11 +8066,11 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8171,7 +8085,7 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
         "text",
         "pdf",
     ]
-    assert draft.steps[0].output_fields is not None
+    assert draft.steps[0].output_contract is not None
     assert compiled.steps[0].input_config["runtime_input"]["input_format"] == "document"
     assert compiled.steps[1].input_type.value == "json"
     assert compiled.steps[3].output_type.value == "pdf"
@@ -8210,14 +8124,14 @@ def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_out
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(
             state,
             ui_language="sv",
         ),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8260,7 +8174,7 @@ def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(
             state,
@@ -8269,7 +8183,9 @@ def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
     )
 
     assert draft.steps[-1].name == "Skapa slutresultat"
-    assert draft.steps[-1].instructions.startswith("Skapa slutresultatet")
+    assert draft.steps[-1].assistant_spec.instructions.startswith(
+        "Skapa slutresultatet"
+    )
 
 
 def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> None:
@@ -8315,11 +8231,11 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8329,7 +8245,6 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         "Review and finalize",
         "Create PDF",
     ]
-    assert draft.document_body_writer_step_indexes == (3,)
     assert compiled.document_body_writer_step_refs == ("step_d",)
     assert compiled.steps[-1].output_type.value == "pdf"
     assert validation.valid
@@ -8379,11 +8294,11 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -8424,11 +8339,11 @@ def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> Non
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
 
     assert draft.steps[0].output_type.value == "json"
-    assert draft.steps[0].output_fields is not None
+    assert draft.steps[0].output_contract is not None
     assert compiled.steps[1].input_type.value == "json"
     assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
 
@@ -8449,8 +8364,8 @@ def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert draft.steps[0].output_type.value == "json"
@@ -8459,12 +8374,11 @@ def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
     assert validation.valid
 
 
-def test_compile_create_draft_bridges_structured_previous_output_into_text_input() -> (
+def test_compile_create_steps_to_spec_bridges_structured_previous_output_into_text_input() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    draft = _compile_create_steps(
         flow_name="Structured bridge",
-        plan_rationale="Extract JSON, then write text from the extracted structure.",
         steps=[
             NewStepDraft(
                 name="Extract fields",
@@ -8484,17 +8398,18 @@ def test_compile_create_draft_bridges_structured_previous_output_into_text_input
         ],
     )
 
-    compiled = compile_create_draft(draft)
+    compiled = draft
 
     assert compiled.steps[1].input_bindings == {
         "question": "{{ step_a.output.structured }}"
     }
 
 
-def test_compile_create_draft_prefers_specific_previous_fields_for_text_input() -> None:
-    draft = FlowCreateDraft(
+def test_compile_create_steps_to_spec_prefers_specific_previous_fields_for_text_input() -> (
+    None
+):
+    draft = _compile_create_steps(
         flow_name="Structured bridge",
-        plan_rationale="Extract JSON, then write text from a selected field.",
         steps=[
             NewStepDraft(
                 name="Extract fields",
@@ -8524,7 +8439,7 @@ def test_compile_create_draft_prefers_specific_previous_fields_for_text_input() 
         ],
     )
 
-    compiled = compile_create_draft(draft)
+    compiled = draft
 
     assert compiled.steps[1].input_bindings == {
         "question": "Summary: {{ step_a.output.structured.summary }}"
@@ -8552,7 +8467,7 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_draft(
+        draft = compile_outline_to_create_spec(
             outline,
             context=OutlineCompileContext(
                 runtime_input_type=InputType.DOCUMENT,
@@ -8589,8 +8504,8 @@ def test_compile_outline_flow_default_outline_stays_linear() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
-    compiled = compile_create_draft(draft)
+    draft = compile_outline_to_create_spec(outline)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.input_source.value for step in draft.steps] == [
@@ -8628,10 +8543,10 @@ def test_compile_outline_flow_preserves_step_mcp_refs() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
-    assert draft.steps[0].mcp_tool_refs == ["case_lookup_tool"]
-    assert draft.steps[0].mcp_server_refs == []
+    assert draft.steps[0].assistant_spec.mcp_tool_refs == ["case_lookup_tool"]
+    assert draft.steps[0].assistant_spec.mcp_server_refs == []
 
 
 def test_compile_outline_flow_does_not_fold_mcp_entry_step() -> None:
@@ -8653,10 +8568,10 @@ def test_compile_outline_flow_does_not_fold_mcp_entry_step() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_spec(outline)
 
     assert [step.name for step in draft.steps] == ["Hämta underlag", "Skriv svar"]
-    assert draft.steps[0].mcp_tool_refs == ["lookup_tool"]
+    assert draft.steps[0].assistant_spec.mcp_tool_refs == ["lookup_tool"]
 
 
 def test_compile_outline_flow_comparison_pattern_owns_final_fan_in() -> None:
@@ -8686,11 +8601,11 @@ def test_compile_outline_flow_comparison_pattern_owns_final_fan_in() -> None:
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.input_source.value for step in draft.steps] == [
@@ -8753,11 +8668,11 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.input_source.value for step in draft.steps] == [
@@ -8808,11 +8723,11 @@ def test_compile_outline_flow_audio_docx_ignores_document_scope_fan_in() -> None
         ),
     }
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert [step.input_source.value for step in draft.steps] == [
@@ -8865,11 +8780,11 @@ def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sou
         )
     )
 
-    draft = compile_outline_to_create_draft(
+    draft = compile_outline_to_create_spec(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = draft
     validation = validate_spec(compiled)
 
     assert draft.steps[2].input_source.value == "all_previous_steps"

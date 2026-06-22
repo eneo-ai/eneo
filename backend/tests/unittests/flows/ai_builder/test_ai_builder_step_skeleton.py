@@ -4,10 +4,8 @@ import pytest
 
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     OutlineCompileContext,
-    compile_create_draft,
-    compile_outline_to_create_draft,
+    compile_outline_to_create_spec,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
     parse_outline_flow_arguments,
 )
@@ -28,6 +26,7 @@ from intric.flows.ai_builder.pattern_registry import (
     TERMINAL_ARTIFACT_STEP,
 )
 from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputMode,
@@ -571,7 +570,7 @@ def test_audio_artifact_skeleton_matches_current_compiler_mechanics(
         pattern_chain_steps=_chain_steps("audio_to_artifact_report"),
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
+    spec = compile_outline_to_create_spec(outline, context=context)
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.AUDIO,
         final_output_type=OutputType.PDF,
@@ -581,7 +580,7 @@ def test_audio_artifact_skeleton_matches_current_compiler_mechanics(
     )
     skeleton = plan.slots_for_semantic_count(len(outline.steps))
 
-    assert _skeleton_mechanics(skeleton) == _draft_mechanics(draft)
+    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
 
 
 @pytest.mark.parametrize("semantic_step_count", [1, 2, 3])
@@ -602,7 +601,7 @@ def test_linear_skeleton_matches_current_compiler_mechanics(
         }
     )
 
-    draft = compile_outline_to_create_draft(
+    spec = compile_outline_to_create_spec(
         outline,
         context=OutlineCompileContext(
             runtime_input_type=InputType.DOCUMENT,
@@ -618,7 +617,7 @@ def test_linear_skeleton_matches_current_compiler_mechanics(
     )
     skeleton = plan.slots_for_semantic_count(len(outline.steps))
 
-    assert _skeleton_mechanics(skeleton) == _draft_mechanics(draft)
+    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
 
 
 def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
@@ -642,7 +641,7 @@ def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
         pattern_chain_steps=_chain_steps("document_to_docx_template"),
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
+    spec = compile_outline_to_create_spec(outline, context=context)
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.DOCX,
@@ -652,7 +651,7 @@ def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
     )
     skeleton = plan.slots_for_semantic_count(len(outline.steps))
 
-    assert _skeleton_mechanics(skeleton) == _draft_mechanics(draft)
+    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
 
 
 @pytest.mark.parametrize("semantic_step_count", [2, 3, 4])
@@ -680,7 +679,7 @@ def test_comparison_skeleton_matches_current_compiler_mechanics(
         aggregation_intent="compare",
     )
 
-    draft = compile_outline_to_create_draft(outline, context=context)
+    spec = compile_outline_to_create_spec(outline, context=context)
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.TEXT,
@@ -691,7 +690,7 @@ def test_comparison_skeleton_matches_current_compiler_mechanics(
     )
     skeleton = plan.slots_for_semantic_count(len(outline.steps))
 
-    assert _skeleton_mechanics(skeleton) == _draft_mechanics(draft)
+    assert _skeleton_mechanics(skeleton) == _spec_mechanics(spec)
 
 
 def _chain_steps(pattern_id: str) -> tuple[str, ...]:
@@ -716,11 +715,9 @@ def _skeleton_mechanics(
 ) -> tuple[tuple[object, ...], ...]:
     return tuple(
         (
-            slot.input_source.value,
             slot.input_type.value,
             slot.output_type.value,
             slot.output_mode.value,
-            slot.document_delivery_mode,
             slot.runtime_required,
             slot.runtime_max_files,
             bool(slot.output_fields),
@@ -729,18 +726,33 @@ def _skeleton_mechanics(
     )
 
 
-def _draft_mechanics(draft: FlowCreateDraft) -> tuple[tuple[object, ...], ...]:
-    compiled = compile_create_draft(draft)
+def _spec_mechanics(spec: FlowDraftSpecCore) -> tuple[tuple[object, ...], ...]:
     return tuple(
         (
-            draft_step.input_source.value,
-            draft_step.input_type.value,
-            draft_step.output_type.value,
-            compiled_step.output_mode.value,
-            draft_step.document_delivery_mode,
-            draft_step.runtime_required,
-            draft_step.runtime_max_files,
-            bool(draft_step.output_fields),
+            step.input_type.value,
+            step.output_type.value,
+            step.output_mode.value,
+            _runtime_input_required(step.input_config),
+            _runtime_input_max_files(step.input_config),
+            step.output_contract is not None,
         )
-        for draft_step, compiled_step in zip(draft.steps, compiled.steps, strict=True)
+        for step in spec.steps
     )
+
+
+def _runtime_input_required(input_config: object) -> bool:
+    if not isinstance(input_config, dict):
+        return False
+    runtime_input = input_config.get("runtime_input")
+    if not isinstance(runtime_input, dict):
+        return False
+    return bool(runtime_input.get("required"))
+
+
+def _runtime_input_max_files(input_config: object) -> object:
+    if not isinstance(input_config, dict):
+        return None
+    runtime_input = input_config.get("runtime_input")
+    if not isinstance(runtime_input, dict):
+        return None
+    return runtime_input.get("max_files")

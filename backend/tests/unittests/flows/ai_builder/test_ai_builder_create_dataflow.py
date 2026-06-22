@@ -1,9 +1,13 @@
-from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_compiler import (
+    compile_create_steps_to_spec,
+)
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
@@ -30,34 +34,51 @@ def _field(name: str) -> StructuredFieldDraft:
     )
 
 
-def _assert_compiles_to_valid_spec(draft: FlowCreateDraft) -> None:
-    assert validate_spec(compile_create_draft(draft)).valid
+def _new_steps(steps: list[NewStepDraft | dict[str, object]]) -> list[NewStepDraft]:
+    return [
+        step if isinstance(step, NewStepDraft) else NewStepDraft.model_validate(step)
+        for step in steps
+    ]
 
 
-# Test-only bridge while existing assertions still construct FlowCreateDraft.
-# Delete it when the create proposal model is removed.
-def normalize_create_draft_mechanics(
-    draft: FlowCreateDraft,
+def _assert_compiles_to_valid_spec(
+    steps: list[NewStepDraft],
     *,
+    flow_name: str = "Test flow",
+    flow_description: str | None = None,
+    form_fields: list[FormFieldSpec] | None = None,
     aggregation_intent: AggregationIntent = "linear",
-) -> FlowCreateDraft:
-    return draft.model_copy(
-        update={
-            "steps": normalize_create_step_mechanics(
-                steps=draft.steps,
-                form_fields=draft.form_fields,
-                flow_name=draft.flow_name,
-                flow_description=draft.flow_description,
-                aggregation_intent=aggregation_intent,
-            )
-        }
+) -> None:
+    spec = compile_create_steps_to_spec(
+        flow_name=flow_name,
+        flow_description=flow_description,
+        form_fields=form_fields,
+        steps=steps,
+        aggregation_intent=aggregation_intent,
+    )
+    assert validate_spec(spec).valid
+
+
+def _normalize_steps(
+    *,
+    flow_name: str,
+    steps: list[NewStepDraft | dict[str, object]],
+    flow_description: str | None = None,
+    form_fields: list[FormFieldSpec] | None = None,
+    aggregation_intent: AggregationIntent = "linear",
+) -> list[NewStepDraft]:
+    return normalize_create_step_mechanics(
+        steps=_new_steps(steps),
+        form_fields=form_fields or [],
+        flow_name=flow_name,
+        flow_description=flow_description,
+        aggregation_intent=aggregation_intent,
     )
 
 
-def test_normalize_create_draft_mechanics_prunes_unknown_previous_field_refs() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_prunes_unknown_previous_field_refs() -> None:
+    normalized = _normalize_steps(
         flow_name="Robust rapport",
-        plan_rationale="Skapa rapport från strukturerade steg.",
         steps=[
             {
                 "name": "Extrahera data",
@@ -83,18 +104,15 @@ def test_normalize_create_draft_mechanics_prunes_unknown_previous_field_refs() -
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
     _assert_compiles_to_valid_spec(normalized)
-    assert [ref.field_path for ref in normalized.steps[1].uses_previous_fields] == [
+    assert [ref.field_path for ref in normalized[1].uses_previous_fields] == [
         "known_field"
     ]
 
 
-def test_normalize_create_draft_mechanics_prunes_invalid_previous_output_refs() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_prunes_invalid_previous_output_refs() -> None:
+    normalized = _normalize_steps(
         flow_name="Robust rapport",
-        plan_rationale="Återanvänd tidigare textutdata.",
         steps=[
             {
                 "name": "Transkribera",
@@ -129,20 +147,17 @@ def test_normalize_create_draft_mechanics_prunes_invalid_previous_output_refs() 
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
     _assert_compiles_to_valid_spec(normalized)
     assert [
-        (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
+        (ref.from_step, ref.label) for ref in normalized[2].uses_previous_outputs
     ] == [(1, "Transkription")]
 
 
-def test_normalize_create_draft_mechanics_restores_audio_source_material_underlag() -> (
+def test_normalize_create_step_mechanics_restores_audio_source_material_underlag() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Mötesprotokoll från ljud till Word",
-        plan_rationale="Transkribera ljud och skapa DOCX-protokoll.",
         steps=[
             {
                 "name": "Transkribera ljud",
@@ -194,37 +209,33 @@ def test_normalize_create_draft_mechanics_restores_audio_source_material_underla
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
     _assert_compiles_to_valid_spec(normalized)
-    assert normalized.steps[2].input_type == "text"
+    assert normalized[2].input_type == "text"
     assert [
-        (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
+        (ref.from_step, ref.label) for ref in normalized[2].uses_previous_outputs
     ] == [(1, "Källmaterial")]
-    assert normalized.steps[3].input_type == "text"
+    assert normalized[3].input_type == "text"
     assert [
-        (ref.from_step, ref.label) for ref in normalized.steps[3].uses_previous_outputs
+        (ref.from_step, ref.label) for ref in normalized[3].uses_previous_outputs
     ] == [(1, "Källmaterial")]
     assert [
-        (ref.from_step, ref.label) for ref in normalized.steps[4].uses_previous_outputs
+        (ref.from_step, ref.label) for ref in normalized[4].uses_previous_outputs
     ] == [(1, "Källmaterial")]
     assert {
-        (ref.from_step, ref.field_path)
-        for ref in normalized.steps[4].uses_previous_fields
+        (ref.from_step, ref.field_path) for ref in normalized[4].uses_previous_fields
     } >= {
         (2, "transcription_text"),
         (3, "meeting_title"),
         (4, "protocol_sections"),
     }
-    assert normalized.steps[5].uses_previous_outputs == []
+    assert normalized[5].uses_previous_outputs == []
 
 
-def test_normalize_create_draft_mechanics_detects_source_after_input_source_normalization() -> (
+def test_normalize_create_step_mechanics_detects_source_after_input_source_normalization() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Audio source report",
-        plan_rationale="Transcribe audio, extract facts, and write a report.",
         steps=[
             {
                 "name": "Transcribe audio",
@@ -251,23 +262,19 @@ def test_normalize_create_draft_mechanics_detects_source_after_input_source_norm
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
-    assert normalized.steps[0].input_source == "flow_input"
-    assert normalized.steps[2].input_type == "text"
+    assert normalized[0].input_source == "flow_input"
+    assert normalized[2].input_type == "text"
     assert [
-        (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
+        (ref.from_step, ref.label) for ref in normalized[2].uses_previous_outputs
     ] == [(1, "Source material")]
     assert [
-        (ref.from_step, ref.field_path)
-        for ref in normalized.steps[2].uses_previous_fields
+        (ref.from_step, ref.field_path) for ref in normalized[2].uses_previous_fields
     ] == [(2, "finding")]
 
 
-def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_policy() -> (
+def test_normalize_create_step_mechanics_and_critic_share_targeted_underlag_policy() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
     from intric.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
@@ -280,9 +287,8 @@ def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_pol
         PlannerPatternSignals,
     )
 
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="PDF-rapport",
-        plan_rationale="Skapar en PDF-rapport med granskningssteg.",
         steps=[
             {
                 "name": "Läs PDF",
@@ -326,8 +332,7 @@ def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_pol
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-    composer = normalized.steps[3]
+    composer = normalized[3]
 
     assert composer.input_source == "previous_step"
     assert {
@@ -337,7 +342,7 @@ def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_pol
         (3, "findings"),
     }
 
-    spec = compile_create_draft(normalized)
+    spec = compile_create_steps_to_spec(flow_name="PDF-rapport", steps=normalized)
     context = CriticContext(
         spec=spec,
         flow=None,
@@ -361,11 +366,9 @@ def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_pol
     assert "prefer_targeted_underlag_over_all_previous_steps" not in issue_ids
 
 
-def test_normalize_create_draft_mechanics_rewrites_final_assembler_to_section_outputs() -> (
+def test_normalize_create_step_mechanics_rewrites_final_assembler_to_section_outputs() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
-
     section_steps = [
         {
             "name": f"Draft section {index}",
@@ -377,9 +380,8 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_to_section_ou
         }
         for index in range(1, 9)
     ]
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Document report",
-        plan_rationale="Extract facts, write sections, assemble a document.",
         steps=[
             {
                 "name": "Read source material",
@@ -416,8 +418,7 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_to_section_ou
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-    assembler = normalized.steps[-2]
+    assembler = normalized[-2]
 
     assert assembler.input_source == "previous_step"
     assert [ref.from_step for ref in assembler.uses_previous_outputs] == list(
@@ -425,7 +426,7 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_to_section_ou
     )
     assert assembler.uses_previous_fields == []
 
-    spec = compile_create_draft(normalized)
+    spec = compile_create_steps_to_spec(flow_name="Document report", steps=normalized)
     question = spec.steps[-2].input_bindings["question"]
 
     assert "{{ step_a.output.text }}" not in question
@@ -443,12 +444,9 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_to_section_ou
         assert f"{{{{ {step_ref}.output.text }}}}" in question
 
 
-def test_normalize_create_draft_mechanics_preserves_final_assembler_field_refs() -> (
-    None
-):
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_preserves_final_assembler_field_refs() -> None:
+    normalized = _normalize_steps(
         flow_name="Document report with audit facts",
-        plan_rationale="Assemble section drafts while preserving explicit audit facts.",
         steps=[
             {
                 "name": "Extract facts",
@@ -493,8 +491,7 @@ def test_normalize_create_draft_mechanics_preserves_final_assembler_field_refs()
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-    assembler = normalized.steps[-2]
+    assembler = normalized[-2]
 
     assert [
         (ref.from_step, ref.field_path) for ref in assembler.uses_previous_fields
@@ -502,10 +499,9 @@ def test_normalize_create_draft_mechanics_preserves_final_assembler_field_refs()
     assert [ref.from_step for ref in assembler.uses_previous_outputs] == [2, 3]
 
 
-def test_normalize_create_draft_mechanics_rewrites_final_assembler_for_aggregate_intent() -> (
+def test_normalize_create_step_mechanics_rewrites_final_assembler_for_aggregate_intent() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
     from intric.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
@@ -518,9 +514,8 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_for_aggregate
         PlannerPatternSignals,
     )
 
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Aggregate report",
-        plan_rationale="Aggregate multiple prior outputs.",
         steps=[
             {
                 "name": "Part A",
@@ -551,20 +546,20 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_for_aggregate
                 "output_type": "pdf",
             },
         ],
-    )
-
-    normalized = normalize_create_draft_mechanics(
-        draft,
         aggregation_intent="aggregate",
     )
 
-    assert normalized.steps[-2].input_source == "previous_step"
-    assert [ref.from_step for ref in normalized.steps[-2].uses_previous_outputs] == [
+    assert normalized[-2].input_source == "previous_step"
+    assert [ref.from_step for ref in normalized[-2].uses_previous_outputs] == [
         1,
         2,
     ]
 
-    spec = compile_create_draft(normalized)
+    spec = compile_create_steps_to_spec(
+        flow_name="Aggregate report",
+        steps=normalized,
+        aggregation_intent="aggregate",
+    )
     context = CriticContext(
         spec=spec,
         flow=None,
@@ -591,12 +586,11 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_for_aggregate
     assert "terminal_renderer_must_consume_previous_composer" not in issue_ids
 
 
-def test_normalize_create_draft_mechanics_keeps_final_assembler_broad_for_compare_intent() -> (
+def test_normalize_create_step_mechanics_keeps_final_assembler_broad_for_compare_intent() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Compare report",
-        plan_rationale="Compare multiple prior outputs.",
         steps=[
             {
                 "name": "Part A",
@@ -627,23 +621,18 @@ def test_normalize_create_draft_mechanics_keeps_final_assembler_broad_for_compar
                 "output_type": "pdf",
             },
         ],
-    )
-
-    normalized = normalize_create_draft_mechanics(
-        draft,
         aggregation_intent="compare",
     )
 
-    assert normalized.steps[-2].input_source == "all_previous_steps"
-    assert normalized.steps[-2].uses_previous_outputs == []
+    assert normalized[-2].input_source == "all_previous_steps"
+    assert normalized[-2].uses_previous_outputs == []
 
 
-def test_normalize_create_draft_mechanics_rewrites_terminal_renderer_all_previous() -> (
+def test_normalize_create_step_mechanics_rewrites_terminal_renderer_all_previous() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Document report",
-        plan_rationale="Extract facts, compose the body, and render the document.",
         steps=[
             {
                 "name": "Read source",
@@ -679,20 +668,18 @@ def test_normalize_create_draft_mechanics_rewrites_terminal_renderer_all_previou
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-    renderer = normalized.steps[-1]
+    renderer = normalized[-1]
 
     assert renderer.input_source == "previous_step"
     assert renderer.uses_previous_fields == []
     assert renderer.uses_previous_outputs == []
 
 
-def test_normalize_create_draft_mechanics_rewrites_terminal_renderer_for_aggregate_intent() -> (
+def test_normalize_create_step_mechanics_rewrites_terminal_renderer_for_aggregate_intent() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Aggregate report",
-        plan_rationale="Aggregate prior outputs into one PDF.",
         steps=[
             {
                 "name": "Part one",
@@ -709,22 +696,17 @@ def test_normalize_create_draft_mechanics_rewrites_terminal_renderer_for_aggrega
                 "output_type": "pdf",
             },
         ],
-    )
-
-    normalized = normalize_create_draft_mechanics(
-        draft,
         aggregation_intent="aggregate",
     )
 
-    assert normalized.steps[-1].input_source == "previous_step"
+    assert normalized[-1].input_source == "previous_step"
 
 
-def test_normalize_create_draft_mechanics_keeps_terminal_renderer_without_text_composer() -> (
+def test_normalize_create_step_mechanics_keeps_terminal_renderer_without_text_composer() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Structured artifact",
-        plan_rationale="Extract structured data before rendering.",
         steps=[
             {
                 "name": "Extract facts",
@@ -753,17 +735,14 @@ def test_normalize_create_draft_mechanics_keeps_terminal_renderer_without_text_c
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
-    assert normalized.steps[-1].input_source == "all_previous_steps"
+    assert normalized[-1].input_source == "all_previous_steps"
 
 
-def test_normalize_create_draft_mechanics_rewrites_assembler_before_terminal_renderer() -> (
+def test_normalize_create_step_mechanics_rewrites_assembler_before_terminal_renderer() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Document report",
-        plan_rationale="Write sections, assemble them, and render the report.",
         steps=[
             {
                 "name": "Extract facts",
@@ -807,23 +786,20 @@ def test_normalize_create_draft_mechanics_rewrites_assembler_before_terminal_ren
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
-    assert normalized.steps[-2].input_source == "previous_step"
-    assert [ref.from_step for ref in normalized.steps[-2].uses_previous_outputs] == [
+    assert normalized[-2].input_source == "previous_step"
+    assert [ref.from_step for ref in normalized[-2].uses_previous_outputs] == [
         2,
         3,
     ]
-    assert normalized.steps[-1].input_source == "previous_step"
-    assert normalized.steps[-1].uses_previous_outputs == []
+    assert normalized[-1].input_source == "previous_step"
+    assert normalized[-1].uses_previous_outputs == []
 
 
-def test_normalize_create_draft_mechanics_rewrites_assembler_before_review_and_renderer() -> (
+def test_normalize_create_step_mechanics_rewrites_assembler_before_review_and_renderer() -> (
     None
 ):
-    draft = FlowCreateDraft(
+    normalized = _normalize_steps(
         flow_name="Document report with final review",
-        plan_rationale="Write sections, assemble them, review, and render.",
         steps=[
             {
                 "name": "Extract facts",
@@ -874,19 +850,16 @@ def test_normalize_create_draft_mechanics_rewrites_assembler_before_review_and_r
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
-    assembler = normalized.steps[3]
+    assembler = normalized[3]
     assert assembler.input_source == "previous_step"
     assert [ref.from_step for ref in assembler.uses_previous_outputs] == [2, 3]
-    assert normalized.steps[4].input_source == "previous_step"
-    assert normalized.steps[5].input_source == "previous_step"
+    assert normalized[4].input_source == "previous_step"
+    assert normalized[5].input_source == "previous_step"
 
 
-def test_normalize_create_draft_mechanics_keeps_non_source_text_step_label() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_keeps_non_source_text_step_label() -> None:
+    normalized = _normalize_steps(
         flow_name="Textbaserad sammanställning",
-        plan_rationale="Skriv rapport från text och strukturerade fält.",
         steps=[
             {
                 "name": "Samla anteckningar",
@@ -921,25 +894,23 @@ def test_normalize_create_draft_mechanics_keeps_non_source_text_step_label() -> 
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-
     assert [
-        (ref.from_step, ref.label) for ref in normalized.steps[3].uses_previous_outputs
+        (ref.from_step, ref.label) for ref in normalized[3].uses_previous_outputs
     ] == [(1, "Samla anteckningar")]
 
 
-def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_prunes_unknown_form_field_refs() -> None:
+    form_fields = [
+        FormFieldSpec(
+            name="case_id",
+            label="Case ID",
+            type="text",
+            required=True,
+        )
+    ]
+    normalized = _normalize_steps(
         flow_name="Robust formulärflöde",
-        plan_rationale="Använd runtime metadata om den finns.",
-        form_fields=[
-            FormFieldSpec(
-                name="case_id",
-                label="Case ID",
-                type="text",
-                required=True,
-            )
-        ],
+        form_fields=form_fields,
         steps=[
             {
                 "name": "Analysera",
@@ -952,16 +923,17 @@ def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> No
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
+    _assert_compiles_to_valid_spec(
+        normalized,
+        flow_name="Robust formulärflöde",
+        form_fields=form_fields,
+    )
+    assert normalized[0].uses_form_fields == ["case_id"]
 
-    _assert_compiles_to_valid_spec(normalized)
-    assert normalized.steps[0].uses_form_fields == ["case_id"]
 
-
-def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
-    draft = FlowCreateDraft(
+def test_normalize_create_step_mechanics_fixes_safe_step_invariants() -> None:
+    normalized = _normalize_steps(
         flow_name="Mekaniskt robust flöde",
-        plan_rationale="Normalisera endast backendägda mekaniker.",
         steps=[
             {
                 "name": "Ta emot dokument",
@@ -992,17 +964,19 @@ def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
         ],
     )
 
-    normalized = normalize_create_draft_mechanics(draft)
-    compiled = compile_create_draft(normalized)
+    compiled = compile_create_steps_to_spec(
+        flow_name="Mekaniskt robust flöde",
+        steps=normalized,
+    )
     runtime_input = compiled.steps[0].input_config["runtime_input"]
 
-    assert normalized.steps[0].input_source == "flow_input"
+    assert normalized[0].input_source == "flow_input"
     assert runtime_input["enabled"] is True
     assert runtime_input["input_format"] == "document"
     assert runtime_input["required"] is True
-    assert normalized.steps[1].input_source == "previous_step"
-    assert normalized.steps[1].input_type == "json"
-    assert normalized.steps[1].document_delivery_mode == "not_applicable"
-    assert normalized.steps[2].input_type == "text"
-    assert normalized.steps[2].citations_requested is False
+    assert normalized[1].input_source == "previous_step"
+    assert normalized[1].input_type == "json"
+    assert normalized[1].document_delivery_mode == "not_applicable"
+    assert normalized[2].input_type == "text"
+    assert normalized[2].citations_requested is False
     _assert_compiles_to_valid_spec(normalized)
