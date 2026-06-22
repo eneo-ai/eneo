@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
+    _OUTLINE_STEP_BACKEND_OWNED_KEYS,
     MAX_OUTLINE_STEPS,
     OutlineFlowArgumentError,
     attach_selected_mcp_refs_to_explicit_outline_steps,
@@ -1974,15 +1975,10 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
     ]
+    leaked_backend_keys = sorted(set(step_props) & _OUTLINE_STEP_BACKEND_OWNED_KEYS)
 
-    assert "input_source" not in step_props
-    assert "input_type" not in step_props
-    assert "input_bindings" not in step_props
-    assert "output_mode" not in step_props
-    assert "uses_previous_fields" not in step_props
-    assert "uses_previous_outputs" not in step_props
+    assert leaked_backend_keys == []
     assert "uses_input_fields" in step_props
-    assert "input_strategy" not in step_props
 
 
 def test_outline_flow_schema_uses_flow_derived_enums() -> None:

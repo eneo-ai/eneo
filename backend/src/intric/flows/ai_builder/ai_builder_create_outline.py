@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
+    build_resource_ref_property_schemas,
     build_review_mode_schema,
     build_structured_field_schema,
 )
@@ -651,58 +652,17 @@ def _outline_step_schema(
                     "compiles them into underlag/input_bindings."
                 ),
             },
-            "model_ref": {
-                "type": ["string", "null"],
-                "description": "Optional portable model slot ref to use for this step.",
-            },
-            "knowledge_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "uniqueItems": True,
-                "description": (
-                    "Portable knowledge slot refs this semantic step needs. "
-                    "Do not combine with MCP refs on the same step."
-                ),
-            },
-            "mcp_server_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "uniqueItems": True,
-                "description": (
-                    "Portable MCP server slot refs this semantic step needs. Use only "
-                    "for external tools/live data and never together with knowledge_refs."
-                ),
-            },
-            "mcp_tool_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "uniqueItems": True,
-                "description": (
-                    "Portable MCP tool slot refs for least-privilege tool access. "
-                    "Prefer tool refs over whole-server refs when possible."
-                ),
-            },
+            **build_resource_ref_property_schemas(
+                model_refs=model_refs,
+                kb_refs=kb_refs,
+                mcp_server_refs=mcp_server_refs,
+                mcp_tool_refs=mcp_tool_refs,
+            ),
             "citations_requested": {"type": "boolean", "default": False},
             "review_mode": build_review_mode_schema(),
         },
         "additionalProperties": False,
     }
-    properties = cast(dict[str, Any], schema["properties"])
-    if model_refs is not None:
-        model_ref_property = cast(dict[str, Any], properties["model_ref"])
-        model_ref_property["enum"] = [*model_refs, None]
-    if kb_refs is not None:
-        knowledge_ref_property = cast(dict[str, Any], properties["knowledge_refs"])
-        knowledge_ref_items = cast(dict[str, Any], knowledge_ref_property["items"])
-        knowledge_ref_items["enum"] = kb_refs
-    if mcp_server_refs is not None:
-        server_refs_property = cast(dict[str, Any], properties["mcp_server_refs"])
-        server_refs_items = cast(dict[str, Any], server_refs_property["items"])
-        server_refs_items["enum"] = mcp_server_refs
-    if mcp_tool_refs is not None:
-        tool_refs_property = cast(dict[str, Any], properties["mcp_tool_refs"])
-        tool_refs_items = cast(dict[str, Any], tool_refs_property["items"])
-        tool_refs_items["enum"] = mcp_tool_refs
     return schema
 
 

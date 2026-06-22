@@ -19,6 +19,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_previous_field_refs_schema,
+    build_resource_ref_property_schemas,
     build_review_mode_schema,
     build_structured_field_schema,
 )
@@ -326,44 +327,13 @@ def _build_add_step_schema(
             ),
             "items": build_structured_field_schema(),
         },
-        "model_ref": {
-            "type": ["string", "null"],
-            "description": "Optional portable model slot ref to use for this step.",
-        },
-        "knowledge_refs": {
-            "type": "array",
-            "items": {"type": "string"},
-            "uniqueItems": True,
-            "description": "Optional portable knowledge slot refs for this step.",
-        },
-        "mcp_server_refs": {
-            "type": "array",
-            "items": {"type": "string"},
-            "uniqueItems": True,
-            "description": (
-                "Optional portable MCP server slot refs for this step. Use only when the "
-                "step needs external tools or live data. Do not combine with knowledge_refs."
-            ),
-        },
-        "mcp_tool_refs": {
-            "type": "array",
-            "items": {"type": "string"},
-            "uniqueItems": True,
-            "description": (
-                "Optional portable MCP tool slot refs for least-privilege tool access. "
-                "Prefer this over enabling a whole server when one specific tool is enough."
-            ),
-        },
+        **build_resource_ref_property_schemas(
+            model_refs=model_refs,
+            kb_refs=kb_refs,
+            mcp_server_refs=mcp_server_refs,
+            mcp_tool_refs=mcp_tool_refs,
+        ),
     }
-
-    if model_refs is not None:
-        properties["model_ref"]["enum"] = [*model_refs, None]
-    if kb_refs is not None:
-        properties["knowledge_refs"]["items"]["enum"] = kb_refs
-    if mcp_server_refs is not None:
-        properties["mcp_server_refs"]["items"]["enum"] = mcp_server_refs
-    if mcp_tool_refs is not None:
-        properties["mcp_tool_refs"]["items"]["enum"] = mcp_tool_refs
 
     description = (
         "Typed add-step payload for a new step added to an existing flow. "
@@ -395,41 +365,13 @@ def _build_assistant_spec_schema(
                 "type": "string",
                 "description": "What this step's assistant should do.",
             },
-            "model_ref": {
-                "type": ["string", "null"],
-                "description": "Model alias, or null for space default.",
-            },
-            "knowledge_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Knowledge base aliases to attach.",
-            },
-            "mcp_server_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "MCP server refs to attach. Use only for external tools/live data "
-                    "and do not combine with knowledge_refs."
-                ),
-            },
-            "mcp_tool_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "MCP tool refs to attach for least-privilege tool access."
-                ),
-            },
+            **build_resource_ref_property_schemas(
+                model_refs=model_refs,
+                kb_refs=kb_refs,
+                mcp_server_refs=mcp_server_refs,
+                mcp_tool_refs=mcp_tool_refs,
+            ),
         },
     }
-
-    # Inject dynamic enums for small lists
-    if model_refs is not None:
-        schema["properties"]["model_ref"]["enum"] = model_refs + [None]
-    if kb_refs is not None:
-        schema["properties"]["knowledge_refs"]["items"]["enum"] = kb_refs
-    if mcp_server_refs is not None:
-        schema["properties"]["mcp_server_refs"]["items"]["enum"] = mcp_server_refs
-    if mcp_tool_refs is not None:
-        schema["properties"]["mcp_tool_refs"]["items"]["enum"] = mcp_tool_refs
 
     return schema
