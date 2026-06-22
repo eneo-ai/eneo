@@ -179,6 +179,35 @@ def _make_grounded_spec(
     )
 
 
+def _make_repeated_all_previous_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Flow",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Step A",
+                assistant_spec=AssistantSpec(instructions="Extract facts."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Step B",
+                assistant_spec=AssistantSpec(instructions="Analyze facts."),
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Step C",
+                assistant_spec=AssistantSpec(instructions="Summarize facts."),
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+            ),
+        ],
+    )
+
+
 def _make_plan(
     *,
     session_id,
@@ -483,6 +512,43 @@ class TestAIBuilderPlanLifecycle:
         assert command.origin.session_id == session.id
         assert command.origin.plan_id == plan.id
         assert command.origin.spec_hash == plan.spec_hash
+
+    @pytest.mark.anyio
+    async def test_apply_plan_passes_approved_spec_without_apply_time_repair(
+        self,
+    ) -> None:
+        user = _make_user()
+        repo = AsyncMock()
+        flow_service = AsyncMock()
+        spec = _make_repeated_all_previous_spec()
+        session = _make_session(
+            tenant_id=user.tenant_id,
+            actor_user_id=user.id,
+            flow_id=None,
+            target_kind=TargetKind.CREATE,
+        )
+        plan = _make_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+        )
+        repo.get_plan.return_value = plan
+        repo.get_session.return_value = session
+        authoring_service = _make_authoring_service(steps_created=3, steps_updated=0)
+
+        lifecycle = AIBuilderPlanLifecycle(
+            user=user,
+            repo=repo,
+            flow_service=flow_service,
+            space_service=_make_space_service(),
+            authoring_service=authoring_service,
+        )
+
+        await lifecycle.apply_plan(plan_id=plan.id)
+
+        command = authoring_service.prepare.await_args.kwargs["command"]
+        assert isinstance(command, CreateFlowAuthoringCommand)
+        assert command.spec == spec
 
     @pytest.mark.anyio
     async def test_apply_plan_derives_removed_refs_from_persisted_edit_intent(

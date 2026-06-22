@@ -13,6 +13,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+    normalize_ai_builder_spec,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
@@ -214,11 +217,195 @@ def _json_helper_before_text_terminal_spec(
     )
 
 
+def _multi_step_fan_in_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Explicit synthesis",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract A",
+                assistant_spec=AssistantSpec(instructions="Extract source A."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Extract B",
+                assistant_spec=AssistantSpec(instructions="Extract source B."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Compare extracts",
+                assistant_spec=AssistantSpec(instructions="Compare both extracts."),
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+                input_bindings={
+                    "question": "{{ step_a.output.text }}\n\n{{ step_b.output.text }}"
+                },
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+        ],
+    )
+
+
+def _pdf_helper_before_text_terminal_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Employee review",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Analyze conversation",
+                assistant_spec=AssistantSpec(
+                    instructions="Analyze the employee review conversation.",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Generate PDF helper",
+                assistant_spec=AssistantSpec(
+                    instructions="Render the analysis as a PDF.",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.PDF,
+                input_bindings={"question": "{{ step_a.output.structured }}"},
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Create final result",
+                assistant_spec=AssistantSpec(
+                    instructions="Return the final review document.",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+                input_bindings={"question": "{{ step_b.output.text }}"},
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+        ],
+    )
+
+
+def _source_material_docx_spec() -> FlowDraftSpecCore:
+    return FlowDraftSpecCore(
+        flow_name="Mötesprotokoll från ljud",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Transkribera ljud",
+                assistant_spec=AssistantSpec(
+                    instructions="Transcribe the uploaded meeting audio.",
+                ),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Strukturera transkription",
+                assistant_spec=AssistantSpec(
+                    instructions="Extract structured decisions from the transcript.",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_c",
+                name="Identifiera mötesmetadata",
+                assistant_spec=AssistantSpec(
+                    instructions="Identify agenda and meeting metadata.",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                input_contract={
+                    "type": "object",
+                    "properties": {"agenda": {"type": "array"}},
+                },
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+            StepSpec(
+                plan_step_ref="step_d",
+                name="Skapa DOCX",
+                assistant_spec=AssistantSpec(
+                    instructions="Create the final meeting protocol.",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.DOCX,
+                input_contract={
+                    "type": "object",
+                    "properties": {"metadata": {"type": "object"}},
+                },
+                mcp_policy=MCPPolicy.INHERIT,
+            ),
+        ],
+    )
+
+
 def _assert_prepared_spec_compiles_with_shared_compiler(
     spec: FlowDraftSpecCore,
 ) -> None:
     shared_changeset = compile_flow_draft_changeset(spec, current_flow=None)
     assert len(shared_changeset.compiled_steps) == len(spec.steps)
+
+
+def _assert_prepared_spec_is_apply_normalization_fixed_point(
+    spec: FlowDraftSpecCore,
+) -> None:
+    normalized, normalization_changes = normalize_ai_builder_spec(spec)
+
+    assert normalized == spec
+    assert normalization_changes == []
+    _assert_prepared_spec_compiles_with_shared_compiler(spec)
+
+
+def _prepare_valid_spec(
+    spec: FlowDraftSpecCore,
+    *,
+    target_kind: TargetKind = TargetKind.CREATE,
+    terminal_output_type: OutputType | None = None,
+    valid_existing_step_refs: list[str] | None = None,
+) -> FlowDraftSpecCore:
+    result = prepare_compiled_spec_for_session(
+        spec=spec,
+        target_kind=target_kind,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        valid_existing_step_refs=valid_existing_step_refs,
+        terminal_output_type=terminal_output_type,
+    )
+
+    assert result.spec is not None
+    assert result.validation is not None
+    assert result.validation.valid
+    return result.spec
 
 
 def test_prepare_compiled_spec_for_session_merges_session_validation_errors() -> None:
@@ -465,6 +652,20 @@ def test_prepare_compiled_spec_preserves_existing_edit_prompt_metadata() -> None
     )
 
 
+def test_prepared_simple_create_spec_is_apply_normalization_fixed_point() -> None:
+    spec = _prepare_valid_spec(_make_spec())
+
+    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
+
+
+def test_prepared_explicit_multi_step_fan_in_is_apply_normalization_fixed_point() -> (
+    None
+):
+    spec = _prepare_valid_spec(_multi_step_fan_in_spec())
+
+    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
+
+
 def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() -> None:
     spec = _make_spec()
 
@@ -537,20 +738,23 @@ def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contr
 
 
 def test_prepared_terminal_artifact_spec_is_apply_compile_stable() -> None:
-    result = prepare_compiled_spec_for_session(
-        spec=_make_spec(),
-        target_kind=TargetKind.CREATE,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
-        valid_existing_step_refs=None,
+    spec = _prepare_valid_spec(
+        _make_spec(),
         terminal_output_type=OutputType.DOCX,
     )
 
-    assert result.spec is not None
-    assert result.validation is not None
-    assert result.validation.valid
-    _assert_prepared_spec_compiles_with_shared_compiler(result.spec)
+    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
+
+
+def test_prepared_pdf_helper_spec_is_apply_normalization_fixed_point() -> None:
+    spec = _prepare_valid_spec(
+        _pdf_helper_before_text_terminal_spec(),
+        terminal_output_type=OutputType.PDF,
+    )
+
+    assert [step.plan_step_ref for step in spec.steps] == ["step_a", "step_c"]
+    assert spec.steps[-1].output_type == OutputType.PDF
+    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
 
 
 def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
@@ -583,19 +787,13 @@ def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() 
 
 
 def test_prepared_edit_duplicate_names_are_apply_compile_stable() -> None:
-    result = prepare_compiled_spec_for_session(
-        spec=_duplicate_step_name_spec(),
+    spec = _prepare_valid_spec(
+        _duplicate_step_name_spec(),
         target_kind=TargetKind.EDIT,
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=None,
         valid_existing_step_refs=[],
     )
 
-    assert result.spec is not None
-    assert result.validation is not None
-    assert result.validation.valid
-    _assert_prepared_spec_compiles_with_shared_compiler(result.spec)
+    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
 
 
 def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_terminal() -> (
@@ -630,6 +828,28 @@ def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_termina
     assert result.validation.valid
     assert [step.plan_step_ref for step in result.spec.steps] == ["step_a", "step_c"]
     assert result.spec.steps[-1].output_type == OutputType.JSON
+    _assert_prepared_spec_is_apply_normalization_fixed_point(result.spec)
+
+
+def test_prepared_source_material_docx_spec_is_apply_normalization_fixed_point() -> (
+    None
+):
+    spec = _prepare_valid_spec(
+        _source_material_docx_spec(),
+        terminal_output_type=OutputType.DOCX,
+    )
+
+    assert spec.steps[2].input_bindings == {
+        "question": (
+            "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        )
+    }
+    assert spec.steps[3].input_bindings == {
+        "question": (
+            "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        )
+    }
+    _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
 
 
 def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_terminal() -> (

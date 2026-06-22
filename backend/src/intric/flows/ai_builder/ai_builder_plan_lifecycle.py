@@ -36,9 +36,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_step_transition_policy import (
-    normalize_ai_builder_spec,
-)
 from intric.flows.application.flow_authoring_command import (
     AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
@@ -261,7 +258,7 @@ class AIBuilderPlanLifecycle:
             plan=plan,
             default_transcription_model_id=default_transcription_model_id,
         )
-        spec, _ = normalize_ai_builder_spec(plan.spec)
+        spec = plan.spec
         removed_existing_step_refs = _removed_existing_step_refs_for_apply(
             session=session,
             plan=plan,
