@@ -2105,7 +2105,7 @@ def test_flow_developer_docs_reviewer_guide_is_generated_from_review_catalog() -
         assert f"`{command.workdir}`" in page
         assert "::" not in command.command
     assert "## Debugging a stuck run" in page
-    assert "worker-root spans" in page
+    assert "worker-root signals" in page
     for step in generator.REVIEWER_DEBUG_RUNBOOK_STEPS:
         assert step.inspect in page
         assert step.next_action in page

@@ -685,7 +685,7 @@ REVIEWER_DEBUG_RUNBOOK_STEPS: tuple[ReviewerDebugRunbookStep, ...] = (
     ),
     _runbook_step(
         slug="run-span-correlation",
-        inspect="Find the worker-root run span by run id first, then by persisted trace token when present.",
+        inspect="Find the worker-root run span or worker log by run id first, then by persisted trace token when present.",
         signals=FLOW_RUN_SPAN_DEBUG_SIGNALS,
         next_action="If the trace-token attribute is absent, the task failed before loading the run row; continue with the run-id attribute.",
         source_refs=(
@@ -962,7 +962,7 @@ def render_flow_developer_reviewer_guide_docs_page() -> str:
         "",
         "## Debugging a stuck run",
         "",
-        "Flow runtime spans are worker-root spans. Correlate by searchable attributes, especially the persisted Flow `trace_id`, not by OpenTelemetry trace-id navigation.",
+        "Flow runtime spans and worker logs are worker-root signals. Correlate by searchable Flow attributes, especially the persisted Flow `trace_id` exposed as `flow.run.trace_id`, not by OpenTelemetry trace-id navigation.",
         "",
         _render_debug_runbook_table(),
         "",

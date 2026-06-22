@@ -359,6 +359,10 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     )
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.task_acks_late is True
+    assert app.conf.broker_connection_retry_on_startup is True
+    assert app.conf.broker_transport_options["visibility_timeout"] == 7200
+    assert app.conf.result_backend_transport_options["visibility_timeout"] == 7200
+    assert app.conf.visibility_timeout == 7200
     assert app.conf.task_soft_time_limit == 540
     assert app.conf.task_time_limit == 600
     assert "reconcile-stale-running" in app.conf.beat_schedule
@@ -673,6 +677,66 @@ def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
     assert error.message == (
         "flow_task_timeout: Flow execution timed out before task completion."
     )
+
+
+def test_execute_flow_run_handles_soft_time_limit_as_timeout(monkeypatch):
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    terminalize_failure = AsyncMock()
+    monkeypatch.setattr(
+        tasks_module,
+        "terminalize_flow_run_failure",
+        terminalize_failure,
+    )
+    monkeypatch.setattr(tasks_module, "_get_flow_task_loop", lambda: object())
+    monkeypatch.setattr(
+        tasks_module,
+        "get_settings",
+        lambda: type("_Settings", (), {"flow_task_timeout_seconds": 10})(),
+    )
+
+    class _RunFuture:
+        def cancel(self):
+            return None
+
+        def result(self, timeout=None):
+            raise tasks_module.SoftTimeLimitExceeded()
+
+    class _DoneFuture:
+        def result(self, timeout=None):
+            return None
+
+    calls = {"count": 0}
+
+    def _run_coroutine_threadsafe(coroutine, _loop):
+        if calls["count"] == 0:
+            calls["count"] += 1
+            coroutine.close()
+            return _RunFuture()
+        asyncio.run(coroutine)
+        return _DoneFuture()
+
+    monkeypatch.setattr(
+        tasks_module.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_threadsafe,
+    )
+
+    result = tasks_module._execute_flow_run_task(
+        run_id=str(uuid4()),
+        flow_id=str(uuid4()),
+        tenant_id=str(uuid4()),
+        principal_type="user",
+        principal_user_id=str(uuid4()),
+        task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "reason": "timeout"}
+    assert terminalize_failure.await_count == 1
+    assert terminalize_failure.await_args.kwargs["source"] == (
+        FlowRunLifecycleSource.TASK_TIMEOUT
+    )
+    assert terminalize_failure.await_args.kwargs["error"].code == "flow_task_timeout"
 
 
 def test_execute_flow_run_handles_generic_exception(monkeypatch):
@@ -1050,23 +1114,34 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
     assert backend.dispatch.await_count == 0
 
 
-def test_flow_worker_process_init_initializes_db_and_http_client(monkeypatch):
+def test_flow_worker_process_init_initializes_observability_db_and_http_client(
+    monkeypatch,
+):
     celery_app_module = importlib.import_module("intric.flows.runtime.celery_app")
-    init_mock = MagicMock()
-    start_mock = MagicMock()
+    events: list[str] = []
+
+    def init_observability():
+        events.append("otel")
+
+    def init_db(database_url: str):
+        events.append(f"db:{database_url}")
+
+    def start_http_client():
+        events.append("aiohttp")
+
     monkeypatch.setattr(
         celery_app_module,
         "get_settings",
         lambda: SimpleNamespace(database_url="postgresql+asyncpg://db"),
     )
-    monkeypatch.setattr(celery_app_module.sessionmanager, "init", init_mock)
-    monkeypatch.setattr(celery_app_module.aiohttp_client, "start", start_mock)
+    monkeypatch.setattr(celery_app_module, "init_observability", init_observability)
+    monkeypatch.setattr(celery_app_module.sessionmanager, "init", init_db)
+    monkeypatch.setattr(celery_app_module.aiohttp_client, "start", start_http_client)
     monkeypatch.setattr(celery_app_module.aiohttp_client, "session", None)
 
     celery_app_module._on_flow_worker_process_init()
 
-    init_mock.assert_called_once_with("postgresql+asyncpg://db")
-    start_mock.assert_called_once_with()
+    assert events == ["otel", "db:postgresql+asyncpg://db", "aiohttp"]
 
 
 def test_flow_worker_process_shutdown_closes_resources(monkeypatch):
@@ -1087,6 +1162,34 @@ def test_enable_autobegin_for_flow_task_session():
     tasks_module.enable_autobegin_for_flow_task_session(async_session)
 
     assert sync_session.autobegin is True
+
+
+def test_flow_run_logging_context_sets_flow_trace_attributes_and_clears():
+    tasks_module = importlib.import_module("intric.flows.runtime.tasks")
+    request_context_module = importlib.import_module("intric.main.request_context")
+    run_id = uuid4()
+    flow_id = uuid4()
+    tenant_id = uuid4()
+    run_trace_id = uuid4()
+
+    request_context_module.clear_request_context()
+
+    with tasks_module._flow_run_logging_context(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        run_trace_id=run_trace_id,
+        celery_task_id="task-1",
+    ):
+        context = request_context_module.get_request_context()
+
+    assert context["flow.run.id"] == str(run_id)
+    assert context["flow.run.trace_id"] == str(run_trace_id)
+    assert context["flow.id"] == str(flow_id)
+    assert context["flow.tenant.id"] == str(tenant_id)
+    assert context["flow.celery.task_id"] == "task-1"
+    assert "trace_id" not in context
+    assert request_context_module.get_request_context() == {}
 
 
 def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):

@@ -27,6 +27,7 @@ from intric.flows.flow_review_expiry_policy import (
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.main.observability import init_observability
 from intric.worker.celery import create_celery_app as create_shared_celery_app
 
 logger = get_logger(__name__)
@@ -89,6 +90,7 @@ def _close_flow_worker_resources() -> None:
 
 @worker_process_init.connect  # pyright: ignore[reportUnknownMemberType]
 def _on_flow_worker_process_init(*_args: Any, **_kwargs: Any) -> None:  # pyright: ignore[reportUnusedFunction]
+    init_observability()
     settings = get_settings()
     sessionmanager.init(settings.database_url)
     aiohttp_client.start()
