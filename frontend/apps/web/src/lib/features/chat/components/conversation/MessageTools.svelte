@@ -89,8 +89,6 @@
           {/if}
         </Button>
       </Tooltip>
-
-    {#if totalRefs > 0}
       <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
         <Dropdown.Trigger asFragment let:trigger>
           <Button
@@ -112,22 +110,23 @@
           </Button>
         </Dropdown.Menu>
       </Dropdown.Root>
-    </div>
 
-      <Button
-        unstyled
-        class="border-default hover:bg-hover-dimmer flex gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
-        on:click={() => {
-          referencesExpanded = !referencesExpanded;
-        }}
-      >
-        <IconChevronRight
-          class={referencesExpanded ? "rotate-90 transition-all" : "transition-all"}
-        />
-        {totalRefs}
-        {m.references()}
-      </Button>
-    {/if}
+      {#if totalRefs > 0}
+        <Button
+          unstyled
+          class="border-default hover:bg-hover-dimmer flex gap-1 rounded-lg border p-1.5 pr-2.5 shadow-sm"
+          on:click={() => {
+            referencesExpanded = !referencesExpanded;
+          }}
+        >
+          <IconChevronRight
+            class={referencesExpanded ? "rotate-90 transition-all" : "transition-all"}
+          />
+          {totalRefs}
+          {m.references()}
+        </Button>
+      {/if}
+    </div>
   </div>
   {#if referencesExpanded}
     <div class="mb-2 flex w-full flex-wrap gap-2 pt-2 md:pb-6">
