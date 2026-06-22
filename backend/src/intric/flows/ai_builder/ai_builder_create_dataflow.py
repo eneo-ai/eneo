@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
-)
-from intric.flows.ai_builder.ai_builder_mechanical_refs import (
-    clean_raw_previous_field_refs,
 )
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_position_input_source,
@@ -160,50 +157,6 @@ _UNDERLAG_SWEDISH_SUFFIXES = (
     "er",
     "or",
 )
-
-
-def strip_malformed_previous_field_refs(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Drop malformed field-level refs before strict Pydantic parsing.
-
-    `uses_previous_fields` is a backend binding hint. LLMs frequently produce
-    malformed variants when they try to author low-level wiring, so create-mode
-    parsing treats malformed refs as absent instead of forcing a repair round.
-    Strict semantic validation remains responsible for unsanitized callers.
-    """
-
-    steps = arguments.get("steps")
-    if not isinstance(steps, list):
-        return arguments
-
-    updated_steps: list[Any] = []
-    changed = False
-    for raw_step in cast(list[Any], steps):
-        if not isinstance(raw_step, dict):
-            updated_steps.append(raw_step)
-            continue
-
-        raw_step_dict = cast(dict[str, Any], raw_step)
-        refs = raw_step_dict.get("uses_previous_fields")
-        if refs is None:
-            updated_steps.append(raw_step_dict)
-            continue
-
-        cleaned_refs = clean_raw_previous_field_refs(refs)
-        if cleaned_refs == refs:
-            updated_steps.append(raw_step_dict)
-            continue
-
-        changed = True
-        updated_step: dict[str, Any] = dict(raw_step_dict)
-        if cleaned_refs:
-            updated_step["uses_previous_fields"] = cleaned_refs
-        else:
-            updated_step.pop("uses_previous_fields", None)
-        updated_steps.append(updated_step)
-
-    if not changed:
-        return arguments
-    return {**arguments, "steps": updated_steps}
 
 
 def normalize_create_draft_mechanics(
@@ -1232,5 +1185,4 @@ __all__ = [
     "TARGETED_UNDERLAG_TOTAL_FIELD_CAP",
     "auto_bind_targeted_underlag_for_text_composer",
     "normalize_create_draft_mechanics",
-    "strip_malformed_previous_field_refs",
 ]

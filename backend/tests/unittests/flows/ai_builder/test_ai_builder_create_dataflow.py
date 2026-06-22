@@ -1,7 +1,6 @@
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
-    strip_malformed_previous_field_refs,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
@@ -941,37 +940,3 @@ def test_normalize_create_draft_mechanics_fixes_safe_step_invariants() -> None:
     assert normalized.steps[2].input_type == "text"
     assert normalized.steps[2].citations_requested is False
     _assert_compiles_to_valid_spec(normalized)
-
-
-def test_strip_malformed_previous_field_refs_removes_non_authorable_noise() -> None:
-    arguments = {
-        "flow_name": "Robust rapport",
-        "plan_rationale": "Skapa rapport.",
-        "steps": [
-            {
-                "name": "Extrahera",
-                "instructions": "Extrahera.",
-                "input_source": "flow_input",
-                "uses_previous_fields": "risker",
-            },
-            {
-                "name": "Skriv",
-                "instructions": "Skriv.",
-                "input_source": "previous_step",
-                "uses_previous_fields": [
-                    {"from_step": 0, "field_path": "risk"},
-                    {"from_step": 1, "field_path": "risk"},
-                    {"from_step": 1, "field_path": "risk"},
-                    {"from_step": 1, "field_path": "  "},
-                    {"from_step": 1, "field_path": "risk", "label": " Risk "},
-                ],
-            },
-        ],
-    }
-
-    cleaned = strip_malformed_previous_field_refs(arguments)
-
-    assert "uses_previous_fields" not in cleaned["steps"][0]
-    assert cleaned["steps"][1]["uses_previous_fields"] == [
-        {"from_step": 1, "field_path": "risk"},
-    ]
