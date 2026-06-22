@@ -63,7 +63,7 @@ uv run python init_db.py
 
 ### Step 5: Start Services
 
-Open **3 separate terminals** in VS Code:
+Open separate terminals in VS Code:
 
 **Terminal 1 - Backend API:**
 ```bash
@@ -77,17 +77,23 @@ cd frontend
 bun run dev
 ```
 
-**Terminal 3 - Worker (Optional, for document processing and for the crawler & apps to work):**
+**Terminal 3 - ARQ worker (document processing, crawler, apps, and existing background jobs):**
 ```bash
 cd backend
 uv run worker
 ```
 
-## Celery
-uv run celery -A src.intric.flows.runtime.celery_app:celery_app worker --loglevel=INFO --queues flows.execute
+**Terminal 4 - Flow worker (Celery):**
+```bash
+cd backend
+uv run flow-worker
+```
 
-## Celery beat
-uv run celery -A src.intric.flows.runtime.celery_app:celery_app beat --loglevel=INFO --pidfile=
+**Terminal 5 - Flow scheduler (Celery beat):**
+```bash
+cd backend
+uv run flow-beat
+```
 
 ## Verify Installation
 

@@ -239,6 +239,30 @@ def test_primary_federation_flag_works_without_deprecated_alias(
     assert "FEDERATION_PER_TENANT_ENABLED is deprecated" not in caplog.text
 
 
+def test_flow_celery_visibility_timeout_must_exceed_task_hard_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FLOW_TASK_TIMEOUT_SECONDS", "3600")
+    monkeypatch.setenv("CELERY_VISIBILITY_TIMEOUT_SECONDS", "3660")
+
+    with pytest.raises(SystemExit):
+        Settings(_env_file=None)
+
+
+def test_flow_celery_visibility_timeout_accepts_default_margin(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FLOW_TASK_TIMEOUT_SECONDS", "3600")
+    monkeypatch.setenv("CELERY_VISIBILITY_TIMEOUT_SECONDS", "7200")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.flow_task_timeout_seconds == 3600
+    assert settings.celery_visibility_timeout_seconds == 7200
+
+
 @pytest.fixture(autouse=True)
 def cleanup_settings():
     """Automatically reset settings after each test."""

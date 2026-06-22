@@ -298,8 +298,8 @@ class Settings(BaseSettings):
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
     flow_max_concurrent_runs_per_tenant: int = 4
     flow_celery_queue: str = "flows.execute"
-    celery_visibility_timeout_seconds: int = 3600
     flow_task_timeout_seconds: int = 3600
+    celery_visibility_timeout_seconds: int = 7200
     flow_max_inline_text_bytes: int = 1_048_576
     flow_llm_request_timeout_seconds: int = 600
     flow_runtime_step_timeout_hard_ceiling_seconds: int = 3600
@@ -652,6 +652,35 @@ class Settings(BaseSettings):
             logging.error(
                 "FLOW_RUNTIME_STEP_TIMEOUT_HARD_CEILING_SECONDS must be greater than zero. Current value: %s",
                 self.flow_runtime_step_timeout_hard_ceiling_seconds,
+            )
+            sys.exit(1)
+
+        if self.flow_task_timeout_seconds <= 0:
+            logging.error(
+                "FLOW_TASK_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.flow_task_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.celery_visibility_timeout_seconds <= 0:
+            logging.error(
+                "CELERY_VISIBILITY_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.celery_visibility_timeout_seconds,
+            )
+            sys.exit(1)
+
+        from intric.flows.application.flow_run_recovery_policy import (
+            flow_task_hard_timeout_seconds,
+        )
+
+        flow_task_hard_timeout = flow_task_hard_timeout_seconds(
+            task_timeout_seconds=self.flow_task_timeout_seconds
+        )
+        if self.celery_visibility_timeout_seconds <= flow_task_hard_timeout:
+            logging.error(
+                "CELERY_VISIBILITY_TIMEOUT_SECONDS (%s) must be greater than the Flow Celery hard time limit (%s).",
+                self.celery_visibility_timeout_seconds,
+                flow_task_hard_timeout,
             )
             sys.exit(1)
 

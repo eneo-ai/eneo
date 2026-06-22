@@ -37,7 +37,7 @@ When you're ready to deploy:
 
 ---
 
-### 💻 For Developers
+### For Developers
 
 Contributing to Eneo? Here's how to get started:
 
@@ -59,7 +59,7 @@ code .
 
 The DevContainer includes:
 - Pre-configured Python environment
-- Node.js and pnpm
+- Node.js and Bun
 - PostgreSQL with pgvector
 - Redis
 - All necessary dependencies
@@ -69,9 +69,10 @@ The DevContainer includes:
 If you prefer manual setup or need more control:
 
 **Requirements:**
-- Python ≥ 3.10
+- Python 3.11
 - Node.js ≥ v20
-- pnpm 8.9.0
+- uv
+- Bun
 - Docker (for PostgreSQL and Redis)
 
 ```bash
@@ -81,23 +82,27 @@ cd eneo
 
 # Backend setup
 cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e ".[dev]"
+uv sync --dev
 
 # Frontend setup
 cd ../frontend
-pnpm install
+bun install
 
-# Start services (requires 3 terminals)
+# Start services (requires separate terminals)
 # Terminal 1: Backend
-cd backend && uvicorn app.main:app --reload --port 8123
+cd backend && uv run start
 
 # Terminal 2: Frontend
-cd frontend/apps/client && pnpm dev
+cd frontend && bun run dev
 
-# Terminal 3: Worker
-cd backend && python -m app.worker
+# Terminal 3: ARQ worker
+cd backend && uv run worker
+
+# Terminal 4: Flow worker
+cd backend && uv run flow-worker
+
+# Terminal 5: Flow scheduler
+cd backend && uv run flow-beat
 ```
 
 #### Access Your Development Environment
@@ -116,7 +121,7 @@ cd backend && python -m app.worker
    - Backend: FastAPI with Python 3.11+
    - Frontend: SvelteKit with TypeScript
    - Database: PostgreSQL with pgvector
-   - Cache/Queue: Redis with ARQ
+   - Cache/Queue: Redis with ARQ and Celery
 
 3. **Make Your First Contribution**
    - Find issues labeled "good first issue" on [GitHub](https://github.com/eneo-ai/eneo/issues)
@@ -143,7 +148,13 @@ If you can't connect to the database:
 ### File Upload Issues
 File uploads require the worker service to be running:
 ```bash
-cd backend && python -m app.worker
+cd backend && uv run worker
+```
+
+Flow runs require the Flow worker and scheduler:
+```bash
+cd backend && uv run flow-worker
+cd backend && uv run flow-beat
 ```
 
 ## Get Help

@@ -19,23 +19,16 @@ fi
 
 # Check if running as Celery worker (flows runtime)
 if [[ "${RUN_AS_CELERY_WORKER,,}" == "true" ]]; then
-    queue="${FLOW_CELERY_QUEUE:-flows.execute}"
-    echo "Starting Celery flow worker on queue: ${queue}"
+    echo "Starting Celery flow worker"
     echo "Launching..."
-    python -m intric.flows.runtime.celery_preflight
-    exec celery -A src.intric.flows.runtime.celery_app:celery_app worker --loglevel=INFO --queues "${queue}"
+    exec flow-worker
 fi
 
 # Check if running as Celery beat (flows reconciliation scheduler)
 if [[ "${RUN_AS_CELERY_BEAT,,}" == "true" ]]; then
-    schedule_file="${CELERYBEAT_SCHEDULE_FILE:-/tmp/celerybeat-schedule}"
     echo "Starting Celery beat for flow reconciliation scheduling"
-    echo "Schedule file: ${schedule_file}"
     echo "Launching..."
-    exec celery -A src.intric.flows.runtime.celery_app:celery_app beat \
-        --loglevel=INFO \
-        --pidfile= \
-        --schedule="${schedule_file}"
+    exec flow-beat
 fi
 
 # Skip Alembic migrations in OpenAPI-only mode

@@ -16,6 +16,7 @@ from intric.flows.application.flow_run_audit_outbox_policy import (
 from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
+    flow_task_hard_timeout_seconds,
 )
 from intric.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
@@ -49,7 +50,9 @@ def create_flow_celery_app() -> Celery:
     app.conf.update(  # pyright: ignore[reportUnknownMemberType]
         include=["intric.flows.runtime.tasks"],
         task_soft_time_limit=soft_time_limit,
-        task_time_limit=soft_time_limit + 60,
+        task_time_limit=flow_task_hard_timeout_seconds(
+            task_timeout_seconds=soft_time_limit
+        ),
         beat_schedule={
             "reconcile-stale-running": {
                 "task": "flows.reconcile_running",

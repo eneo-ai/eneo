@@ -14,7 +14,7 @@ import { Callout, Steps, Tabs } from 'nextra/components'
 
 ## Architecture Overview
 
-Eneo uses a microservices architecture with six core services.
+Eneo uses a microservices architecture with eight core services.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
@@ -27,8 +27,10 @@ Eneo uses a microservices architecture with six core services.
 | **Frontend** | SvelteKit | 3000 | Web interface, SSR |
 | **Backend** | FastAPI (Python) | 8000 | API server, authentication |
 | **Worker** | ARQ | - | Background processing, document indexing |
+| **Flow worker** | Celery | - | Flow runtime execution |
+| **Flow scheduler** | Celery beat | - | Flow stale-run recovery and outbox delivery |
 | **Database** | PostgreSQL 16 + pgvector | 5432 | Data storage, vector search |
-| **Redis** | Redis 7 | 6379 | Cache, task queue |
+| **Redis** | Redis 7 | 6379 | Cache, ARQ queue, Celery broker |
 | **db-init** | Python | - | One-time database initialization |
 
 <Callout type="info">

@@ -72,6 +72,8 @@ dependencies = [
 [project.scripts]
 start = "intric.server.main:start"
 worker = "intric.worker.cli:start"
+flow-worker = "intric.flows.runtime.cli:worker"
+flow-beat = "intric.flows.runtime.cli:beat"
 
 [dependency-groups]
 dev = [

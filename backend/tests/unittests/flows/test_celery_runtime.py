@@ -24,6 +24,15 @@ from intric.flows.runtime.celery_execution_backend import (
     CeleryFlowExecutionBackend,
 )
 
+EXPECTED_FLOW_CELERY_TASKS = {
+    "flows.execute",
+    "flows.reconcile_running",
+    "flows.reconcile_review_expiry",
+    "flows.redispatch_stale_queued",
+    "flows.deliver_audit_outbox",
+    "flows.deliver_webhook_outbox",
+}
+
 
 def _fake_flow_task_session():
     """Mock session that supports `enable_autobegin_for_flow_task_session`
@@ -363,6 +372,93 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
         app.conf.beat_schedule["deliver-flow-webhook-outbox"]["task"]
         == "flows.deliver_webhook_outbox"
     )
+
+
+def test_flow_worker_cli_app_path_loads_registered_flow_tasks():
+    cli_module = importlib.import_module("intric.flows.runtime.cli")
+    app_module_name, _, app_attr = cli_module.FLOW_CELERY_APP.partition(":")
+    celery_app = getattr(importlib.import_module(app_module_name), app_attr)
+
+    importlib.import_module("intric.flows.runtime.tasks")
+
+    assert EXPECTED_FLOW_CELERY_TASKS <= set(celery_app.tasks)
+
+
+def test_flow_worker_cli_runs_preflight_then_installed_package_celery_app(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    cli_module = importlib.import_module("intric.flows.runtime.cli")
+    calls: list[str | tuple[str, str, list[str]]] = []
+    monkeypatch.setattr(
+        cli_module,
+        "get_settings",
+        lambda: SimpleNamespace(flow_celery_queue="flows.custom"),
+    )
+    monkeypatch.setattr(cli_module, "get_loglevel", lambda: 10)
+    monkeypatch.setattr(
+        cli_module.celery_preflight,
+        "run_preflight",
+        lambda: calls.append("preflight"),
+    )
+
+    def fake_execvp(file: str, args: list[str]) -> None:
+        calls.append(("execvp", file, args))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli_module.os, "execvp", fake_execvp)
+
+    with pytest.raises(SystemExit):
+        cli_module.worker()
+
+    assert calls[0] == "preflight"
+    assert calls[1] == (
+        "execvp",
+        "celery",
+        [
+            "celery",
+            "-A",
+            "intric.flows.runtime.celery_app:celery_app",
+            "worker",
+            "--loglevel",
+            "DEBUG",
+            "--queues",
+            "flows.custom",
+        ],
+    )
+
+
+def test_flow_beat_cli_uses_installed_package_celery_app_and_schedule_file(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    cli_module = importlib.import_module("intric.flows.runtime.cli")
+    monkeypatch.setattr(cli_module, "get_loglevel", lambda: 30)
+    monkeypatch.setenv("CELERYBEAT_SCHEDULE_FILE", "/var/run/flows/celerybeat")
+    exec_calls: list[tuple[str, list[str]]] = []
+
+    def fake_execvp(file: str, args: list[str]) -> None:
+        exec_calls.append((file, args))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli_module.os, "execvp", fake_execvp)
+
+    with pytest.raises(SystemExit):
+        cli_module.beat()
+
+    assert exec_calls == [
+        (
+            "celery",
+            [
+                "celery",
+                "-A",
+                "intric.flows.runtime.celery_app:celery_app",
+                "beat",
+                "--loglevel",
+                "WARNING",
+                "--pidfile=",
+                "--schedule=/var/run/flows/celerybeat",
+            ],
+        )
+    ]
 
 
 def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
