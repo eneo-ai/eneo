@@ -93,8 +93,8 @@ class SpaceService:
         transcription_model_service: TranscriptionModelService,
         actor_manager: "ActorManager",
         security_classification_service: "SecurityClassificationService",
-        tenant_metadata_field_service: TenantMetadataFieldService,
         icon_repo: IconRepository,
+        tenant_metadata_field_service: TenantMetadataFieldService | None = None,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -269,7 +269,10 @@ class SpaceService:
         if not actor.can_edit_space():
             raise UnauthorizedException("User does not have permission to edit space")
 
-        if is_provided(metadata_json):
+        if (
+            is_provided(metadata_json)
+            and self.tenant_metadata_field_service is not None
+        ):
             await self.tenant_metadata_field_service.validate_metadata_for_resource(
                 metadata_json, resource_type="space"
             )

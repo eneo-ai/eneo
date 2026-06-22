@@ -244,6 +244,7 @@
         {#if !isOrgSpace}
           <Settings.Row
             title={m.resource_metadata_section_title()}
+            description={m.resource_metadata_section_description()}
             hasChanges={$currentChanges.diff.metadata_json !== undefined}
             revertFn={() => discardChanges("metadata_json")}
             fullWidth

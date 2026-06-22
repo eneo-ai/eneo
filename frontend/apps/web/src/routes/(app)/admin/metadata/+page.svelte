@@ -11,6 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
   import type { MetadataFieldType, TenantMetadataField } from "@intric/intric-js";
+  import { untrack } from "svelte";
 
   let { data } = $props();
 
@@ -32,7 +33,7 @@
   };
 
   let metadataFields = $state<MetadataFieldDraft[]>(
-    (data.settings.metadata_fields ?? []).map(toDraft)
+    untrack(() => (data.settings.metadata_fields ?? []).map(toDraft))
   );
 
   function toDraft(field: TenantMetadataField): MetadataFieldDraft {
