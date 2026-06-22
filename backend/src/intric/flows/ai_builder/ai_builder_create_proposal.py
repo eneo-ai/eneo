@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
+    FlowBuilderProposalContent,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
@@ -150,14 +151,14 @@ def process_scoped_step_revision_if_requested(
 
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
-            spec=prepared.spec,
-            assumptions=tuple(),
-            plan_rationale=plan_rationale
-            or _scoped_step_revision_rationale(
-                conversation,
-                revision_kind=scoped_revision.kind,
+            content=FlowBuilderProposalContent(
+                spec=prepared.spec,
+                plan_rationale=plan_rationale
+                or _scoped_step_revision_rationale(
+                    conversation,
+                    revision_kind=scoped_revision.kind,
+                ),
             ),
-            reasoning=None,
             validation=prepared.validation,
             resource_bindings=(
                 collect_flow_spec_resource_bindings(
@@ -365,10 +366,11 @@ async def _process_create_spec(
 
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
-            spec=spec,
-            assumptions=tuple(outline.assumptions),
-            plan_rationale=outline.plan_rationale,
-            reasoning=None,
+            content=FlowBuilderProposalContent(
+                spec=spec,
+                assumptions=outline.assumptions,
+                plan_rationale=outline.plan_rationale,
+            ),
             validation=validation,
             resource_bindings=(
                 collect_flow_spec_resource_bindings(spec, catalog=resource_catalog)

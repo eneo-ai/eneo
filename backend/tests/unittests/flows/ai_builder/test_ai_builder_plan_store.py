@@ -135,24 +135,27 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
         confidence="needs_review",
     )
     compiled = CompiledProposal(
-        spec=_make_turn_spec(),
-        assumptions=("Assumption",),
-        plan_rationale="Use one step.",
+        content=FlowBuilderProposalContent(
+            spec=_make_turn_spec(),
+            assumptions=["Assumption"],
+            plan_rationale="Use one step.",
+            edit=edit,
+        ),
         reasoning="Internal reasoning.",
         validation=validation,
         resource_bindings=(binding,),
-        edit=edit,
     )
 
     proposal = build_flow_builder_proposal(compiled)
 
-    assert proposal.spec == compiled.spec
+    assert proposal.spec == compiled.content.spec
     assert proposal.content.assumptions == ["Assumption"]
     assert proposal.content.plan_rationale == "Use one step."
     assert proposal.reasoning == "Internal reasoning."
     assert proposal.resource_bindings == (binding,)
     assert not hasattr(proposal, "edit_result")
     assert proposal.content.description_override_manual is False
+    assert proposal.content.risk_acknowledgments == []
     assert proposal.content.edit is not None
     assert proposal.content.edit.base_flow_revision == 7
     assert proposal.content.edit.removed_existing_step_refs == frozenset(
@@ -173,6 +176,25 @@ def test_build_flow_builder_proposal_promotes_full_compiled_candidate() -> None:
             severity=LintSeverity.WARNING,
         )
     ]
+
+
+def test_build_flow_builder_proposal_rejects_prepopulated_lint_warnings() -> None:
+    compiled = CompiledProposal(
+        content=FlowBuilderProposalContent(
+            spec=_make_turn_spec(),
+            lint_warnings=[
+                LintWarning(
+                    step_ref="step_a",
+                    code="producer_owned_lint",
+                    message="Producers must not pre-populate lint warnings.",
+                )
+            ],
+        ),
+        validation=SpecValidationResult(),
+    )
+
+    with pytest.raises(ValueError, match="derived from compiled.validation"):
+        build_flow_builder_proposal(compiled)
 
 
 def test_append_plan_messages_uses_single_active_submission_tool_name() -> None:
@@ -256,10 +278,7 @@ def _compiled_proposal(
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
 ) -> CompiledProposal:
     return CompiledProposal(
-        spec=spec or _make_turn_spec(),
-        assumptions=tuple(),
-        plan_rationale=None,
-        reasoning=None,
+        content=FlowBuilderProposalContent(spec=spec or _make_turn_spec()),
         validation=validation or SpecValidationResult(),
         resource_bindings=resource_bindings,
     )

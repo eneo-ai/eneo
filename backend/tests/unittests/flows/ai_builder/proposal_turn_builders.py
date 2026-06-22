@@ -111,10 +111,10 @@ def _make_retry_invocation(**overrides: object) -> ToolRetryInvocation:
 def _compiled_outline_proposal() -> CompiledProposal:
     spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
     return CompiledProposal(
-        spec=spec,
-        assumptions=(),
-        plan_rationale="Classify incoming text.",
-        reasoning=None,
+        content=FlowBuilderProposalContent(
+            spec=spec,
+            plan_rationale="Classify incoming text.",
+        ),
         validation=SpecValidationResult(),
     )
 
@@ -134,13 +134,10 @@ def _compiled_outline_proposal_with_validation(
 ) -> CompiledProposal:
     compiled = _compiled_outline_proposal()
     return CompiledProposal(
-        spec=compiled.spec,
-        assumptions=compiled.assumptions,
-        plan_rationale=compiled.plan_rationale,
+        content=compiled.content,
         reasoning=compiled.reasoning,
         validation=validation,
         resource_bindings=compiled.resource_bindings,
-        edit=compiled.edit,
         aggregation_intent=compiled.aggregation_intent,
     )
 
@@ -159,12 +156,12 @@ def _compiled_edit_proposal(
         advisories=advisories or [],
     )
     return CompiledProposal(
-        spec=compiled_spec,
-        assumptions=(),
-        plan_rationale="Update the flow.",
-        reasoning=None,
+        content=FlowBuilderProposalContent(
+            spec=compiled_spec,
+            plan_rationale="Update the flow.",
+            edit=edit,
+        ),
         validation=SpecValidationResult(),
-        edit=edit,
     )
 
 

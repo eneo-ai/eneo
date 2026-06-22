@@ -388,7 +388,8 @@ class ProposalSubmissionOwner:
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
                 target_kind=TargetKind.CREATE,
                 arguments={
-                    "plan_rationale": result.compiled_proposal.plan_rationale or "",
+                    "plan_rationale": result.compiled_proposal.content.plan_rationale
+                    or "",
                     "revision_kind": "scoped_step_direct",
                 },
                 assistant_content=scoped_step_revision_assistant_text(ctx.conversation),

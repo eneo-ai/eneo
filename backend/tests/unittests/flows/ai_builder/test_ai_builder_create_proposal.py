@@ -355,7 +355,7 @@ async def test_outline_processing_expands_mcp_server_name_through_compiled_spec(
     )
 
     assert result.compiled_proposal is not None
-    assistant_spec = result.compiled_proposal.spec.steps[0].assistant_spec
+    assistant_spec = result.compiled_proposal.content.spec.steps[0].assistant_spec
     assert assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
     assert assistant_spec.mcp_tool_refs == [
         "mcp_tool.time-mcp-get-current-time",
@@ -406,7 +406,7 @@ async def test_outline_processing_keeps_named_mcp_tool_to_one_tool() -> None:
     )
 
     assert result.compiled_proposal is not None
-    assistant_spec = result.compiled_proposal.spec.steps[0].assistant_spec
+    assistant_spec = result.compiled_proposal.content.spec.steps[0].assistant_spec
     assert assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
     assert assistant_spec.mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
 
@@ -514,7 +514,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     )
 
     assert result.compiled_proposal is not None
-    spec = result.compiled_proposal.spec
+    spec = result.compiled_proposal.content.spec
     assert spec.steps[0].input_type == InputType.AUDIO
     assert spec.steps[-1].output_type == OutputType.DOCX
     await assert_create_spec_prepares_through_authoring_command_async(spec)
@@ -561,7 +561,7 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
     )
 
     assert result.compiled_proposal is not None
-    spec = result.compiled_proposal.spec
+    spec = result.compiled_proposal.content.spec
     assert spec.form_fields is not None
     assert [field.name for field in spec.form_fields] == ["malgrupp"]
     assert spec.steps[0].input_bindings is not None
@@ -700,10 +700,11 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
     assert result.compiled_proposal is not None
     assert result.feedback is None
     assert (
-        result.compiled_proposal.plan_rationale == "Bytte modell på det valda steget."
+        result.compiled_proposal.content.plan_rationale
+        == "Bytte modell på det valda steget."
     )
-    assert result.compiled_proposal.assumptions == tuple()
-    revised_steps = result.compiled_proposal.spec.steps
+    assert result.compiled_proposal.content.assumptions == []
+    revised_steps = result.compiled_proposal.content.spec.steps
     assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
         mode="json"
     )
@@ -775,7 +776,7 @@ async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf(
 
     assert result is not None
     assert result.compiled_proposal is not None
-    revised_steps = result.compiled_proposal.spec.steps
+    revised_steps = result.compiled_proposal.content.spec.steps
     assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
         mode="json"
     )
@@ -840,7 +841,7 @@ async def test_scoped_outline_revision_uses_slot_classification_for_pdf_edit() -
 
     assert result is not None
     assert result.compiled_proposal is not None
-    revised_steps = result.compiled_proposal.spec.steps
+    revised_steps = result.compiled_proposal.content.spec.steps
     assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
         mode="json"
     )

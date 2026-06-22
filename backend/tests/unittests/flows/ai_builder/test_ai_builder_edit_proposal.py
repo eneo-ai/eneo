@@ -45,11 +45,15 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
 
     assert result.failure_kind is None
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.assumptions == ("The existing input stays text.",)
-    assert result.compiled_proposal.plan_rationale == "Rename the analysis step."
-    assert result.compiled_proposal.spec.steps[0].name == "Analyze case text"
-    assert result.compiled_proposal.edit is not None
-    assert result.compiled_proposal.edit.base_flow_revision == 7
+    assert result.compiled_proposal.content.assumptions == [
+        "The existing input stays text."
+    ]
+    assert (
+        result.compiled_proposal.content.plan_rationale == "Rename the analysis step."
+    )
+    assert result.compiled_proposal.content.spec.steps[0].name == "Analyze case text"
+    assert result.compiled_proposal.content.edit is not None
+    assert result.compiled_proposal.content.edit.base_flow_revision == 7
 
 
 @pytest.mark.asyncio
@@ -190,12 +194,12 @@ async def test_ordered_form_fields_preserve_on_omission() -> None:
     )
 
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.spec.form_fields == [
+    assert result.compiled_proposal.content.spec.form_fields == [
         FormFieldSpec(name="case_id", type="text", label="Case ID", required=True),
         FormFieldSpec(name="context", type="text", label="Context", required=False),
     ]
-    assert result.compiled_proposal.edit is not None
-    assert result.compiled_proposal.edit.diff.form_changes == []
+    assert result.compiled_proposal.content.edit is not None
+    assert result.compiled_proposal.content.edit.diff.form_changes == []
 
 
 @pytest.mark.asyncio
@@ -240,10 +244,10 @@ async def test_ordered_form_fields_diff_complete_state() -> None:
     )
 
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.edit is not None
+    assert result.compiled_proposal.content.edit is not None
     assert [
         (change.kind, change.field_name)
-        for change in result.compiled_proposal.edit.diff.form_changes
+        for change in result.compiled_proposal.content.edit.diff.form_changes
     ] == [
         ("modified", "case_id"),
         ("added", "review_date"),
@@ -303,8 +307,8 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
     )
 
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.edit is not None
-    edit = result.compiled_proposal.edit
+    assert result.compiled_proposal.content.edit is not None
+    edit = result.compiled_proposal.content.edit
     assert [
         (change.kind, change.step_ref, change.step_name)
         for change in edit.diff.step_changes
@@ -357,7 +361,7 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
 
     assert result.failure_kind is None
     assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.edit
+    edit = result.compiled_proposal.content.edit
     assert edit is not None
     assert [
         (change.kind, change.step_ref, change.step_name)
@@ -367,7 +371,7 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
         ("added", None, "Review source"),
         ("unchanged", "existing_step_2", "Use source"),
     ]
-    reordered_consumer = result.compiled_proposal.spec.steps[2]
+    reordered_consumer = result.compiled_proposal.content.spec.steps[2]
     assert reordered_consumer.input_bindings == {"question": "{{ step_a.output.text }}"}
     assert reordered_consumer.output_config == {"template": "{{ step_a.output.text }}"}
 
@@ -394,7 +398,7 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
     assert first_result.failure_kind is None
     assert first_result.compiled_proposal is not None
     assert (
-        first_result.compiled_proposal.spec.steps[0].input_source
+        first_result.compiled_proposal.content.spec.steps[0].input_source
         == InputSource.FLOW_INPUT
     )
 
@@ -418,7 +422,7 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
     assert later_result.failure_kind is None
     assert later_result.compiled_proposal is not None
     assert (
-        later_result.compiled_proposal.spec.steps[1].input_source
+        later_result.compiled_proposal.content.spec.steps[1].input_source
         == InputSource.PREVIOUS_STEP
     )
 
@@ -445,7 +449,7 @@ async def test_ordered_add_first_document_step_derives_runtime_input_config() ->
 
     assert result.failure_kind is None
     assert result.compiled_proposal is not None
-    step = result.compiled_proposal.spec.steps[0]
+    step = result.compiled_proposal.content.spec.steps[0]
     assert step.input_source == InputSource.FLOW_INPUT
     assert step.input_type == InputType.DOCUMENT
     assert step.input_config is not None
@@ -477,7 +481,7 @@ async def test_ordered_add_later_document_step_compiles_to_text_input() -> None:
 
     assert result.failure_kind is None
     assert result.compiled_proposal is not None
-    step = result.compiled_proposal.spec.steps[1]
+    step = result.compiled_proposal.content.spec.steps[1]
     assert step.input_source == InputSource.PREVIOUS_STEP
     assert step.input_type == InputType.TEXT
     assert step.input_config is None
@@ -553,7 +557,7 @@ async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only
 
     assert result.failure_kind is None
     assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.edit
+    edit = result.compiled_proposal.content.edit
     assert edit is not None
     assert [(change.kind, change.step_ref) for change in edit.diff.step_changes] == [
         ("unchanged", "existing_step_1")
@@ -564,12 +568,12 @@ async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only
     assert edit.diff.metadata_changes == []
     assert edit.diff.flow_property_changes == {}
 
-    spec_step = result.compiled_proposal.spec.steps[0]
+    spec_step = result.compiled_proposal.content.spec.steps[0]
     assert spec_step.assistant_spec.instructions == "Extract case data."
     assert spec_step.assistant_spec.model_ref == "model.gpt"
     assert spec_step.assistant_spec.knowledge_refs == ["knowledge.policy"]
     assert spec_step.input_config == flow.steps[0].input_config
-    assert result.compiled_proposal.spec.form_fields == [
+    assert result.compiled_proposal.content.spec.form_fields == [
         FormFieldSpec(
             name="case_id",
             type="text",
@@ -608,8 +612,8 @@ async def test_ordered_edit_confidence_needs_review_for_many_changes() -> None:
     )
 
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.edit is not None
-    assert result.compiled_proposal.edit.confidence == "needs_review"
+    assert result.compiled_proposal.content.edit is not None
+    assert result.compiled_proposal.content.edit.confidence == "needs_review"
 
 
 @pytest.mark.asyncio
@@ -633,13 +637,13 @@ async def test_ordered_form_field_shadow_declaration_is_dropped_with_advisory() 
     )
 
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.spec.form_fields is None
-    assert result.compiled_proposal.edit is not None
-    assert result.compiled_proposal.edit.diff.form_changes == []
+    assert result.compiled_proposal.content.spec.form_fields is None
+    assert result.compiled_proposal.content.edit is not None
+    assert result.compiled_proposal.content.edit.diff.form_changes == []
     assert any(
         advisory.code == "form_field_shadows_primary_input"
         and advisory.field == "form_fields"
-        for advisory in result.compiled_proposal.edit.advisories
+        for advisory in result.compiled_proposal.content.edit.advisories
     )
 
 
@@ -685,14 +689,14 @@ async def test_ordered_step_shadow_reference_is_filtered_with_advisory() -> None
     )
 
     assert result.compiled_proposal is not None
-    assert result.compiled_proposal.spec.steps[1].input_bindings == {
+    assert result.compiled_proposal.content.spec.steps[1].input_bindings == {
         "question": "{{ step_a.output.structured }}\n\ncase_id: {{ flow_input.case_id }}"
     }
-    assert result.compiled_proposal.edit is not None
+    assert result.compiled_proposal.content.edit is not None
     assert any(
         advisory.code == "form_field_shadows_primary_input"
         and advisory.field == "form_fields"
-        for advisory in result.compiled_proposal.edit.advisories
+        for advisory in result.compiled_proposal.content.edit.advisories
     )
 
 
@@ -714,7 +718,7 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
     )
 
     assert result.compiled_proposal is not None
-    steps = result.compiled_proposal.spec.steps
+    steps = result.compiled_proposal.content.spec.steps
     assert [
         (step.input_source, step.input_type, step.output_type, step.output_mode)
         for step in steps
@@ -741,13 +745,13 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
     assert runtime_input["enabled"] is True
     assert runtime_input["input_format"] == "audio"
     assert runtime_input["required"] is True
-    assert result.compiled_proposal.edit is not None
+    assert result.compiled_proposal.content.edit is not None
     assert any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
-        for change in result.compiled_proposal.edit.diff.step_changes
+        for change in result.compiled_proposal.content.edit.diff.step_changes
     )
-    assert result.compiled_proposal.edit.warnings
-    assert result.compiled_proposal.edit.confidence == "needs_review"
+    assert result.compiled_proposal.content.edit.warnings
+    assert result.compiled_proposal.content.edit.confidence == "needs_review"
 
 
 @pytest.mark.asyncio
@@ -788,11 +792,14 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
     assert result.compiled_proposal is not None
     transcript_steps = [
         step
-        for step in result.compiled_proposal.spec.steps
+        for step in result.compiled_proposal.content.spec.steps
         if step.name == "Transkribera ljud"
     ]
     assert len(transcript_steps) == 1
-    assert result.compiled_proposal.spec.steps[1].existing_step_ref == "existing_step_1"
+    assert (
+        result.compiled_proposal.content.spec.steps[1].existing_step_ref
+        == "existing_step_1"
+    )
 
 
 async def _process(

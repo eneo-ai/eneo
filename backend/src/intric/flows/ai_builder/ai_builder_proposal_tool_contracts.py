@@ -11,7 +11,7 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntim
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
-    FlowBuilderEditApproval,
+    FlowBuilderProposalContent,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -30,7 +30,6 @@ from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
-    from intric.flows.flow_authoring_spec import FlowDraftSpecCore
 
 
 class ProposalCompletionFn(Protocol):
@@ -105,13 +104,10 @@ class ProposalCompletionRequest:
 
 @dataclass(frozen=True)
 class CompiledProposal:
-    spec: "FlowDraftSpecCore"
-    assumptions: tuple[str, ...]
-    plan_rationale: str | None
-    reasoning: str | None
+    content: FlowBuilderProposalContent
     validation: SpecValidationResult
+    reasoning: str | None = None
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple()
-    edit: FlowBuilderEditApproval | None = None
     aggregation_intent: AggregationIntent = "linear"
 
 

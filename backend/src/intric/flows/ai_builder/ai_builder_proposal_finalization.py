@@ -136,7 +136,7 @@ class CompiledProposalFinalizer:
 
         mcp_policy_feedback = self._mcp_policy_feedback(
             request=request,
-            spec=request.compiled.spec,
+            spec=request.compiled.content.spec,
         )
         compiled = request.compiled
         if request.target_kind == TargetKind.CREATE:
@@ -185,7 +185,7 @@ class CompiledProposalFinalizer:
     ) -> BackendQuestionPersistenceResult | None:
         issue = mcp_clarification_issue_if_needed(
             conversation=request.conversation,
-            spec=request.compiled.spec,
+            spec=request.compiled.content.spec,
             catalog=request.resource_catalog,
             signal_text=aggregate_freeform_user_text(request.conversation),
         )
@@ -265,12 +265,12 @@ class CompiledProposalFinalizer:
             )
             contextual_hint = format_create_contextual_quality_feedback(
                 conversation=request.conversation,
-                spec=compiled.spec,
+                spec=compiled.content.spec,
                 aggregation_intent=compiled.aggregation_intent,
                 resource_catalog=request.resource_catalog,
             )
             hard_feedback = format_validation_feedback(
-                spec=compiled.spec,
+                spec=compiled.content.spec,
                 errors=compiled.validation.errors,
             )
             combined_feedback = "\n\n".join(
@@ -297,7 +297,7 @@ class CompiledProposalFinalizer:
         )
         contextual_quality_feedback = format_create_contextual_quality_feedback(
             conversation=request.conversation,
-            spec=compiled.spec,
+            spec=compiled.content.spec,
             aggregation_intent=compiled.aggregation_intent,
             resource_catalog=request.resource_catalog,
         )
@@ -344,7 +344,7 @@ class CompiledProposalFinalizer:
         )
         contextual_quality_feedback = format_contextual_quality_feedback(
             conversation=request.conversation,
-            spec=compiled.spec,
+            spec=compiled.content.spec,
             flow=request.flow,
             resource_catalog=request.resource_catalog,
         )

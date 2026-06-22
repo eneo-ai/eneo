@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_create_feedback import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
+    FlowBuilderProposalContent,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
@@ -176,10 +177,12 @@ async def process_edit_arguments(
 
     return ToolProcessingResult(
         compiled_proposal=CompiledProposal(
-            spec=compiled_spec,
-            assumptions=tuple(proposal.assumptions),
-            plan_rationale=proposal.plan_rationale,
-            reasoning=None,
+            content=FlowBuilderProposalContent(
+                spec=compiled_spec,
+                assumptions=proposal.assumptions,
+                plan_rationale=proposal.plan_rationale,
+                edit=edit_result.approval,
+            ),
             validation=validation,
             resource_bindings=(
                 collect_flow_spec_resource_bindings(
@@ -188,7 +191,6 @@ async def process_edit_arguments(
                 if resource_catalog is not None
                 else tuple()
             ),
-            edit=edit_result.approval,
         ),
     )
 

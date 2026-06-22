@@ -276,7 +276,7 @@ async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision(
     request = finalize.await_args.args[0]
     assert request.arguments["revision_kind"] == "scoped_step_direct"
     assert request.assistant_content == "Jag har uppdaterat det valda steget."
-    assert request.compiled.spec.steps[0].output_type == OutputType.PDF
+    assert request.compiled.content.spec.steps[0].output_type == OutputType.PDF
     assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
@@ -978,8 +978,8 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
     assert request.compiled is original
-    assert request.compiled.edit is not None
-    assert [advisory.code for advisory in request.compiled.edit.advisories] == [
+    assert request.compiled.content.edit is not None
+    assert [advisory.code for advisory in request.compiled.content.edit.advisories] == [
         "flow_description_update_required"
     ]
 
@@ -1040,8 +1040,8 @@ async def test_handle_edit_propose_flow_preserves_description_advisory_without_c
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
     assert request.compiled is original
-    assert request.compiled.edit is not None
-    assert [advisory.code for advisory in request.compiled.edit.advisories] == [
+    assert request.compiled.content.edit is not None
+    assert [advisory.code for advisory in request.compiled.content.edit.advisories] == [
         "flow_description_update_required"
     ]
     assert request.assistant_content == "Assistant text"

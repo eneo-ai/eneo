@@ -10,7 +10,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     FlowBuilderProposal,
-    FlowBuilderProposalContent,
     LintSeverity,
     LintWarning,
 )
@@ -66,14 +65,16 @@ def _is_user_visible_lint_warning(warning: LintWarning) -> bool:
 def build_flow_builder_proposal(
     compiled: CompiledProposal,
 ) -> FlowBuilderProposal:
+    if compiled.content.lint_warnings:
+        raise ValueError(
+            "Compiled proposal content must not set lint_warnings; they are "
+            "derived from compiled.validation at the storage boundary."
+        )
+    content = compiled.content.model_copy(
+        update={"lint_warnings": build_lint_warnings(compiled.validation)}
+    )
     return FlowBuilderProposal(
-        content=FlowBuilderProposalContent(
-            spec=compiled.spec,
-            assumptions=list(compiled.assumptions),
-            plan_rationale=compiled.plan_rationale,
-            lint_warnings=build_lint_warnings(compiled.validation),
-            edit=compiled.edit,
-        ),
+        content=content,
         reasoning=compiled.reasoning,
         resource_bindings=compiled.resource_bindings,
     )
@@ -101,8 +102,8 @@ async def store_plan_and_update_conversation(
         tool_call_id=tool_call_id,
         tool_name=tool_name,
         arguments=arguments,
-        spec=compiled.spec,
-        assumptions=list(compiled.assumptions),
+        spec=compiled.content.spec,
+        assumptions=compiled.content.assumptions,
     )
     async with repo.savepoint():
         prior_state = await repo.load_planning_state(

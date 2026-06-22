@@ -83,10 +83,10 @@ def _make_flow_spec() -> FlowDraftSpecCore:
 
 def _compiled_outline_proposal() -> CompiledProposal:
     return CompiledProposal(
-        spec=_make_flow_spec(),
-        assumptions=(),
-        plan_rationale="Classify incoming text.",
-        reasoning=None,
+        content=FlowBuilderProposalContent(
+            spec=_make_flow_spec(),
+            plan_rationale="Classify incoming text.",
+        ),
         validation=SpecValidationResult(),
     )
 
@@ -96,13 +96,10 @@ def _compiled_outline_proposal_with_validation(
 ) -> CompiledProposal:
     compiled = _compiled_outline_proposal()
     return CompiledProposal(
-        spec=compiled.spec,
-        assumptions=compiled.assumptions,
-        plan_rationale=compiled.plan_rationale,
+        content=compiled.content,
         reasoning=compiled.reasoning,
         validation=validation,
         resource_bindings=compiled.resource_bindings,
-        edit=compiled.edit,
         aggregation_intent=compiled.aggregation_intent,
     )
 
@@ -123,12 +120,12 @@ def _compiled_edit_proposal(*, compiled_spec: FlowDraftSpecCore) -> CompiledProp
         ],
     )
     return CompiledProposal(
-        spec=compiled_spec,
-        assumptions=(),
-        plan_rationale="Update the flow.",
-        reasoning=None,
+        content=FlowBuilderProposalContent(
+            spec=compiled_spec,
+            plan_rationale="Update the flow.",
+            edit=edit,
+        ),
         validation=SpecValidationResult(),
-        edit=edit,
     )
 
 
@@ -146,7 +143,7 @@ def _stored_plan_result(*, plan=None, proposal=None):
 async def _store_compiled_plan(**kwargs):
     return _stored_plan_result(
         proposal=FlowBuilderProposal(
-            content=FlowBuilderProposalContent(spec=kwargs["compiled"].spec),
+            content=FlowBuilderProposalContent(spec=kwargs["compiled"].content.spec),
         ),
     )
 
@@ -440,8 +437,8 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
 
     assert result.event is not None
     captured = captured_compiled[0]
-    assert captured.spec.flow_description == original_spec.flow_description
-    captured_edit = captured.edit
+    assert captured.content.spec.flow_description == original_spec.flow_description
+    captured_edit = captured.content.edit
     assert captured_edit is not None
     assert [advisory.code for advisory in captured_edit.advisories] == [
         "flow_description_update_required"

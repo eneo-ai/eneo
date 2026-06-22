@@ -69,7 +69,7 @@ async def _store_compiled_plan(**kwargs: object):
     assert isinstance(compiled, CompiledProposal)
     return _stored_plan_result(
         proposal=FlowBuilderProposal(
-            content=FlowBuilderProposalContent(spec=compiled.spec),
+            content=FlowBuilderProposalContent(spec=compiled.content.spec),
         ),
     )
 
