@@ -12,7 +12,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
-    normalize_create_draft_mechanics,
+    normalize_create_step_mechanics,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
@@ -304,12 +304,15 @@ def compile_create_draft(
     *,
     aggregation_intent: AggregationIntent = "linear",
 ) -> FlowDraftSpecCore:
-    draft = normalize_create_draft_mechanics(
-        draft,
+    steps = normalize_create_step_mechanics(
+        steps=draft.steps,
+        form_fields=draft.form_fields,
+        flow_name=draft.flow_name,
+        flow_description=draft.flow_description,
         aggregation_intent=aggregation_intent,
     )
     compiled_steps: list[StepSpec] = []
-    for index, step_draft in enumerate(draft.steps):
+    for index, step_draft in enumerate(steps):
         compiled_steps.append(
             compile_new_step_draft(
                 step_draft=step_draft,

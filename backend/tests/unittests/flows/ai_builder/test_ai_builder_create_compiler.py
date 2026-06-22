@@ -21,7 +21,10 @@ from intric.flows.ai_builder.ai_builder_create_compiler import (
     outline_compile_context_from_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
-    normalize_create_draft_mechanics,
+    auto_bind_targeted_underlag_for_text_composer as _auto_bind_targeted_underlag_for_text_composer,
+)
+from intric.flows.ai_builder.ai_builder_create_dataflow import (
+    normalize_create_step_mechanics,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
@@ -93,6 +96,39 @@ from tests.unittests.flows.ai_builder.authoring_command_assertions import (
 
 CREATE_OUTLINE_LOGGER = "intric.flows.ai_builder.ai_builder_create_outline"
 CREATE_COMPILER_LOGGER = "intric.flows.ai_builder.ai_builder_create_compiler"
+
+
+# Test-only bridge while existing assertions still construct FlowCreateDraft.
+# Delete it when the create proposal model is removed.
+def normalize_create_draft_mechanics(
+    draft: FlowCreateDraft,
+    *,
+    aggregation_intent: AggregationIntent = "linear",
+) -> FlowCreateDraft:
+    return draft.model_copy(
+        update={
+            "steps": normalize_create_step_mechanics(
+                steps=draft.steps,
+                form_fields=draft.form_fields,
+                flow_name=draft.flow_name,
+                flow_description=draft.flow_description,
+                aggregation_intent=aggregation_intent,
+            )
+        }
+    )
+
+
+def auto_bind_targeted_underlag_for_text_composer(
+    draft: FlowCreateDraft,
+    *,
+    aggregation_intent: AggregationIntent,
+) -> list[NewStepDraft]:
+    return _auto_bind_targeted_underlag_for_text_composer(
+        steps=draft.steps,
+        flow_name=draft.flow_name,
+        flow_description=draft.flow_description,
+        aggregation_intent=aggregation_intent,
+    )
 
 
 def _model_resource(
@@ -4953,10 +4989,6 @@ def test_auto_bind_targeted_underlag_rewrites_aggregate_but_not_compare() -> Non
     """`compare` retains broad fan-in, but `aggregate` still gets targeted
     underlag because aggregate classification is intentionally conservative.
     """
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Sektion A",
@@ -5016,10 +5048,6 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
     predecessor could otherwise force `uses_previous_fields` even when user
     intent is "summarize what came before" via broad fan-in.
     """
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Hämta data",
@@ -5052,9 +5080,6 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
 
 def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() -> None:
     # Pins 78bf7994: the soft cap counts text priors, not JSON priors.
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
     from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
@@ -5100,9 +5125,6 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     None
 ):
     # Pins 78bf7994: many JSON priors should still auto-bind targeted refs.
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
     from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
@@ -5170,10 +5192,6 @@ def test_auto_bind_targeted_underlag_rewrites_nonterminal_all_previous_composer(
     broad `all_previous_steps`; otherwise runtime prompt material is bloated
     before the review/revision chain even starts.
     """
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Läs PDF",
@@ -5244,10 +5262,6 @@ def test_auto_bind_targeted_underlag_rewrites_multiple_eligible_composers() -> N
     prior material. Stopping after the final composer leaves earlier generated
     report sections broad and token-heavy.
     """
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Läs underlag",
@@ -5309,10 +5323,6 @@ def test_auto_bind_targeted_underlag_rewrites_multiple_eligible_composers() -> N
 
 
 def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Skriv del ett",
@@ -5349,9 +5359,6 @@ def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() ->
 
 
 def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
     from intric.flows.ai_builder.ai_builder_critic_invariants import (
         CRITIC_INVARIANTS,
         CriticContext,
@@ -5457,10 +5464,6 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
     remains a no-op (pinned by
     `test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged`).
     """
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Extrahera produktdata",
@@ -5533,7 +5536,6 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP,
         TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
-        auto_bind_targeted_underlag_for_text_composer,
     )
 
     steps_before = [
@@ -5766,10 +5768,6 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
     valid linear extract→summarize pipeline. Auto-bind must not inflate it
     with multi-source attachment.
     """
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Extrahera fält",
@@ -5807,10 +5805,6 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
 def test_auto_bind_targeted_underlag_routes_single_json_source_to_section_writers() -> (
     None
 ):
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     extraction_fields = [
         _field(
             "tidplan",
@@ -6753,10 +6747,6 @@ def test_targeted_underlag_predicate_handles_aggregation_intents(
 
 
 def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:
-    from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        auto_bind_targeted_underlag_for_text_composer,
-    )
-
     steps_before = [
         NewStepDraft(
             name="Extrahera a",

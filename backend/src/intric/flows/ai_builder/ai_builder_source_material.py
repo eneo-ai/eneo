@@ -4,7 +4,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
@@ -267,14 +266,14 @@ def _step_order_for(
     return None
 
 
-def _create_draft_returns_document_artifact(draft: FlowCreateDraft) -> bool:
-    return any(step.output_type in _DOCUMENT_OUTPUT_TYPES for step in draft.steps)
+def _create_steps_return_document_artifact(steps: Sequence[NewStepDraft]) -> bool:
+    return any(step.output_type in _DOCUMENT_OUTPUT_TYPES for step in steps)
 
 
-def create_draft_returns_material_report(draft: FlowCreateDraft) -> bool:
-    if _create_draft_returns_document_artifact(draft):
+def create_steps_return_material_report(steps: Sequence[NewStepDraft]) -> bool:
+    if _create_steps_return_document_artifact(steps):
         return True
-    return bool(draft.steps) and draft.steps[-1].output_type == OutputType.TEXT
+    return bool(steps) and steps[-1].output_type == OutputType.TEXT
 
 
 def _compiled_spec_returns_document_artifact(spec: FlowDraftSpecCore) -> bool:
@@ -287,10 +286,13 @@ def _compiled_spec_returns_material_report(spec: FlowDraftSpecCore) -> bool:
     return bool(spec.steps) and spec.steps[-1].output_type == OutputType.TEXT
 
 
-def primary_source_material_ref(
-    draft: FlowCreateDraft,
+def primary_source_material_ref_for_steps(
+    *,
+    steps: Sequence[NewStepDraft],
+    flow_name: str,
+    flow_description: str | None,
 ) -> PreviousOutputRef | None:
-    source_step = _draft_primary_source_text_step(draft)
+    source_step = _primary_source_text_step(steps)
     if source_step is None:
         return None
     step_index, step = source_step
@@ -299,8 +301,8 @@ def primary_source_material_ref(
         label=source_material_label_for_text(
             " ".join(
                 (
-                    draft.flow_name,
-                    draft.flow_description or "",
+                    flow_name,
+                    flow_description or "",
                     step.name,
                     step.instructions or "",
                 )
@@ -309,10 +311,10 @@ def primary_source_material_ref(
     )
 
 
-def _draft_primary_source_text_step(
-    draft: FlowCreateDraft,
+def _primary_source_text_step(
+    steps: Sequence[NewStepDraft],
 ) -> tuple[int, NewStepDraft] | None:
-    for step_index, step in enumerate(draft.steps, start=1):
+    for step_index, step in enumerate(steps, start=1):
         if step.input_source != InputSource.FLOW_INPUT:
             continue
         if step.input_type not in _PRIMARY_MATERIAL_INPUT_TYPES:
@@ -354,9 +356,9 @@ def _compiled_primary_source_text_step(
 __all__ = [
     "CompiledSourceMaterialBoundary",
     "SourceMaterialBindingStatus",
-    "create_draft_returns_material_report",
+    "create_steps_return_material_report",
     "iter_compiled_source_material_boundaries",
-    "primary_source_material_ref",
+    "primary_source_material_ref_for_steps",
     "source_material_binding_status",
     "source_material_label_for_text",
     "source_material_question_for_boundary",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
@@ -19,8 +18,8 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
-    create_draft_returns_material_report,
-    primary_source_material_ref,
+    create_steps_return_material_report,
+    primary_source_material_ref_for_steps,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
@@ -35,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_underlag_policy import (
     terminal_renderer_rewrite_indexes,
 )
 from intric.flows.flow_authoring_spec import (
+    FormFieldSpec,
     InputSource,
     InputType,
     OutputType,
@@ -159,11 +159,14 @@ _UNDERLAG_SWEDISH_SUFFIXES = (
 )
 
 
-def normalize_create_draft_mechanics(
-    draft: FlowCreateDraft,
+def normalize_create_step_mechanics(
     *,
+    steps: list[NewStepDraft],
+    form_fields: list[FormFieldSpec],
+    flow_name: str,
+    flow_description: str | None,
     aggregation_intent: "AggregationIntent" = "linear",
-) -> FlowCreateDraft:
+) -> list[NewStepDraft]:
     """Remove low-level references the backend cannot compile safely.
 
     The model may describe semantic flow intent, but exact structured field
@@ -173,30 +176,37 @@ def normalize_create_draft_mechanics(
     intent instead of rejecting an otherwise useful plan.
     """
 
-    normalized_draft = _normalize_create_draft_refs(draft)
+    normalized_steps = _normalize_create_step_refs(
+        steps,
+        form_fields=form_fields,
+    )
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
-        normalized_draft,
+        normalized_steps,
+        flow_name=flow_name,
+        flow_description=flow_description,
         aggregation_intent=aggregation_intent,
     )
-    rebound_draft = (
-        normalized_draft
-        if rebound_steps is normalized_draft.steps
-        else normalized_draft.model_copy(update={"steps": rebound_steps})
+    return _normalize_create_step_refs(
+        rebound_steps,
+        form_fields=form_fields,
     )
-    return _normalize_create_draft_refs(rebound_draft)
 
 
-def _normalize_create_draft_refs(draft: FlowCreateDraft) -> FlowCreateDraft:
+def _normalize_create_step_refs(
+    steps: list[NewStepDraft],
+    *,
+    form_fields: list[FormFieldSpec],
+) -> list[NewStepDraft]:
     mechanically_normalized_steps: list[NewStepDraft] = []
     changed = False
-    for step_index, step in enumerate(draft.steps):
+    for step_index, step in enumerate(steps):
         normalized_step = _normalize_step_mechanics(step, step_index=step_index)
         if normalized_step != step:
             changed = True
         mechanically_normalized_steps.append(normalized_step)
 
     updated_steps: list[NewStepDraft] = []
-    known_form_fields = {field.name for field in draft.form_fields}
+    known_form_fields = {field.name for field in form_fields}
     for step_index, step in enumerate(mechanically_normalized_steps):
         normalized_refs = _compile_safe_previous_field_refs(
             steps=mechanically_normalized_steps,
@@ -231,7 +241,7 @@ def _normalize_create_draft_refs(draft: FlowCreateDraft) -> FlowCreateDraft:
             )
         )
 
-    return draft if not changed else draft.model_copy(update={"steps": updated_steps})
+    return updated_steps if changed else steps
 
 
 def _normalize_step_mechanics(
@@ -331,8 +341,10 @@ def _compile_safe_previous_output_refs(
 
 
 def auto_bind_targeted_underlag_for_text_composer(
-    draft: FlowCreateDraft,
+    steps: list[NewStepDraft],
     *,
+    flow_name: str,
+    flow_description: str | None,
     aggregation_intent: "AggregationIntent",
 ) -> list[NewStepDraft]:
     """Bind composer underlag from backend-owned draft mechanics.
@@ -341,21 +353,27 @@ def auto_bind_targeted_underlag_for_text_composer(
     pass owns only the targeted field/output refs that keep composers from
     reading broad structured JSON blobs.
     """
-    rewritten_steps = draft.steps
-    source_ref = primary_source_material_ref(draft)
-    returns_material_report = create_draft_returns_material_report(draft)
+    rewritten_steps = steps
+    # Source detection must run after the first mechanics pass so source_ref
+    # indexes match the step snapshot that targeted-underlag binding rewrites.
+    source_ref = primary_source_material_ref_for_steps(
+        steps=steps,
+        flow_name=flow_name,
+        flow_description=flow_description,
+    )
+    returns_material_report = create_steps_return_material_report(steps)
     # Capture candidates before rewrites because each pass mutates input_source.
     terminal_renderer_candidate_indexes = set(
-        _terminal_renderer_rewrite_indexes_for_draft(rewritten_steps)
+        _terminal_renderer_rewrite_indexes_for_steps(rewritten_steps)
     )
     all_previous_candidate_indexes = set(
-        _targeted_underlag_rewrite_indexes_for_draft(
+        _targeted_underlag_rewrite_indexes_for_steps(
             rewritten_steps,
             aggregation_intent=aggregation_intent,
         )
     )
     final_assembler_candidate_indexes = set(
-        _final_assembler_rewrite_indexes_for_draft(
+        _final_assembler_rewrite_indexes_for_steps(
             rewritten_steps,
             aggregation_intent=aggregation_intent,
         )
@@ -370,7 +388,7 @@ def auto_bind_targeted_underlag_for_text_composer(
             rewritten_steps = updated_steps
             changed = True
     if aggregation_intent == "compare":
-        return rewritten_steps if changed else draft.steps
+        return rewritten_steps if changed else steps
     for composer_index in range(len(rewritten_steps)):
         if composer_index in final_assembler_candidate_indexes:
             updated_steps = _bind_final_assembler_prior_outputs(
@@ -403,43 +421,43 @@ def auto_bind_targeted_underlag_for_text_composer(
             rewritten_steps = updated_steps
             changed = True
 
-    return rewritten_steps if changed else draft.steps
+    return rewritten_steps if changed else steps
 
 
-def _terminal_renderer_rewrite_indexes_for_draft(
+def _terminal_renderer_rewrite_indexes_for_steps(
     steps: list[NewStepDraft],
 ) -> tuple[int, ...]:
     return terminal_renderer_rewrite_indexes(
-        _underlag_step_signals_for_draft(steps),
+        _underlag_step_signals_for_steps(steps),
     )
 
 
-def _targeted_underlag_rewrite_indexes_for_draft(
+def _targeted_underlag_rewrite_indexes_for_steps(
     steps: list[NewStepDraft],
     *,
     aggregation_intent: "AggregationIntent",
 ) -> tuple[int, ...]:
     return targeted_underlag_rewrite_indexes(
-        _underlag_step_signals_for_draft(steps),
+        _underlag_step_signals_for_steps(steps),
         aggregation_intent=aggregation_intent,
     )
 
 
-def _final_assembler_rewrite_indexes_for_draft(
+def _final_assembler_rewrite_indexes_for_steps(
     steps: list[NewStepDraft],
     *,
     aggregation_intent: "AggregationIntent",
 ) -> tuple[int, ...]:
     return final_assembler_rewrite_indexes(
-        _underlag_step_signals_for_draft(steps),
+        _underlag_step_signals_for_steps(steps),
         aggregation_intent=aggregation_intent,
     )
 
 
-def _underlag_step_signals_for_draft(
+def _underlag_step_signals_for_steps(
     steps: list[NewStepDraft],
 ) -> tuple[TargetedUnderlagStepSignal, ...]:
-    """Draft mode has no compiled question, so it cannot count existing refs."""
+    """Create-step mode has no compiled question, so it cannot count refs."""
     return tuple(
         TargetedUnderlagStepSignal(
             input_source=require_resolved_input_source(step),
@@ -1184,5 +1202,5 @@ __all__ = [
     "TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP",
     "TARGETED_UNDERLAG_TOTAL_FIELD_CAP",
     "auto_bind_targeted_underlag_for_text_composer",
-    "normalize_create_draft_mechanics",
+    "normalize_create_step_mechanics",
 ]

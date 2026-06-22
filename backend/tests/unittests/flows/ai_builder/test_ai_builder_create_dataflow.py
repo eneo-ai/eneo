@@ -1,6 +1,6 @@
 from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
-    normalize_create_draft_mechanics,
+    normalize_create_step_mechanics,
 )
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
@@ -8,6 +8,7 @@ from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.flow_authoring_spec import FormFieldSpec
 
 
@@ -31,6 +32,26 @@ def _field(name: str) -> StructuredFieldDraft:
 
 def _assert_compiles_to_valid_spec(draft: FlowCreateDraft) -> None:
     assert validate_spec(compile_create_draft(draft)).valid
+
+
+# Test-only bridge while existing assertions still construct FlowCreateDraft.
+# Delete it when the create proposal model is removed.
+def normalize_create_draft_mechanics(
+    draft: FlowCreateDraft,
+    *,
+    aggregation_intent: AggregationIntent = "linear",
+) -> FlowCreateDraft:
+    return draft.model_copy(
+        update={
+            "steps": normalize_create_step_mechanics(
+                steps=draft.steps,
+                form_fields=draft.form_fields,
+                flow_name=draft.flow_name,
+                flow_description=draft.flow_description,
+                aggregation_intent=aggregation_intent,
+            )
+        }
+    )
 
 
 def test_normalize_create_draft_mechanics_prunes_unknown_previous_field_refs() -> None:
@@ -196,6 +217,51 @@ def test_normalize_create_draft_mechanics_restores_audio_source_material_underla
         (4, "protocol_sections"),
     }
     assert normalized.steps[5].uses_previous_outputs == []
+
+
+def test_normalize_create_draft_mechanics_detects_source_after_input_source_normalization() -> (
+    None
+):
+    draft = FlowCreateDraft(
+        flow_name="Audio source report",
+        plan_rationale="Transcribe audio, extract facts, and write a report.",
+        steps=[
+            {
+                "name": "Transcribe audio",
+                "instructions": "Transcribe the uploaded audio.",
+                "input_type": "audio",
+                "output_type": "text",
+                "runtime_required": True,
+            },
+            {
+                "name": "Extract facts",
+                "instructions": "Extract the relevant facts.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("finding")],
+            },
+            {
+                "name": "Write answer",
+                "instructions": "Write a concise answer from the facts.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+            },
+        ],
+    )
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    assert normalized.steps[0].input_source == "flow_input"
+    assert normalized.steps[2].input_type == "text"
+    assert [
+        (ref.from_step, ref.label) for ref in normalized.steps[2].uses_previous_outputs
+    ] == [(1, "Source material")]
+    assert [
+        (ref.from_step, ref.field_path)
+        for ref in normalized.steps[2].uses_previous_fields
+    ] == [(2, "finding")]
 
 
 def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_policy() -> (
