@@ -223,6 +223,8 @@ class CommitHookTests(unittest.TestCase):
             "    'UPLOAD_IMAGE_TO_SESSION_MAX_SIZE',\n"
             "    'UPLOAD_MAX_FILE_SIZE',\n"
             "    'TRANSCRIPTION_MAX_FILE_SIZE',\n"
+            "    'FLOW_TASK_TIMEOUT_SECONDS',\n"
+            "    'CELERY_VISIBILITY_TIMEOUT_SECONDS',\n"
             "    'JWT_EXPIRY_TIME',\n"
             "    'JWT_SECRET',\n"
             "    'ENCRYPTION_KEY',\n"
@@ -277,9 +279,15 @@ class CommitHookTests(unittest.TestCase):
             "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE",
             "UPLOAD_MAX_FILE_SIZE",
             "TRANSCRIPTION_MAX_FILE_SIZE",
+            "FLOW_TASK_TIMEOUT_SECONDS",
+            "CELERY_VISIBILITY_TIMEOUT_SECONDS",
             "JWT_EXPIRY_TIME",
         ):
             self.assertRegex(dump_env[key], r"^\d+$", key)
+        self.assertGreater(
+            int(dump_env["CELERY_VISIBILITY_TIMEOUT_SECONDS"]),
+            int(dump_env["FLOW_TASK_TIMEOUT_SECONDS"]) + 60,
+        )
 
     def test_pre_push_schema_drift_env_covers_required_settings(self) -> None:
         pre_push_check = load_pre_push_check_module()
