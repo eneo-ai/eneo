@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -33,6 +33,7 @@ from intric.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
+    FlowAuthoringPreview,
     FlowAuthoringResult,
 )
 from intric.flows.application.flow_draft_materialization import (
@@ -86,9 +87,35 @@ def _make_repo_mock() -> AsyncMock:
     return repo
 
 
+def _make_authoring_preview(
+    *,
+    flow_id: UUID | None = None,
+    steps_created: int = 0,
+    steps_updated: int = 1,
+    steps_removed: int = 0,
+    assistants_to_create: int = 0,
+    assistants_to_update: int = 0,
+    assistants_to_delete: int = 0,
+) -> FlowAuthoringPreview:
+    return FlowAuthoringPreview(
+        kind="edit" if flow_id is not None else "create",
+        flow_id=flow_id,
+        base_revision=1 if flow_id is not None else None,
+        spec_hash="spec-hash",
+        steps_created=steps_created,
+        steps_updated=steps_updated,
+        steps_removed=steps_removed,
+        assistants_to_create=assistants_to_create,
+        assistants_to_update=assistants_to_update,
+        assistants_to_delete=assistants_to_delete,
+        resource_bindings_count=0,
+        step_changes=(),
+    )
+
+
 def _make_authoring_service(
     *,
-    flow_id=None,
+    flow_id: UUID | None = None,
     flow_name: str = "Flow",
     steps_created: int = 0,
     steps_updated: int = 1,
@@ -96,7 +123,13 @@ def _make_authoring_service(
 ) -> AsyncMock:
     service = AsyncMock()
     service.prepare.return_value = SimpleNamespace(
-        changeset=FlowDraftChangeSet(flow_name=flow_name, flow_description="")
+        changeset=FlowDraftChangeSet(flow_name=flow_name, flow_description=""),
+        preview=_make_authoring_preview(
+            flow_id=flow_id,
+            steps_created=steps_created,
+            steps_updated=steps_updated,
+            steps_removed=steps_removed,
+        ),
     )
     service.apply_prepared.return_value = FlowAuthoringResult(
         flow_id=flow_id or uuid4(),
@@ -920,7 +953,18 @@ class TestAIBuilderPlanLifecycle:
             compiled_steps=[],
         )
         authoring_service = _make_authoring_service(flow_id=flow_id)
-        authoring_service.prepare.return_value = SimpleNamespace(changeset=changeset)
+        authoring_service.prepare.return_value = SimpleNamespace(
+            changeset=changeset,
+            preview=_make_authoring_preview(
+                flow_id=flow_id,
+                steps_created=1,
+                steps_updated=2,
+                steps_removed=3,
+                assistants_to_create=4,
+                assistants_to_update=5,
+                assistants_to_delete=6,
+            ),
+        )
         progress = FlowDraftMaterializationProgress(
             stage=FlowDraftMaterializationStage.ASSISTANTS_UPDATED,
             assistants_created=0,
@@ -950,7 +994,16 @@ class TestAIBuilderPlanLifecycle:
 
         mock_log_apply_failed.assert_called_once()
         assert mock_log_apply_failed.call_args.kwargs["phase"] == "apply_authoring"
-        assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is not None
+        assert mock_log_apply_failed.call_args.kwargs[
+            "changeset_counts"
+        ].model_dump() == {
+            "steps_created": 1,
+            "steps_updated": 2,
+            "steps_removed": 3,
+            "assistants_to_create": 4,
+            "assistants_to_update": 5,
+            "assistants_to_delete": 6,
+        }
         assert mock_log_apply_failed.call_args.kwargs[
             "materializer_progress"
         ] == MaterializerProgressSnapshot(
@@ -1003,7 +1056,8 @@ class TestAIBuilderPlanLifecycle:
             changeset=FlowDraftChangeSet(
                 flow_name="Flow",
                 flow_description="Desc",
-            )
+            ),
+            preview=_make_authoring_preview(flow_id=flow_id),
         )
         authoring_service.apply_prepared.side_effect = BadRequestException(
             "stale",

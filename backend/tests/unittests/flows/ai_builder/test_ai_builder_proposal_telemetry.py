@@ -32,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     proposal_repair_reason_from_tool_failure,
 )
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
+from intric.flows.application.flow_authoring_command import FlowAuthoringPreview
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _FAILURE_KIND_SOURCE_FILES = (
@@ -284,6 +285,34 @@ def test_apply_failure_log_uses_typed_apply_payload() -> None:
             "flow_created": False,
             "flow_updated": True,
         },
+    }
+
+
+def test_changeset_count_summary_maps_preview_counts_to_log_projection() -> None:
+    preview = FlowAuthoringPreview(
+        kind="edit",
+        flow_id=uuid4(),
+        base_revision=42,
+        spec_hash="spec-hash",
+        steps_created=1,
+        steps_updated=2,
+        steps_removed=3,
+        assistants_to_create=4,
+        assistants_to_update=5,
+        assistants_to_delete=6,
+        resource_bindings_count=7,
+        step_changes=(),
+    )
+
+    summary = ChangesetCountSummary.from_preview(preview)
+
+    assert summary.model_dump() == {
+        "steps_created": 1,
+        "steps_updated": 2,
+        "steps_removed": 3,
+        "assistants_to_create": 4,
+        "assistants_to_update": 5,
+        "assistants_to_delete": 6,
     }
 
 

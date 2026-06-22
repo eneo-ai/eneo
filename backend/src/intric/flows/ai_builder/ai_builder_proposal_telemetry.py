@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -39,6 +39,9 @@ from intric.flows.ai_builder.ai_builder_token_usage import (
     completion_token_usage_from_response,
 )
 from intric.main.logging import get_logger
+
+if TYPE_CHECKING:
+    from intric.flows.application.flow_authoring_command import FlowAuthoringPreview
 
 ToolProcessingFailureKind = Literal[
     "parse",
@@ -262,6 +265,17 @@ class ChangesetCountSummary(BaseModel):
     assistants_to_create: int
     assistants_to_update: int
     assistants_to_delete: int
+
+    @classmethod
+    def from_preview(cls, preview: FlowAuthoringPreview) -> ChangesetCountSummary:
+        return cls(
+            steps_created=preview.steps_created,
+            steps_updated=preview.steps_updated,
+            steps_removed=preview.steps_removed,
+            assistants_to_create=preview.assistants_to_create,
+            assistants_to_update=preview.assistants_to_update,
+            assistants_to_delete=preview.assistants_to_delete,
+        )
 
 
 class MaterializerProgressSnapshot(BaseModel):

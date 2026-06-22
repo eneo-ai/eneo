@@ -47,11 +47,7 @@ from intric.flows.application.flow_authoring_command import (
     FlowAuthoringCommandService,
 )
 from intric.flows.application.flow_draft_materialization import (
-    FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
-)
-from intric.flows.application.flow_draft_materialization import (
-    FlowDraftStepChangeKind as StepChangeKind,
 )
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -64,27 +60,6 @@ if TYPE_CHECKING:
     from intric.flows.application.flow_service import FlowService
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
-
-
-def _build_changeset_count_summary(
-    changeset: FlowDraftChangeSet,
-) -> ChangesetCountSummary:
-    return ChangesetCountSummary(
-        steps_created=sum(
-            1
-            for step in changeset.compiled_steps
-            if step.change_kind == StepChangeKind.ADDED
-        ),
-        steps_updated=sum(
-            1
-            for step in changeset.compiled_steps
-            if step.change_kind == StepChangeKind.MODIFIED
-        ),
-        steps_removed=len(changeset.assistants_to_delete),
-        assistants_to_create=len(changeset.assistants_to_create),
-        assistants_to_update=len(changeset.assistants_to_update),
-        assistants_to_delete=len(changeset.assistants_to_delete),
-    )
 
 
 def _spec_has_assistant_resource_refs(spec: FlowDraftSpecCore) -> bool:
@@ -363,7 +338,7 @@ class AIBuilderPlanLifecycle:
                 target_kind=session.target_kind,
                 flow_id=session.flow_id,
                 exception=exc,
-                changeset_counts=_build_changeset_count_summary(prepared.changeset),
+                changeset_counts=ChangesetCountSummary.from_preview(prepared.preview),
                 materializer_progress=materializer_progress,
             )
             raise
