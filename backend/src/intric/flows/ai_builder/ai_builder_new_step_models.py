@@ -17,6 +17,27 @@ StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
 MAX_STRUCTURED_FIELD_DEPTH = 3
 
 
+def normalize_authoring_string_list(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        candidate = raw.strip()
+        if not candidate or candidate in seen:
+            continue
+        normalized.append(candidate)
+        seen.add(candidate)
+    return normalized
+
+
+def mixes_knowledge_and_mcp_refs(
+    *,
+    knowledge_refs: list[str],
+    mcp_server_refs: list[str],
+    mcp_tool_refs: list[str],
+) -> bool:
+    return bool(knowledge_refs) and bool(mcp_server_refs or mcp_tool_refs)
+
+
 class PreviousFieldRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,15 +199,7 @@ class NewStepDraft(BaseModel):
     )
     @classmethod
     def _normalize_string_lists(cls, values: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for raw in values:
-            candidate = raw.strip()
-            if not candidate or candidate in seen:
-                continue
-            normalized.append(candidate)
-            seen.add(candidate)
-        return normalized
+        return normalize_authoring_string_list(values)
 
     @field_validator("runtime_max_files")
     @classmethod
@@ -208,7 +221,11 @@ class NewStepDraft(BaseModel):
     def _validate_structured_depth(self) -> "NewStepDraft":
         if self.instructions is None:
             raise ValueError("Steps require non-empty text values.")
-        if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
+        if mixes_knowledge_and_mcp_refs(
+            knowledge_refs=self.knowledge_refs,
+            mcp_server_refs=self.mcp_server_refs,
+            mcp_tool_refs=self.mcp_tool_refs,
+        ):
             raise ValueError(
                 "A step cannot use knowledge_refs and MCP refs at the same time."
             )

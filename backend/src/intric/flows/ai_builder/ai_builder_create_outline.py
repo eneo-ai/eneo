@@ -20,6 +20,8 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
+    mixes_knowledge_and_mcp_refs,
+    normalize_authoring_string_list,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -95,15 +97,7 @@ class OutlineInputField(BaseModel):
     @field_validator("options")
     @classmethod
     def _normalize_options(cls, value: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for option in value:
-            candidate = option.strip()
-            if not candidate or candidate in seen:
-                continue
-            normalized.append(candidate)
-            seen.add(candidate)
-        return normalized
+        return normalize_authoring_string_list(value)
 
 
 class OutlineStep(BaseModel):
@@ -152,15 +146,7 @@ class OutlineStep(BaseModel):
     )
     @classmethod
     def _normalize_string_list(cls, values: list[str]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for raw in values:
-            candidate = raw.strip()
-            if not candidate or candidate in seen:
-                continue
-            normalized.append(candidate)
-            seen.add(candidate)
-        return normalized
+        return normalize_authoring_string_list(values)
 
     @field_validator("model_ref")
     @classmethod
@@ -172,7 +158,11 @@ class OutlineStep(BaseModel):
 
     @model_validator(mode="after")
     def _validate_resource_mode(self) -> "OutlineStep":
-        if self.knowledge_refs and (self.mcp_server_refs or self.mcp_tool_refs):
+        if mixes_knowledge_and_mcp_refs(
+            knowledge_refs=self.knowledge_refs,
+            mcp_server_refs=self.mcp_server_refs,
+            mcp_tool_refs=self.mcp_tool_refs,
+        ):
             raise ValueError(
                 "Outline steps cannot combine knowledge_refs with MCP refs."
             )
