@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import re
 
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
-    flow_steps_to_authoring_specs,
-)
 from intric.flows.application.flow_authoring_command import AIBuilderFlowAuthoringOrigin
 from intric.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
@@ -65,9 +62,7 @@ def _resolve_flow_description(
         return spec.flow_description
 
     try:
-        old_sig = FlowSemanticSignature.from_steps(
-            flow_steps_to_authoring_specs(current_flow.steps)
-        )
+        old_sig = FlowSemanticSignature.from_flow_steps(current_flow.steps)
     except ValueError:
         return spec.flow_description
     new_sig = FlowSemanticSignature.from_steps(spec.steps)

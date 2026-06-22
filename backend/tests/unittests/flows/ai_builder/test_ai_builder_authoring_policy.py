@@ -198,27 +198,83 @@ async def test_unsupported_current_flow_signature_leaves_description_unchanged()
     assert prepared.spec.flow_description == current_flow.description
 
 
+@pytest.mark.anyio
+async def test_unsupported_middle_step_signature_leaves_description_unchanged() -> None:
+    current_flow = _flow(
+        description="Sammanställer fallöversikt i textformat.",
+        draft_revision=1,
+        steps=[
+            _flow_step(step_order=1, input_source="flow_input", output_type="text"),
+            _flow_step(step_order=2, input_source="http_get", output_type="json"),
+            _flow_step(step_order=3, input_source="previous_step", output_type="text"),
+        ],
+    )
+    spec = _spec(
+        flow_description=current_flow.description or "",
+        steps=[
+            _spec_step(plan_step_ref="step_a", existing_step_ref="existing_step_1"),
+            _spec_step(
+                plan_step_ref="step_b",
+                existing_step_ref="existing_step_2",
+                output_type=OutputType.JSON,
+            ),
+            _spec_step(
+                plan_step_ref="step_c",
+                existing_step_ref="existing_step_3",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+    origin = _origin(spec_hash=spec.spec_hash())
+
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=EditFlowAuthoringCommand(
+            space_id=current_flow.space_id,
+            flow_id=current_flow.id,
+            expected_revision=1,
+            spec=spec,
+            removed_existing_step_refs=frozenset(),
+            origin=origin,
+        ),
+        flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+
+    assert prepared.spec.flow_description == current_flow.description
+
+
 def _spec(
     *,
     flow_description: str = "",
     output_type: OutputType = OutputType.TEXT,
     existing_step_ref: str | None = None,
+    steps: list[StepSpec] | None = None,
 ) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name="Flow",
         flow_description=flow_description,
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                existing_step_ref=existing_step_ref,
-                name="Step A",
-                assistant_spec=AssistantSpec(instructions="Do something."),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=output_type,
-            )
-        ],
+        steps=steps
+        or [_spec_step(existing_step_ref=existing_step_ref, output_type=output_type)],
+    )
+
+
+def _spec_step(
+    *,
+    plan_step_ref: str = "step_a",
+    existing_step_ref: str | None = None,
+    input_source: InputSource = InputSource.FLOW_INPUT,
+    output_type: OutputType = OutputType.TEXT,
+) -> StepSpec:
+    return StepSpec(
+        plan_step_ref=plan_step_ref,
+        existing_step_ref=existing_step_ref,
+        name="Step A",
+        assistant_spec=AssistantSpec(instructions="Do something."),
+        input_source=input_source,
+        input_type=InputType.TEXT,
+        output_mode=OutputMode.PASS_THROUGH,
+        output_type=output_type,
     )
 
 
@@ -245,14 +301,15 @@ def _flow_step(
     *,
     output_type: str,
     input_source: str = "flow_input",
+    step_order: int = 1,
 ) -> FlowStep:
     return FlowStep(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
         assistant_id=uuid4(),
-        step_order=1,
-        user_description="Step A",
+        step_order=step_order,
+        user_description=f"Step {step_order}",
         input_source=input_source,
         input_type="text",
         output_mode="pass_through",

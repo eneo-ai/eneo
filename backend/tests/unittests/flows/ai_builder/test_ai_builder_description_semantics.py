@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
+import pytest
+
 from intric.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
+from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
@@ -74,6 +79,41 @@ class TestFlowSemanticSignature:
         assert sig.terminal_output_type == "pdf"
         assert sig.terminal_output_mode == "pass_through"
 
+    def test_from_flow_steps_coerces_current_flow_vocabulary(self) -> None:
+        sig = FlowSemanticSignature.from_flow_steps(
+            [
+                _flow_step(
+                    step_order=1,
+                    input_source="all_previous_steps",
+                    input_type="json",
+                    output_mode="pass_through",
+                    output_type="text",
+                ),
+                _flow_step(
+                    step_order=2,
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode="template_fill",
+                    output_type="docx",
+                ),
+            ]
+        )
+
+        assert sig.entry_input_source == "all_previous_steps"
+        assert sig.entry_input_type == "json"
+        assert sig.terminal_output_mode == "template_fill"
+        assert sig.terminal_output_type == "docx"
+
+    def test_from_flow_steps_rejects_unsupported_middle_step_vocabulary(self) -> None:
+        with pytest.raises(ValueError):
+            FlowSemanticSignature.from_flow_steps(
+                [
+                    _flow_step(step_order=1, input_source="flow_input"),
+                    _flow_step(step_order=2, input_source="http_get"),
+                    _flow_step(step_order=3, input_source="previous_step"),
+                ]
+            )
+
     def test_has_semantic_change_detects_input_type_change(self) -> None:
         old = FlowSemanticSignature(
             entry_input_type="audio",
@@ -107,3 +147,26 @@ class TestFlowSemanticSignature:
         )
         new = old.model_copy(update={"terminal_output_type": "pdf"})
         assert old.has_semantic_change(new) is True
+
+
+def _flow_step(
+    *,
+    step_order: int,
+    input_source: str,
+    input_type: str = "text",
+    output_mode: str = "pass_through",
+    output_type: str = "text",
+) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=f"Step {step_order}",
+        input_source=input_source,
+        input_type=input_type,
+        output_mode=output_mode,
+        output_type=output_type,
+        mcp_policy="inherit",
+    )

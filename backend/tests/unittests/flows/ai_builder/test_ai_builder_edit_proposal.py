@@ -324,6 +324,55 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
 
 
 @pytest.mark.asyncio
+async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> None:
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Extract source"),
+        _flow_step(
+            step_order=2,
+            user_description="Use source",
+            input_source="previous_step",
+            input_bindings={"question": "{{ step_1.output.text }}"},
+            output_config={"template": "{{ step_1.output.text }}"},
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Insert a follow-up step before the consumer.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Review source",
+                        "instructions": "Review source.",
+                        "input_source": "previous_step",
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert result.failure_kind is None
+    assert result.compiled_proposal is not None
+    edit = result.compiled_proposal.edit
+    assert edit is not None
+    assert [
+        (change.kind, change.step_ref, change.step_name)
+        for change in edit.diff.step_changes
+    ] == [
+        ("unchanged", "existing_step_1", "Extract source"),
+        ("added", None, "Review source"),
+        ("unchanged", "existing_step_2", "Use source"),
+    ]
+    reordered_consumer = result.compiled_proposal.spec.steps[2]
+    assert reordered_consumer.input_bindings == {"question": "{{ step_a.output.text }}"}
+    assert reordered_consumer.output_config == {"template": "{{ step_a.output.text }}"}
+
+
+@pytest.mark.asyncio
 async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() -> None:
     first_result = await _process(
         flow=_flow(_flow_step(step_order=1, user_description="Remove")),

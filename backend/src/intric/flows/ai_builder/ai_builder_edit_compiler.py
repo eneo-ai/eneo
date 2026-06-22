@@ -18,8 +18,6 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     OrderedEditStep,
     compile_ordered_edit_proposal,
     current_flow_authoring_spec,
-    flow_step_to_authoring_spec,
-    flow_steps_to_authoring_specs,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderEditApproval
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
@@ -138,7 +136,7 @@ def compile_edit_proposal(
     advisories.extend(
         _build_description_advisories(
             proposal=prepared.proposal,
-            current_steps=current_steps,
+            base_spec=base_spec,
             compiled_steps=compiled_steps,
             current_description=flow_description,
         )
@@ -151,11 +149,9 @@ def compile_edit_proposal(
     )
 
     step_changes = _build_step_changes(
-        current_steps=current_steps,
+        base_spec=base_spec,
         compiled_steps=compiled_steps,
         removed_refs=prepared.proposal.removed_existing_step_refs,
-        assistant_snapshots=assistant_snapshots,
-        resource_catalog=resource_catalog,
     )
 
     metadata_changes: list[MetadataChange] = []
@@ -468,11 +464,9 @@ def _build_normalization_advisories(
 
 def _build_step_changes(
     *,
-    current_steps: list[FlowStep],
+    base_spec: FlowDraftSpecCore,
     compiled_steps: list[StepSpec],
     removed_refs: frozenset[str],
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    resource_catalog: AIBuilderResourceCatalog | None,
 ) -> list[StepChange]:
     existing_order_to_plan_ref = {
         existing_order: step.plan_step_ref
@@ -481,19 +475,19 @@ def _build_step_changes(
     }
     removed_names: dict[str, str] = {}
     baseline_steps: list[StepSpec] = []
-    for step in current_steps:
-        ref = f"existing_step_{step.step_order}"
-        plan_ref = existing_order_to_plan_ref.get(step.step_order, ref)
-        baseline_spec = flow_step_to_authoring_spec(
-            step,
-            plan_ref,
-            assistant_snapshots=assistant_snapshots,
-            resource_catalog=resource_catalog,
-        )
+    for step in base_spec.steps:
+        if step.existing_step_ref is None:
+            continue
         baseline_steps.append(
-            _canonicalize_step_for_diff(baseline_spec, existing_order_to_plan_ref)
+            _canonicalize_step_for_diff(
+                _restamp_existing_step_plan_ref_for_diff(
+                    step,
+                    existing_order_to_plan_ref,
+                ),
+                existing_order_to_plan_ref,
+            )
         )
-        removed_names[ref] = step.user_description or f"Step {step.step_order}"
+        removed_names[step.existing_step_ref] = step.name
     baseline_specs = _normalize_baseline_specs_for_diff(baseline_steps)
 
     step_changes: list[StepChange] = []
@@ -528,9 +522,9 @@ def _build_step_changes(
             )
         )
 
-    for step in current_steps:
-        ref = f"existing_step_{step.step_order}"
-        if ref not in removed_refs:
+    for step in base_spec.steps:
+        ref = step.existing_step_ref
+        if ref is None or ref not in removed_refs:
             continue
         step_changes.append(
             StepChange(
@@ -554,6 +548,19 @@ def _canonicalize_step_for_diff(
         step,
         existing_order_to_plan_ref,
     )
+
+
+def _restamp_existing_step_plan_ref_for_diff(
+    step: StepSpec,
+    existing_order_to_plan_ref: dict[int, str],
+) -> StepSpec:
+    existing_order = _existing_step_order(step.existing_step_ref)
+    if existing_order is None:
+        return step
+    plan_ref = existing_order_to_plan_ref.get(existing_order)
+    if plan_ref is None or plan_ref == step.plan_step_ref:
+        return step
+    return step.model_copy(update={"plan_step_ref": plan_ref})
 
 
 def _normalize_baseline_specs_for_diff(steps: list[StepSpec]) -> dict[str, StepSpec]:
@@ -623,19 +630,17 @@ def _compute_confidence(
 def _build_description_advisories(
     *,
     proposal: OrderedEditProposal,
-    current_steps: list[FlowStep],
+    base_spec: FlowDraftSpecCore,
     compiled_steps: list[StepSpec],
     current_description: str | None,
 ) -> list[EditAdvisory]:
     """Emit advisory when semantic signature changed but description wasn't updated."""
     if "flow_description" in proposal.model_fields_set:
         return []
-    if not current_steps or not compiled_steps or not current_description:
+    if not base_spec.steps or not compiled_steps or not current_description:
         return []
 
-    old_sig = FlowSemanticSignature.from_steps(
-        flow_steps_to_authoring_specs(current_steps)
-    )
+    old_sig = FlowSemanticSignature.from_steps(base_spec.steps)
     new_sig = FlowSemanticSignature.from_steps(compiled_steps)
 
     if not old_sig.has_semantic_change(new_sig):

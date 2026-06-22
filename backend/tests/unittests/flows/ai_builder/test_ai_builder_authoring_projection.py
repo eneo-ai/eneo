@@ -12,8 +12,8 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     ModifyExistingStep,
     OrderedEditProposal,
     compile_ordered_edit_proposal,
+    current_flow_authoring_spec,
     flow_step_to_authoring_spec,
-    flow_steps_to_authoring_specs,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
@@ -661,9 +661,9 @@ def test_flow_to_authoring_projection_preserves_authoring_fields() -> None:
     assert projected.review_policy == review_policy
 
 
-def test_flow_steps_to_authoring_specs_preserves_signature_vocabulary() -> None:
-    result = flow_steps_to_authoring_specs(
-        [
+def test_current_flow_authoring_spec_preserves_signature_vocabulary() -> None:
+    result = current_flow_authoring_spec(
+        current_steps=[
             FlowStep(
                 id=uuid4(),
                 flow_id=uuid4(),
@@ -690,17 +690,21 @@ def test_flow_steps_to_authoring_specs_preserves_signature_vocabulary() -> None:
                 output_type="docx",
                 mcp_policy="inherit",
             ),
-        ]
+        ],
+        flow_name="Signature flow",
+        flow_description="Existing description",
+        assistant_snapshots=None,
+        resource_catalog=None,
     )
 
-    assert [step.plan_step_ref for step in result] == [
+    assert [step.plan_step_ref for step in result.steps] == [
         "existing_step_1",
         "existing_step_2",
     ]
-    assert result[0].input_source == InputSource.ALL_PREVIOUS_STEPS
-    assert result[0].input_type == InputType.JSON
-    assert result[-1].output_mode == OutputMode.TEMPLATE_FILL
-    assert result[-1].output_type == OutputType.DOCX
+    assert result.steps[0].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert result.steps[0].input_type == InputType.JSON
+    assert result.steps[-1].output_mode == OutputMode.TEMPLATE_FILL
+    assert result.steps[-1].output_type == OutputType.DOCX
 
 
 def _base_spec(
