@@ -67,6 +67,16 @@ class SpaceAssembler:
         self.completion_model_assembler = completion_model_assembler
         self.actor_manager = actor_manager
 
+    @staticmethod
+    def _normalize_metadata_json(
+        metadata_json: object,
+    ) -> dict[str, object] | None:
+        return (
+            cast(dict[str, object], metadata_json)
+            if isinstance(metadata_json, dict)
+            else None
+        )
+
     def _set_permissions_on_resources(self, space: Space) -> None:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -605,7 +615,7 @@ class SpaceAssembler:
             available_roles=available_roles,
             security_classification=security_classification,
             data_retention_days=space.data_retention_days,
-            metadata_json=space.metadata_json,
+            metadata_json=self._normalize_metadata_json(space.metadata_json),
             icon_id=space.icon_id,
         )
 
@@ -623,7 +633,7 @@ class SpaceAssembler:
             organization=space.is_organization(),
             permissions=self._get_space_permissions(space),
             data_retention_days=space.data_retention_days,
-            metadata_json=space.metadata_json,
+            metadata_json=self._normalize_metadata_json(space.metadata_json),
             icon_id=space.icon_id,
         )
 
@@ -675,7 +685,7 @@ class SpaceAssembler:
             applications=applications,
             default_assistant=default_assistant,
             data_retention_days=space.data_retention_days,
-            metadata_json=space.metadata_json,
+            metadata_json=self._normalize_metadata_json(space.metadata_json),
             icon_id=space.icon_id,
         )
 

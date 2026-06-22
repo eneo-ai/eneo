@@ -630,6 +630,7 @@
       <Settings.Group title={m.advanced_settings()}>
         <Settings.Row
           title={m.resource_metadata_section_title()}
+          description={m.resource_metadata_section_description()}
           hasChanges={$currentChanges.diff.metadata_json !== undefined}
           revertFn={() => {
             discardChanges("metadata_json");

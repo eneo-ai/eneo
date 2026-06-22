@@ -168,7 +168,7 @@ class AssistantService:
         icon_repo: IconRepository,
         org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
-        tenant_metadata_field_service: TenantMetadataFieldService,
+        tenant_metadata_field_service: TenantMetadataFieldService | None = None,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
     ):
@@ -479,7 +479,10 @@ class AssistantService:
             if not actor.can_toggle_insight():
                 raise UnauthorizedException("Only admins can toggle insights")
 
-        if is_provided(metadata_json):
+        if (
+            is_provided(metadata_json)
+            and self.tenant_metadata_field_service is not None
+        ):
             await self.tenant_metadata_field_service.validate_metadata_for_resource(
                 metadata_json, resource_type="assistant"
             )

@@ -1,6 +1,6 @@
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Intric, Assistant } from "@intric/intric-js";
+import type { Assistant, Intric, ResourceMetadataJson } from "@intric/intric-js";
 
 const [getAssistantEditor, setAssistantEditor] =
   createContext<ReturnType<typeof initAssistantEditor>>("Edit an Assistant");
@@ -21,7 +21,7 @@ function initAssistantEditor(data: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
       mcp_tools: [],
-      metadata_json: null
+      metadata_json: null as ResourceMetadataJson | null
     },
     updateResource: async (resource, changes) => {
       const updated = await data.intric.assistants.update({

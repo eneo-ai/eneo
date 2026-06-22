@@ -3432,7 +3432,7 @@
   "admin_metadata_spaces_label": "Ytor",
   "admin_metadata_add_field": "Lägg till metadatafält",
   "resource_metadata_section_title": "Metadata",
-  "resource_metadata_section_description": "Metadata för externa mottagare.",
+  "resource_metadata_section_description": "",
   "resource_metadata_empty": "Inga metadatafält tillgängliga.",
   "chat_history_untitled": "Namnlös",
   "chat_history_rename": "Byt namn",

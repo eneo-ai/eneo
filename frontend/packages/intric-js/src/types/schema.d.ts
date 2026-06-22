@@ -851,6 +851,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/metadata-fields/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Metadata Fields
+     * @description List tenant metadata field definitions.
+     */
+    get: operations["get_metadata_fields_api_v1_settings_metadata_fields__get"];
+    put?: never;
+    /**
+     * Create Metadata Field
+     * @description Create a tenant metadata field definition.
+     */
+    post: operations["create_metadata_field_api_v1_settings_metadata_fields__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/models/": {
     parameters: {
       query?: never;
@@ -889,6 +913,30 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/metadata-fields/{field_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Metadata Field
+     * @description Delete a tenant metadata field definition.
+     */
+    delete: operations["delete_metadata_field_api_v1_settings_metadata_fields__field_id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Metadata Field
+     * @description Update a tenant metadata field definition.
+     */
+    patch: operations["update_metadata_field_api_v1_settings_metadata_fields__field_id___patch"];
     trace?: never;
   };
   "/api/v1/settings/templates": {
@@ -12483,6 +12531,11 @@ export interface components {
       /** Count */
       count: number;
     };
+    /**
+     * MetadataFieldType
+     * @enum {string}
+     */
+    MetadataFieldType: "int" | "string" | "boolean";
     /** MetadataStatistics */
     MetadataStatistics: {
       /** Assistants */
@@ -13588,6 +13641,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[TenantMetadataFieldPublic] */
+    PaginatedResponse_TenantMetadataFieldPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["TenantMetadataFieldPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[TenantWithMaskedCredentials] */
     PaginatedResponse_TenantWithMaskedCredentials_: {
       /**
@@ -13971,6 +14037,13 @@ export interface components {
        * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
+      /**
+       * Metadata Json
+       * @description Metadata for the space. Set to null to clear.
+       */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * PatchFederationRequest
@@ -15105,7 +15178,7 @@ export interface components {
       message: string;
     };
     /** SettingsPublic */
-    SettingsPublic: {
+    "SettingsPublic-Input": {
       /** Chatbot Widget */
       chatbot_widget?: {
         [key: string]: unknown;
@@ -15135,6 +15208,42 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      /** Metadata Fields */
+      metadata_fields?: components["schemas"]["TenantMetadataFieldPublic"][];
+    };
+    /** SettingsPublic */
+    "SettingsPublic-Output": {
+      /** Chatbot Widget */
+      chatbot_widget?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Using Templates
+       * @default false
+       */
+      using_templates?: boolean;
+      /**
+       * Tenant Credentials Enabled
+       * @default false
+       */
+      tenant_credentials_enabled?: boolean;
+      /**
+       * Audit Logging Enabled
+       * @default true
+       */
+      audit_logging_enabled?: boolean;
+      /**
+       * Provisioning
+       * @default false
+       */
+      provisioning?: boolean;
+      /**
+       * Api Key Expiry Notifications
+       * @default true
+       */
+      api_key_expiry_notifications?: boolean;
+      /** Metadata Fields */
+      metadata_fields?: components["schemas"]["TenantMetadataFieldPublic"][];
     };
     /**
      * SharePointSubscriptionPublic
@@ -15280,6 +15389,10 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon
@@ -15354,6 +15467,10 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon
@@ -15413,6 +15530,10 @@ export interface components {
       personal: boolean;
       /** Organization */
       organization: boolean;
+      /** Metadata Json */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon
@@ -16118,6 +16239,52 @@ export interface components {
     TenantListResponse: {
       /** Tenants */
       tenants: components["schemas"]["TenantInfo"][];
+    };
+    /** TenantMetadataFieldCreate */
+    TenantMetadataFieldCreate: {
+      /** Name */
+      name: string;
+      field_type: components["schemas"]["MetadataFieldType"];
+      /**
+       * Visible On Assistants
+       * @default true
+       */
+      visible_on_assistants?: boolean;
+      /**
+       * Visible On Spaces
+       * @default true
+       */
+      visible_on_spaces?: boolean;
+    };
+    /** TenantMetadataFieldPublic */
+    TenantMetadataFieldPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      field_type: components["schemas"]["MetadataFieldType"];
+      /**
+       * Visible On Assistants
+       * @default true
+       */
+      visible_on_assistants?: boolean;
+      /**
+       * Visible On Spaces
+       * @default true
+       */
+      visible_on_spaces?: boolean;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /** TenantPublic */
     TenantPublic: {
@@ -21567,7 +21734,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingsPublic"];
+          "application/json": components["schemas"]["SettingsPublic-Output"];
         };
       };
     };
@@ -21581,7 +21748,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["SettingsPublic"];
+        "application/json": components["schemas"]["SettingsPublic-Input"];
       };
     };
     responses: {
@@ -21591,11 +21758,82 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingsPublic"];
+          "application/json": components["schemas"]["SettingsPublic-Output"];
         };
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_metadata_fields_api_v1_settings_metadata_fields__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_TenantMetadataFieldPublic_"];
+        };
+      };
+    };
+  };
+  create_metadata_field_api_v1_settings_metadata_fields__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantMetadataFieldCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TenantMetadataFieldPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -21654,6 +21892,115 @@ export interface operations {
       };
     };
   };
+  delete_metadata_field_api_v1_settings_metadata_fields__field_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        field_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_metadata_field_api_v1_settings_metadata_fields__field_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        field_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantMetadataFieldCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TenantMetadataFieldPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   update_template_setting_api_v1_settings_templates_patch: {
     parameters: {
       query?: never;
@@ -21673,7 +22020,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingsPublic"];
+          "application/json": components["schemas"]["SettingsPublic-Output"];
         };
       };
       /** @description Forbidden */
@@ -21715,7 +22062,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingsPublic"];
+          "application/json": components["schemas"]["SettingsPublic-Output"];
         };
       };
       /** @description Forbidden */
@@ -21757,7 +22104,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingsPublic"];
+          "application/json": components["schemas"]["SettingsPublic-Output"];
         };
       };
       /** @description Forbidden */
@@ -21799,7 +22146,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingsPublic"];
+          "application/json": components["schemas"]["SettingsPublic-Output"];
         };
       };
       /** @description Forbidden */

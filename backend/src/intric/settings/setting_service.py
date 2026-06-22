@@ -38,7 +38,7 @@ class SettingService:
         feature_flag_service: "FeatureFlagService",
         tenant_repo: TenantRepository,
         audit_service: AuditService,
-        tenant_metadata_field_service: TenantMetadataFieldService,
+        tenant_metadata_field_service: TenantMetadataFieldService | None = None,
     ):
         super().__init__()
         self.repo = repo
@@ -123,7 +123,11 @@ class SettingService:
         )
 
         app_settings = get_app_settings()
-        metadata_fields = await self.tenant_metadata_field_service.list_fields()
+        metadata_fields = (
+            await self.tenant_metadata_field_service.list_fields()
+            if self.tenant_metadata_field_service is not None
+            else []
+        )
 
         return SettingsPublic(
             chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {})
@@ -141,19 +145,27 @@ class SettingService:
         return await self._build_settings_public(settings_in_db=settings)
 
     async def get_metadata_fields(self) -> list[TenantMetadataFieldPublic]:
+        if self.tenant_metadata_field_service is None:
+            return []
         return await self.tenant_metadata_field_service.list_fields()
 
     async def create_metadata_field(
         self, metadata_field: TenantMetadataFieldCreate
     ) -> TenantMetadataFieldPublic:
+        if self.tenant_metadata_field_service is None:
+            raise RuntimeError("Tenant metadata field service is not configured")
         return await self.tenant_metadata_field_service.create_field(metadata_field)
 
     async def update_metadata_field(
         self, metadata_field: TenantMetadataFieldUpdate
     ) -> TenantMetadataFieldPublic:
+        if self.tenant_metadata_field_service is None:
+            raise RuntimeError("Tenant metadata field service is not configured")
         return await self.tenant_metadata_field_service.update_field(metadata_field)
 
     async def delete_metadata_field(self, field_id: UUID) -> None:
+        if self.tenant_metadata_field_service is None:
+            raise RuntimeError("Tenant metadata field service is not configured")
         await self.tenant_metadata_field_service.delete_field(field_id)
 
     async def update_settings(self, settings: SettingsPublic) -> SettingsInDB:
