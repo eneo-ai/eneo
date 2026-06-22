@@ -25,13 +25,15 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    LLMCompletionToolCall,
+)
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionFn,
     ProposalCompletionRequest,
-    ProposalCompletionToolCall,
     ToolProcessingResult,
     ToolRetryInvocation,
 )
@@ -390,7 +392,7 @@ async def request_self_correction(
 
         if hasattr(message, "tool_calls") and message.tool_calls:
             retry_feedback: (
-                tuple[ProposalCompletionToolCall, str, ToolProcessingFailureKind | None]
+                tuple[LLMCompletionToolCall, str, ToolProcessingFailureKind | None]
                 | None
             ) = None
             for correction_tool_call in message.tool_calls:

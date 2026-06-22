@@ -31,7 +31,7 @@ from intric.flows.ai_builder.ai_builder_interaction_utils import (
     analyze_discovery_ready,
     build_question_fallback_text,
 )
-from intric.flows.ai_builder.ai_builder_proposal_completion import (
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (

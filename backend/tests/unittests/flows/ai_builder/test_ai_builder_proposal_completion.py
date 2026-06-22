@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from intric.flows.ai_builder.ai_builder_domain_models import TargetKind
-from intric.flows.ai_builder.ai_builder_proposal_completion import (
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
@@ -176,6 +176,47 @@ async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
     assert tool_call.id == "call_outline"
     assert tool_call.function.name == PROPOSE_FLOW_TOOL_NAME
     assert tool_call.function.arguments == '{"flow_name":"Test"}'
+
+
+@pytest.mark.asyncio
+async def test_call_proposal_completion_normalizes_object_tool_calls() -> None:
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_object",
+                            function=SimpleNamespace(
+                                name=PROPOSE_FLOW_TOOL_NAME,
+                                arguments='{"flow_name":"Object"}',
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    result = await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+        ),
+    )
+
+    tool_call = result.choices[0].message.tool_calls[0]
+    assert tool_call.id == "call_object"
+    assert tool_call.function.name == PROPOSE_FLOW_TOOL_NAME
+    assert tool_call.function.arguments == '{"flow_name":"Object"}'
 
 
 @pytest.mark.asyncio

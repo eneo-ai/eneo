@@ -32,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_dispatcher import (
     PlannerDispatchResult,
     dispatch_planner_action,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     PipelineOutcome,
     run_planner_pipeline,
@@ -43,7 +44,6 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
     evaluate_planner_output,
 )
-from intric.flows.ai_builder.ai_builder_planner_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_response_format import (
     PlannerResponseFormatSelection,
 )

@@ -42,6 +42,10 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    CompletionMetadata,
+    call_planner_completion,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
     PlannerOutput,
@@ -49,10 +53,6 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     evaluate_planner_output,
     parse_planner_output,
     summarize_parse_failure,
-)
-from intric.flows.ai_builder.ai_builder_planner_completion import (
-    CompletionMetadata,
-    call_planner_completion,
 )
 from intric.flows.ai_builder.ai_builder_planner_output_normalizer import (
     normalize_planner_output,

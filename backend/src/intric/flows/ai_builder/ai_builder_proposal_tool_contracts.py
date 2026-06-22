@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
@@ -29,6 +29,9 @@ from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_litellm_completion import (
+        LLMCompletionResponse,
+    )
     from intric.flows.domain.flow import Flow
 
 
@@ -36,58 +39,7 @@ class ProposalCompletionFn(Protocol):
     def __call__(
         self,
         request: "ProposalCompletionRequest",
-    ) -> Awaitable["ProposalCompletionResponse"]: ...
-
-
-class ProposalCompletionUsage(Protocol):
-    @property
-    def prompt_tokens(self) -> int: ...
-
-    @property
-    def completion_tokens(self) -> int: ...
-
-    @property
-    def total_tokens(self) -> int: ...
-
-
-class ProposalCompletionToolCallFunction(Protocol):
-    @property
-    def name(self) -> str: ...
-
-    @property
-    def arguments(self) -> str: ...
-
-
-class ProposalCompletionToolCall(Protocol):
-    @property
-    def id(self) -> str: ...
-
-    @property
-    def function(self) -> ProposalCompletionToolCallFunction: ...
-
-
-class ProposalCompletionMessage(Protocol):
-    @property
-    def content(self) -> str | None: ...
-
-    @property
-    def tool_calls(self) -> Sequence[ProposalCompletionToolCall]: ...
-
-
-class ProposalCompletionChoice(Protocol):
-    @property
-    def message(self) -> ProposalCompletionMessage: ...
-
-    @property
-    def finish_reason(self) -> str | None: ...
-
-
-class ProposalCompletionResponse(Protocol):
-    @property
-    def choices(self) -> Sequence[ProposalCompletionChoice]: ...
-
-    @property
-    def usage(self) -> ProposalCompletionUsage | None: ...
+    ) -> Awaitable["LLMCompletionResponse"]: ...
 
 
 @dataclass(frozen=True)

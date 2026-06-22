@@ -35,7 +35,7 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
-from intric.flows.ai_builder.ai_builder_proposal_completion import (
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
     make_usage_tracked_proposal_completion,
 )
 from intric.flows.ai_builder.ai_builder_proposal_policy import (

@@ -68,7 +68,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
-from intric.flows.ai_builder.ai_builder_planner_completion import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_litellm_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     DiscoveryBlockPrepared,
     NormalPlannerPrepared,

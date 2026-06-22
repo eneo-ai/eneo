@@ -779,14 +779,19 @@ def test_proposal_processor_no_longer_owns_completion_boundary() -> None:
     assert violations == []
 
 
-def test_proposal_completion_has_single_typed_completion_boundary() -> None:
+def test_litellm_completion_has_single_typed_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
     )
-    completion_tree = ast.parse(
-        completion_path.read_text(), filename=str(completion_path)
+    old_completion_paths = (
+        backend_root
+        / Path("src/intric/flows/ai_builder/ai_builder_proposal_completion.py"),
+        backend_root
+        / Path("src/intric/flows/ai_builder/ai_builder_planner_completion.py"),
     )
+    completion_text = completion_path.read_text()
+    completion_tree = ast.parse(completion_text, filename=str(completion_path))
 
     acompletion_refs = [
         node
@@ -794,9 +799,16 @@ def test_proposal_completion_has_single_typed_completion_boundary() -> None:
         if isinstance(node, ast.Attribute) and node.attr == "acompletion"
     ]
     violations: list[str] = []
-    if len(acompletion_refs) != 1:
+    stale_paths = [str(path) for path in old_completion_paths if path.exists()]
+    if stale_paths:
+        violations.append(f"stale completion modules exist: {stale_paths}")
+    if len(acompletion_refs) != 2:
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{completion_path}: acompletion refs {lines}")
+    if "_ProposalCompletion" in completion_text:
+        violations.append(f"{completion_path}: still defines proposal view classes")
+    if "ProposalCompletionUsage" in completion_text:
+        violations.append(f"{completion_path}: still references proposal usage type")
 
     for node in ast.walk(completion_tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -811,10 +823,10 @@ def test_proposal_completion_has_single_typed_completion_boundary() -> None:
     assert violations == []
 
 
-def test_proposal_completion_dependency_direction_stays_leaf_owned() -> None:
+def test_litellm_completion_dependency_direction_stays_leaf_owned() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     telemetry_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py"
@@ -837,7 +849,7 @@ def test_proposal_completion_dependency_direction_stays_leaf_owned() -> None:
     for node in ast.walk(telemetry_tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if node.module == "intric.flows.ai_builder.ai_builder_proposal_completion":
+        if node.module == "intric.flows.ai_builder.ai_builder_litellm_completion":
             violations.append(f"{telemetry_path}:{node.lineno} imports {node.module}")
 
     assert violations == []
@@ -942,7 +954,7 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
                 violations.append(
                     f"{question_path}:{node.lineno} imports {node.module}"
                 )
-            if node.module == "intric.flows.ai_builder.ai_builder_proposal_completion":
+            if node.module == "intric.flows.ai_builder.ai_builder_litellm_completion":
                 for alias in node.names:
                     if alias.name == "call_proposal_completion_with_usage":
                         tracked_completion_import_count += 1
@@ -1010,7 +1022,7 @@ def test_proposal_completion_has_single_request_boundary() -> None:
         "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
     )
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     submission_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
@@ -1169,10 +1181,10 @@ def test_old_edit_operation_ir_files_are_deleted() -> None:
     assert violations == []
 
 
-def test_planner_completion_has_single_provider_boundary() -> None:
+def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_planner_completion.py"
+        "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
     )
     repair_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_repair.py"
@@ -1191,7 +1203,7 @@ def test_planner_completion_has_single_provider_boundary() -> None:
         for node in ast.walk(completion_tree)
         if isinstance(node, ast.Attribute) and node.attr == "acompletion"
     ]
-    if len(acompletion_refs) != 1:
+    if len(acompletion_refs) != 2:
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{completion_path}: acompletion refs {lines}")
 

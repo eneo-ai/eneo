@@ -53,16 +53,16 @@ from intric.flows.ai_builder.ai_builder_commit_invariance import (
     CommitDriftError,
     assert_architecture_commit_draft_matches_pinned,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    CompletionMetadata,
+    call_planner_completion,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     PlannerOutput,
     RejectionCode,
     RejectionReason,
     parse_planner_output,
     summarize_parse_failure,
-)
-from intric.flows.ai_builder.ai_builder_planner_completion import (
-    CompletionMetadata,
-    call_planner_completion,
 )
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,

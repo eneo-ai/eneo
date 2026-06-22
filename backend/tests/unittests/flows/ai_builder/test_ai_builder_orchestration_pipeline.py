@@ -43,7 +43,7 @@ from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
-from intric.flows.ai_builder.ai_builder_planner_completion import (
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
     call_planner_completion,
 )
 from intric.flows.ai_builder.ai_builder_token_usage import (

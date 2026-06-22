@@ -45,12 +45,14 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
 )
 from intric.flows.ai_builder.ai_builder_events import build_text_event
 from intric.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
-)
-from intric.flows.ai_builder.ai_builder_proposal_completion import (
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    LLMCompletionMessage,
+    LLMCompletionToolCall,
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
@@ -73,8 +75,6 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ProposalCompletionMessage,
-    ProposalCompletionToolCall,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
@@ -108,12 +108,12 @@ EventBatch = tuple[dict[str, str], ...]
 @dataclass(frozen=True)
 class ForcedSubmissionResponse:
     text_content: str | None
-    tool_call: ProposalCompletionToolCall
+    tool_call: LLMCompletionToolCall
 
 
 def _forced_submission_response(
     *,
-    message: ProposalCompletionMessage,
+    message: LLMCompletionMessage,
     submission_tool_name: str,
 ) -> ForcedSubmissionResponse | None:
     if submission_tool_name != PROPOSE_FLOW_TOOL_NAME:
