@@ -92,6 +92,8 @@ class OutlineCompileContext:
     """
 
     runtime_input_type: InputType | None = None
+    runtime_required: bool = True
+    runtime_max_files: int | None = None
     final_output_type: OutputType | None = None
     final_output_mode: OutputMode | None = None
     pattern_ids: tuple[str, ...] = ()
@@ -100,6 +102,12 @@ class OutlineCompileContext:
     runtime_metadata_state: RuntimeMetadataState | None = None
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
+
+    def __post_init__(self) -> None:
+        if self.runtime_input_type is InputType.ANY:
+            raise ValueError("OutlineCompileContext.runtime_input_type cannot be ANY")
+        if self.runtime_max_files is not None and self.runtime_max_files < 1:
+            raise ValueError("runtime_max_files must be at least 1 when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +123,7 @@ def compile_outline_to_create_draft(
     runtime_input_type = (
         context.runtime_input_type
         if context is not None and context.runtime_input_type is not None
-        else InputType(outline.runtime_input.input_type)
+        else InputType.TEXT
     )
     final_output_type = (
         context.final_output_type
@@ -204,8 +212,10 @@ def compile_outline_to_create_draft(
             aggregation_intent=(
                 context.aggregation_intent if context is not None else "linear"
             ),
-            runtime_required=outline.runtime_input.required,
-            runtime_max_files=outline.runtime_input.max_files,
+            runtime_required=context.runtime_required if context is not None else True,
+            runtime_max_files=(
+                context.runtime_max_files if context is not None else None
+            ),
             ui_language=context.ui_language if context is not None else None,
         )
         composition = skeleton_plan.compose(semantic_steps)
@@ -426,9 +436,13 @@ def _runtime_input_type_from_architecture(
     if architecture is None or not architecture.tuples_chain:
         return None
     try:
-        return InputType(architecture.tuples_chain[0].input_type)
+        runtime_input_type = InputType(architecture.tuples_chain[0].input_type)
     except ValueError:
         return None
+    if runtime_input_type is InputType.ANY:
+        # ANY is a capability envelope, not a concrete compile input type.
+        return None
+    return runtime_input_type
 
 
 def _final_output_type_from_planning_state(state: PlanningState) -> OutputType | None:

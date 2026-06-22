@@ -16,7 +16,6 @@ from pydantic import (
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     BuilderFormFieldType,
     builder_form_field_type_values,
-    builder_input_type_values,
     builder_output_type_values,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
@@ -35,7 +34,6 @@ from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
 )
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.flow_authoring_spec import (
-    InputType,
     OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
@@ -68,38 +66,6 @@ logger = logging.getLogger(__name__)
 _OUTLINE_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
 _OUTLINE_ASSUMPTIONS_FIELD = "assumptions"
 _OUTLINE_STEP_ROOT_RECOVERED_KEYS = frozenset({_OUTLINE_ASSUMPTIONS_FIELD})
-
-
-def outline_runtime_input_type_values() -> list[str]:
-    """Input types the outline compiler can safely place on the first step."""
-
-    return [
-        value for value in builder_input_type_values() if value != InputType.ANY.value
-    ]
-
-
-class OutlineRuntimeInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    input_type: str = InputType.TEXT.value
-    required: bool = True
-    max_files: int | None = None
-
-    @field_validator("input_type")
-    @classmethod
-    def _validate_input_type(cls, value: str) -> str:
-        normalized = value.strip()
-        if normalized not in outline_runtime_input_type_values():
-            allowed = ", ".join(outline_runtime_input_type_values())
-            raise ValueError(f"input_type must be one of: {allowed}")
-        return normalized
-
-    @field_validator("max_files")
-    @classmethod
-    def _validate_max_files(cls, value: int | None) -> int | None:
-        if value is not None and value < 1:
-            raise ValueError("max_files must be at least 1 when provided.")
-        return value
 
 
 class OutlineInputField(BaseModel):
@@ -230,7 +196,6 @@ class FlowCreateOutline(BaseModel):
     flow_name: str
     flow_description: str | None = None
     plan_rationale: str
-    runtime_input: OutlineRuntimeInput = Field(default_factory=OutlineRuntimeInput)
     input_fields: list[OutlineInputField] = Field(
         default_factory=_empty_outline_input_fields
     )
@@ -756,7 +721,6 @@ __all__ = [
     "OutlineFlowArgumentError",
     "attach_selected_mcp_refs_to_explicit_outline_steps",
     "build_outline_flow_tool_schema",
-    "outline_runtime_input_type_values",
     "parse_outline_flow_arguments",
     "safe_validation_issues",
 ]

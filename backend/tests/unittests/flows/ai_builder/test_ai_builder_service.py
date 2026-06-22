@@ -397,7 +397,6 @@ def _normalize_tool_arguments(
         return {
             "flow_name": "Test Flow",
             "plan_rationale": "Extrahera först och strukturera sedan resultatet.",
-            "runtime_input": {"input_type": "text", "required": True},
             "final_output_type": "text",
             "steps": [
                 {
@@ -416,7 +415,6 @@ def _normalize_tool_arguments(
     steps = normalized.get("steps")
     if isinstance(steps, list):
         normalized["steps"] = [_normalize_create_step(step) for step in steps]
-    normalized.setdefault("runtime_input", {"input_type": "text", "required": True})
     normalized.setdefault("final_output_type", "text")
     return normalized
 
@@ -1572,7 +1570,6 @@ class TestSendMessageToolCall:
         bad_args = {
             "flow_name": "Bad",
             "plan_rationale": "Invalid semantic outline.",
-            "runtime_input": {"input_type": "text", "required": True},
             "final_output_type": "text",
             "steps": [
                 {

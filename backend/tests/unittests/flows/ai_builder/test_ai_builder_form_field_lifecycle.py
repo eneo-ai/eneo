@@ -39,6 +39,7 @@ from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     FormFieldSpec,
+    InputType,
     OutputType,
 )
 
@@ -54,7 +55,6 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
         {
             "flow_name": "Priority review",
             "plan_rationale": "Classify the request before drafting the answer.",
-            "runtime_input": {"input_type": "text", "required": True},
             "input_fields": [
                 {
                     "variable_name": "priority",
@@ -106,7 +106,6 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
         {
             "flow_name": "PDF report",
             "plan_rationale": "Analyze the document before rendering PDF.",
-            "runtime_input": {"input_type": "document", "required": True},
             "input_fields": [
                 {
                     "variable_name": "focus_area",
@@ -143,7 +142,10 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
 
     draft = compile_outline_to_create_draft(
         outline,
-        context=OutlineCompileContext(final_output_type=OutputType.PDF),
+        context=OutlineCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+        ),
     )
     compiled = compile_create_draft(draft)
 
@@ -160,7 +162,6 @@ def test_single_step_outline_form_field_fallback_binds_only_available_step() -> 
         {
             "flow_name": "PDF report",
             "plan_rationale": "Render a short PDF.",
-            "runtime_input": {"input_type": "text", "required": True},
             "input_fields": [
                 {
                     "variable_name": "report_title",
@@ -248,7 +249,6 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
         {
             "flow_name": "Audience response",
             "plan_rationale": "Classify a request and adapt the answer.",
-            "runtime_input": {"input_type": "text", "required": True},
             "input_fields": [
                 {
                     "variable_name": "audience",

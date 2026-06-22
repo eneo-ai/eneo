@@ -288,7 +288,6 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         {
             "flow_name": "Document analysis",
             "plan_rationale": "Analyze the document and produce a summary.",
-            "runtime_input": {"input_type": "document", "required": True},
             "final_output_type": "text",
             "steps": [{"name": "Analyze", "task": "Analyze the document."}],
         },

@@ -319,7 +319,6 @@ class TestProposalGating:
             {
                 "flow_name": "Test Flow",
                 "plan_rationale": "Extraktion först.",
-                "runtime_input": {"input_type": "text", "required": True},
                 "final_output_type": "text",
                 "steps": [
                     {

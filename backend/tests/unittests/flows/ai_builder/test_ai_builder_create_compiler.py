@@ -1270,7 +1270,6 @@ def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
         {
             "flow_name": "Granska text",
             "plan_rationale": "Användaren ska kunna ändra resultatet.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Bearbeta text",
@@ -1294,7 +1293,6 @@ def test_compile_outline_parity_plain_text_snapshot() -> None:
         {
             "flow_name": "Text summary",
             "plan_rationale": "Summarize supplied text.",
-            "runtime_input": {"input_type": "text"},
             "steps": [
                 {
                     "name": "Summarize text",
@@ -1460,7 +1458,6 @@ def test_compile_outline_parity_json_intermediate_snapshot() -> None:
         {
             "flow_name": "Customer report",
             "plan_rationale": "Extract structured facts and write a report.",
-            "runtime_input": {"input_type": "text"},
             "steps": [
                 {
                     "name": "Extract facts",
@@ -1741,7 +1738,6 @@ def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
         {
             "flow_name": "Fold text hop",
             "plan_rationale": "Avoid zero-contract first step.",
-            "runtime_input": {"input_type": "text"},
             "steps": [
                 {
                     "name": "Receive text",
@@ -2395,7 +2391,39 @@ def test_parse_outline_flow_allows_server_owned_core_shape_defaults() -> None:
         }
     )
 
-    assert outline.runtime_input.input_type == "text"
+    draft = compile_outline_to_create_draft(outline)
+
+    assert draft.steps[0].input_type is InputType.TEXT
+    assert draft.steps[0].runtime_required is False
+    assert draft.steps[0].runtime_max_files is None
+
+
+def test_parse_outline_flow_rejects_model_supplied_runtime_input() -> None:
+    with pytest.raises(OutlineFlowArgumentError, match="runtime_input"):
+        parse_outline_flow_arguments(
+            {
+                "flow_name": "Minimal outline",
+                "plan_rationale": "Runtime input is server-owned.",
+                "runtime_input": {"input_type": "document", "required": True},
+                "steps": [
+                    {
+                        "name": "Do the work",
+                        "task": "Follow the user's confirmed requirements.",
+                    }
+                ],
+            }
+        )
+
+
+def test_outline_compile_context_rejects_invalid_runtime_input_constraints() -> None:
+    with pytest.raises(ValueError, match="runtime_max_files"):
+        OutlineCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            runtime_max_files=0,
+        )
+
+    with pytest.raises(ValueError, match="runtime_input_type"):
+        OutlineCompileContext(runtime_input_type=InputType.ANY)
 
 
 def test_parse_outline_flow_ignores_model_supplied_final_output_type() -> None:
@@ -2821,11 +2849,6 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
             "flow_name": "Case report",
             "flow_description": "Analyzes uploaded source material.",
             "plan_rationale": "Extract structure first, then create the report.",
-            "runtime_input": {
-                "input_type": "document",
-                "required": True,
-                "max_files": 5,
-            },
             "input_fields": [
                 {
                     "variable_name": "case_id",
@@ -2867,7 +2890,12 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
 
     draft = compile_outline_to_create_draft(
         outline,
-        context=OutlineCompileContext(final_output_type=OutputType.DOCX),
+        context=OutlineCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.DOCX,
+            runtime_required=True,
+            runtime_max_files=5,
+        ),
     )
     compiled = compile_create_draft(draft)
 
@@ -3073,7 +3101,6 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
         {
             "flow_name": "Utvecklingssamtal",
             "plan_rationale": "Transkribera samtal och skapa en strukturerad bedömning.",
-            "runtime_input": {"input_type": "audio", "required": True},
             "steps": [
                 {
                     "name": "Transkribera samtal",
@@ -3099,7 +3126,10 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
             ],
         }
     )
-    context = OutlineCompileContext(runtime_input_field_hints=field_hints)
+    context = OutlineCompileContext(
+        runtime_input_type=InputType.AUDIO,
+        runtime_input_field_hints=field_hints,
+    )
 
     draft = compile_outline_to_create_draft(outline, context=context)
     compiled = compile_create_draft(draft)
@@ -3368,7 +3398,6 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
         {
             "flow_name": "Kommunstyrelsemöte till DOCX",
             "plan_rationale": "Transkribera och strukturera mötet innan DOCX skapas.",
-            "runtime_input": {"input_type": "audio", "required": True},
             "input_fields": [
                 {
                     "variable_name": "language",
@@ -3557,7 +3586,6 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
         {
             "flow_name": "Customer reply",
             "plan_rationale": "Classify first, then draft the reply.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Receive question",
@@ -3619,7 +3647,6 @@ def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> N
         {
             "flow_name": "Structured intake",
             "plan_rationale": "Extract structured fields before writing.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Extract intake",
@@ -3657,7 +3684,6 @@ def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> 
         {
             "flow_name": "Audience reply",
             "plan_rationale": "Use runtime audience metadata while drafting.",
-            "runtime_input": {"input_type": "text", "required": True},
             "input_fields": [
                 {
                     "variable_name": "audience",
@@ -3702,7 +3728,6 @@ def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
         {
             "flow_name": "Document summary",
             "plan_rationale": "Prepare uploaded documents before summarizing.",
-            "runtime_input": {"input_type": "document", "required": True},
             "steps": [
                 {
                     "name": "Read documents",
@@ -3718,7 +3743,10 @@ def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
         }
     )
 
-    draft = compile_outline_to_create_draft(outline)
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=OutlineCompileContext(runtime_input_type=InputType.DOCUMENT),
+    )
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
@@ -3732,7 +3760,6 @@ def test_compile_outline_flow_preserves_leading_step_with_model_ref() -> None:
         {
             "flow_name": "Specialized first pass",
             "plan_rationale": "Use a selected model for the first pass.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Specialized reading",
@@ -3766,7 +3793,6 @@ def test_compile_outline_flow_preserves_leading_step_with_knowledge_refs() -> No
         {
             "flow_name": "Policy grounded reply",
             "plan_rationale": "Ground the first pass in a selected knowledge base.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Ground in policy",
@@ -3797,7 +3823,6 @@ def test_compile_outline_flow_folds_before_final_artifact_append() -> None:
         {
             "flow_name": "DOCX report",
             "plan_rationale": "Prepare source text and generate a report.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Receive text",
@@ -3971,12 +3996,26 @@ def test_outline_compile_context_does_not_extract_runtime_hints_from_empty_sourc
     assert context.runtime_input_field_hints == ()
 
 
+def test_outline_compile_context_treats_architecture_any_input_as_no_override() -> None:
+    state = _committed_architecture_state(
+        input_type="any",
+        output_type="text",
+        output_mode="pass_through",
+        chosen_patterns=[],
+        required_capabilities=[],
+    )
+
+    context = outline_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_type is None
+
+
 def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() -> None:
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Audio report",
             "plan_rationale": "Transcribe and summarize.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Transcribe",
@@ -6763,7 +6802,6 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
         {
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Transkribera ljud och skapa rapport.",
-            "runtime_input": {"input_type": "audio", "required": True},
             "steps": [
                 {
                     "name": "Etablera möteskontext",
@@ -6799,7 +6837,10 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
     outline_compiled = compile_create_draft(
         compile_outline_to_create_draft(
             outline,
-            context=OutlineCompileContext(ui_language="sv"),
+            context=OutlineCompileContext(
+                runtime_input_type=InputType.AUDIO,
+                ui_language="sv",
+            ),
         )
     )
     direct_compiled = compile_create_draft(
@@ -7498,7 +7539,6 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         {
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Analysera transkriberat ljud och skapa rapport.",
-            "runtime_input": {"input_type": "audio", "required": True},
             "steps": [
                 {
                     "name": "Etablera gemensam möteskontext",
@@ -7554,6 +7594,7 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
     draft = compile_outline_to_create_draft(
         outline,
         context=OutlineCompileContext(
+            runtime_input_type=InputType.AUDIO,
             final_output_type=OutputType(final_output_type),
             ui_language="sv",
         ),
@@ -7609,7 +7650,6 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
         {
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Transkribera ljud och skapa rapport.",
-            "runtime_input": {"input_type": "audio", "required": True},
             "steps": [
                 {
                     "name": "Transkribera ljud",
@@ -7627,6 +7667,7 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
     draft = compile_outline_to_create_draft(
         outline,
         context=OutlineCompileContext(
+            runtime_input_type=InputType.AUDIO,
             final_output_type=OutputType.PDF,
             ui_language="sv",
         ),
@@ -8374,7 +8415,6 @@ def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> Non
         {
             "flow_name": "Structured extraction",
             "plan_rationale": "Extract fields, then summarize.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Extract fields",
@@ -8408,7 +8448,6 @@ def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
         {
             "flow_name": "Structured intermediate",
             "plan_rationale": "Create an intermediate JSON result before prose.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Build structure",
@@ -8509,7 +8548,6 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
         {
             "flow_name": "DOCX report",
             "plan_rationale": "Backend owns the artifact output.",
-            "runtime_input": {"input_type": "document", "required": True},
             "steps": [
                 {
                     "name": "Write report",
@@ -8526,7 +8564,10 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
     ):
         draft = compile_outline_to_create_draft(
             outline,
-            context=OutlineCompileContext(final_output_type=OutputType.DOCX),
+            context=OutlineCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.DOCX,
+            ),
         )
     drift_records = [
         record
@@ -8547,7 +8588,6 @@ def test_compile_outline_flow_default_outline_stays_linear() -> None:
         {
             "flow_name": "Synthesis",
             "plan_rationale": "Analyze two branches and synthesize.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {"name": "Branch A", "task": "Analyze from angle A."},
                 {"name": "Branch B", "task": "Analyze from angle B."},
@@ -8609,7 +8649,6 @@ def test_compile_outline_flow_does_not_fold_mcp_entry_step() -> None:
         {
             "flow_name": "MCP-flöde",
             "plan_rationale": "Hämtar externt underlag och skriver svar.",
-            "runtime_input": {"input_type": "text", "required": True},
             "steps": [
                 {
                     "name": "Hämta underlag",
