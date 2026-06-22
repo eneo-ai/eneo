@@ -22,12 +22,12 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
-from intric.flows.ai_builder.ai_builder_new_step_schema import (
-    build_review_mode_schema,
-    build_structured_field_schema,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
+)
+from intric.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
+    build_review_mode_schema,
+    build_structured_field_schema,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
     looks_like_structured_field_spec,

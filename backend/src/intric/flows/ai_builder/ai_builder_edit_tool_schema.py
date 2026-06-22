@@ -14,13 +14,13 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
 )
-from intric.flows.ai_builder.ai_builder_new_step_schema import (
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+)
+from intric.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_previous_field_refs_schema,
     build_review_mode_schema,
     build_structured_field_schema,
-)
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderResourceCatalog,
 )
 from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowMcpPolicy
