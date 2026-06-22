@@ -1,0 +1,92 @@
+name: Request Eneo AI review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: eneo-ai-review-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  request-review:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == '@review' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HERMES_REVIEW_URL: ${{ secrets.HERMES_REVIEW_URL }}
+      HERMES_WEBHOOK_SECRET: ${{ secrets.HERMES_WEBHOOK_SECRET }}
+      ALLOWED_USERS: ${{ vars.AI_REVIEW_ALLOWED_USERS }}
+
+    steps:
+      - name: Authorize requester and send signed review request
+        shell: python
+        run: |
+          import hashlib
+          import hmac
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
+              event = json.load(handle)
+
+          if event["comment"]["body"].strip() != "@review":
+              raise SystemExit("The trigger must be exactly @review")
+
+          requester = event["comment"]["user"]["login"]
+          allowed = {
+              item.casefold()
+              for item in re.split(r"[\s,]+", os.environ.get("ALLOWED_USERS", "").strip())
+              if item
+          }
+          if not allowed:
+              raise SystemExit("AI_REVIEW_ALLOWED_USERS is empty; deny by default")
+          if requester.casefold() not in allowed:
+              raise SystemExit(f"{requester} is not allowlisted to invoke the reviewer")
+
+          association = event["comment"].get("author_association", "")
+          if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+              raise SystemExit("The requester is not a trusted repository maintainer")
+
+          payload = {
+              "repository": {"full_name": event["repository"]["full_name"]},
+              "pull_request": {"number": event["issue"]["number"]},
+              "requester": {"login": requester, "association": association},
+              "request": {"comment_id": event["comment"]["id"]},
+          }
+          body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+          secret = os.environ["HERMES_WEBHOOK_SECRET"].encode("utf-8")
+          signature = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
+
+          request = urllib.request.Request(
+              os.environ["HERMES_REVIEW_URL"],
+              data=body,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "User-Agent": "Eneo-AI-Review-Trigger/2.0",
+                  "X-GitHub-Event": "issue_comment",
+                  # Keep this stable across workflow retries so Hermes' one-hour
+                  # idempotency cache cannot start a duplicate agent run.
+                  "X-GitHub-Delivery": str(event["comment"]["id"]),
+                  "X-Hub-Signature-256": signature,
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=900) as response:
+                  text = response.read(4096).decode("utf-8", errors="replace")
+                  print(f"Hermes accepted the request: HTTP {response.status} {text}")
+          except urllib.error.HTTPError as error:
+              detail = error.read(4096).decode("utf-8", errors="replace")
+              raise SystemExit(f"Hermes rejected the request: HTTP {error.code} {detail}")
+          except urllib.error.URLError as error:
+              raise SystemExit(f"Hermes could not be reached: {error.reason}")
