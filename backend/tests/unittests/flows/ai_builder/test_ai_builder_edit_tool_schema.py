@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
@@ -272,7 +273,7 @@ class TestBuildEditFlowToolSchema:
         assert "Omit to preserve" in description
         assert "set null to clear all" in description
 
-    def test_add_payload_uses_shared_new_step_authoring_shape(self):
+    def test_add_payload_exposes_edit_new_step_authoring_shape(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=_empty_catalog(),
@@ -298,6 +299,20 @@ class TestBuildEditFlowToolSchema:
             "edit",
             None,
         ]
+
+    def test_add_payload_schema_tracks_new_step_draft_authorable_fields(self):
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+
+        add_payload = _add_step_payload_schema(schema)
+        backend_owned_fields = {"uses_previous_outputs"}
+
+        assert set(add_payload["properties"]) == (
+            set(NewStepDraft.model_fields) - backend_owned_fields
+        )
 
     def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
         self,

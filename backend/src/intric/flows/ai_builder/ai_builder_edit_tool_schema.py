@@ -11,10 +11,13 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_STRUCTURED_FIELD_DEPTH,
+)
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
-    build_new_step_draft_schema,
     build_previous_field_refs_schema,
     build_review_mode_schema,
+    build_structured_field_schema,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -22,6 +25,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowMcpPolicy
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
+from intric.flows.flow_authoring_spec import InputType, OutputType
 
 
 def build_edit_flow_tool_schema(
@@ -40,7 +44,7 @@ def build_edit_flow_tool_schema(
     mcp_server_refs: list[str] | None = None
     mcp_tool_refs: list[str] | None = None
 
-    step_payload_schema = _build_step_payload_schema(
+    step_payload_schema = _build_add_step_schema(
         model_refs,
         kb_refs,
         mcp_server_refs,
@@ -241,31 +245,140 @@ def _build_form_field_spec_schema() -> dict[str, Any]:
     }
 
 
-def _build_step_payload_schema(
+def _build_add_step_schema(
     model_refs: list[str] | None,
     kb_refs: list[str] | None,
     mcp_server_refs: list[str] | None,
     mcp_tool_refs: list[str] | None,
 ) -> dict[str, Any]:
-    return build_new_step_draft_schema(
-        model_refs=model_refs,
-        kb_refs=kb_refs,
-        mcp_server_refs=mcp_server_refs,
-        mcp_tool_refs=mcp_tool_refs,
-        description=(
-            "Typed authoring draft for a new step added to an existing flow. "
-            "Describe only the new step intent; the backend derives output_mode, "
-            "bindings, contracts, and low-level config."
-        ),
-        input_source_description=(
-            "Optional advanced override for where the new step gets its primary "
-            "input. Omit it for the backend to derive 'flow_input' for the first "
-            "ordered step and 'previous_step' for later ordered steps. Use "
-            "'all_previous_steps' only when the new step must read every prior step."
-        ),
-        expose_previous_field_refs=True,
-        require_input_source=False,
+    properties: dict[str, Any] = {
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "User-visible step name.",
+        },
+        "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "Plain assistant instructions for this step. Do not include variable references like "
+                "{{ indata_text }} or {{ step_a.output.text }}."
+            ),
+        },
+        "input_source": {
+            "type": "string",
+            "enum": builder_input_source_values(),
+            "description": (
+                "Optional advanced override for where the new step gets its primary "
+                "input. Omit it for the backend to derive 'flow_input' for the first "
+                "ordered step and 'previous_step' for later ordered steps. Use "
+                "'all_previous_steps' only when the new step must read every prior step."
+            ),
+        },
+        "input_type": {
+            "type": "string",
+            "enum": builder_input_type_values(),
+            "default": InputType.TEXT.value,
+        },
+        "output_type": {
+            "type": "string",
+            "enum": builder_output_type_values(),
+            "default": OutputType.TEXT.value,
+        },
+        "runtime_required": {
+            "type": "boolean",
+            "default": False,
+            "description": "Whether the runtime input is required for this step.",
+        },
+        "runtime_max_files": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "Optional max number of files for runtime input.",
+        },
+        "uses_form_fields": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Form field variable names this step needs in its compiled underlag.",
+        },
+        "uses_previous_fields": build_previous_field_refs_schema(),
+        "document_delivery_mode": {
+            "type": "string",
+            "enum": document_delivery_mode_values(),
+            "default": "not_applicable",
+            "description": (
+                "For docx/pdf outputs: generated document or template_fill. "
+                "Only DOCX supports template_fill."
+            ),
+        },
+        "citations_requested": {
+            "type": "boolean",
+            "default": False,
+            "description": "Whether the backend should enable inline citations for this text step.",
+        },
+        "review_mode": build_review_mode_schema(),
+        "output_fields": {
+            "type": ["array", "null"],
+            "description": (
+                "Typed structured output fields for JSON output. Use these instead of raw JSON Schema. "
+                "These field objects belong inside output_fields, never directly in steps[]. "
+                f"Keep max nesting depth {MAX_STRUCTURED_FIELD_DEPTH}: top-level fields, child fields, "
+                "and one grandchild level only."
+            ),
+            "items": build_structured_field_schema(),
+        },
+        "model_ref": {
+            "type": ["string", "null"],
+            "description": "Optional portable model slot ref to use for this step.",
+        },
+        "knowledge_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": True,
+            "description": "Optional portable knowledge slot refs for this step.",
+        },
+        "mcp_server_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": True,
+            "description": (
+                "Optional portable MCP server slot refs for this step. Use only when the "
+                "step needs external tools or live data. Do not combine with knowledge_refs."
+            ),
+        },
+        "mcp_tool_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": True,
+            "description": (
+                "Optional portable MCP tool slot refs for least-privilege tool access. "
+                "Prefer this over enabling a whole server when one specific tool is enough."
+            ),
+        },
+    }
+
+    if model_refs is not None:
+        properties["model_ref"]["enum"] = [*model_refs, None]
+    if kb_refs is not None:
+        properties["knowledge_refs"]["items"]["enum"] = kb_refs
+    if mcp_server_refs is not None:
+        properties["mcp_server_refs"]["items"]["enum"] = mcp_server_refs
+    if mcp_tool_refs is not None:
+        properties["mcp_tool_refs"]["items"]["enum"] = mcp_tool_refs
+
+    description = (
+        "Typed add-step payload for a new step added to an existing flow. "
+        "Describe only the new step intent; the backend derives output_mode, "
+        "bindings, contracts, and low-level config."
+        + " Use `uses_previous_fields` instead of raw `input_bindings` "
+        "when a downstream step should reuse specific structured fields."
     )
+    return {
+        "type": "object",
+        "description": description,
+        "required": ["name", "instructions"],
+        "properties": properties,
+        "additionalProperties": False,
+    }
 
 
 def _build_assistant_spec_schema(
