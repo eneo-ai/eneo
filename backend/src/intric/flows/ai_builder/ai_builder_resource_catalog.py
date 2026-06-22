@@ -5,12 +5,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
-from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPServerResource,
     normalize_ai_builder_mcp_resources,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
@@ -534,52 +532,6 @@ def collect_flow_spec_resource_bindings(
                 ref=ref,
             )
     return tuple(bindings_by_slot.values())
-
-
-def canonicalize_create_draft_resources(
-    draft: FlowCreateDraft,
-    *,
-    catalog: AIBuilderResourceCatalog,
-) -> tuple[FlowCreateDraft, list[AIBuilderResourceResolutionIssue]]:
-    issues: list[AIBuilderResourceResolutionIssue] = []
-    updated_steps: list[NewStepDraft] = []
-    changed = False
-    for index, step in enumerate(draft.steps):
-        assistant_spec, assistant_issues = canonicalize_assistant_spec_resources(
-            AssistantSpec(
-                instructions=step.instructions or "",
-                model_ref=step.model_ref,
-                knowledge_refs=list(step.knowledge_refs),
-                mcp_server_refs=list(step.mcp_server_refs),
-                mcp_tool_refs=list(step.mcp_tool_refs),
-            ),
-            catalog=catalog,
-            location_prefix=f"steps[{index}]",
-        )
-        issues.extend(assistant_issues)
-        if (
-            assistant_spec.model_ref != step.model_ref
-            or assistant_spec.knowledge_refs != step.knowledge_refs
-            or assistant_spec.mcp_server_refs != step.mcp_server_refs
-            or assistant_spec.mcp_tool_refs != step.mcp_tool_refs
-        ):
-            changed = True
-            updated_steps.append(
-                step.model_copy(
-                    update={
-                        "model_ref": assistant_spec.model_ref,
-                        "knowledge_refs": assistant_spec.knowledge_refs,
-                        "mcp_server_refs": assistant_spec.mcp_server_refs,
-                        "mcp_tool_refs": assistant_spec.mcp_tool_refs,
-                    }
-                )
-            )
-        else:
-            updated_steps.append(step)
-
-    if not changed:
-        return draft, issues
-    return draft.model_copy(update={"steps": updated_steps}), issues
 
 
 def canonicalize_assistant_spec_resources(

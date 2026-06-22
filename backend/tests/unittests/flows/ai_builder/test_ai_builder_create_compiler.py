@@ -47,7 +47,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
-    canonicalize_create_draft_resources,
+    canonicalize_flow_spec_resources,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     DETAILED_CASE_METADATA,
@@ -74,6 +74,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
     InputType,
@@ -140,6 +141,17 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
         available_kbs=[],
         available_mcps=[],
     )
+
+
+def _compile_and_canonicalize_create_draft(
+    draft: FlowCreateDraft,
+    *,
+    catalog: AIBuilderResourceCatalog,
+) -> FlowDraftSpecCore:
+    spec = compile_create_draft(draft)
+    canonicalized, issues = canonicalize_flow_spec_resources(spec, catalog=catalog)
+    assert issues == []
+    return canonicalized
 
 
 def _field(
@@ -1961,34 +1973,6 @@ def test_structured_field_depth_above_three_is_rejected() -> None:
         )
 
 
-def test_canonicalize_create_draft_resources_resolves_names_to_refs() -> None:
-    draft = FlowCreateDraft(
-        flow_name="Resursupplösning",
-        plan_rationale="Test",
-        steps=[
-            NewStepDraft(
-                name="Analys",
-                instructions="Analysera underlaget.",
-                input_source="flow_input",
-                input_type="text",
-                output_type="text",
-                model_ref="gpt-5.4-nano",
-                knowledge_refs=["Risk KB"],
-            )
-        ],
-    )
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[_model_resource("model-1", "gpt-5.4-nano")],
-        available_kbs=[_kb_resource("kb-1", "Risk KB")],
-    )
-
-    canonicalized, issues = canonicalize_create_draft_resources(draft, catalog=catalog)
-
-    assert issues == []
-    assert canonicalized.steps[0].model_ref == "model.gpt-5-4-nano"
-    assert canonicalized.steps[0].knowledge_refs == ["knowledge.risk-kb"]
-
-
 def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
     schema = build_outline_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
@@ -2090,16 +2074,17 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
-    draft, issues = canonicalize_create_draft_resources(
+    spec = _compile_and_canonicalize_create_draft(
         compile_outline_to_create_draft(updated),
         catalog=catalog,
     )
 
-    assert issues == []
-    assert draft.steps[0].mcp_server_refs == ["mcp_server.time-mcp"]
-    assert draft.steps[0].mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
-    assert draft.steps[1].mcp_server_refs == []
-    assert draft.steps[1].mcp_tool_refs == []
+    assert spec.steps[0].assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert spec.steps[0].assistant_spec.mcp_tool_refs == [
+        "mcp_tool.time-mcp-get-current-time"
+    ]
+    assert spec.steps[1].assistant_spec.mcp_server_refs == []
+    assert spec.steps[1].assistant_spec.mcp_tool_refs == []
     record = next(
         (
             record
@@ -2155,14 +2140,15 @@ def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
-    draft, issues = canonicalize_create_draft_resources(
+    spec = _compile_and_canonicalize_create_draft(
         compile_outline_to_create_draft(updated),
         catalog=catalog,
     )
 
-    assert issues == []
-    assert draft.steps[0].mcp_server_refs == ["mcp_server.time-mcp"]
-    assert draft.steps[0].mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
+    assert spec.steps[0].assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert spec.steps[0].assistant_spec.mcp_tool_refs == [
+        "mcp_tool.time-mcp-get-current-time"
+    ]
 
 
 def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() -> None:
@@ -2204,16 +2190,19 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
-    draft, issues = canonicalize_create_draft_resources(
+    spec = _compile_and_canonicalize_create_draft(
         compile_outline_to_create_draft(updated),
         catalog=catalog,
     )
 
-    assert issues == []
-    assert draft.steps[0].mcp_server_refs == ["mcp_server.time-mcp"]
-    assert draft.steps[0].mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
-    assert draft.steps[1].mcp_server_refs == ["mcp_server.time-mcp"]
-    assert draft.steps[1].mcp_tool_refs == ["mcp_tool.time-mcp-convert-time"]
+    assert spec.steps[0].assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert spec.steps[0].assistant_spec.mcp_tool_refs == [
+        "mcp_tool.time-mcp-get-current-time"
+    ]
+    assert spec.steps[1].assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert spec.steps[1].assistant_spec.mcp_tool_refs == [
+        "mcp_tool.time-mcp-convert-time"
+    ]
 
 
 def test_selected_mcp_attachment_skips_knowledge_steps() -> None:

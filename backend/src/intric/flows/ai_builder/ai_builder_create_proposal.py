@@ -53,9 +53,7 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
-    canonicalize_create_draft_resources,
     collect_flow_spec_resource_bindings,
-    format_resource_resolution_feedback,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
@@ -307,17 +305,6 @@ async def _process_create_draft(
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
-    if resource_catalog is not None:
-        draft, resolution_issues = canonicalize_create_draft_resources(
-            draft,
-            catalog=resource_catalog,
-        )
-        if resolution_issues:
-            return ToolProcessingResult(
-                feedback=format_resource_resolution_feedback(resolution_issues),
-                failure_kind="validation",
-            )
-
     try:
         spec = compile_create_draft(
             draft,

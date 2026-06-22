@@ -311,6 +311,143 @@ async def test_outline_processing_leaves_mcp_question_persistence_to_processor()
 
 
 @pytest.mark.asyncio
+async def test_outline_processing_expands_mcp_server_name_through_compiled_spec() -> (
+    None
+):
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [
+                    {"id": "current-time", "name": "get_current_time"},
+                    {"id": "convert-time", "name": "convert_time"},
+                ],
+            }
+        ],
+    )
+
+    result = await process_outline_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Använd Time MCP för att hämta och konvertera tid.",
+            )
+        ],
+        arguments={
+            "flow_name": "Time flow",
+            "plan_rationale": "Use the selected time MCP server.",
+            "steps": [
+                {
+                    "name": "Hämta tid",
+                    "task": "Använd Time MCP för tidshämtning.",
+                    "mcp_server_refs": ["Time MCP"],
+                }
+            ],
+        },
+        tool_call_id="call-time-server",
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+    )
+
+    assert result.compiled_proposal is not None
+    assistant_spec = result.compiled_proposal.spec.steps[0].assistant_spec
+    assert assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert assistant_spec.mcp_tool_refs == [
+        "mcp_tool.time-mcp-get-current-time",
+        "mcp_tool.time-mcp-convert-time",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_outline_processing_keeps_named_mcp_tool_to_one_tool() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [
+                    {"id": "current-time", "name": "get_current_time"},
+                    {"id": "convert-time", "name": "convert_time"},
+                ],
+            }
+        ],
+    )
+
+    result = await process_outline_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Använd bara get_current_time från Time MCP.",
+            )
+        ],
+        arguments={
+            "flow_name": "Time flow",
+            "plan_rationale": "Use one selected MCP tool.",
+            "steps": [
+                {
+                    "name": "Hämta aktuell tid",
+                    "task": "Använd get_current_time för angiven tidszon.",
+                    "mcp_tool_refs": ["get_current_time"],
+                }
+            ],
+        },
+        tool_call_id="call-time-tool",
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+    )
+
+    assert result.compiled_proposal is not None
+    assistant_spec = result.compiled_proposal.spec.steps[0].assistant_spec
+    assert assistant_spec.mcp_server_refs == ["mcp_server.time-mcp"]
+    assert assistant_spec.mcp_tool_refs == ["mcp_tool.time-mcp-get-current-time"]
+
+
+@pytest.mark.asyncio
+async def test_outline_processing_reports_unknown_resource_from_compiled_spec() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[_model_resource("model-1", "gpt-5.4-nano")],
+        available_kbs=[],
+        available_mcps=[],
+    )
+
+    result = await process_outline_arguments(
+        turn=_make_turn(),
+        conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
+        arguments={
+            "flow_name": "Unknown model flow",
+            "plan_rationale": "Use a missing model ref.",
+            "steps": [
+                {
+                    "name": "Analysera",
+                    "task": "Analysera texten.",
+                    "model_ref": "missing-fast-model",
+                }
+            ],
+        },
+        tool_call_id="call-unknown-resource",
+        available_model_refs=catalog.model_refs,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+    )
+
+    assert result.compiled_proposal is None
+    assert result.failure_kind == "validation"
+    assert result.feedback is not None
+    assert "Unknown model reference 'missing-fast-model'" in result.feedback
+    assert "step 'step_a'.assistant_spec.model_ref" in result.feedback
+    assert "model.gpt-5-4-nano" in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
     result = await process_outline_arguments(
         turn=_make_turn(),
