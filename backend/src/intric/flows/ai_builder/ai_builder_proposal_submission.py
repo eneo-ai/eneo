@@ -58,7 +58,7 @@ from intric.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
 )
-from intric.flows.ai_builder.ai_builder_proposal_repair_runtime import (
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolAfterTextRequest,
     ProposalSelfCorrectionRequest,
     build_proposal_self_correction_request,

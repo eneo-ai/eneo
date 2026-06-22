@@ -27,6 +27,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_events import (
     build_text_event,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    make_usage_tracked_proposal_completion,
+)
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     build_mcp_resource_selection_question,
     find_named_mcp_request_issue,
@@ -35,13 +38,10 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
-from intric.flows.ai_builder.ai_builder_litellm_completion import (
-    make_usage_tracked_proposal_completion,
-)
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
     resolve_ui_language,
 )
-from intric.flows.ai_builder.ai_builder_proposal_repair_runtime import (
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
     build_proposal_self_correction_request,
     run_tool_self_correction,
 )
