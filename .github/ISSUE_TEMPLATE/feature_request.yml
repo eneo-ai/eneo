@@ -1,6 +1,9 @@
 name: Feature Request
 description: Suggest a new feature or improvement
-labels: ["enhancement"]
+title: "[Feature]: "
+labels: ["enhancement", "needs:triage"]
+projects: ["eneo-ai/5"]
+type: feature
 body:
   - type: markdown
     attributes:

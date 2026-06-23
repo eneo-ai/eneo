@@ -1,0 +1,91 @@
+name: Development task
+description: A buildable work item that belongs to an epic.
+title: "[Task]: "
+labels: ["kind:task", "enhancement"]
+projects: ["eneo-ai/5"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Development tasks must belong to an epic. Add the parent epic as a GitHub sub-issue relationship and reference it below.
+
+  - type: input
+    id: parent_epic
+    attributes:
+      label: Parent epic
+      description: Required. Link the epic issue, for example #123.
+      placeholder: "#123"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete problem this task solves.
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed approach
+      description: Current owner, reused logic, moved or deleted logic, contracts, data model, APIs, and edge cases.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend
+        - Frontend
+        - Infra
+        - Docs
+        - Security
+        - Other
+      default: 5
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: Reviewable implementation size.
+      options:
+        - XS
+        - S
+        - M
+        - L
+        - XL
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Tests and validation
+      description: Behavior tests, contract tests, manual checks, and commands that prove this task.
+      placeholder: |
+        - ...
+        - Command: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: What this task deliberately does not change.

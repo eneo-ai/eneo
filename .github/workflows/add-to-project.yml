@@ -1,20 +1,43 @@
-name: Add new issues and PRs to Eneo project
+name: Eneo project intake
 
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened, edited, reopened, labeled, unlabeled]
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, edited, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  PROJECT_OWNER: eneo-ai
+  PROJECT_NUMBER: "5"
+  PROJECT_URL: https://github.com/orgs/eneo-ai/projects/5
 
 jobs:
-  add-to-project:
+  intake:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out intake scripts
+        uses: actions/checkout@v4
+
+      - name: Ensure planning labels
+        run: node .github/scripts/ensure-planning-labels.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Add to Eneo project
+        if: >-
+          (github.event_name == 'issues' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action)) ||
+          (github.event_name == 'pull_request_target' && contains(fromJSON('["opened","reopened","labeled"]'), github.event.action))
         uses: actions/add-to-project@v1.0.2
         with:
-          project-url: https://github.com/orgs/eneo-ai/projects/5
+          project-url: ${{ env.PROJECT_URL }}
           github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+      - name: Validate planning metadata
+        run: node .github/scripts/project-intake.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

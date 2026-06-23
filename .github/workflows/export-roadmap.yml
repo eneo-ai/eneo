@@ -1,0 +1,38 @@
+name: Export roadmap graph
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: Export format
+        type: choice
+        options:
+          - markdown
+          - mermaid
+        default: markdown
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out export script
+        uses: actions/checkout@v4
+
+      - name: Export roadmap
+        run: |
+          node scripts/export_github_roadmap.mjs \
+            --owner eneo-ai \
+            --project 5 \
+            --format "${{ inputs.format }}" \
+            --output roadmap.${{ inputs.format == 'mermaid' && 'mmd' || 'md' }}
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+      - name: Upload roadmap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eneo-roadmap-${{ inputs.format }}
+          path: roadmap.${{ inputs.format == 'mermaid' && 'mmd' || 'md' }}

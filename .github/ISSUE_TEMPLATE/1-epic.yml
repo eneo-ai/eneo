@@ -1,0 +1,118 @@
+name: Epic
+description: Plan a roadmap-level outcome that can own multiple development tasks.
+title: "[Epic]: "
+labels: ["kind:epic", "enhancement"]
+projects: ["eneo-ai/5"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use an epic for roadmap work that should be visible by version, such as "planned for 2.1" or "planned for 2.2".
+        Development tasks should be linked to the epic as sub-issues or reference the epic issue number.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Two to four sentences describing the user-visible outcome and why it matters.
+      placeholder: Users should be able to ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: roadmap_version
+    attributes:
+      label: Roadmap version
+      description: The planned release bucket. Update this issue when planning moves.
+      options:
+        - Unscheduled
+        - 2.1
+        - 2.2
+        - 2.3
+        - Future
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Relative planning priority inside the roadmap version.
+      options:
+        - P0
+        - P1
+        - P2
+        - P3
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Primary ownership area.
+      options:
+        - Backend
+        - Frontend
+        - Infra
+        - Docs
+        - Security
+        - Other
+      default: 5
+    validations:
+      required: true
+
+  - type: textarea
+    id: graph
+    attributes:
+      label: Flow / architecture
+      description: Optional Mermaid diagram for the main flow or architecture.
+      value: |
+        ```mermaid
+        flowchart LR
+          User[User] --> Frontend[Frontend]
+          Frontend --> Backend[Backend]
+        ```
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What this epic owns. Keep this at the behavior and contract level.
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: development_tasks
+    attributes:
+      label: Development tasks
+      description: Link child development issues here once they exist. Prefer GitHub sub-issues when available.
+      value: |
+        - [ ] #123
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Observable outcomes that prove the epic is done.
+      value: |
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Explicitly excluded work to protect the epic boundary.
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and rollback
+      description: Main delivery risks, operational risks, and how to recover if the direction is wrong.
