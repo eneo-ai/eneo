@@ -12,9 +12,12 @@ concurrency:
 
 jobs:
   request-review:
+    # Coarse gate: a PR comment that starts with the trigger token. The Python step
+    # below is the precise, security-relevant gate (exact token after strip + allowlist
+    # + association), so a trailing space or newline no longer silently drops a request.
     if: >-
       github.event.issue.pull_request &&
-      github.event.comment.body == '@review' &&
+      (startsWith(github.event.comment.body, '@review') || startsWith(github.event.comment.body, '/review')) &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -38,8 +41,10 @@ jobs:
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
               event = json.load(handle)
 
-          if event["comment"]["body"].strip() != "@review":
-              raise SystemExit("The trigger must be exactly @review")
+          # Precise gate: exactly "@review" or "/review" after trimming whitespace.
+          trigger = event["comment"]["body"].strip()
+          if trigger not in {"@review", "/review"}:
+              raise SystemExit(f"ignored: trigger must be exactly '@review' or '/review' (got {trigger!r})")
 
           requester = event["comment"]["user"]["login"]
           allowed = {
@@ -48,13 +53,13 @@ jobs:
               if item
           }
           if not allowed:
-              raise SystemExit("AI_REVIEW_ALLOWED_USERS is empty; deny by default")
+              raise SystemExit("ignored: AI_REVIEW_ALLOWED_USERS is empty; deny by default")
           if requester.casefold() not in allowed:
-              raise SystemExit(f"{requester} is not allowlisted to invoke the reviewer")
+              raise SystemExit(f"ignored: {requester} is not allowlisted to invoke the reviewer")
 
           association = event["comment"].get("author_association", "")
           if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
-              raise SystemExit("The requester is not a trusted repository maintainer")
+              raise SystemExit(f"ignored: {requester} is not a trusted repository maintainer ({association})")
 
           payload = {
               "repository": {"full_name": event["repository"]["full_name"]},
