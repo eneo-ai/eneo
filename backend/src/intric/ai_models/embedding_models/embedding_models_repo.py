@@ -4,9 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelCreate,
     EmbeddingModelLegacy,
-    EmbeddingModelUpdate,
 )
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
@@ -27,10 +25,7 @@ class AdminEmbeddingModelsService:
         # Query the model with tenant filtering
         stmt = sa.select(EmbeddingModels).where(
             EmbeddingModels.id == id,
-            sa.or_(
-                EmbeddingModels.tenant_id.is_(None),
-                EmbeddingModels.tenant_id == tenant_id,
-            ),
+            EmbeddingModels.tenant_id == tenant_id,
             EmbeddingModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
@@ -47,17 +42,6 @@ class AdminEmbeddingModelsService:
 
     async def get_model_by_name(self, name: str) -> EmbeddingModelLegacy | None:
         return await self.delegate.get_by(conditions={EmbeddingModels.name: name})
-
-    async def create_model(self, model: EmbeddingModelCreate) -> EmbeddingModelLegacy:
-        return await self.delegate.add(model)
-
-    async def update_model(
-        self, model: EmbeddingModelUpdate
-    ) -> EmbeddingModelLegacy | None:
-        return await self.delegate.update(model)
-
-    async def delete_model(self, id: UUID) -> EmbeddingModelLegacy | None:
-        return await self.delegate.delete(id)
 
     async def get_models(
         self,
@@ -77,14 +61,8 @@ class AdminEmbeddingModelsService:
         if id_list is not None:
             stmt = stmt.where(EmbeddingModels.id.in_(id_list))
 
-        # Filter to tenant's models
         if tenant_id is not None:
-            stmt = stmt.where(
-                sa.or_(
-                    EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == tenant_id,
-                )
-            )
+            stmt = stmt.where(EmbeddingModels.tenant_id == tenant_id)
 
         result = await self.session.execute(stmt)
         db_models = result.scalars().all()

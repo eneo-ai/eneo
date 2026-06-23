@@ -144,12 +144,13 @@ def _snapshot_completion_capabilities(
 
 
 def _ensure_tenant_owned(model: Any) -> None:
-    """Block updates/deletes against rows that escaped the tenant_id filter
-    (e.g. global models surfaced through a shared table). The router's
-    SELECT already filters by tenant_id; this is the belt-and-braces
-    guard for the rare case the row's `tenant_id` itself is NULL."""
+    """Block updates/deletes against rows that escaped the tenant_id filter.
+
+    The SELECT already filters by tenant_id; this is the belt-and-braces guard
+    for legacy dirty rows that predate the tenant-owned model invariant.
+    """
     if model.tenant_id is None:
-        raise UnauthorizedException("Cannot modify global models")
+        raise UnauthorizedException("Cannot modify models without tenant ownership")
 
 
 async def _audit(
@@ -340,7 +341,8 @@ class TenantCompletionModelService:
         # re-discover with both fields settled. An explicit capability payload
         # below still wins over the refreshed snapshot.
         if payload.name is not None or payload.reasoning is not None:
-            if model.provider_id is None:
+            provider_id = getattr(model, "provider_id", None)
+            if provider_id is None:
                 raise BadRequestException(
                     "Tenant completion model is missing its provider"
                 )
@@ -348,7 +350,7 @@ class TenantCompletionModelService:
                 session=self.session,
                 tenant_id=self.user.tenant_id,
             )
-            provider = await provider_repo.get_by_id(model.provider_id)
+            provider = await provider_repo.get_by_id(provider_id)
             model.model_kwargs_capabilities = _snapshot_completion_capabilities(
                 provider.provider_type,
                 model.name,

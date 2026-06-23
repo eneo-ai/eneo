@@ -6535,7 +6535,7 @@ export interface paths {
     put?: never;
     /**
      * Create Completion Model
-     * @description Create global completion model metadata (system-wide operation).
+     * @description Deprecated. Completion models must be created through tenant-scoped admin model routes.
      */
     post: operations["create_completion_model_api_v1_sysadmin_completion_models_create_post"];
     delete?: never;
@@ -6554,7 +6554,7 @@ export interface paths {
     get?: never;
     /**
      * Update Completion Model Metadata
-     * @description Update global completion model metadata (system-wide operation).
+     * @description Deprecated. Completion model metadata must be updated through tenant-scoped admin model routes.
      */
     put: operations["update_completion_model_metadata_api_v1_sysadmin_completion_models__id__metadata_put"];
     post?: never;
@@ -6576,7 +6576,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Completion Model
-     * @description Soft-delete global completion model metadata (system-wide operation).
+     * @description Deprecated. Completion models must be deleted through tenant-scoped admin model routes.
      */
     delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
     options?: never;
@@ -6595,7 +6595,7 @@ export interface paths {
     put?: never;
     /**
      * Create Embedding Model
-     * @description Create global embedding model metadata (system-wide operation).
+     * @description Deprecated. Embedding models must be created through tenant-scoped admin model routes.
      */
     post: operations["create_embedding_model_api_v1_sysadmin_embedding_models_create_post"];
     delete?: never;
@@ -6614,7 +6614,7 @@ export interface paths {
     get?: never;
     /**
      * Update Embedding Model Metadata
-     * @description Update global embedding model metadata (system-wide operation).
+     * @description Deprecated. Embedding model metadata must be updated through tenant-scoped admin model routes.
      */
     put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
     post?: never;
@@ -6636,7 +6636,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Embedding Model
-     * @description Soft-delete global embedding model metadata (system-wide operation).
+     * @description Deprecated. Embedding models must be deleted through tenant-scoped admin model routes.
      */
     delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
     options?: never;
@@ -9439,55 +9439,6 @@ export interface components {
       readonly token_limit: number;
       readonly supported_model_kwargs: components["schemas"]["SupportedModelKwargs"];
     };
-    /** CompletionModelCreate */
-    CompletionModelCreate: {
-      /** Name */
-      name: string;
-      /** Nickname */
-      nickname?: string | null;
-      /** Family */
-      family?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens: number;
-      /** Max Output Tokens */
-      max_output_tokens: number;
-      /** Is Deprecated */
-      is_deprecated: boolean;
-      /** Nr Billion Parameters */
-      nr_billion_parameters?: number | null;
-      /** Hf Link */
-      hf_link?: string | null;
-      /** Stability */
-      stability?: string | null;
-      /** Hosting */
-      hosting?: string | null;
-      /** Open Source */
-      open_source?: boolean | null;
-      /** Description */
-      description?: string | null;
-      /** Deployment Name */
-      deployment_name?: string | null;
-      /** Org */
-      org?: string | null;
-      /** Vision */
-      vision: boolean;
-      /** Reasoning */
-      reasoning: boolean;
-      /**
-       * Supports Tool Calling
-       * @default false
-       */
-      supports_tool_calling?: boolean;
-      /** Base Url */
-      base_url?: string | null;
-      /** Litellm Model Name */
-      litellm_model_name?: string | null;
-      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
-      /** Input Cost Per Token */
-      input_cost_per_token?: number | string | null;
-      /** Output Cost Per Token */
-      output_cost_per_token?: number | string | null;
-    };
     /** CompletionModelPublic */
     CompletionModelPublic: {
       /** Created At */
@@ -10558,39 +10509,6 @@ export interface components {
       /** Prompt Locked */
       prompt_locked: boolean;
     };
-    /** EmbeddingModelCreate */
-    EmbeddingModelCreate: {
-      /** Name */
-      name: string;
-      /** Family */
-      family?: string | null;
-      /** Is Deprecated */
-      is_deprecated: boolean;
-      /** Open Source */
-      open_source: boolean;
-      /** Dimensions */
-      dimensions?: number | null;
-      /** Max Input */
-      max_input?: number | null;
-      /** Max Batch Size */
-      max_batch_size?: number | null;
-      /** Hf Link */
-      hf_link?: string | null;
-      /** Stability */
-      stability?: string | null;
-      /** Hosting */
-      hosting?: string | null;
-      /** Description */
-      description?: string | null;
-      /** Org */
-      org?: string | null;
-      /** Litellm Model Name */
-      litellm_model_name?: string | null;
-      /** Input Cost Per Token */
-      input_cost_per_token?: number | string | null;
-      /** Output Cost Per Token */
-      output_cost_per_token?: number | string | null;
-    };
     /** EmbeddingModelLegacy */
     EmbeddingModelLegacy: {
       /** Created At */
@@ -10842,48 +10760,6 @@ export interface components {
       deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
-    };
-    /** EmbeddingModelSparse */
-    EmbeddingModelSparse: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /** Family */
-      family?: string | null;
-      /** Is Deprecated */
-      is_deprecated: boolean;
-      /** Open Source */
-      open_source: boolean;
-      /** Dimensions */
-      dimensions?: number | null;
-      /** Max Input */
-      max_input?: number | null;
-      /** Max Batch Size */
-      max_batch_size?: number | null;
-      /** Hf Link */
-      hf_link?: string | null;
-      /** Stability */
-      stability?: string | null;
-      /** Hosting */
-      hosting?: string | null;
-      /** Description */
-      description?: string | null;
-      /** Org */
-      org?: string | null;
-      /** Litellm Model Name */
-      litellm_model_name?: string | null;
-      /** Input Cost Per Token */
-      input_cost_per_token?: string | null;
-      /** Output Cost Per Token */
-      output_cost_per_token?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -13834,89 +13710,6 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
-    };
-    /** PartialCompletionModelUpdate */
-    PartialCompletionModelUpdate: {
-      /** Name */
-      name?: string | null;
-      /** Nickname */
-      nickname?: string | null;
-      /** Family */
-      family?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens?: number | null;
-      /** Max Output Tokens */
-      max_output_tokens?: number | null;
-      /** Is Deprecated */
-      is_deprecated?: boolean | null;
-      /** Nr Billion Parameters */
-      nr_billion_parameters?: number | null;
-      /** Hf Link */
-      hf_link?: string | null;
-      /** Stability */
-      stability?: string | null;
-      /** Hosting */
-      hosting?: string | null;
-      /** Open Source */
-      open_source?: boolean | null;
-      /** Description */
-      description?: string | null;
-      /** Deployment Name */
-      deployment_name?: string | null;
-      /** Org */
-      org?: string | null;
-      /** Vision */
-      vision?: boolean | null;
-      /** Reasoning */
-      reasoning?: boolean | null;
-      /** Supports Tool Calling */
-      supports_tool_calling?: boolean | null;
-      /** Base Url */
-      base_url?: string | null;
-      /** Litellm Model Name */
-      litellm_model_name?: string | null;
-      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
-      /** Input Cost Per Token */
-      input_cost_per_token?: number | string | null;
-      /** Output Cost Per Token */
-      output_cost_per_token?: number | string | null;
-      /** Id */
-      id?: string | null;
-    };
-    /** PartialEmbeddingModelUpdate */
-    PartialEmbeddingModelUpdate: {
-      /** Name */
-      name?: string | null;
-      /** Family */
-      family?: string | null;
-      /** Is Deprecated */
-      is_deprecated?: boolean | null;
-      /** Open Source */
-      open_source?: boolean | null;
-      /** Dimensions */
-      dimensions?: number | null;
-      /** Max Input */
-      max_input?: number | null;
-      /** Max Batch Size */
-      max_batch_size?: number | null;
-      /** Hf Link */
-      hf_link?: string | null;
-      /** Stability */
-      stability?: string | null;
-      /** Hosting */
-      hosting?: string | null;
-      /** Description */
-      description?: string | null;
-      /** Org */
-      org?: string | null;
-      /** Litellm Model Name */
-      litellm_model_name?: string | null;
-      /** Input Cost Per Token */
-      input_cost_per_token?: number | string | null;
-      /** Output Cost Per Token */
-      output_cost_per_token?: number | string | null;
-      /** Id */
-      id?: string | null;
     };
     /** PartialPropUserUpdate */
     PartialPropUserUpdate: {
@@ -39969,11 +39762,7 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CompletionModelCreate"];
-      };
-    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -39981,16 +39770,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["CompletionModelSparse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": unknown;
         };
       };
       /** @description Unauthorized */
@@ -40002,22 +39782,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
-      409: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -40031,11 +39802,7 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PartialCompletionModelUpdate"];
-      };
-    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -40043,7 +39810,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["CompletionModelSparse"];
+          "application/json": unknown;
         };
       };
       /** @description Unauthorized */
@@ -40055,17 +39822,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Conflict */
-      409: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -40107,15 +39865,6 @@ export interface operations {
           "application/json": unknown;
         };
       };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Unauthorized */
       401: {
         headers: {
@@ -40125,8 +39874,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -40152,11 +39901,7 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["EmbeddingModelCreate"];
-      };
-    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -40164,16 +39909,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["EmbeddingModelSparse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": unknown;
         };
       };
       /** @description Unauthorized */
@@ -40185,22 +39921,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
-      409: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -40214,11 +39941,7 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["PartialEmbeddingModelUpdate"];
-      };
-    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -40226,7 +39949,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["EmbeddingModelSparse"];
+          "application/json": unknown;
         };
       };
       /** @description Unauthorized */
@@ -40238,17 +39961,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Conflict */
-      409: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -40290,15 +40004,6 @@ export interface operations {
           "application/json": unknown;
         };
       };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Unauthorized */
       401: {
         headers: {
@@ -40308,8 +40013,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };

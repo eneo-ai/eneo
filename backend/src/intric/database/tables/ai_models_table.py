@@ -62,12 +62,12 @@ class CompletionModels(BasePublic):
         Numeric(20, 12), nullable=True
     )
 
-    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
-    tenant_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    # Model rows are tenant-owned and backed by an explicit provider.
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False, index=True
     )
-    provider_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    provider_id: Mapped[UUID] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Settings (previously in separate completion_model_settings table)
@@ -79,7 +79,7 @@ class CompletionModels(BasePublic):
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="completion_models")
     )
-    provider: Mapped[Optional[ModelProviders]] = relationship()
+    provider: Mapped[ModelProviders] = relationship()
 
     # Lifecycle: migration tracking and soft-delete
     migrated_to_model_id: Mapped[Optional[UUID]] = mapped_column(
@@ -97,8 +97,8 @@ class CompletionModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
-            name="ck_completion_models_tenant_provider",
+            "tenant_id IS NOT NULL AND provider_id IS NOT NULL",
+            name="ck_completion_models_tenant_provider_required",
         ),
     )
 
@@ -129,12 +129,12 @@ class TranscriptionModels(BasePublic):
         Numeric(20, 6), nullable=True
     )
 
-    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
-    tenant_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    # Model rows are tenant-owned and backed by an explicit provider.
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False, index=True
     )
-    provider_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    provider_id: Mapped[UUID] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Settings (previously in separate transcription_model_settings table)
@@ -159,8 +159,8 @@ class TranscriptionModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
-            name="ck_transcription_models_tenant_provider",
+            "tenant_id IS NOT NULL AND provider_id IS NOT NULL",
+            name="ck_transcription_models_tenant_provider_required",
         ),
     )
 
@@ -192,12 +192,12 @@ class EmbeddingModels(BasePublic):
         Numeric(20, 12), nullable=True
     )
 
-    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
-    tenant_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    # Model rows are tenant-owned and backed by an explicit provider.
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False, index=True
     )
-    provider_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    provider_id: Mapped[UUID] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Settings (previously in separate embedding_model_settings table)
@@ -218,8 +218,8 @@ class EmbeddingModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
-            name="ck_embedding_models_tenant_provider",
+            "tenant_id IS NOT NULL AND provider_id IS NOT NULL",
+            name="ck_embedding_models_tenant_provider_required",
         ),
     )
 

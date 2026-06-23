@@ -5,7 +5,6 @@ from uuid import uuid4
 import pytest
 
 from intric.ai_models.ai_models_service import AIModelsService
-from intric.main.config import get_settings
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB
 from intric.user_groups.user_group import UserGroupInDB
@@ -180,8 +179,9 @@ async def test_embedding_models_flags_settings_not_exists(service: AIModelsServi
             assert not model.is_org_enabled
 
 
-async def test_azure_models_with_feature_flag_off(service: AIModelsService):
-    get_settings().using_azure_models = False
+async def test_completion_models_are_not_filtered_by_global_azure_flag(
+    service: AIModelsService,
+):
     service.completion_model_repo.get_models.return_value = [
         TEST_MODEL_GPT4,
         TEST_MODEL_CHATGPT,
@@ -190,12 +190,15 @@ async def test_azure_models_with_feature_flag_off(service: AIModelsService):
 
     models = await service.get_completion_models()
 
-    assert len(models) == 2
-    assert "azure" not in [model.family for model in models]
+    service.completion_model_repo.get_models.assert_awaited_once_with(
+        tenant_id=TEST_TENANT.id,
+        is_deprecated=False,
+        id_list=None,
+    )
+    assert [model.family for model in models] == ["openai", "openai", "azure"]
 
 
-async def test_azure_models_with_feature_flag_on(service: AIModelsService):
-    get_settings().using_azure_models = True
+async def test_completion_models_keep_repository_order(service: AIModelsService):
     service.completion_model_repo.get_models.return_value = [
         TEST_MODEL_GPT4,
         TEST_MODEL_CHATGPT,
@@ -204,30 +207,27 @@ async def test_azure_models_with_feature_flag_on(service: AIModelsService):
 
     models = await service.get_completion_models()
 
-    assert len(models) == 3
-    assert "azure" in [model.family for model in models]
+    assert [model.id for model in models] == [
+        TEST_MODEL_GPT4.id,
+        TEST_MODEL_CHATGPT.id,
+        TEST_MODEL_AZURE.id,
+    ]
 
 
-async def test_tenant_azure_models_shown_when_flag_off(service: AIModelsService):
-    # A tenant that explicitly configures an Azure provider gets family="azure"
-    # on its completion models. Those are deliberate config and must stay
-    # visible even when the global `using_azure_models` flag (which only gates
-    # the predefined global Azure models) is off. Regression for Azure
-    # completion models 200-ing on create yet never appearing in the admin
-    # list / chat picker.
-    get_settings().using_azure_models = False
+async def test_tenant_azure_models_shown_from_repository(service: AIModelsService):
+    # Azure is now just a tenant-owned provider/model combination. The global
+    # `using_azure_models` setting no longer filters read results; the repository
+    # owns tenant visibility and returns only rows for this tenant.
     tenant_azure = TEST_MODEL_AZURE.model_copy(update={"tenant_id": TEST_TENANT.id})
     service.completion_model_repo.get_models.return_value = [
         TEST_MODEL_GPT4,
-        TEST_MODEL_AZURE,  # global → hidden
-        tenant_azure,  # tenant-owned → shown
+        tenant_azure,
     ]
 
     models = await service.get_completion_models()
 
-    families = [model.family for model in models]
-    assert families.count("azure") == 1
-    assert any(model.tenant_id == TEST_TENANT.id for model in models)
+    assert [model.family for model in models] == ["openai", "azure"]
+    assert models[1].tenant_id == TEST_TENANT.id
 
 
 def test_get_latest_available_model_handles_missing_created_at(

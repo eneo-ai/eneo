@@ -110,7 +110,7 @@ class TestEmbeddingModelSoftDelete:
                     TenantEmbeddingModelUpdate(description="should not update"),
                 )
 
-    async def test_sysadmin_delete_soft_deletes_and_preserves_info_blob_model_link(
+    async def test_legacy_sysadmin_delete_does_not_mutate_tenant_embedding_model(
         self, client, super_admin_token, db_container, admin_user, space_factory
     ):
         async with db_container() as container:
@@ -136,7 +136,7 @@ class TestEmbeddingModelSoftDelete:
             f"/api/v1/sysadmin/embedding-models/{model_id}",
             headers={"X-API-Key": super_admin_token},
         )
-        assert response.status_code == 200
+        assert response.status_code == 410
 
         async with db_container() as container:
             session = container.session()
@@ -146,7 +146,7 @@ class TestEmbeddingModelSoftDelete:
                     select(EmbeddingModels).where(EmbeddingModels.id == model_id)
                 )
             ).scalar_one()
-            assert row.deleted_at is not None
+            assert row.deleted_at is None
 
             blob = (
                 await session.execute(
@@ -162,7 +162,7 @@ class TestEmbeddingModelSoftDelete:
                     )
                 )
             ).scalar_one_or_none()
-            assert link is None
+            assert link is not None
 
 
 @pytest.mark.integration

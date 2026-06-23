@@ -11,11 +11,11 @@ Tests cover:
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.spaces_table import Spaces
-from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.spaces_table import Spaces
 
 
 class TestKnowledgeDistributionBasics:
@@ -57,7 +57,9 @@ class TestKnowledgeDistributionBasics:
             await session.flush()
 
             # Create embedding model and user integration
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -129,7 +131,9 @@ class TestKnowledgeDistributionBasics:
             await session.flush()
 
             # Create embedding model and user integration
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -210,7 +214,9 @@ class TestKnowledgeDistributionBasics:
             await session.flush()
 
             # Create embedding model and user integration
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -272,7 +278,9 @@ class TestDistributionIdempotency:
             await session.flush()
 
             # Create knowledge
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -334,7 +342,9 @@ class TestDistributionScope:
             await session.flush()
 
             # Create knowledge on org space
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -444,7 +454,9 @@ class TestDistributionScope:
             await session.flush()
 
             # Create knowledge on tenant 1 org space
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant_1.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant_1.id
             )
@@ -515,7 +527,9 @@ class TestDistributionScope:
             await session.flush()
 
             # Create knowledge
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )

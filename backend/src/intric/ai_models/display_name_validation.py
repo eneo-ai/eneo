@@ -8,12 +8,10 @@ tell apart. This mirrors the partial unique indexes added in the
 `20260602_unique_display_names` migration so the service layer raises a clean
 409 instead of letting the DB throw a raw 500 on insert.
 
-Used by both the tenant model service (AddWizard path) and the sysadmin
-global-model endpoints — same rule everywhere. The predicate must stay in lockstep
-with that migration's index: active = `deleted_at IS NULL AND is_deprecated = false`,
-case-insensitive via SQL `lower()`, scoped per (tenant, provider). Global models
-always carry `provider_id IS NULL`, so they share one provider scope and stay
-unique per name; the same name may repeat across a tenant's providers.
+Used by the tenant model service (AddWizard path). The predicate must stay in
+lockstep with the active-nickname index: active = `deleted_at IS NULL AND
+is_deprecated = false`, case-insensitive via SQL `lower()`, scoped per concrete
+(tenant, provider). The same name may repeat across a tenant's providers.
 """
 
 from __future__ import annotations
@@ -33,9 +31,9 @@ async def validate_unique_display_name(
     session: "AsyncSession",
     table: Any,
     *,
-    tenant_id: UUID | None,
+    tenant_id: UUID,
     nickname: str | None,
-    provider_id: UUID | None = None,
+    provider_id: UUID,
     exclude_id: UUID | None = None,
 ) -> None:
     """Raise `NameCollisionException` if another active model in the same
@@ -43,11 +41,8 @@ async def validate_unique_display_name(
     None.
 
     `table` is one of the three model ORM tables (all carry `nickname`,
-    `deleted_at`, `is_deprecated`, `tenant_id`, `provider_id` after the
-    model-table alignment). `provider_id` is None for global models (which also
-    have no provider) and otherwise scopes the check to one provider, so a name
-    may repeat across a tenant's providers. Pass `exclude_id` on updates so a row
-    never collides with itself.
+    `deleted_at`, `is_deprecated`, `tenant_id`, `provider_id`). Pass
+    `exclude_id` on updates so a row never collides with itself.
     """
     if nickname is None:
         return
@@ -57,14 +52,8 @@ async def validate_unique_display_name(
         table.deleted_at.is_(None),
         table.is_deprecated.is_(False),
     ]
-    if tenant_id is None:
-        conditions.append(table.tenant_id.is_(None))
-    else:
-        conditions.append(table.tenant_id == tenant_id)
-    if provider_id is None:
-        conditions.append(table.provider_id.is_(None))
-    else:
-        conditions.append(table.provider_id == provider_id)
+    conditions.append(table.tenant_id == tenant_id)
+    conditions.append(table.provider_id == provider_id)
     if exclude_id is not None:
         conditions.append(table.id != exclude_id)
 

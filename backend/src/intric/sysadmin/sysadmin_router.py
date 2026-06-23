@@ -2,30 +2,21 @@ from datetime import datetime, timedelta
 from typing import Annotated, cast
 from uuid import UUID
 
-import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
-    CompletionModelCreate,
     CompletionModelPublic,
     CompletionModelSparse,
-    CompletionModelUpdate,
     CompletionModelUpdateFlags,
 )
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
-from intric.ai_models.display_name_validation import validate_unique_display_name
 from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelCreate,
     EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
-    EmbeddingModelSparse,
     EmbeddingModelUpdateFlags,
-)
-from intric.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelUpdate as EmbeddingModelMetadataUpdate,
 )
 from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
@@ -45,20 +36,10 @@ from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
 )
 from intric.database.database import AsyncSession
-from intric.database.tables.ai_models_table import (
-    CompletionModels,
-    EmbeddingModels,
-)
-from intric.database.tables.collections_table import CollectionsTable
-from intric.database.tables.info_blobs_table import InfoBlobs
-from intric.database.tables.integration_table import IntegrationKnowledge
-from intric.database.tables.spaces_table import SpacesEmbeddingModels
-from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
 from intric.main.exceptions import (
     BadRequestException,
-    ModelInUseException,
     ValidationException,
 )
 from intric.main.logging import get_logger
@@ -1290,13 +1271,14 @@ async def migrate_completion_model_for_all_tenants(
 
 
 # ============================================================================
-# AI Models CRUD Operations (System-Wide)
+# Legacy Global AI Model CRUD
 # ============================================================================
-# These endpoints allow system administrators to create, update, and delete
-# AI model metadata. They require ENEO_SUPER_API_KEY authentication.
-# Note: These endpoints manage global model metadata only, not tenant-specific
-# settings. To enable/disable models for specific tenants, use the tenant-scoped
-# endpoints in the completion_models and embedding_models routers.
+# Model ownership now lives exclusively in tenant-scoped model rows with a
+# concrete provider. The old sysadmin CRUD API created provider-less global rows,
+# which made tenant/admin model state diverge and allowed dirty databases to
+# recreate hidden global models. Keep these routes present long enough to give
+# old clients an explicit deprecation response instead of silently mutating the
+# wrong owner.
 # ============================================================================
 
 
@@ -1305,134 +1287,63 @@ async def migrate_completion_model_for_all_tenants(
 
 @router.post(
     "/completion-models/create",
-    response_model=CompletionModelSparse,
-    description="Create global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([400, 401, 409]),
+    response_model=None,
+    description="Deprecated. Completion models must be created through tenant-scoped admin model routes.",
+    responses=responses.get_responses([401, 410]),
 )
 async def create_completion_model(
-    model_data: CompletionModelCreate,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
-) -> CompletionModelSparse:
-    """
-    Create a new completion model (system-wide operation).
-
-    Requires: X-API-Key header with ENEO_SUPER_API_KEY
-
-    This creates the model metadata only. To enable it for a tenant,
-    use POST /api/v1/completion-models/{id}/ with tenant credentials.
-    """
-    # AUDIT GAP: sysadmin model lifecycle does not emit audit_log rows.
-    # audit_logs.tenant_id is NOT NULL but a global model has no owning
-    # tenant at create time. The tenant-scoped /tenant-models/ routes
-    # already audit COMPLETION_MODEL_CREATED via tenant_model_service;
-    # this path is reachable only by ENEO_SUPER_API_KEY (cross-tenant
-    # operator), and observability lives in app logs for now. A clean
-    # fix needs either a system-tenant convention or a separate
-    # sysadmin_audit store; tracked as follow-up.
-    session = cast(AsyncSession, container.session())
-    async with session.begin():
-        await validate_unique_display_name(
-            session,
-            CompletionModels,
-            tenant_id=None,
-            nickname=getattr(model_data, "nickname", None),
-        )
-        repo = CompletionModelsRepository(session=session)
-        model = await repo.create_model(model_data)
-
-    return CompletionModelSparse.model_validate(model)
+):
+    _ = container
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Global completion model CRUD has been removed. Create or update "
+            "tenant-owned models through /api/v1/admin/tenant-models/completion/ "
+            "with an explicit provider_id."
+        ),
+    )
 
 
 @router.put(
     "/completion-models/{id}/metadata",
-    response_model=CompletionModelSparse,
-    description="Update global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([401, 404, 409]),
+    response_model=None,
+    description="Deprecated. Completion model metadata must be updated through tenant-scoped admin model routes.",
+    responses=responses.get_responses([401, 410]),
 )
 async def update_completion_model_metadata(
     id: UUID,
-    model_data: CompletionModelUpdate,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
-) -> CompletionModelSparse:
-    """
-    Update completion model metadata (system-wide operation).
-
-    Requires: X-API-Key header with ENEO_SUPER_API_KEY
-
-    Updates global model metadata. Does not affect tenant-specific settings.
-    """
-    from intric.main.exceptions import NotFoundException
-
-    session = cast(AsyncSession, container.session())
-    async with session.begin():
-        repo = CompletionModelsRepository(session=session)
-
-        await validate_unique_display_name(
-            session,
-            CompletionModels,
-            tenant_id=None,
-            nickname=getattr(model_data, "nickname", None),
-            exclude_id=id,
-        )
-
-        # Ensure model_data has the id
-        update_with_id = CompletionModelUpdate(
-            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
-        )
-        model = await repo.update_model(update_with_id)
-
-        if model is None:
-            raise NotFoundException(f"Completion model with id {id} not found")
-
-    return CompletionModelSparse.model_validate(model)
+):
+    _ = (id, container)
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Global completion model metadata cannot be updated. Update the "
+            "tenant-owned model row through /api/v1/admin/tenant-models/completion/."
+        ),
+    )
 
 
 @router.delete(
     "/completion-models/{id}",
     response_model=None,
-    description="Soft-delete global completion model metadata (system-wide operation).",
-    responses=responses.get_responses([404, 400, 401]),
+    description="Deprecated. Completion models must be deleted through tenant-scoped admin model routes.",
+    responses=responses.get_responses([401, 410]),
 )
 async def delete_completion_model(
     id: UUID,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
     force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
-    """
-    Soft-delete a completion model (system-wide operation).
-
-    Requires: X-API-Key header with ENEO_SUPER_API_KEY
-
-    WARNING: Affects all tenants. Use with caution.
-    Set force=true to hard-delete (may break references).
-    """
-    # AUDIT GAP: same constraint as create_completion_model — no tenant
-    # to attach the audit row to. App logs are the only trace today.
-    session = cast(AsyncSession, container.session())
-    async with session.begin():
-        repo = CompletionModelsRepository(session=session)
-        if force:
-            # Hard-delete: 20260402_lifecycle changed questions.completion_model_id
-            # from SET NULL → RESTRICT so historical attribution can't be silently
-            # erased. If any question references this model the DELETE will fail
-            # with IntegrityError; surface it as MODEL_IN_USE (400) so operators
-            # see a useful error instead of a 500.
-            import sqlalchemy as sa
-            from sqlalchemy.exc import IntegrityError
-
-            from intric.database.tables.ai_models_table import CompletionModels
-
-            stmt = sa.delete(CompletionModels).where(CompletionModels.id == id)
-            try:
-                await session.execute(stmt)
-            except IntegrityError as exc:
-                raise ModelInUseException() from exc
-        else:
-            if await repo.has_active_references(id):
-                raise ModelInUseException()
-            await repo.delete_model(id)
-
-    return {"success": True, "message": f"Model {id} deleted successfully"}
+    _ = (id, container, force)
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Global completion model deletion has been removed. Delete the "
+            "tenant-owned model row through /api/v1/admin/tenant-models/completion/."
+        ),
+    )
 
 
 # Embedding Models CRUD
@@ -1440,171 +1351,63 @@ async def delete_completion_model(
 
 @router.post(
     "/embedding-models/create",
-    response_model=EmbeddingModelSparse,
-    description="Create global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([400, 401, 409]),
+    response_model=None,
+    description="Deprecated. Embedding models must be created through tenant-scoped admin model routes.",
+    responses=responses.get_responses([401, 410]),
 )
 async def create_embedding_model(
-    model_data: EmbeddingModelCreate,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
-) -> EmbeddingModelSparse:
-    """
-    Create a new embedding model (system-wide operation).
-
-    Requires: X-API-Key header with ENEO_SUPER_API_KEY
-
-    This creates the model metadata only. To enable it for a tenant,
-    use POST /api/v1/embedding-models/{id}/ with tenant credentials.
-    """
-    # AUDIT GAP: see create_completion_model — no owning tenant for a
-    # global model row, so no audit_log entry is emitted today.
-    session = cast(AsyncSession, container.session())
-    async with session.begin():
-        await validate_unique_display_name(
-            session,
-            EmbeddingModels,
-            tenant_id=None,
-            nickname=getattr(model_data, "nickname", None),
-        )
-        repo = AdminEmbeddingModelsService(session=session)
-        model = await repo.create_model(model_data)
-
-    return EmbeddingModelSparse.model_validate(model)
+):
+    _ = container
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Global embedding model CRUD has been removed. Create or update "
+            "tenant-owned models through /api/v1/admin/tenant-models/embedding/ "
+            "with an explicit provider_id."
+        ),
+    )
 
 
 @router.put(
     "/embedding-models/{id}/metadata",
-    response_model=EmbeddingModelSparse,
-    description="Update global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([401, 404, 409]),
+    response_model=None,
+    description="Deprecated. Embedding model metadata must be updated through tenant-scoped admin model routes.",
+    responses=responses.get_responses([401, 410]),
 )
 async def update_embedding_model_metadata(
     id: UUID,
-    model_data: EmbeddingModelMetadataUpdate,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
-) -> EmbeddingModelSparse:
-    """
-    Update embedding model metadata (system-wide operation).
-
-    Requires: X-API-Key header with ENEO_SUPER_API_KEY
-
-    Updates global model metadata. Does not affect tenant-specific settings.
-    """
-    from intric.main.exceptions import NotFoundException
-
-    session = cast(AsyncSession, container.session())
-    async with session.begin():
-        repo = AdminEmbeddingModelsService(session=session)
-
-        await validate_unique_display_name(
-            session,
-            EmbeddingModels,
-            tenant_id=None,
-            nickname=getattr(model_data, "nickname", None),
-            exclude_id=id,
-        )
-
-        # Ensure model_data has the id
-        update_with_id = EmbeddingModelMetadataUpdate(
-            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
-        )
-        model = await repo.update_model(update_with_id)
-
-        if model is None:
-            raise NotFoundException(f"Embedding model with id {id} not found")
-
-    return EmbeddingModelSparse.model_validate(model)
+):
+    _ = (id, container)
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Global embedding model metadata cannot be updated. Update the "
+            "tenant-owned model row through /api/v1/admin/tenant-models/embedding/."
+        ),
+    )
 
 
 @router.delete(
     "/embedding-models/{id}",
     response_model=None,
-    description="Soft-delete global embedding model metadata (system-wide operation).",
-    responses=responses.get_responses([404, 400, 401]),
+    description="Deprecated. Embedding models must be deleted through tenant-scoped admin model routes.",
+    responses=responses.get_responses([401, 410]),
 )
 async def delete_embedding_model(
     id: UUID,
     container: Annotated[Container, Depends(get_container_for_sysadmin())],
     force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
-    """
-    Delete an embedding model (system-wide operation).
-
-    Requires: X-API-Key header with ENEO_SUPER_API_KEY
-
-    WARNING: Deletion affects all tenants. Use with caution.
-    Set force=true to hard-delete (may erase historical info_blob attribution).
-    """
-    # AUDIT GAP: see create_embedding_model — no owning tenant to attach
-    # the audit row to. App logs are the only trace today.
-    session = cast(AsyncSession, container.session())
-
-    async with session.begin():
-        if force:
-            # Hard-delete remains an explicit operator escape hatch. Historical
-            # info_blobs use ON DELETE SET NULL, so this can erase attribution;
-            # the normal path below soft-deletes instead.
-            from sqlalchemy.exc import IntegrityError
-
-            repo = AdminEmbeddingModelsService(session=session)
-            try:
-                await repo.delete_model(id)
-            except IntegrityError as exc:
-                raise ModelInUseException() from exc
-        else:
-            model = await session.scalar(
-                sa.select(EmbeddingModels).where(
-                    EmbeddingModels.id == id,
-                    EmbeddingModels.deleted_at.is_(None),
-                )
-            )
-            if model is None:
-                # Idempotent, matching delete_completion_model: a missing or
-                # already-soft-deleted model is a no-op success, not a 404.
-                return {
-                    "success": True,
-                    "message": f"Model {id} deleted successfully",
-                }
-
-            # Three separate counts — combining them in one SELECT pulls all three
-            # tables into the FROM clause, producing a cartesian product.
-            collections_count = await session.scalar(
-                sa.select(sa.func.count()).where(
-                    CollectionsTable.embedding_model_id == id
-                )
-            )
-            websites_count = await session.scalar(
-                sa.select(sa.func.count()).where(Websites.embedding_model_id == id)
-            )
-            integrations_count = await session.scalar(
-                sa.select(sa.func.count()).where(
-                    IntegrationKnowledge.embedding_model_id == id
-                )
-            )
-            if collections_count or websites_count or integrations_count:
-                raise ModelInUseException()
-
-            info_blobs_count = await session.scalar(
-                sa.select(sa.func.count()).where(InfoBlobs.embedding_model_id == id)
-            )
-            if info_blobs_count:
-                logger.info(
-                    "sysadmin.embedding_model.soft_deleted_with_info_blobs",
-                    extra={
-                        "embedding_model_id": str(id),
-                        "info_blobs_count": info_blobs_count,
-                    },
-                )
-
-            await session.execute(
-                sa.delete(SpacesEmbeddingModels).where(
-                    SpacesEmbeddingModels.embedding_model_id == id
-                )
-            )
-            model.deleted_at = sa.func.now()
-            await session.flush()
-
-    return {"success": True, "message": f"Model {id} deleted successfully"}
+    _ = (id, container, force)
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Global embedding model deletion has been removed. Delete the "
+            "tenant-owned model row through /api/v1/admin/tenant-models/embedding/."
+        ),
+    )
 
 
 @router.post(

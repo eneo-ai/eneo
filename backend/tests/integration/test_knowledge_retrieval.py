@@ -9,11 +9,11 @@ Tests cover:
 
 from sqlalchemy import select
 
-from intric.database.tables.spaces_table import Spaces
-from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.integration_knowledge_spaces_table import (
     IntegrationKnowledgesSpaces,
 )
+from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.spaces_table import Spaces
 
 
 class TestKnowledgeRetrieval:
@@ -52,7 +52,9 @@ class TestKnowledgeRetrieval:
             await session.flush()
 
             # Create knowledge on org space
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -127,7 +129,9 @@ class TestKnowledgeRetrieval:
             await session.flush()
 
             # Create embedding model and user integration
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -216,7 +220,9 @@ class TestKnowledgeRetrieval:
             await session.flush()
 
             # Create embedding model and user integration
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -297,7 +303,9 @@ class TestKnowledgeRetrieval:
             await session.flush()
 
             # Create embedding model and user integration
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -363,7 +371,9 @@ class TestKnowledgeVisibilityBoundaries:
             await session.flush()
 
             # Create knowledge on org space
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant.id
+            )
             user_integration = await user_integration_factory(
                 session, tenant_id=tenant.id
             )
@@ -422,7 +432,9 @@ class TestKnowledgeVisibilityBoundaries:
             await session.flush()
 
             # Create knowledge in tenant 1
-            embedding_model = await embedding_model_factory(session)
+            embedding_model = await embedding_model_factory(
+                session, tenant_id=tenant_1.id
+            )
             user_integration_1 = await user_integration_factory(
                 session, tenant_id=tenant_1.id
             )

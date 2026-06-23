@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Union
 
-from intric.main.config import get_settings
 from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
@@ -32,25 +31,7 @@ class CompletionModelCRUDService:
         self.security_classification_repo = security_classification_repo
 
     async def get_completion_models(self) -> list["CompletionModel"]:
-        models = await self.completion_model_repo.all()
-
-        available_models: list["CompletionModel"] = []
-        for model in models:
-            # `using_azure_models` gates the *predefined global* Azure models
-            # (tenant_id is None) that ship with Eneo. A tenant that explicitly
-            # configures an Azure provider gets family="azure" too, but those
-            # models are deliberate config and must never be hidden by a global
-            # deployment flag — otherwise they 200 on create yet vanish here.
-            if (
-                model.family == "azure"
-                and model.tenant_id is None
-                and not get_settings().using_azure_models
-            ):
-                continue
-
-            available_models.append(model)
-
-        return available_models
+        return await self.completion_model_repo.all()
 
     async def get_completion_model(self, model_id: "UUID") -> "CompletionModel":
         completion_model = await self.completion_model_repo.one(model_id=model_id)
