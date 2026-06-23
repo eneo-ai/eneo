@@ -45,7 +45,9 @@ async def create_service(
     service_in_db = await service_service.create_service(service_model)
 
     assert service_in_db is not None, "Service must exist after creation"
-    return from_domain_service(service_in_db)
+    return from_domain_service(
+        service_in_db, show_pricing=container.user().can_view_model_pricing
+    )
 
 
 @router.get(
@@ -64,7 +66,11 @@ async def get_services(
     return {
         "count": len(services),
         "items": [
-            from_domain_service(service) for service in services if service is not None
+            from_domain_service(
+                service, show_pricing=container.user().can_view_model_pricing
+            )
+            for service in services
+            if service is not None
         ],
     }
 
@@ -82,7 +88,11 @@ async def get_service(
 
     service, permissions = await service_service.get_service(service_id=id)
 
-    return from_domain_service(service=service, permissions=permissions)
+    return from_domain_service(
+        service=service,
+        permissions=permissions,
+        show_pricing=container.user().can_view_model_pricing,
+    )
 
 
 @router.post(
@@ -103,7 +113,11 @@ async def update_service(
     service, permissions = await service_service.update_service(service_model, id)
 
     assert service is not None, "Service must exist after update"
-    return from_domain_service(service, permissions=permissions)
+    return from_domain_service(
+        service,
+        permissions=permissions,
+        show_pricing=container.user().can_view_model_pricing,
+    )
 
 
 @router.delete(
@@ -150,7 +164,12 @@ async def get_service_runs(
 
     return {
         "count": len(runs),
-        "items": [to_question(run, service) for run in runs],
+        "items": [
+            to_question(
+                run, service, show_pricing=container.user().can_view_model_pricing
+            )
+            for run in runs
+        ],
     }
 
 

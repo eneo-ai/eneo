@@ -1,80 +1,49 @@
-// Types CompletionModel, TranscriptionModel, EmbeddingModel are available from @intric/intric-js
-// but not imported here since groupModelsByProvider uses a local ModelWithProvider type constraint
-
-// Model with provider info - uses Record intersection to ensure all fields accessible on all union members
-type ModelWithProvider = {
-  id: string;
-  name: string;
-  nickname?: string | null;
-  provider_id?: string | null;
+// Only the fields the vendor grouping actually reads — `org` is the model
+// vendor (OpenAI, Anthropic…), distinct from the hosting provider. Kept minimal
+// (no index signature) so CompletionModel/TranscriptionModel satisfy it directly.
+type VendorFields = {
+  org?: string | null;
   provider_name?: string | null;
   provider_type?: string | null;
-  [key: string]: unknown;
 };
 
-export type ModelGroup<T extends ModelWithProvider = ModelWithProvider> = {
-  id: string | null;
+export type VendorGroup<T> = {
   label: string;
-  providerType: string | null;
   models: T[];
 };
 
+/** "azure_openai" → "Azure Openai". Used as a last-resort group label. */
+export function prettifyProviderType(type: string | null | undefined): string | null {
+  if (!type) return null;
+  return type
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 /**
- * Groups models by their provider.
- * System models (provider_id === null) are placed in a separate group at the top.
- * Provider groups are sorted alphabetically by provider name.
- * Models within each group are sorted by nickname.
+ * Groups models by vendor (`org`), falling back to the provider name, then a
+ * prettified provider type, then `otherLabel`. Groups are sorted alphabetically;
+ * model order within a group is preserved (sort the input beforehand). Shared by
+ * the chat and settings model selectors so they group identically.
  */
-export function groupModelsByProvider<T extends ModelWithProvider>(
+export function groupModelsByVendor<T extends VendorFields>(
   models: T[],
-  systemModelsLabel: string
-): ModelGroup<T>[] {
-  const systemModels: T[] = [];
-  const providerMap = new Map<string, { name: string; type: string | null; models: T[] }>();
-
+  otherLabel: string
+): VendorGroup<T>[] {
+  const groups = new Map<string, VendorGroup<T>>();
   for (const model of models) {
-    if (!model.provider_id) {
-      systemModels.push(model);
-    } else {
-      const providerId = model.provider_id;
-      if (!providerMap.has(providerId)) {
-        providerMap.set(providerId, {
-          name: model.provider_name ?? "Unknown Provider",
-          type: model.provider_type ?? null,
-          models: []
-        });
-      }
-      providerMap.get(providerId)!.models.push(model);
+    const label =
+      model.org?.trim() ||
+      model.provider_name?.trim() ||
+      prettifyProviderType(model.provider_type) ||
+      otherLabel;
+    let group = groups.get(label);
+    if (!group) {
+      group = { label, models: [] };
+      groups.set(label, group);
     }
+    group.models.push(model);
   }
-
-  const groups: ModelGroup<T>[] = [];
-
-  // Add system models group first if there are any
-  if (systemModels.length > 0) {
-    systemModels.sort((a, b) => (a.nickname ?? "").localeCompare(b.nickname ?? ""));
-    groups.push({
-      id: null,
-      label: systemModelsLabel,
-      providerType: null,
-      models: systemModels
-    });
-  }
-
-  // Sort provider groups alphabetically and add them
-  const sortedProviders = Array.from(providerMap.entries()).sort(([, a], [, b]) =>
-    a.name.localeCompare(b.name)
-  );
-
-  for (const [providerId, provider] of sortedProviders) {
-    provider.models.sort((a, b) => (a.nickname ?? "").localeCompare(b.nickname ?? ""));
-    groups.push({
-      id: providerId,
-      label: provider.name,
-      providerType: provider.type,
-      models: provider.models
-    });
-  }
-
-  return groups;
+  return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
 }

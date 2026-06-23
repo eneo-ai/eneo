@@ -71,6 +71,8 @@ class CompletionModelAssembler:
     @staticmethod
     def from_completion_model_to_sparse(
         completion_model: "CompletionModel | CompletionModelSparse",
+        *,
+        show_pricing: bool = True,
     ) -> CompletionModelSparse:
         """
         Converts a domain CompletionModel to a CompletionModelSparse instance.
@@ -101,6 +103,16 @@ class CompletionModelAssembler:
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=(
+                getattr(completion_model, "input_cost_per_token", None)
+                if show_pricing
+                else None
+            ),
+            output_cost_per_token=(
+                getattr(completion_model, "output_cost_per_token", None)
+                if show_pricing
+                else None
+            ),
             provider_type=completion_model.provider_type,
         )
 

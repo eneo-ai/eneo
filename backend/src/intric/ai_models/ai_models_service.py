@@ -161,7 +161,7 @@ class AIModelsService:
                 is_locked=self._is_locked(model),
                 can_access=self._can_access(model),
             )
-            if not self.user.tenant.show_model_pricing:
+            if not self.user.can_view_model_pricing:
                 public_model.input_cost_per_token = None
                 public_model.output_cost_per_token = None
             models.append(public_model)

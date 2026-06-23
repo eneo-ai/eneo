@@ -236,7 +236,9 @@ class CompletionModelPublic(CompletionModel):
     migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
-    def from_domain(cls, completion_model: CompletionModelDomain):
+    def from_domain(
+        cls, completion_model: CompletionModelDomain, *, show_pricing: bool = True
+    ):
         return cls(
             id=completion_model.id,
             created_at=completion_model.created_at,
@@ -261,11 +263,15 @@ class CompletionModelPublic(CompletionModel):
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
-            input_cost_per_token=getattr(
-                completion_model, "input_cost_per_token", None
+            input_cost_per_token=(
+                getattr(completion_model, "input_cost_per_token", None)
+                if show_pricing
+                else None
             ),
-            output_cost_per_token=getattr(
-                completion_model, "output_cost_per_token", None
+            output_cost_per_token=(
+                getattr(completion_model, "output_cost_per_token", None)
+                if show_pricing
+                else None
             ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,

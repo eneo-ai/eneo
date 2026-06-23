@@ -12,7 +12,7 @@
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
-  const { tenant } = getAppContext();
+  const { tenant, updateTenant } = getAppContext();
   const intric = getIntric();
   let { data } = $props();
 
@@ -112,6 +112,7 @@
     try {
       const updated = await intric.settings.updateModelPricingVisibility(next);
       showModelPricing = updated.show_model_pricing;
+      updateTenant({ show_model_pricing: updated.show_model_pricing });
       await invalidateAll();
     } catch (error) {
       console.error("[Admin] Error updating model pricing visibility:", error);

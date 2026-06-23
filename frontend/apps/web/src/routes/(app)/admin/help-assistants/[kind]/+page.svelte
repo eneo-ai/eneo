@@ -253,7 +253,6 @@
           <SelectAIModelV2
             bind:selectedModel={$update.completion_model}
             availableModels={data.orgSpace.completion_models}
-            showCost={false}
             {aria}
           ></SelectAIModelV2>
         </Settings.Row>

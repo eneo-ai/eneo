@@ -8,6 +8,10 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
+from intric.ai_models.completion_models.completion_model import (
+    CompletionModelPublic,
+    CompletionModelSecurityStatus,
+)
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
@@ -74,3 +78,19 @@ def test_pricing_visible_by_default():
 
     assert public.input_cost_per_token == Decimal("0.000005")
     assert public.output_cost_per_token == Decimal("0.000015")
+
+
+def test_domain_projection_hides_pricing_when_not_visible():
+    public = CompletionModelPublic.from_domain(_make_model(), show_pricing=False)
+
+    assert public.input_cost_per_token is None
+    assert public.output_cost_per_token is None
+
+
+def test_security_status_projection_hides_pricing_when_not_visible():
+    public = CompletionModelSecurityStatus.from_domain(
+        _make_model(), show_pricing=False
+    )
+
+    assert public.input_cost_per_token is None
+    assert public.output_cost_per_token is None

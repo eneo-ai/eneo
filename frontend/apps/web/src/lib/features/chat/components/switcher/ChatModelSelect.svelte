@@ -14,10 +14,10 @@
   import * as ModelSelector from "$lib/components/ai-elements/model-selector/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { sortModels } from "$lib/features/ai-models/sortModels";
+  import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
   import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { m } from "$lib/paraglide/messages";
   import { Lock } from "lucide-svelte";
-  import { SvelteMap } from "svelte/reactivity";
   import ChatModelDetails from "./ChatModelDetails.svelte";
 
   const {
@@ -75,34 +75,10 @@
     if (!selectorOpen) previewedModelId = null;
   });
 
-  function prettifyProviderType(type: string | null | undefined): string | null {
-    if (!type) return null;
-    return type
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  }
-
   // Group by model vendor (org), falling back to the configured provider for
-  // models without one. Groups sorted alphabetically, models within a group
-  // keep sortModels' nickname order.
-  const modelGroups = $derived.by(() => {
-    const groups = new SvelteMap<string, { label: string; models: typeof visibleModels }>();
-    for (const model of visibleModels) {
-      const label =
-        model.org?.trim() ||
-        model.provider_name?.trim() ||
-        prettifyProviderType(model.provider_type) ||
-        m.model_group_other();
-      let group = groups.get(label);
-      if (!group) {
-        group = { label, models: [] };
-        groups.set(label, group);
-      }
-      group.models.push(model);
-    }
-    return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
-  });
+  // models without one. Shared with the settings model selector so both group
+  // identically.
+  const modelGroups = $derived(groupModelsByVendor(visibleModels, m.model_group_other()));
 
   function selectModel(id: string) {
     if (!id || id === selectedId) return;

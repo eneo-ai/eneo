@@ -37,8 +37,15 @@ type AppContextParams = {
 
 function AppContext(data: AppContextParams) {
   const user = { ...data.user, hasPermission: hasPermission(data.user) };
+  const tenant = { ...data.tenant };
+  const tenantStore = writable(tenant);
   const showHeader = writable(true);
   const userInfo = writable(data.userInfo);
+
+  function updateTenant(update: Partial<Tenant>) {
+    Object.assign(tenant, update);
+    tenantStore.set(tenant);
+  }
 
   async function updateUserInfo(update: UserInfo) {
     if (data.zitadelClient) {
@@ -61,17 +68,19 @@ function AppContext(data: AppContextParams) {
 
   return Object.freeze({
     user,
-    tenant: data.tenant,
+    tenant,
     limits: data.limits,
     settings: data.settings,
     versions: data.versions,
     featureFlags: data.featureFlags,
     environment: data.environment,
+    updateTenant,
     /** Update the user's name. */
     updateUserInfo,
     state: {
       /** User's name. Eventhough this is a store it's currently not being used as such. Read more in AppContext.ts */
       userInfo,
+      tenant: tenantStore,
       showHeader
     }
   });

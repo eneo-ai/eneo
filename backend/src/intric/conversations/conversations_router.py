@@ -356,7 +356,11 @@ async def chat(
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
         )
 
-    return await to_conversation_response(response=response, stream=request.stream)
+    return await to_conversation_response(
+        response=response,
+        stream=request.stream,
+        show_pricing=container.user().can_view_model_pricing,
+    )
 
 
 @router.post(

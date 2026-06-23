@@ -85,17 +85,23 @@ def to_ask_response(
     info_blobs: Sequence[_SupportsModelDump],
     tools: "UseTools",
     completion_model: CompletionModel | CompletionModelPublic | None = None,
+    show_pricing: bool = True,
     mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskResponse:
-    public_model = (
-        completion_model
-        if isinstance(completion_model, CompletionModelPublic)
-        else (
-            CompletionModelPublic.from_domain(completion_model)
-            if completion_model is not None
-            else None
+    if completion_model is None:
+        public_model = None
+    elif isinstance(completion_model, CompletionModelPublic):
+        public_model = (
+            completion_model
+            if show_pricing
+            else completion_model.model_copy(
+                update={"input_cost_per_token": None, "output_cost_per_token": None}
+            )
         )
-    )
+    else:
+        public_model = CompletionModelPublic.from_domain(
+            completion_model, show_pricing=show_pricing
+        )
     return AskResponse(
         question=question,
         files=[FilePublic(**file.model_dump()) for file in files],
@@ -135,21 +141,27 @@ def to_ask_conversation_response(
     info_blobs: Sequence[_SupportsModelDump],
     tools: "UseTools",
     completion_model: CompletionModel | CompletionModelPublic | None = None,
+    show_pricing: bool = True,
     question_id: Optional["UUID"] = None,
     created_at: Optional[datetime] = None,
     updated_at: Optional[datetime] = None,
     web_search_results: Sequence[_SupportsWebSearchResult] | None = None,
     mcp_tool_references: Sequence[McpToolReference] = (),
 ) -> AskChatResponse:
-    public_model = (
-        completion_model
-        if isinstance(completion_model, CompletionModelPublic)
-        else (
-            CompletionModelPublic.from_domain(completion_model)
-            if completion_model is not None
-            else None
+    if completion_model is None:
+        public_model = None
+    elif isinstance(completion_model, CompletionModelPublic):
+        public_model = (
+            completion_model
+            if show_pricing
+            else completion_model.model_copy(
+                update={"input_cost_per_token": None, "output_cost_per_token": None}
+            )
         )
-    )
+    else:
+        public_model = CompletionModelPublic.from_domain(
+            completion_model, show_pricing=show_pricing
+        )
     return AskChatResponse(  # type: ignore[call-arg]
         created_at=created_at,  # type: ignore[call-arg]
         updated_at=updated_at,  # type: ignore[call-arg]
@@ -349,6 +361,8 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
 async def to_response(
     response: "AssistantResponse",
     stream: bool,
+    *,
+    show_pricing: bool = True,
 ) -> EventSourceResponse | AskResponse:
     if stream:
 
@@ -363,6 +377,7 @@ async def to_response(
                         answer=chunk.text or "",
                         info_blobs=chunk.reference_chunks or [],
                         completion_model=response.completion_model,
+                        show_pricing=show_pricing,
                         tools=response.tools,
                     ).model_dump_json()
 
@@ -376,6 +391,7 @@ async def to_response(
         answer=response.answer,
         info_blobs=response.info_blobs,
         completion_model=response.completion_model,
+        show_pricing=show_pricing,
         tools=response.tools,
         mcp_tool_references=response.mcp_tool_references,
     )
@@ -384,6 +400,8 @@ async def to_response(
 async def to_conversation_response(
     response: "AssistantResponse",
     stream: bool,
+    *,
+    show_pricing: bool = True,
 ) -> EventSourceResponse | AskChatResponse:
     if stream:
 
@@ -397,6 +415,7 @@ async def to_conversation_response(
                     info_blobs=response.info_blobs,
                     tools=response.tools,
                     completion_model=response.completion_model,
+                    show_pricing=show_pricing,
                     question_id=response.question_id,
                     created_at=response.created_at,
                     updated_at=response.updated_at,
@@ -422,6 +441,7 @@ async def to_conversation_response(
         info_blobs=response.info_blobs,
         tools=response.tools,
         completion_model=response.completion_model,
+        show_pricing=show_pricing,
         question_id=response.question_id,
         created_at=response.created_at,
         updated_at=response.updated_at,

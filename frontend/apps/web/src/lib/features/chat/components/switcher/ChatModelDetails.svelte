@@ -15,15 +15,15 @@
   let { model }: Props = $props();
 
   // Org admins can hide model prices from users; default to showing them.
-  const { tenant } = getAppContext();
-  const showPricing = tenant.show_model_pricing !== false;
+  const {
+    state: { tenant }
+  } = getAppContext();
+  const showPricing = $derived($tenant.show_model_pricing !== false);
 
-  const inputPrice = $derived(
-    formatCostPerMillionTokens(model.input_cost_per_token) ?? m.model_cost_unknown()
-  );
-  const outputPrice = $derived(
-    formatCostPerMillionTokens(model.output_cost_per_token) ?? m.model_cost_unknown()
-  );
+  // Null when the model has no cost on record; the row is then dropped entirely
+  // rather than showing a placeholder.
+  const inputPrice = $derived(formatCostPerMillionTokens(model.input_cost_per_token));
+  const outputPrice = $derived(formatCostPerMillionTokens(model.output_cost_per_token));
   const contextWindow = $derived(
     m.model_selector_context_value({
       tokens: new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US").format(
@@ -35,7 +35,7 @@
 </script>
 
 <aside
-  class="bg-popover/95 ring-foreground/10 hidden max-h-[22.25rem] w-80 flex-col overflow-y-auto rounded-xl p-4 shadow-lg ring-1 backdrop-blur-xl sm:flex"
+  class="bg-popover/95 ring-foreground/10 no-scrollbar hidden max-h-[22.25rem] w-80 flex-col overflow-y-auto rounded-xl p-4 shadow-lg ring-1 backdrop-blur-xl sm:flex"
   aria-label={`${m.model_info_for()} ${model.nickname ?? model.name}`}
 >
   <div class="flex items-center gap-2.5">
@@ -55,27 +55,25 @@
       <dt class="text-muted-foreground">{m.model_context_label()}</dt>
       <dd class="text-right text-[13px] font-medium tabular-nums">{contextWindow}</dd>
     </div>
-    {#if showPricing}
+    {#if showPricing && inputPrice}
       <div class="flex items-center justify-between gap-4 py-2.5">
         <dt class="text-muted-foreground">{m.model_selector_input_price()}</dt>
         <dd class="text-right text-[13px] font-medium tabular-nums">
           {inputPrice}
-          {#if inputPrice !== m.model_cost_unknown()}
-            <span class="text-muted-foreground font-normal">
-              / {m.model_selector_million_tokens()}
-            </span>
-          {/if}
+          <span class="text-muted-foreground font-normal">
+            / {m.model_selector_million_tokens()}
+          </span>
         </dd>
       </div>
+    {/if}
+    {#if showPricing && outputPrice}
       <div class="flex items-center justify-between gap-4 py-2.5">
         <dt class="text-muted-foreground">{m.model_selector_output_price()}</dt>
         <dd class="text-right text-[13px] font-medium tabular-nums">
           {outputPrice}
-          {#if outputPrice !== m.model_cost_unknown()}
-            <span class="text-muted-foreground font-normal">
-              / {m.model_selector_million_tokens()}
-            </span>
-          {/if}
+          <span class="text-muted-foreground font-normal">
+            / {m.model_selector_million_tokens()}
+          </span>
         </dd>
       </div>
     {/if}

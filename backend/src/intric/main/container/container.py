@@ -573,6 +573,7 @@ class Container(containers.DeclarativeContainer):
     storage_assembler = providers.Factory(StorageInfoAssembler)
     app_assembler = providers.Factory(
         AppAssembler,
+        user=user,
         prompt_assembler=prompt_assembler,
     )
     app_run_assembler = providers.Factory(AppRunAssembler)
