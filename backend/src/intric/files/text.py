@@ -2,6 +2,7 @@ import logging
 import zipfile
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import magic
 import pdfplumber
@@ -74,6 +75,10 @@ class MimeTypesBase(str, Enum):
 
 
 class TextMimeTypes(MimeTypesBase):
+    # Text formats the extractor can handle. Doubles as the upload/attachment
+    # allowlist (see limits.limit_service). The crawler maintains its own
+    # download policy in crawler.parse_html.CRAWLABLE_DOCUMENT_MIMETYPES — keep
+    # the two concerns separate so changing one never silently affects the other.
     # Supported formats
     MD = "text/markdown"
     TXT = "text/plain"
@@ -84,6 +89,10 @@ class TextMimeTypes(MimeTypesBase):
     PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     XLS = "application/vnd.ms-excel"
+    JSON = "application/json"
+    # Browsers and libmagic disagree on the XML mimetype, so accept both spellings
+    XML = "text/xml"
+    XML_APP = "application/xml"
 
     # Legacy formats (for detection/rejection only)
     DOC = "application/msword"
@@ -103,6 +112,16 @@ class TextSanitizer:
 
 
 class TextExtractor:
+    @staticmethod
+    def _looks_binary(filepath: Path) -> bool:
+        # A NUL byte in the leading chunk reliably marks binary content
+        # (images, video, archives); UTF-8/cp1252 text never contains it.
+        try:
+            with open(filepath, "rb") as f:
+                return b"\x00" in f.read(8192)
+        except (PermissionError, OSError):
+            return False
+
     @staticmethod
     def extract_from_plain_text(filepath: Path, filename: str | None = None) -> str:
         display_name = filename or filepath.name
@@ -129,23 +148,88 @@ class TextExtractor:
             raise ExtractionError(f"Error reading '{display_name}': {e}")
 
     @staticmethod
-    def extract_from_pdf(filepath: Path, filename: str | None = None) -> str:
+    def _table_to_markdown(table: list[list[str | None]]) -> str:
+        rows = [
+            [(cell or "").replace("\n", " ").strip() for cell in row]
+            for row in table
+            if any(cell for cell in row)
+        ]
+        if not rows:
+            return ""
+
+        lines = ["| " + " | ".join(rows[0]) + " |"]
+        lines.append("| " + " | ".join("---" for _ in rows[0]) + " |")
+        for row in rows[1:]:
+            # Pad short rows so the markdown stays rectangular
+            padded = row + [""] * (len(rows[0]) - len(row))
+            lines.append("| " + " | ".join(padded[: len(rows[0])]) + " |")
+        return "\n".join(lines)
+
+    @classmethod
+    def _extract_pdf_page(cls, page: Any) -> str:
+        # pdfplumber ships no type stubs — treat the page as Any and pin the
+        # types we rely on at the boundaries.
+        tables: list[Any] = list(page.find_tables())
+        if not tables:
+            return str(page.extract_text() or "")
+
+        # Extract running text outside the table regions, then append the
+        # tables as markdown — otherwise table cells appear twice.
+        table_bboxes: list[tuple[float, float, float, float]] = [
+            tuple(table.bbox) for table in tables
+        ]
+
+        def outside_tables(obj: dict[str, Any]) -> bool:
+            center_x = (float(obj["x0"]) + float(obj["x1"])) / 2
+            center_y = (float(obj["top"]) + float(obj["bottom"])) / 2
+            return not any(
+                x0 <= center_x <= x1 and top <= center_y <= bottom
+                for (x0, top, x1, bottom) in table_bboxes
+            )
+
+        parts: list[str] = []
+        text = str(page.filter(outside_tables).extract_text() or "")
+        if text.strip():
+            parts.append(text)
+        for table in tables:
+            markdown = cls._table_to_markdown(table.extract())
+            if markdown:
+                parts.append(markdown)
+        return "\n\n".join(parts)
+
+    @classmethod
+    def extract_from_pdf(cls, filepath: Path, filename: str | None = None) -> str:
         display_name = filename or filepath.name
         try:
             with pdfplumber.open(filepath) as pdf:
-                extracted_text = " ".join(
-                    page.extract_text() or "" for page in pdf.pages
-                )
+                page_texts: list[str] = []
+                has_content = False
+                for page in pdf.pages:
+                    try:
+                        page_text = cls._extract_pdf_page(page)
+                    except Exception as e:
+                        logger.warning(
+                            f"Table-aware extraction failed on page "
+                            f"{page.page_number} of '{display_name}', "
+                            f"falling back to plain text: {e}"
+                        )
+                        page_text = page.extract_text() or ""
+                    has_content = has_content or bool(page_text.strip())
+                    page_texts.append(f"[PAGE {page.page_number}]\n{page_text}")
+
+                extracted_text = "\n\n".join(page_texts)
 
             # Warn if no text extracted (likely image-only/scanned PDF)
-            sanitized = TextSanitizer.sanitize(extracted_text)
-            if not sanitized.strip():
+            if not has_content:
                 logger.warning(
                     f"No text extracted from PDF '{display_name}' - "
                     "file may be image-only or scanned"
                 )
+                # Return empty rather than bare page markers, so downstream
+                # empty-content handling keeps working.
+                return ""
 
-            return sanitized
+            return TextSanitizer.sanitize(extracted_text)
 
         except PDFSyntaxError as e:
             logger.warning(f"PDF read error for {display_name}: {e}")
@@ -258,6 +342,15 @@ class TextExtractor:
                         )
                         if shape_text.strip():
                             slide_parts.append(shape_text)
+                if slide.has_notes_slide:
+                    notes_frame = slide.notes_slide.notes_text_frame  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportOptionalMemberAccess]  # pptx stubs are incomplete
+                    notes_text = (
+                        (notes_frame.text or "").strip()
+                        if notes_frame is not None
+                        else ""
+                    )  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pptx stubs are incomplete
+                    if notes_text:
+                        slide_parts.append(f"Speaker notes: {notes_text}")
                 if slide_parts:
                     parts.append(" ".join(slide_parts))
             return "\n".join(parts)
@@ -301,6 +394,9 @@ class TextExtractor:
                 | TextMimeTypes.MD
                 | TextMimeTypes.TEXT_CSV
                 | TextMimeTypes.APP_CSV
+                | TextMimeTypes.JSON
+                | TextMimeTypes.XML
+                | TextMimeTypes.XML_APP
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.PDF:
@@ -312,7 +408,11 @@ class TextExtractor:
             case TextMimeTypes.XLSX | TextMimeTypes.XLS:
                 extracted_text = self.extract_from_xlsx(filepath, display_name)
             case _:
-                # Fallback to plain text
+                # Unknown mimetype: only treat as text if it is not binary.
+                # Guards against binary uploads (e.g. unsupported image formats)
+                # being decoded into garbage and written to the TEXT column.
+                if self._looks_binary(filepath):
+                    raise UnsupportedFormatError(display_name, mimetype or "binary")
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
 
         return extracted_text.strip()

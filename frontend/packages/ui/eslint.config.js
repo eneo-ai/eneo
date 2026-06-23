@@ -3,6 +3,7 @@ import js from "@eslint/js";
 import svelte from "eslint-plugin-svelte";
 import globals from "globals";
 import ts from "typescript-eslint";
+import intric from "@intric/eslint-plugin";
 
 export default ts.config(
   js.configs.recommended,
@@ -10,6 +11,7 @@ export default ts.config(
   ...svelte.configs["flat/recommended"],
   prettier,
   ...svelte.configs["flat/prettier"],
+  ...intric.configs.recommended,
   {
     languageOptions: {
       globals: {
@@ -29,6 +31,12 @@ export default ts.config(
   },
   {
     ignores: ["build/", ".svelte-kit/", "dist/"]
+  },
+  {
+    files: ["src/**/*.{svelte,js,ts}"],
+    rules: {
+      "intric/no-raw-color": "error"
+    }
   },
   {
     rules: {

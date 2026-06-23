@@ -59,6 +59,7 @@ async def get_app(
 
 @router.patch(
     "/{id}/",
+    description="Update an app by id.",
     response_model=AppPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -211,18 +212,13 @@ async def update_app(
 
     # Model behavior parameters (temperature, top_p)
     if update_service_req.completion_model_kwargs is not None:
-        old_kwargs = cast(
-            dict[str, object],
-            old_app.completion_model_kwargs or {},
-        )
-        new_kwargs = cast(
-            dict[str, object],
-            update_service_req.completion_model_kwargs or {},
-        )
-
         # Temperature
-        old_temperature = old_kwargs.get("temperature")
-        new_temperature = new_kwargs.get("temperature")
+        old_temperature = (
+            old_app.completion_model_kwargs.temperature
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_temperature = update_service_req.completion_model_kwargs.temperature
 
         if old_temperature != new_temperature and new_temperature is not None:
             changes["temperature"] = {"old": old_temperature, "new": new_temperature}
@@ -230,8 +226,12 @@ async def update_app(
                 change_summary.append("parameters")
 
         # Top-p
-        old_top_p = old_kwargs.get("top_p")
-        new_top_p = new_kwargs.get("top_p")
+        old_top_p = (
+            old_app.completion_model_kwargs.top_p
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_top_p = update_service_req.completion_model_kwargs.top_p
 
         if old_top_p != new_top_p and new_top_p is not None:
             changes["top_p"] = {"old": old_top_p, "new": new_top_p}
@@ -341,6 +341,7 @@ async def update_app(
 
 @router.delete(
     "/{id}/",
+    description="Delete an app by id.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
@@ -394,9 +395,10 @@ async def delete_app(
 
 @router.post(
     "/{id}/runs/",
+    description="Queue a run for an app by id.",
     status_code=203,
     response_model=AppRunPublic,
-    responses=responses.get_responses([400, 403]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def run_app(
     id: UUID,
@@ -490,6 +492,7 @@ async def get_prompts(
 
 @router.post(
     "/{id}/publish/",
+    description="Publish or unpublish an app by id.",
     response_model=AppPublic,
     responses=responses.get_responses([403, 404]),
 )

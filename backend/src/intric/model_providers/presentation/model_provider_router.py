@@ -10,6 +10,7 @@ from typing_extensions import TypedDict
 from intric.authentication.auth_dependencies import get_current_active_user
 from intric.database.database import AsyncSession, get_session_with_transaction
 from intric.main.config import get_settings
+from intric.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from intric.model_providers.domain.model_provider_service import ModelProviderService
 from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -54,6 +55,12 @@ class ModelCostInfo(TypedDict, total=False):
     supports_vision: bool
     supports_function_calling: bool
     supports_reasoning: bool
+    # Cost fields. Token-based for chat/completion/embedding; per-second for
+    # most audio_transcription entries (Whisper et al.).
+    input_cost_per_token: float | None
+    output_cost_per_token: float | None
+    input_cost_per_second: float | None
+    output_cost_per_second: float | None
 
 
 class ModelCapabilityBase(TypedDict):
@@ -67,6 +74,13 @@ class ModelCapability(ModelCapabilityBase, total=False):
     supports_vision: bool
     supports_function_calling: bool
     supports_reasoning: bool
+    # Indicative pricing — surfaced so that picking a suggestion in the wizard
+    # populates the cost fields without a second `/model-defaults/` round-trip.
+    # Token-priced for completion + embedding; per-minute for transcription
+    # (derived from LiteLLM's per-second value × 60).
+    input_cost_per_token: float | None
+    output_cost_per_token: float | None
+    cost_per_minute: float | None
 
 
 class ProviderCapabilities(TypedDict):
@@ -104,6 +118,8 @@ ServiceDep = Annotated[ModelProviderService, Depends(get_model_provider_service)
 @router.get(
     "/",
     response_model=list[ModelProviderPublic],
+    description="List all model providers for the tenant.",
+    responses=responses.get_responses([403]),
 )
 async def list_providers(
     user: CurrentUser,
@@ -117,6 +133,11 @@ async def list_providers(
 
 @router.get(
     "/capabilities/",
+    response_model=dict[str, object],
+    description=(
+        "Get supported model types and top models per provider type from LiteLLM."
+    ),
+    responses=responses.get_responses([]),
 )
 async def get_provider_capabilities(
     _user: CurrentUser,
@@ -211,9 +232,20 @@ async def get_provider_capabilities(
                     "supports_function_calling", False
                 )
                 model_info["supports_reasoning"] = info.get("supports_reasoning", False)
+                model_info["input_cost_per_token"] = info.get("input_cost_per_token")
+                model_info["output_cost_per_token"] = info.get("output_cost_per_token")
             elif mode == "embedding":
                 model_info["max_input_tokens"] = info.get("max_input_tokens")
                 model_info["output_vector_size"] = info.get("output_vector_size")
+                model_info["input_cost_per_token"] = info.get("input_cost_per_token")
+                model_info["output_cost_per_token"] = info.get("output_cost_per_token")
+            elif mode == "transcription":
+                # LiteLLM stores transcription rates per-second on most entries
+                # (Whisper, Deepgram). Expose per-minute so the form shows a
+                # human-readable number directly.
+                input_per_second = info.get("input_cost_per_second")
+                if isinstance(input_per_second, (int, float)):
+                    model_info["cost_per_minute"] = input_per_second * 60
             raw[provider][mode][model_key] = model_info
 
     # Build response sorted by release date (newest first)
@@ -249,7 +281,12 @@ async def get_provider_capabilities(
     }
 
 
-@router.get("/favorites/")
+@router.get(
+    "/favorites/",
+    response_model=dict[str, list[str]],
+    description="Get the tenant's favorite provider types.",
+    responses=responses.get_responses([]),
+)
 async def get_favorite_providers(
     user: CurrentUser,
     session: SessionDep,
@@ -261,7 +298,12 @@ async def get_favorite_providers(
     return {"providers": tenant.favorite_providers}
 
 
-@router.put("/favorites/")
+@router.put(
+    "/favorites/",
+    response_model=dict[str, list[str]],
+    description="Set the tenant's favorite provider types.",
+    responses=responses.get_responses([]),
+)
 async def set_favorite_providers(
     body: FavoriteProvidersUpdate,
     user: CurrentUser,
@@ -275,34 +317,46 @@ async def set_favorite_providers(
 
 @router.get(
     "/model-defaults/",
+    response_model=dict[str, object],
+    description=(
+        "Look up recommended default values for a model from LiteLLM's "
+        "model_cost database."
+    ),
+    responses=responses.get_responses([]),
 )
 async def get_model_defaults(
     model_name: str,
     _user: CurrentUser,
+    provider_type: str | None = Query(
+        default=None,
+        description=(
+            "Canonical provider type the model belongs to (e.g. 'openai', "
+            "'azure'). When provided, '{provider_type}/{model_name}' is "
+            "preferred over the bare entry so Azure-served gpt-4o picks up "
+            "azure/gpt-4o prices instead of openai/gpt-4o."
+        ),
+    ),
 ) -> dict[str, object]:
     """Look up recommended default values for a model from LiteLLM's model_cost database."""
     import litellm
 
     model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
-
-    # Try exact match first
-    info = model_cost.get(model_name)
-
-    # If no exact match, try common prefixed variants
-    if info is None:
-        prefixes: set[str] = set()
-        for key in model_cost:
-            if "/" in key:
-                prefix = key.split("/")[0]
-                prefixes.add(prefix)
-        for prefix in sorted(prefixes):
-            candidate = f"{prefix}/{model_name}"
-            info = model_cost.get(candidate)
-            if info is not None:
-                break
+    info = resolve_model_defaults(
+        cast(dict[str, dict[str, Any]], model_cost), model_name, provider_type
+    )
 
     if info is None:
         return {"found": False}
+
+    # Cost fields differ by mode. Frontend asks for both shapes; we surface
+    # whichever the model actually has so the wizard/edit dialog can write the
+    # right column. cost_per_minute is derived from per-second when present.
+    input_cost_per_token = info.get("input_cost_per_token")
+    output_cost_per_token = info.get("output_cost_per_token")
+    input_per_second = info.get("input_cost_per_second")
+    cost_per_minute = (
+        input_per_second * 60 if isinstance(input_per_second, (int, float)) else None
+    )
 
     return {
         "found": True,
@@ -311,13 +365,16 @@ async def get_model_defaults(
         "supports_vision": info.get("supports_vision", False),
         "supports_function_calling": info.get("supports_function_calling", False),
         "supports_reasoning": info.get("supports_reasoning", False),
+        "input_cost_per_token": input_cost_per_token,
+        "output_cost_per_token": output_cost_per_token,
+        "cost_per_minute": cost_per_minute,
     }
 
 
 @router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_provider(
     provider_id: UUID,
@@ -333,7 +390,8 @@ async def get_provider(
 @router.post(
     "/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([409]),
+    description="Create a new model provider.",
+    responses=responses.get_responses([400, 403, 409]),
 )
 async def create_provider(
     data: ModelProviderCreate,
@@ -356,7 +414,8 @@ async def create_provider(
 @router.put(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([404, 409]),
+    description="Update an existing model provider.",
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_provider(
     provider_id: UUID,
@@ -378,6 +437,10 @@ async def update_provider(
 
 @router.get(
     "/{provider_id}/models/",
+    response_model=list[dict[str, Any]],
+    description=(
+        "List available models from the provider's API using its credentials."
+    ),
     responses=responses.get_responses([404]),
 )
 async def list_provider_models(
@@ -401,6 +464,8 @@ async def list_provider_models(
 
 @router.post(
     "/{provider_id}/test/",
+    response_model=dict[str, Any],
+    description="Test connectivity to a model provider.",
     responses=responses.get_responses([404]),
 )
 async def test_provider(
@@ -413,6 +478,10 @@ async def test_provider(
 
 @router.post(
     "/{provider_id}/validate-model/",
+    response_model=dict[str, Any],
+    description=(
+        "Validate that a model works with this provider by making a minimal API call."
+    ),
     responses=responses.get_responses([404]),
 )
 async def validate_model(
@@ -426,7 +495,9 @@ async def validate_model(
 
 @router.delete(
     "/{provider_id}/",
-    responses=responses.get_responses([404]),
+    response_model=dict[str, str],
+    description="Delete a model provider.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_provider(
     provider_id: UUID,

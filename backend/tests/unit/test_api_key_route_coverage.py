@@ -151,6 +151,11 @@ INTENTIONALLY_UNGUARDED = {
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
+    "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
+    "assistant (in the request body) and run-actor identity (in the URL path), so the "
+    "router-level resource_permission_for_method check would be a no-op here — there is "
+    "no single resource_type/path-param pair that captures the gating. Mutating routes "
+    "are listed individually in MUTATING_ALLOWLIST_EXACT.",
 }
 
 # Route prefixes that intentionally do NOT have scope guards.
@@ -168,6 +173,9 @@ INTENTIONALLY_SCOPE_FREE = {
     "/modules": "Protected by super-duper API key dependency",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
+    "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
+    "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
+    "enforces edit-permission on the body's target_id and actor identity on the run.",
 }
 
 
@@ -589,7 +597,7 @@ class TestHighRiskExactRouteGuards:
             f"{label} should not require _api_key_permission_dep"
         )
 
-    def test_files_routes_have_scope_resource_and_delete_stash_guards(self):
+    def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
         detail_get_route = _find_route_by_method_and_paths(
@@ -613,7 +621,7 @@ class TestHighRiskExactRouteGuards:
             )
 
         assert _route_has_dep_name(detail_delete_route, "_stash"), (
-            "DELETE /files/{id}/ missing deferred tenant-scope delete guard (_stash)"
+            "DELETE /files/{id}/ missing deferred file delete scope guard (_stash)"
         )
 
     def test_prompts_route_has_scope_and_resource_permission_guard(self):
@@ -857,6 +865,24 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
         "/prompts/{id}/",
     ): "Scope=prompt gates which prompt the key can reach; basic DELETE→admin blocks non-admin keys. "
     "Prompts are intentionally outside the fine-grained resource_permissions vocabulary.",
+    (
+        "POST",
+        "/help-assistants/runs/",
+    ): "HelperRunService loads the target assistant from the body and rejects callers "
+    "without ResourcePermission.EDIT (403). The active role-assignment also gates the "
+    "call by tenant. Basic POST→write blocks read-only keys.",
+    (
+        "POST",
+        "/help-assistants/runs/{run_id}/turns/",
+    ): "HelperRunService loads the run by id + tenant and rejects callers other than the "
+    "original actor (403). The active role-assignment is re-validated on every follow-up "
+    "turn. Basic POST→write blocks read-only keys.",
+    (
+        "PATCH",
+        "/help-assistants/runs/{run_id}/",
+    ): "Status transitions are gated on (run.tenant_id, run.actor_user_id) inside "
+    "HelperRunService.set_status; repeat transitions return 400. Basic PATCH→write blocks "
+    "read-only keys.",
 }
 
 
@@ -1009,8 +1035,9 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id). The require_tenant_scope_for_delete "
-        "dep also blocks DELETE for non-tenant-scoped keys.",
+        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "The file delete scope guard "
+        "blocks service keys because files are user-owned.",
         (
             "POST",
             "/files/{id}/signed-url/",

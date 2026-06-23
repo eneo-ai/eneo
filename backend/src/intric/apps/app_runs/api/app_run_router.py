@@ -19,6 +19,7 @@ _WITH_USER = Depends(get_container(with_user=True))
 @router.get(
     "/{id}/",
     response_model=AppRunPublic,
+    description="Get an app run by id.",
     responses=responses.get_responses([403, 404]),
 )
 async def get_app_run(
@@ -36,6 +37,7 @@ async def get_app_run(
 @router.delete(
     "/{id}/",
     status_code=204,
+    description="Delete an app run by id.",
     responses=responses.get_responses([403, 404]),
 )
 async def delete_app_run(

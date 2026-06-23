@@ -1,3 +1,4 @@
+import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { PAGINATION } from "$lib/core/constants";
 import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerType";
@@ -20,6 +21,14 @@ export const load: PageLoad = async (event) => {
     throw new Error("Not working");
   }
 
+  // The personal chat (default assistant) is gated by the personal_chat
+  // permission. Without read access we render a no-access state instead of
+  // firing conversation calls that would 403 — and this is the default landing
+  // page, so a user with no permissions must land here gracefully, not crash.
+  const accessDenied =
+    partnerType === "default-assistant" &&
+    !(currentSpace.default_assistant?.permissions?.includes("read") ?? false);
+
   const getPartner = async () => {
     switch (partnerType) {
       case "assistant":
@@ -40,11 +49,14 @@ export const load: PageLoad = async (event) => {
   };
 
   const loadSession = async () => {
-    if (!selectedSessionId) return null;
+    if (accessDenied || !selectedSessionId) return null;
     return intric.conversations.get({ id: selectedSessionId });
   };
 
   const listSessions = async () => {
+    if (accessDenied) {
+      return { items: [], total_count: 0, count: 0, next_cursor: null };
+    }
     return (
       intric.conversations
         .list({
@@ -62,8 +74,19 @@ export const load: PageLoad = async (event) => {
 
   const partner = await partnerPromise;
 
+  // Help assistants run behind the scenes to support users and must never be
+  // opened as a chat (the backend ask-guard also blocks the actual ask). This
+  // covers any stale or hand-built chat URL pointing at a helper.
+  if (
+    partnerType === "assistant" &&
+    (partner as { is_help_assistant?: boolean })?.is_help_assistant
+  ) {
+    throw error(404);
+  }
+
   return {
     chatPartner: partner,
+    accessDenied,
     initialHistory: historyPromise,
     initialConversation: initialSessionPromise
   };

@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Numeric,
     UniqueConstraint,
     func,
 )
@@ -46,6 +48,20 @@ class CompletionModels(BasePublic):
         JSONB, nullable=True
     )
 
+    # Indicative USD ratecard. NULL = unknown / not applicable. Stored at high
+    # precision because frontier-model prices live in the 1e-7 USD/token range.
+    # Numeric(20, 12) = 8 integer digits → cap is < 10^8 USD/token. The frontend
+    # admin form lets users enter cost per million tokens, so its input cap is
+    # the same number * 10^6 (= MAX_COST_INPUT in
+    # frontend/apps/web/src/routes/(app)/admin/models/AddWizard/models/draft.ts).
+    # Keep the two in sync if either side changes.
+    input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+    output_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
@@ -65,6 +81,20 @@ class CompletionModels(BasePublic):
     )
     provider: Mapped[Optional[ModelProviders]] = relationship()
 
+    # Lifecycle: migration tracking and soft-delete
+    migrated_to_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("completion_models.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # Stored as TIMESTAMPTZ in Postgres; the column was created via TIMESTAMPTZ
+    # but the SQLAlchemy mapping forgot `timezone=True`, which generated
+    # `::TIMESTAMP WITHOUT TIME ZONE` casts on UPDATE and crashed asyncpg
+    # whenever a tz-aware UTC datetime was assigned (the soft-delete path).
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     __table_args__ = (
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
@@ -76,6 +106,11 @@ class CompletionModels(BasePublic):
 class TranscriptionModels(BasePublic):
     name: Mapped[str] = mapped_column()
     model_name: Mapped[str] = mapped_column()
+    # Display name. Added in phase 1 of the model-table alignment for parity
+    # with completion/embedding. Currently the display name is still written to
+    # `name` (model_name holds the API id); nickname is backfilled but unused
+    # until a later phase switches the source of truth.
+    nickname: Mapped[Optional[str]] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")
     hf_link: Mapped[Optional[str]] = mapped_column()
@@ -85,6 +120,14 @@ class TranscriptionModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     base_url: Mapped[str] = mapped_column()
+
+    # USD per minute of audio processed. NULL = unknown / self-hosted.
+    # Numeric(20, 6) = 14 integer digits → cap is < 10^14 USD/minute, matching
+    # MAX_COST_INPUT in the frontend admin form (see
+    # frontend/apps/web/src/routes/(app)/admin/models/AddWizard/models/draft.ts).
+    cost_per_minute: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 6), nullable=True
+    )
 
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
@@ -102,6 +145,16 @@ class TranscriptionModels(BasePublic):
     )
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="transcription_models")
+    )
+
+    # Lifecycle parity with completion_models (model-table alignment).
+    migrated_to_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("transcription_models.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     __table_args__ = (
@@ -129,6 +182,16 @@ class EmbeddingModels(BasePublic):
     org: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
 
+    # Indicative USD ratecard. Output cost is almost always zero for embeddings
+    # but kept for shape parity with completion models. Same Numeric(20, 12)
+    # cap as completion models — see CompletionModels.input_cost_per_token.
+    input_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+    output_cost_per_token: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 12), nullable=True
+    )
+
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
@@ -145,6 +208,12 @@ class EmbeddingModels(BasePublic):
     )
     security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
         relationship(back_populates="embedding_models")
+    )
+
+    # Soft-delete parity with completion_models (added in phase 1 of the
+    # model-table alignment; unused until a later phase wires it up).
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     __table_args__ = (

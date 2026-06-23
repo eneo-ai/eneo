@@ -85,3 +85,18 @@ async def test_update_tenant_rejects_missing_default_role():
         )
 
     service.repo.update_tenant.assert_not_awaited()
+
+
+async def test_set_credential_rejects_missing_provider_fields_as_bad_request():
+    tenant = _make_tenant()
+    service = _make_service(tenant, None)
+
+    with pytest.raises(BadRequestException, match="Credential validation failed"):
+        await service.set_credential(
+            tenant_id=tenant.id,
+            provider="azure",
+            api_key="azure-key",
+            strict_mode=True,
+        )
+
+    service.repo.update_api_credential.assert_not_awaited()

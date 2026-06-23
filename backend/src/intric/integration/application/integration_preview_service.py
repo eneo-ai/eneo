@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
 
 from intric.integration.domain.entities.integration_preview import IntegrationPreview
+from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -105,7 +106,9 @@ class IntegrationPreviewService:
                     token=token
                 )
             else:
-                raise ValueError(f"Unsupported integration type: {token.token_type}")
+                raise BadRequestException(
+                    f"Unsupported integration type: {token.token_type}"
+                )
 
         # If not found, check if it's a tenant_app (ID is actually tenant_app_id)
         if self.tenant_sharepoint_app_repo:

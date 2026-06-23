@@ -8,6 +8,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
+from intric.ai_models.deprecation_lookup import is_model_effectively_deprecated
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
     EmbeddingModelPublicLegacy,
@@ -17,6 +18,7 @@ from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
 from intric.main.config import get_settings
+from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.roles.permissions import Permission, validate_permissions
 from intric.tenants.tenant_repo import TenantRepository
@@ -43,15 +45,28 @@ class AIModelsService:
     ):
         return False
 
+    @staticmethod
+    def _is_effectively_deprecated(
+        model: CompletionModel | EmbeddingModelLegacy,
+    ) -> bool:
+        return is_model_effectively_deprecated(
+            model.name,
+            getattr(model, "provider_type", None),
+            manually_deprecated=model.is_deprecated,
+        )
+
     def _can_access(
         self,
         model: CompletionModel | EmbeddingModelLegacy,
     ):
         if (
             not self._is_locked(model)
-            and not model.is_deprecated
+            and not self._is_effectively_deprecated(model)
             and model.is_org_enabled
         ):
+            # Migrated completion models should not be accessible
+            if getattr(model, "migrated_to_model_id", None) is not None:
+                return False
             return True
 
         return False
@@ -62,8 +77,7 @@ class AIModelsService:
         sorted_models: list[CompletionModelPublic | EmbeddingModelPublicLegacy] = (
             sorted(
                 models,
-                key=lambda model: model.created_at
-                or "",  # created_at is Optional[datetime]; treat None as earliest
+                key=lambda model: datetime_or_utc_min(model.created_at),
                 reverse=True,
             )
         )
@@ -83,7 +97,8 @@ class AIModelsService:
         for model in embedding_models:
             models.append(
                 EmbeddingModelPublicLegacy(
-                    **model.model_dump(),
+                    **model.model_dump(exclude={"is_deprecated"}),
+                    is_deprecated=self._is_effectively_deprecated(model),
                     is_locked=self._is_locked(model),
                     can_access=self._can_access(model),
                 )
@@ -96,7 +111,7 @@ class AIModelsService:
             id, tenant_id=self.user.tenant_id
         )
 
-        if model.is_deprecated:
+        if self._is_effectively_deprecated(model):
             raise BadRequestException(
                 f"EmbeddingModel {model.name} not supported anymore."
             )
@@ -108,7 +123,8 @@ class AIModelsService:
             )
 
         return EmbeddingModelPublicLegacy(
-            **model.model_dump(),
+            **model.model_dump(exclude={"is_deprecated"}),
+            is_deprecated=self._is_effectively_deprecated(model),
             is_locked=self._is_locked(model),
             can_access=can_access,
         )
@@ -129,16 +145,26 @@ class AIModelsService:
 
         models: list[CompletionModelPublic] = []
         for model in completion_models:
-            if model.family == "azure" and not get_settings().using_azure_models:
+            # See completion_model_crud_service: only the predefined global
+            # Azure models (tenant_id is None) are gated by this flag. Tenant-
+            # configured Azure models are explicit config and always shown.
+            if (
+                model.family == "azure"
+                and model.tenant_id is None
+                and not get_settings().using_azure_models
+            ):
                 continue
 
-            models.append(
-                CompletionModelPublic(
-                    **model.model_dump(),
-                    is_locked=self._is_locked(model),
-                    can_access=self._can_access(model),
-                )
+            public_model = CompletionModelPublic(
+                **model.model_dump(exclude={"is_deprecated"}),
+                is_deprecated=self._is_effectively_deprecated(model),
+                is_locked=self._is_locked(model),
+                can_access=self._can_access(model),
             )
+            if not self.user.can_view_model_pricing:
+                public_model.input_cost_per_token = None
+                public_model.output_cost_per_token = None
+            models.append(public_model)
 
         return models
 
@@ -156,7 +182,8 @@ class AIModelsService:
             embedding_model_id, tenant_id=self.user.tenant_id
         )
         return EmbeddingModelPublicLegacy(
-            **model.model_dump(),
+            **model.model_dump(exclude={"is_deprecated"}),
+            is_deprecated=self._is_effectively_deprecated(model),
             is_locked=self._is_locked(model),
             can_access=self._can_access(model),
         )

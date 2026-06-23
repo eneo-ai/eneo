@@ -21,7 +21,7 @@ from intric.users.user import UserInDB
 class DummySettings(SimpleNamespace):
     def __init__(self, **overrides):
         defaults = {
-            "jwt_secret": "unit-test-secret",
+            "jwt_secret": "unit-test-secret-padded-to-the-hs256-minimum",
             "oidc_state_ttl_seconds": 600,
             "oidc_redirect_grace_period_seconds": 900,
             "strict_oidc_redirect_validation": True,

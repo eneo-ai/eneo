@@ -11,7 +11,6 @@ from intric.audit.application.audit_config_service import (
 )
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
-    CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
 )
 
@@ -28,8 +27,8 @@ ALL_CATEGORIES = [
 
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
-    "admin_actions": 25,
-    "user_actions": 29,
+    "admin_actions": 46,
+    "user_actions": 37,
     "security_events": 6,
     "file_operations": 2,
     "integration_events": 19,
@@ -209,18 +208,6 @@ class TestGetConfig:
         assert len(result.categories) == 7
         category_names = [c.category for c in result.categories]
         assert category_names == ALL_CATEGORIES
-
-    async def test_get_config_includes_descriptions(
-        self, config_service, mock_repository
-    ):
-        """Verify each category includes correct description."""
-        tenant_id = uuid4()
-        mock_repository.find_by_tenant.return_value = []
-
-        result = await config_service.get_config(tenant_id)
-
-        for cat_config in result.categories:
-            assert cat_config.description == CATEGORY_DESCRIPTIONS[cat_config.category]
 
     async def test_get_config_includes_action_counts(
         self, config_service, mock_repository
@@ -476,21 +463,6 @@ class TestGetActionConfig:
         total_expected = len(ActionType)
         assert len(result.actions) == total_expected
 
-    async def test_get_action_config_includes_swedish_metadata(
-        self, config_service, mock_repository
-    ):
-        """Verify actions include Swedish names and descriptions."""
-        tenant_id = uuid4()
-        mock_repository.find_all_by_tenant.return_value = []
-
-        result = await config_service.get_action_config(tenant_id)
-
-        for action_config in result.actions:
-            assert action_config.name_sv is not None
-            assert action_config.description_sv is not None
-            assert len(action_config.name_sv) > 0
-            assert len(action_config.description_sv) > 0
-
     async def test_get_action_config_includes_category(
         self, config_service, mock_repository
     ):
@@ -662,15 +634,15 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveCorrectActionCounts:
     """Verify each category has the expected number of actions mapped."""
 
-    def test_admin_actions_has_25_actions(self):
-        """Verify admin_actions has 25 action types."""
+    def test_admin_actions_has_46_actions(self):
+        """Verify admin_actions has 46 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
-        assert count == 25
+        assert count == 46
 
-    def test_user_actions_has_29_actions(self):
-        """Verify user_actions has 29 action types."""
+    def test_user_actions_has_37_actions(self):
+        """Verify user_actions has 37 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
-        assert count == 29
+        assert count == 37
 
     def test_security_events_has_6_actions(self):
         """Verify security_events has 6 action types."""

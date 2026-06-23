@@ -52,7 +52,9 @@ async def get_models(
 
     completion_models: list[CompletionModelSecurityStatus] = []
     for cm in cms:
-        completion_model_public = CompletionModelSecurityStatus.from_domain(cm)
+        completion_model_public = CompletionModelSecurityStatus.from_domain(
+            cm, show_pricing=user.can_view_model_pricing
+        )
         if space:
             if user.tenant.security_enabled:
                 if space.security_classification is None:

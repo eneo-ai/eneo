@@ -24,3 +24,9 @@ class Files(BasePublic):
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
+
+    # Set for files derived from another upload (e.g. images extracted from a
+    # PDF attachment); derived files are deleted with their parent.
+    parent_file_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )

@@ -133,6 +133,11 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.path) {
     Object.entries(params.path).forEach(([param, value]) => {
+      if (value === undefined || value === null || value === "undefined" || value === "null") {
+        throw new Error(
+          `Missing path parameter "${param}" for endpoint "${endpoint}" (got ${value === undefined ? "undefined" : JSON.stringify(value)}).`
+        );
+      }
       endpoint = endpoint.replace(`{${param}}`, value);
     });
   }
@@ -298,6 +303,20 @@ export class IntricError extends Error {
       message = this.message;
     }
     return message;
+  }
+
+  /**
+   * Return the backend trace ID for this error, suitable for support reports.
+   *
+   * Reads ``X-Trace-Id`` (set by TraceIdResponseMiddleware on every response,
+   * including 4xx/5xx) and falls back to the legacy ``X-Correlation-ID``
+   * during the migration period when both headers are emitted in parallel.
+   *
+   * @returns {string | undefined} 32-char hex trace ID, or undefined if no
+   *   span was active when the response was produced.
+   */
+  getTraceId() {
+    return this.headers?.get("x-trace-id") ?? this.headers?.get("x-correlation-id") ?? undefined;
   }
 
   /**

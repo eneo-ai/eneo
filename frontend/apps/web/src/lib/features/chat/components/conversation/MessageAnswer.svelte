@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Markdown } from "@intric/ui";
   import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
+  import McpImageAttachments from "./McpImageAttachments.svelte";
+  import ReasoningTrace from "./ReasoningTrace.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
@@ -21,6 +23,10 @@
   const toolsStillExecuting = $derived(
     isLast() && chat.askQuestion.isLoading && message.answer.trim() === ""
   );
+  // Looser gate than toolsStillExecuting: tool calls can interleave with answer
+  // text (multi-round MCP), so "pending"/"approved" statuses stay live for the
+  // whole streaming turn, not just until the first text chunk.
+  const isStreamingTurn = $derived(isLast() && chat.askQuestion.isLoading);
 
   // Get MCP tool calls from the message
   // - mcp_tool_calls: runtime property added during streaming
@@ -30,11 +36,19 @@
       | Array<{
           server_name: string;
           tool_name: string;
+          title?: string | null;
           arguments?: Record<string, unknown>;
           tool_call_id?: string;
           approved?: boolean;
+          result_status?: string;
         }>
       | undefined
+  );
+
+  // Reasoning/thinking text for this message: accumulated by ChatService while
+  // streaming, served from the persisted `reasoning` field on reload.
+  const reasoningText = $derived(
+    ((message as Record<string, unknown>).reasoning as string | null | undefined) ?? ""
   );
 
   // Check if there's a pending tool approval for this message (only on last message)
@@ -51,6 +65,50 @@
   const submittingToolIds = new SvelteSet<string>();
   const deniedToolIds = new SvelteSet<string>();
   let isSubmittingBulk = $state(false);
+
+  // Split tool calls: pending approvals stay as prominent cards below (a
+  // blocking decision must never hide); everything else (running, done, denied)
+  // folds into the collapsible reasoning trace above them.
+  const isPending = (tc: { tool_call_id?: string }) =>
+    !!tc.tool_call_id && pendingToolIds.includes(tc.tool_call_id);
+  const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
+  const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
+  const tracedSteps = $derived(
+    tracedToolCalls.map((tc, i) => {
+      const denied =
+        (!!tc.tool_call_id && deniedToolIds.has(tc.tool_call_id)) ||
+        tc.approved === false ||
+        tc.result_status === "denied" ||
+        tc.result_status === "timeout_denied";
+      const isLastTraced = i === tracedToolCalls.length - 1;
+      // "pending" = the model is still writing the call's arguments;
+      // "approved" = approved/auto-approved but the result hasn't landed yet.
+      // A pending call on a turn that is no longer streaming never executed
+      // (the stream died), so it is shown as failed rather than spinning forever.
+      const status: "preparing" | "running" | "complete" | "failed" | "denied" = denied
+        ? "denied"
+        : tc.result_status === "failed"
+          ? "failed"
+          : tc.result_status === "pending"
+            ? isStreamingTurn
+              ? "preparing"
+              : "failed"
+            : tc.result_status === "approved" && isStreamingTurn
+              ? "running"
+              : toolsStillExecuting && isLastTraced
+                ? "running"
+                : "complete";
+      return {
+        // Prefer the server-provided title annotation, falling back to the
+        // raw tool name when the MCP server omits one.
+        toolName: tc.title || tc.tool_name,
+        serverName: tc.server_name,
+        args: tc.arguments,
+        toolCallId: tc.tool_call_id,
+        status
+      };
+    })
+  );
 
   function toggleToolCallExpanded(index: number) {
     if (expandedToolCalls.has(index)) {
@@ -135,10 +193,21 @@
     {/each}
   {/if}
 
-  {#if mcpToolCalls && mcpToolCalls.length > 0}
+  {#if tracedSteps.length > 0 || reasoningText.trim().length > 0}
+    <div class="mb-4">
+      <ReasoningTrace
+        steps={tracedSteps}
+        reasoning={reasoningText}
+        working={toolsStillExecuting}
+        loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
+      />
+    </div>
+  {/if}
+
+  {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
-      {#each mcpToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
-        {@const isLastToolCall = idx === mcpToolCalls.length - 1}
+      {#each pendingToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
+        {@const isLastToolCall = idx === pendingToolCalls.length - 1}
         {@const isPendingTool =
           toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
         {@const isDeniedLocally = toolCall.tool_call_id && deniedToolIds.has(toolCall.tool_call_id)}
@@ -229,7 +298,7 @@
           <!-- Approval actions -->
           {#if isPendingTool && toolCall.tool_call_id}
             <div class="border-dimmer flex items-center gap-2 border-t px-3 py-2.5">
-              <span class="text-muted mr-auto text-xs">Väntar på godkännande</span>
+              <span class="text-muted mr-auto text-xs">{m.chat_tool_awaiting_approval()}</span>
               <button
                 type="button"
                 class="bg-positive-default text-on-fill hover:bg-positive-stronger inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
@@ -258,7 +327,9 @@
         <div
           class="border-default bg-secondary/50 mt-1 flex items-center justify-end gap-2 rounded-lg border border-dashed px-3 py-2.5"
         >
-          <span class="text-muted mr-auto text-xs">{pendingToolIds.length} verktyg väntar</span>
+          <span class="text-muted mr-auto text-xs"
+            >{m.chat_tools_pending({ count: pendingToolIds.length })}</span
+          >
           <button
             type="button"
             class="bg-positive-default text-on-fill hover:bg-positive-stronger inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium shadow-sm transition-colors disabled:opacity-50"
@@ -289,6 +360,8 @@
     }}
   />
 </div>
+
+<McpImageAttachments />
 
 {#each message.generated_files as file (file.id)}
   {@const url = attachmentUrls.getUrl(file) ?? null}

@@ -41,21 +41,19 @@ class FileRepository:
 
         return files
 
-    async def get_list_by_id_and_tenant(
-        self, ids: list[UUID], tenant_id: UUID, include_transcription: bool = True
+    async def get_by_parent_ids(
+        self, parent_ids: list[UUID], user_id: UUID
     ) -> list[File]:
+        if not parent_ids:
+            return []
+
         stmt = (
             sa.select(Files)
-            .where(Files.id.in_(ids))
-            .where(Files.tenant_id == tenant_id)
+            .where(Files.parent_file_id.in_(parent_ids))
+            .where(Files.user_id == user_id)
             .order_by(Files.created_at)
         )
-
-        if not include_transcription:
-            stmt = stmt.options(defer(Files.transcription, raiseload=True))
-
         files_in_db = await self.session.scalars(stmt)
-
         return [File.model_validate(file) for file in files_in_db]
 
     async def get_by_id(self, file_id: UUID) -> File:
@@ -65,7 +63,16 @@ class FileRepository:
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
+        # Derived files (parent_file_id set) are internal vision inputs and
+        # not part of the user's own upload library.
+        stmt = (
+            sa.select(Files)
+            .where(Files.user_id == user_id)
+            .where(Files.parent_file_id.is_(None))
+            .order_by(Files.created_at)
+        )
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(
@@ -76,11 +83,17 @@ class FileRepository:
     async def delete(self, id: UUID) -> File:
         return cast(File, await self._delegate.delete(id))
 
-    async def delete_by_owner(self, id: UUID, user_id: UUID) -> File | None:
-        """Atomic owner-bound delete. Returns None if no matching row."""
+    async def delete_by_owner(
+        self, id: UUID, user_id: UUID, tenant_id: UUID
+    ) -> File | None:
+        """Atomic tenant- and owner-bound delete. Returns None if no row matches."""
         stmt = (
             sa.delete(Files)
-            .where(Files.id == id, Files.user_id == user_id)
+            .where(
+                Files.id == id,
+                Files.user_id == user_id,
+                Files.tenant_id == tenant_id,
+            )
             .returning(Files)
         )
         result = await self.session.execute(stmt)

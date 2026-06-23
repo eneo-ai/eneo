@@ -30,7 +30,7 @@
       <StorageSummary spaces={data.spaces} storageStats={data.storageStats}></StorageSummary>
     </Page.Tab>
     <Page.Tab id="tokens">
-      <TokenSummary tokenStats={data.tokenStats}></TokenSummary>
+      <TokenSummary tokenStats={data.tokenStats} models={data.models}></TokenSummary>
     </Page.Tab>
   </Page.Main>
 </Page.Root>

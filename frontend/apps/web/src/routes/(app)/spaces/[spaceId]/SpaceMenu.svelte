@@ -28,7 +28,11 @@
 </script>
 
 <Navigation.Menu>
-  {#if !isOrgSpace && $currentSpace.hasPermission("read", "default_assistant") && $currentSpace.personal}
+  {#if !isOrgSpace && $currentSpace.personal}
+    <!-- The personal chat is a fixed feature of the personal space: always
+         shown here, like Overview. Access is gated in-page (the chat renders a
+         no-access state without the personal_chat permission), so the nav stays
+         consistent regardless of permissions. -->
     <Navigation.Link
       href={localizeHref(`/spaces/${$currentSpace.routeId}/chat?tab=chat`)}
       isActive={section === "chat" && !chatPartnerIsDefined}

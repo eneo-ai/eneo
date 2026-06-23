@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
-from intric.main.exceptions import NameCollisionException
+from intric.main.exceptions import BadRequestException, NameCollisionException
 from intric.model_providers.domain.model_provider import ModelProvider
 from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -206,9 +206,19 @@ def _enrich_with_litellm_metadata(
             "supports_function_calling", False
         )
         enriched["supports_reasoning"] = info.get("supports_reasoning", False)
+        enriched["input_cost_per_token"] = info.get("input_cost_per_token")
+        enriched["output_cost_per_token"] = info.get("output_cost_per_token")
     elif mode == "embedding":
         enriched["max_input_tokens"] = info.get("max_input_tokens")
         enriched["output_vector_size"] = info.get("output_vector_size")
+        enriched["input_cost_per_token"] = info.get("input_cost_per_token")
+        enriched["output_cost_per_token"] = info.get("output_cost_per_token")
+    elif mode == "transcription":
+        # LiteLLM stores transcription rates per second on most entries
+        # (Whisper et al.); surface a per-minute view for the form.
+        input_per_second = info.get("input_cost_per_second")
+        if isinstance(input_per_second, (int, float)):
+            enriched["cost_per_minute"] = input_per_second * 60
     return enriched
 
 
@@ -272,7 +282,7 @@ class ModelProviderService:
                 source = credentials if field["in_"] == "credentials" else config
                 value = source.get(field["name"])
                 if not value or (isinstance(value, str) and not value.strip()):
-                    raise ValueError(
+                    raise BadRequestException(
                         f"Field '{field['name']}' is required for provider '{provider_type}'"
                     )
 
@@ -353,12 +363,12 @@ class ModelProviderService:
         """Delete a provider.
 
         Raises:
-            ValueError: If the provider has models attached to it
+            BadRequestException: If the provider has models attached to it
         """
         # Check if provider has any models
         model_count = await self.repository.count_models_for_provider(provider_id)
         if model_count > 0:
-            raise ValueError(
+            raise BadRequestException(
                 f"Cannot delete provider: {model_count} model(s) are using this provider. "
                 "Delete the models first."
             )

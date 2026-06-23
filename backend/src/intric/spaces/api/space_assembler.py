@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from intric.assistants.api.assistant_assembler import AssistantAssembler
     from intric.assistants.assistant import Assistant
     from intric.completion_models.presentation import CompletionModelAssembler
+    from intric.governance_policy.domain.policy_resolver import EffectiveConfig
     from intric.group_chat.domain.entities.group_chat import GroupChat
 
 
@@ -508,7 +509,11 @@ class SpaceAssembler:
             else None
         )
 
-    def from_space_to_model(self, space: Space) -> SpacePublic:
+    def from_space_to_model(
+        self,
+        space: Space,
+        default_assistant_effective_config: "EffectiveConfig | None" = None,
+    ) -> SpacePublic:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         self._set_permissions_on_resources(space)
         applications = self._get_applications_model(space)
@@ -533,10 +538,15 @@ class SpaceAssembler:
         ]
         completion_models = [
             self.completion_model_assembler.from_completion_model_to_model(
-                completion_model=model
+                completion_model=model,
+                show_pricing=self.user.can_view_model_pricing,
             )
             for model in space.completion_models
-            if model.is_org_enabled
+            if (
+                model.is_org_enabled
+                and model.migrated_to_model_id is None
+                and model.deleted_at is None
+            )
         ]
 
         transcription_models = [
@@ -558,6 +568,7 @@ class SpaceAssembler:
                 self.assistant_assembler.from_assistant_to_default_assistant_model(
                     space_default_assistant,
                     permissions=da_permissions,
+                    effective_config=default_assistant_effective_config,
                 )
             )
         available_roles = [
@@ -701,7 +712,9 @@ class SpaceAssembler:
             apps=applications.apps.items,
             services=applications.services.items,
             completion_models=[
-                self.completion_model_assembler.from_completion_model_to_model(cm)
+                self.completion_model_assembler.from_completion_model_to_model(
+                    cm, show_pricing=self.user.can_view_model_pricing
+                )
                 for cm in result.affected_completion_models
             ],
             embedding_models=[

@@ -1,32 +1,29 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
-import base64
 import json
 import re
 import uuid
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterator,
-    Callable,
     Literal,
+    NoReturn,
     Optional,
     Protocol,
     TypedDict,
     cast,
 )
+from urllib.parse import urlsplit, urlunsplit
 
-import litellm
-from litellm.exceptions import (
-    APIError,
-    AuthenticationError,
-    BadRequestError,
-    RateLimitError,
-)
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from typing_extensions import override
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ModelKwargs,
     ResponseType,
     TokenUsage,
@@ -35,19 +32,199 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
-from intric.files.file_models import File
+from intric.completion_models.infrastructure.message_payload import (
+    build_content,
+    build_turn_messages,
+)
+from intric.completion_models.infrastructure.static_prompts import (
+    MCP_TOOL_REFERENCES_INSTRUCTION,
+)
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from intric.main.logging import get_logger
+from intric.model_providers.infrastructure import litellm_transport
+from intric.model_providers.infrastructure.litellm_provider import (
+    build_litellm_model_name,
+    build_litellm_provider_kwargs,
+)
 from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
 
 logger = get_logger(__name__)
 
+PROVIDER_UNAVAILABLE_MESSAGE = litellm_transport.PROVIDER_UNAVAILABLE_MESSAGE
+PROVIDER_UNAVAILABLE_CODE = litellm_transport.PROVIDER_UNAVAILABLE_CODE
+
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+# Markdown image token: ![alt](url "optional title"). Captures the url only.
+_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)")
+
+
+def _canonical_resource_key(uri: str) -> str:
+    """Signature-independent identity for an MCP resource URL.
+
+    Signed URLs for the same object differ only in the query (HMAC/expiry) and
+    sometimes the fragment, so dedup must ignore those; identity lives in
+    scheme+host+path. The path extension is deliberately preserved: crawl-origin
+    images distinguish themselves by extension (``a.png`` vs ``a.jpg`` are
+    different assets), and for uploaded-doc images the inline and resource_link
+    surfaces carry the same path verbatim, so query-stripping alone collapses
+    them. For opaque uris (custom scheme, no host) the whole string is the key.
+    """
+    if not uri:
+        return ""
+    parts = urlsplit(uri)
+    if not parts.scheme or not parts.netloc:
+        return uri.strip()
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
+
+
+def _inline_image_keys(text: str) -> set[str]:
+    """Canonical keys of every Markdown image already embedded in ``text``."""
+    if not text:
+        return set()
+    return {
+        _canonical_resource_key(m.group(1))
+        for m in _MARKDOWN_IMAGE_PATTERN.finditer(text)
+    }
+
+
+def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
+    """Mint a UUID whose 8-char hex prefix is unique within this Message.
+
+    ``existing_prefixes`` is mutated in place so frontend prefix lookup stays
+    unambiguous across multi-tool-call turns.
+    """
+    ref_id = uuid.uuid4()
+    attempt = 0
+    while str(ref_id)[:8] in existing_prefixes and attempt < 8:
+        ref_id = uuid.uuid4()
+        attempt += 1
+    existing_prefixes.add(str(ref_id)[:8])
+    return ref_id
+
+
+def _build_tool_result_with_references(
+    content_list: list[dict[str, Any]],
+    tool_call_id: Optional[str],
+    mcp_tool_name: Optional[str],
+    existing_prefixes: set[str],
+) -> tuple[str, str, list[McpToolReference]]:
+    """Build LLM-facing and user-facing tool result texts; capture resource refs.
+
+    Two texts are produced because they serve different audiences:
+
+    - ``llm_text`` (forwarded to the LLM): upstream text blocks, then each
+      resource rendered as a self-describing, triple-quoted block whose
+      attribution rides in the server-provided ``resource.text``. Eneo prepends
+      only an 8-char ``source_id`` line so the model can cite, mirroring the
+      knowledge-base source format in ``context_builder``. ``_meta`` is not
+      forwarded: per MCP it is implementation metadata, not model-facing.
+    - ``display_text`` (persisted on ``ToolCallInfo.result`` for the chat UI's
+      "view tool response" affordance): upstream text blocks plus each
+      resource's own text, exactly what a vanilla MCP client would render. No
+      source_id markers.
+
+    Resource blocks are captured as ``McpToolReference`` rows for separate
+    persistence (the structured channel the frontend renders, where ``uri`` and
+    ``meta`` live). ``existing_prefixes`` is mutated in place so multi-tool-call
+    turns don't mint colliding 8-char prefixes.
+
+    Image ``resource_link`` blocks (MCP spec, 2025-11-25) are also captured as
+    rows, but display-only: no text, no source_id, absent from ``llm_text``.
+    They are audience-gated (``user`` or unstated) and de-duplicated against
+    inline Markdown images by signature-independent URL identity, so a server
+    that emits both an inline ``![](url)`` and a ``resource_link`` for the same
+    object renders it once (inline wins).
+    """
+    text_parts: list[str] = []
+    resource_texts: list[str] = []
+    llm_blocks: list[str] = []
+    refs: list[McpToolReference] = []
+
+    # Inline Markdown wins. Collect every image url already embedded in any
+    # text/resource block so a resource_link for the same object is suppressed
+    # (a host that renders both surfaces would otherwise show it twice).
+    inline_image_keys: set[str] = set()
+    for ci in content_list:
+        if ci.get("type") in ("text", "resource"):
+            inline_image_keys |= _inline_image_keys(ci.get("text") or "")
+    seen_link_keys: set[str] = set()
+
+    for ci in content_list:
+        block_type = ci.get("type")
+        if block_type == "text":
+            text_parts.append(ci.get("text") or "")
+        elif block_type == "resource":
+            uri = ci.get("uri") or ""
+            if not uri:
+                # Resource without a URI has nothing to cite. Skip.
+                continue
+            ref_id = _mint_ref_id(existing_prefixes)
+            prefix = str(ref_id)[:8]
+            resource_text = ci.get("text") or ""
+            refs.append(
+                McpToolReference(
+                    id=ref_id,
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    uri=uri,
+                    mime_type=ci.get("mime_type"),
+                    content=ci.get("text"),
+                    meta=ci.get("meta") or {},
+                    order=len(refs),
+                )
+            )
+            resource_texts.append(resource_text)
+            llm_blocks.append(f'"""source_id: {prefix}\n{resource_text}"""')
+        elif block_type == "resource_link":
+            # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
+            # no citable text, so it rides the structured channel (the
+            # McpToolReference row the frontend renders as a thumbnail) and is
+            # not added to the LLM-facing text.
+            uri = ci.get("uri") or ""
+            mime = ci.get("mime_type") or ""
+            if not uri or not mime.startswith("image/"):
+                # Scope: only image resource_links get a display surface today.
+                continue
+            audience = ci.get("audience")
+            if audience is not None and "user" not in audience:
+                # Marked for the model only; not a user-facing figure.
+                # Absent audience == default == render.
+                continue
+            key = _canonical_resource_key(uri)
+            if key in inline_image_keys or key in seen_link_keys:
+                # Inline Markdown already renders this image (inline wins), or a
+                # prior resource_link covered it. Suppress to avoid double-render.
+                continue
+            seen_link_keys.add(key)
+            refs.append(
+                McpToolReference(
+                    id=_mint_ref_id(existing_prefixes),
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    uri=uri,
+                    mime_type=ci.get("mime_type"),
+                    content=None,
+                    meta=ci.get("meta") or {},
+                    order=len(refs),
+                )
+            )
+
+    upstream_text = "".join(text_parts)
+    if not refs:
+        return upstream_text, upstream_text, refs
+
+    display_text = "\n\n".join(
+        seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
+    )
+    llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
+    llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
+    return llm_text, display_text, refs
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -94,6 +271,7 @@ class _LiteLLMStreamToolCall(Protocol):
 
 class _LiteLLMDelta(Protocol):
     content: str | None
+    reasoning_content: str | None
     tool_calls: list[_LiteLLMStreamToolCall] | None
 
 
@@ -127,14 +305,31 @@ class _AccumulatedToolCall(TypedDict):
     function: _AccumulatedToolFunction
 
 
-def _get_supported_openai_params(model: str) -> list[str] | None:
-    return cast(
-        list[str] | None, getattr(litellm, "get_supported_openai_params")(model=model)
+@dataclass
+class PreparedModelStream:
+    stream: AsyncIterator[_LiteLLMStreamChunk]
+    messages: list[dict[str, Any]]
+    kwargs: dict[str, Any]
+    mcp_proxy: "MCPProxySession | None"
+    has_tools: bool
+    # Intric built-in tools (web search, etc.) kept so iterate_stream can
+    # re-merge with refreshed MCP tools after a tools/list_changed without
+    # recomputing the built-ins.
+    intric_tools: list[dict[str, Any]] = field(
+        default_factory=lambda: cast("list[dict[str, Any]]", [])
     )
 
 
-def _acompletion_call(**kwargs: Any) -> Any:
-    return cast(Callable[..., Any], getattr(litellm, "acompletion"))(**kwargs)
+def _get_supported_openai_params(model: str) -> list[str] | None:
+    return litellm_transport.get_supported_openai_params(model)
+
+
+async def _acompletion_call(**kwargs: Any) -> Any:
+    return await litellm_transport.acompletion(**kwargs)
+
+
+def _is_provider_unavailable_error(exc: BaseException) -> bool:
+    return litellm_transport.is_provider_unavailable_error(exc)
 
 
 def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
@@ -162,6 +357,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         - vLLM: "openai/meta-llama/Meta-Llama-3-70B-Instruct"
         - Anthropic: "anthropic/claude-3-5-sonnet-20241022"
     """
+
+    MAX_TOOL_ROUNDS = 10
 
     def __init__(
         self,
@@ -192,8 +389,46 @@ class TenantModelAdapter(CompletionModelAdapter):
         # LiteLLM requires the provider prefix to know which client to use
         # When using custom api_base, LiteLLM strips one prefix level and sends the rest to the API
         # Example: "openai/openai/gpt-4" -> sends "openai/gpt-4" to custom endpoint
-        self.litellm_model = f"{provider_type}/{model.name}"
+        self.litellm_model = build_litellm_model_name(provider_type, model.name)
         self.provider_type = provider_type
+
+    def _record_provider_unavailable(self, *, phase: str, exc: BaseException) -> None:
+        span = trace.get_current_span()
+        if span.is_recording():
+            is_streaming = phase in {"stream_preparation", "stream_iteration"}
+            span.set_attribute("gen_ai.operation.name", "chat")
+            span.set_attribute("gen_ai.provider.name", self.provider_type)
+            span.set_attribute("gen_ai.request.model", self.model.name)
+            span.set_attribute("gen_ai.request.stream", is_streaming)
+            span.set_attribute("error.type", PROVIDER_UNAVAILABLE_CODE)
+            span.set_attribute("eneo.ai.provider_unavailable", True)
+            span.set_attribute("eneo.ai.provider_type", self.provider_type)
+            span.set_attribute("eneo.ai.model", self.litellm_model)
+            span.set_attribute("eneo.ai.operation", phase)
+            span.set_attribute("eneo.ai.error_type", exc.__class__.__name__)
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR, PROVIDER_UNAVAILABLE_MESSAGE))
+
+        logger.exception(
+            f"[TenantModelAdapter] Provider unavailable for {self.litellm_model} during {phase}",
+            extra={
+                "provider_type": self.provider_type,
+                "model": self.litellm_model,
+                "operation": phase,
+                "error_type": exc.__class__.__name__,
+                "error_code": PROVIDER_UNAVAILABLE_CODE,
+            },
+        )
+
+    def _raise_provider_unavailable(
+        self, *, phase: str, exc: BaseException
+    ) -> NoReturn:
+        self._record_provider_unavailable(phase=phase, exc=exc)
+        raise OpenAIException(
+            PROVIDER_UNAVAILABLE_MESSAGE,
+            code=PROVIDER_UNAVAILABLE_CODE,
+            details={"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True},
+        ) from exc
 
     def _mask_sensitive_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Return copy of params with masked API key for safe logging."""
@@ -265,6 +500,24 @@ class TenantModelAdapter(CompletionModelAdapter):
             return text
         return THINKING_BLOCK_PATTERN.sub("", text).strip()
 
+    @staticmethod
+    def _parse_tool_arguments(arguments: str | None) -> dict[str, Any]:
+        if not arguments:
+            return {}
+        try:
+            parsed = json.loads(arguments)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise OpenAIException(
+                "The model produced invalid tool arguments.",
+                code="invalid_tool_arguments",
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise OpenAIException(
+                "The model produced invalid tool arguments.",
+                code="invalid_tool_arguments",
+            )
+        return cast(dict[str, Any], parsed)
+
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -303,53 +556,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             completion_tokens=_add(existing.completion_tokens, new.completion_tokens),
             reasoning_tokens=_add(existing.reasoning_tokens, new.reasoning_tokens),
         )
-
-    def _build_image(self, file: File) -> dict[str, Any]:
-        """
-        Build image content block for OpenAI-compatible format.
-
-        Args:
-            file: Image file with blob data
-
-        Returns:
-            dict: Image content in OpenAI format
-        """
-        blob = file.blob
-        if blob is None:
-            raise ValueError("Image file is missing blob data")
-
-        image_data = base64.b64encode(blob).decode("utf-8")
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:{file.mimetype};base64,{image_data}"},
-        }
-
-    def _build_content(
-        self, input: str, images: list[File]
-    ) -> list[dict[str, Any]] | str:
-        """
-        Build message content with text and images.
-
-        Args:
-            input: Text content
-            images: List of image files
-
-        Returns:
-            list[dict] | str: Content array if images present, otherwise string
-        """
-        # Build content array with text
-        content: list[dict[str, Any]] = []
-        if input:
-            content.append({"type": "text", "text": input})
-
-        # Add images
-        for image in images:
-            content.append(self._build_image(image))
-
-        # Return string if only text, array if images included
-        if len(content) == 1 and content[0].get("type") == "text":
-            return input
-        return content
 
     def _build_tools_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -393,14 +599,46 @@ class TenantModelAdapter(CompletionModelAdapter):
         will reject requests containing tools.
         """
         if not self.model.supports_tool_calling:
-            if mcp_proxy:
+            if intric_tools or mcp_proxy:
                 logger.info(
-                    f"[MCP] Skipping MCP tools for model '{self.model.name}' "
+                    f"[Tools] Skipping tools for model '{self.model.name}' "
                     f"(supports_tool_calling=False)"
                 )
-            return intric_tools
+            return []
         mcp_tools = mcp_proxy.get_tools_for_llm() if mcp_proxy else []
         return intric_tools + mcp_tools
+
+    async def _refresh_mcp_tools_after_round(
+        self,
+        mcp_proxy: "MCPProxySession",
+        intric_tools: list[dict[str, Any]],
+        tool_names: list[str],
+        litellm_kwargs: dict[str, Any],
+        allowed_tools: set[str],
+    ) -> set[str]:
+        """Re-list MCP tools after a tool round; update the advertised set if changed.
+
+        Progressive-discovery MCP servers reveal tools lazily: a tool such as
+        ``load_tools`` activates new tools and the server emits
+        ``notifications/tools/list_changed``. Without re-listing, the model never
+        sees the activated tools and loops calling the activator. When the tool
+        set changed, rewrite ``litellm_kwargs["tools"]`` (consumed by the
+        follow-up request) and return a refreshed allow-list; otherwise return
+        the current allow-list unchanged.
+        """
+        try:
+            tools_changed = await mcp_proxy.refresh_tools(touched_tool_names=tool_names)
+        except Exception as exc:
+            logger.warning(f"[MCP] Tool refresh failed: {exc}")
+            return allowed_tools
+
+        if not tools_changed:
+            return allowed_tools
+
+        refreshed_tools = self._merge_mcp_tools(intric_tools, mcp_proxy)
+        if refreshed_tools:
+            litellm_kwargs["tools"] = refreshed_tools
+        return mcp_proxy.get_allowed_tool_names()
 
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -418,76 +656,23 @@ class TenantModelAdapter(CompletionModelAdapter):
         if context.prompt:
             messages.append({"role": "system", "content": context.prompt})
 
-        # Convert previous Q&A pairs to user/assistant messages (with images)
+        # Convert previous Q&A pairs to canonical replay messages (with images
+        # and tool calls) — the same shape token counting uses.
         for msg in context.messages:
-            # User message with question + images
-            messages.append(
-                {
-                    "role": "user",
-                    "content": self._build_content(
-                        input=msg.question,
-                        images=msg.images + msg.generated_images,
-                    ),
-                }
+            messages.extend(
+                build_turn_messages(
+                    question=msg.question,
+                    answer=msg.answer,
+                    images=msg.images + msg.generated_images,
+                    tool_calls=msg.tool_calls,
+                )
             )
-            # Assistant response. If the turn invoked tools, emit the canonical
-            # OpenAI shape: a pre-tool assistant message with only `tool_calls`,
-            # one `role: tool` entry per call, then a post-tool assistant
-            # message with the final answer. This matches what the live flow
-            # produces during generation and keeps causal order intact.
-            if msg.tool_calls:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": tc.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.tool_name,
-                                    "arguments": (
-                                        json.dumps(tc.arguments)
-                                        if tc.arguments is not None
-                                        else "{}"
-                                    ),
-                                },
-                            }
-                            for tc in msg.tool_calls
-                        ],
-                    }
-                )
-                for tc in msg.tool_calls:
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.tool_call_id,
-                            "content": tc.result,
-                        }
-                    )
-                if msg.answer:
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": msg.answer,
-                        }
-                    )
-            else:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": msg.answer or "[image generated]",
-                    }
-                )
 
         # Add current question with images
         messages.append(
             {
                 "role": "user",
-                "content": self._build_content(
-                    input=context.input,
-                    images=context.images,
-                ),
+                "content": build_content(context.input, context.images),
             }
         )
 
@@ -508,32 +693,13 @@ class TenantModelAdapter(CompletionModelAdapter):
         Returns:
             dict: LiteLLM kwargs with api_key, api_base, and config fields
         """
-        kwargs: dict[str, Any] = {}
-
-        # Inject API key (required)
-        api_key = self.credential_resolver.get_api_key()
-        if api_key:
-            kwargs["api_key"] = api_key
-        else:
-            raise ValueError(f"No API key available for tenant model {self.model.name}")
-
-        # Inject custom endpoint if present
-        endpoint = self.credential_resolver.get_credential_field(field="endpoint")
-        if endpoint:
-            kwargs["api_base"] = endpoint
-
-        # Inject additional config fields (e.g., api_version for Azure)
-        config_fields = ["api_version", "api_type", "organization"]
-        for field in config_fields:
-            value = self.credential_resolver.get_credential_field(field=field)
-            if value:
-                kwargs[field] = value
+        kwargs = build_litellm_provider_kwargs(self.credential_resolver)
 
         # Process model kwargs with provider-specific adjustments
         if model_kwargs:
             # Convert Pydantic ModelKwargs to dict if needed.
             if isinstance(model_kwargs, dict):
-                model_kwargs_dict: dict[str, Any] = model_kwargs
+                model_kwargs_dict = dict(model_kwargs)
             else:
                 model_kwargs_dict = model_kwargs.model_dump(exclude_none=True)
 
@@ -637,28 +803,34 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Extract token usage from provider response
             usage = self._extract_usage(response)
 
-            # Parse response
             completion = Completion()
             if response.choices:
                 choice = response.choices[0]
                 msg = choice.message
-
-                # DEBUG: Log message details
                 logger.debug(f"[DEBUG] Message: {msg}")
                 reasoning = getattr(msg, "reasoning_content", None)
                 if reasoning:
                     logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
-                # Check if model wants to call MCP tools
-                if msg.tool_calls and mcp_proxy:
+                tool_round = 0
+                seen_prefixes: set[str] = set()
+                captured_refs: list[McpToolReference] = []
+                while msg.tool_calls and mcp_proxy:
+                    if tool_round >= self.MAX_TOOL_ROUNDS:
+                        raise OpenAIException(
+                            "The model exceeded the maximum number of tool rounds.",
+                            code="tool_round_limit",
+                        )
+                    tool_round += 1
+
                     allowed_tools = mcp_proxy.get_allowed_tool_names()
                     for tc in msg.tool_calls:
                         if tc.function.name not in allowed_tools:
                             raise OpenAIException(
-                                f"Unauthorized MCP tool call: {tc.function.name}"
+                                "The model requested an unauthorized tool.",
+                                code="unauthorized_tool",
                             )
 
-                    # Add assistant message with tool calls to conversation
                     messages.append(
                         {
                             "role": "assistant",
@@ -677,40 +849,43 @@ class TenantModelAdapter(CompletionModelAdapter):
                         }
                     )
 
-                    # Execute tools via proxy
                     proxy_calls: list[tuple[str, dict[str, Any]]] = []
                     for tc in msg.tool_calls:
-                        arguments = (
-                            cast(dict[str, Any], json.loads(tc.function.arguments))
-                            if tc.function.arguments
-                            else {}
-                        )
+                        arguments = self._parse_tool_arguments(tc.function.arguments)
                         proxy_calls.append((tc.function.name, arguments))
                     results = await mcp_proxy.call_tools_parallel(proxy_calls)
 
-                    # Add tool results to messages
+                    # Add tool results to messages. Resource content blocks are
+                    # captured as McpToolReferences (buffered on completion for
+                    # later persistence) and woven into the LLM-facing text via
+                    # a structured MCP source context so the model can emit
+                    # <inref/> markers without relying on server-specific shapes.
                     for tc, result in zip(msg.tool_calls, results):
-                        result_text = ""
-                        if result.get("content"):
-                            for ci in result["content"]:
-                                if ci.get("type") == "text":
-                                    result_text += ci.get("text", "")
+                        content_list = cast(
+                            list[dict[str, Any]], result.get("content") or []
+                        )
+                        (
+                            llm_text,
+                            _display_text,
+                            refs_for_call,
+                        ) = _build_tool_result_with_references(
+                            content_list=content_list,
+                            tool_call_id=tc.id,
+                            mcp_tool_name=tc.function.name,
+                            existing_prefixes=seen_prefixes,
+                        )
+                        captured_refs.extend(refs_for_call)
                         if result.get("is_error"):
-                            result_text = json.dumps(
-                                {"error": result_text or "Tool execution failed"}
+                            llm_text = json.dumps(
+                                {"error": llm_text or "Tool execution failed"}
                             )
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": result_text,
+                                "content": llm_text,
                             }
                         )
-
-                    # Follow-up completion without tools
-                    follow_up_kwargs = {
-                        k: v for k, v in litellm_kwargs.items() if k != "tools"
-                    }
                     response = cast(
                         _LiteLLMResponse,
                         await _acompletion_call(
@@ -718,12 +893,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                             messages=messages,
                             stream=False,
                             drop_params=True,
-                            **follow_up_kwargs,
+                            **litellm_kwargs,
                         ),
                     )
                     usage = self._accumulate_usage(usage, response)
-                    msg = response.choices[0].message
+                    if not response.choices:
+                        break
+                    choice = response.choices[0]
+                    msg = choice.message
 
+                if captured_refs:
+                    completion.mcp_tool_references = captured_refs
                 if msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"
@@ -734,75 +914,23 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             return completion
 
-        except AuthenticationError as exc:
-            logger.error(
-                f"Authentication failed for tenant model {self.model.name}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                    "error_type": "AuthenticationError",
-                },
-            )
-            raise APIKeyNotConfiguredException(
-                f"Invalid API credentials for provider '{self.provider_type}'. "
-                f"Please verify your API key configuration."
-            ) from exc
-
-        except RateLimitError as exc:
-            logger.error(
-                f"Rate limit error for tenant model {self.model.name}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                },
-            )
-            raise OpenAIException(
-                f"Rate limit exceeded for {self.provider_type}. Please try again later."
-            ) from exc
-
-        except BadRequestError as exc:
-            # Surface the actual error message for invalid parameters/values
-            error_message = str(exc)
-            logger.error(
-                f"Bad request for tenant model {self.model.name}: {error_message}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                },
-            )
-            raise OpenAIException(f"Invalid request: {error_message}") from exc
-
-        except APIError as exc:
-            error_message = str(exc)
-            logger.error(
-                f"API error for tenant model {self.model.name}: {error_message}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                },
-            )
-
-            # Check for specific error types
-            if (
-                "Virtual Network/Firewall" in error_message
-                or "Firewall rules" in error_message
-            ):
-                raise OpenAIException(
-                    "Access denied: Virtual Network/Firewall rules. "
-                    "Please check your network configuration."
-                ) from exc
-            elif "rate limit" in error_message.lower():
-                raise OpenAIException(
-                    f"Rate limit exceeded for {self.provider_type}. Please try again later."
-                ) from exc
-            else:
-                raise OpenAIException(f"API error: {error_message}") from exc
-
         except Exception as exc:
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error for {self.litellm_model}"
             )
-            raise OpenAIException("Unknown error occurred") from exc
+            if isinstance(
+                exc,
+                (OpenAIException, APIKeyNotConfiguredException),
+            ):
+                raise
+            litellm_transport.raise_public_litellm_error(
+                exc,
+                provider_type=self.provider_type,
+                is_unavailable=_is_provider_unavailable_error,
+                raise_unavailable=lambda error: self._raise_provider_unavailable(
+                    phase="completion", exc=error
+                ),
+            )
 
     @override
     async def prepare_streaming(
@@ -811,7 +939,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
         mcp_proxy: "MCPProxySession | None" = None,
         **kwargs: Any,
-    ) -> AsyncIterator[_LiteLLMStreamChunk]:
+    ) -> PreparedModelStream:
         """
         Initialize streaming completion from tenant model.
         Phase 1: Create stream connection before EventSourceResponse.
@@ -865,98 +993,40 @@ class TenantModelAdapter(CompletionModelAdapter):
                 ),
             )
 
-            # Store context for MCP tool execution in iterate_stream
-            stream_with_ctx = cast(Any, stream)
-            setattr(
-                stream_with_ctx,
-                "_eneo_context",
-                {
-                    "messages": messages,
-                    "kwargs": litellm_kwargs,
-                    "has_tools": bool(all_tools),
-                    "mcp_proxy": mcp_proxy,
-                },
-            )
-
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream connection created successfully"
             )
-            return stream
-
-        except AuthenticationError as exc:
-            logger.error(
-                f"Authentication failed for streaming tenant model {self.model.name}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                    "error_type": "AuthenticationError",
-                },
+            return PreparedModelStream(
+                stream=stream,
+                messages=messages,
+                kwargs=litellm_kwargs,
+                mcp_proxy=mcp_proxy,
+                has_tools=bool(all_tools),
+                intric_tools=intric_tools,
             )
-            raise APIKeyNotConfiguredException(
-                f"Invalid API credentials for provider '{self.provider_type}'. "
-                f"Please verify your API key configuration."
-            ) from exc
-
-        except RateLimitError as exc:
-            logger.error(
-                f"Rate limit error for streaming tenant model {self.model.name}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                },
-            )
-            raise OpenAIException(
-                f"Rate limit exceeded for {self.provider_type}. Please try again later."
-            ) from exc
-
-        except BadRequestError as exc:
-            # Surface the actual error message for invalid parameters/values
-            error_message = str(exc)
-            logger.error(
-                f"Bad request for streaming tenant model {self.model.name}: {error_message}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                },
-            )
-            raise OpenAIException(f"Invalid request: {error_message}") from exc
-
-        except APIError as exc:
-            error_message = str(exc)
-            logger.error(
-                f"API error for streaming tenant model {self.model.name}: {error_message}",
-                extra={
-                    "provider_type": self.provider_type,
-                    "model": self.litellm_model,
-                },
-            )
-
-            # Check for specific error types
-            if (
-                "Virtual Network/Firewall" in error_message
-                or "Firewall rules" in error_message
-            ):
-                raise OpenAIException(
-                    "Access denied: Virtual Network/Firewall rules. "
-                    "Please check your network configuration."
-                ) from exc
-            elif "rate limit" in error_message.lower():
-                raise OpenAIException(
-                    f"Rate limit exceeded for {self.provider_type}. Please try again later."
-                ) from exc
-            else:
-                raise OpenAIException(f"API error: {error_message}") from exc
 
         except Exception as exc:
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error creating stream for {self.litellm_model}"
             )
-            raise OpenAIException("Unknown error occurred") from exc
+            if isinstance(
+                exc,
+                (OpenAIException, APIKeyNotConfiguredException),
+            ):
+                raise
+            litellm_transport.raise_public_litellm_error(
+                exc,
+                provider_type=self.provider_type,
+                is_unavailable=_is_provider_unavailable_error,
+                raise_unavailable=lambda error: self._raise_provider_unavailable(
+                    phase="stream_preparation", exc=error
+                ),
+            )
 
     @override
     async def iterate_stream(
         self,
-        stream: AsyncIterator[_LiteLLMStreamChunk],
+        stream: PreparedModelStream | AsyncIterator[_LiteLLMStreamChunk],
         context: Optional["Context"] = None,
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
         require_tool_approval: bool = False,
@@ -988,9 +1058,28 @@ class TenantModelAdapter(CompletionModelAdapter):
                 f"[TenantModelAdapter] {self.litellm_model}: Starting stream iteration"
             )
 
-            # Get MCP context stored by prepare_streaming
-            eneo_ctx = getattr(stream, "_eneo_context", None)
-            mcp_proxy = eneo_ctx.get("mcp_proxy") if eneo_ctx else None
+            prepared = stream if isinstance(stream, PreparedModelStream) else None
+            source_stream = (
+                prepared.stream
+                if prepared
+                else cast(AsyncIterator[_LiteLLMStreamChunk], stream)
+            )
+            mcp_proxy = prepared.mcp_proxy if prepared else None
+            mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
+            pending_allowed_tools: set[str] = (
+                mcp_proxy.get_allowed_tool_names()
+                if mcp_proxy is not None and mcp_tools_active
+                else set()
+            )
+
+            def _resolve_tool_names(name: str) -> tuple[str, str, str | None]:
+                info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
+                if info:
+                    return info
+                if "__" in name:
+                    server_name, tool_name = name.split("__", 1)
+                    return server_name, tool_name, None
+                return "", name, None
 
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
@@ -1009,6 +1098,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 buffer = ""
                 inside_thinking = False
                 thinking_stripped = False
+                pending_emitted: set[int] = set()
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
 
@@ -1033,6 +1123,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                     finish_reason = chunk.choices[0].finish_reason
                     logger.debug(f"[DEBUG] Delta: {delta}")
 
+                    # Forward provider reasoning/thinking deltas (e.g. Anthropic
+                    # extended thinking surfaced by LiteLLM as reasoning_content)
+                    # as REASONING chunks. Kept separate from text so it never
+                    # pollutes the persisted answer.
+                    reasoning_delta = getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        yield Completion(
+                            reasoning_content=reasoning_delta,
+                            response_type=ResponseType.REASONING,
+                        )
+
                     # Accumulate tool call deltas
                     if delta.tool_calls:
                         res.has_tool_calls = True
@@ -1056,6 +1157,41 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     res.tool_calls_acc[idx]["function"][
                                         "arguments"
                                     ] += fn.arguments
+
+                        # Surface each call as a "pending" step as soon as its
+                        # name and id are known — argument JSON for many parallel
+                        # calls can take tens of seconds to generate, and the
+                        # stream is otherwise silent for that whole window.
+                        if mcp_tools_active:
+                            for idx, acc in res.tool_calls_acc.items():
+                                if idx in pending_emitted:
+                                    continue
+                                call_id = acc["id"]
+                                name = acc["function"]["name"]
+                                if (
+                                    not call_id
+                                    or not name
+                                    or name not in pending_allowed_tools
+                                ):
+                                    continue
+                                server_name, tool_name, title = _resolve_tool_names(
+                                    name
+                                )
+                                pending_emitted.add(idx)
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL,
+                                    tool_calls_metadata=[
+                                        ToolCallMetadata(
+                                            server_name=server_name,
+                                            tool_name=tool_name,
+                                            title=title,
+                                            arguments=None,
+                                            tool_call_id=call_id,
+                                            result_status="pending",
+                                            mcp_tool_name=name,
+                                        )
+                                    ],
+                                )
 
                     # Handle text content with thinking-block stripping
                     content = delta.content or ""
@@ -1095,21 +1231,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                         buffer = ""
 
             # --- Drain initial stream ---
-            async for comp in _drain_stream(stream, result):
+            async for comp in _drain_stream(source_stream, result):
                 yield comp
 
             # --- MCP tool call loop ---
-            if (
-                result.has_tool_calls
-                and mcp_proxy
-                and eneo_ctx
-                and eneo_ctx.get("has_tools")
-            ):
-                messages = eneo_ctx["messages"]
-                litellm_kwargs = eneo_ctx["kwargs"]
+            if result.has_tool_calls and mcp_proxy and prepared and prepared.has_tools:
+                messages = prepared.messages
+                litellm_kwargs = prepared.kwargs
+                intric_tools: list[dict[str, Any]] = prepared.intric_tools
                 allowed_tools = mcp_proxy.get_allowed_tool_names()
 
-                max_rounds = 10
+                max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
 
                 while result.has_tool_calls and tool_round < max_rounds:
@@ -1126,34 +1258,34 @@ class TenantModelAdapter(CompletionModelAdapter):
                     for tc in tool_calls:
                         name = tc["function"]["name"]
                         if name not in allowed_tools:
-                            raise OpenAIException(f"Unauthorized MCP tool: {name}")
+                            raise OpenAIException(
+                                "The model requested an unauthorized tool.",
+                                code="unauthorized_tool",
+                            )
 
                     # Build tool metadata for frontend
                     tool_metadata: list[ToolCallMetadata] = []
                     for tc in tool_calls:
                         name = tc["function"]["name"]
                         try:
-                            args = (
-                                cast(
-                                    dict[str, Any],
-                                    json.loads(tc["function"]["arguments"]),
-                                )
-                                if tc["function"]["arguments"]
-                                else None
+                            args = self._parse_tool_arguments(
+                                tc["function"]["arguments"]
                             )
-                        except json.JSONDecodeError:
+                        except OpenAIException:
                             args = None
                         info = mcp_proxy.get_tool_info(name)
                         if info:
-                            sname, tname = info
+                            sname, tname, title = info
                         elif "__" in name:
                             sname, tname = name.split("__", 1)
+                            title = None
                         else:
-                            sname, tname = "", name
+                            sname, tname, title = "", name, None
                         tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=sname,
                                 tool_name=tname,
+                                title=title,
                                 arguments=args,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=name,
@@ -1214,6 +1346,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     ToolCallMetadata(
                                         server_name=tm.server_name,
                                         tool_name=tm.tool_name,
+                                        title=tm.title,
                                         arguments=_tool_metadata_arguments(tm),
                                         tool_call_id=tm.tool_call_id,
                                         approved=False,
@@ -1230,6 +1363,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ToolCallMetadata(
                                     server_name=tm.server_name,
                                     tool_name=tm.tool_name,
+                                    title=tm.title,
                                     arguments=_tool_metadata_arguments(tm),
                                     tool_call_id=tm.tool_call_id,
                                     approved=decision_map.get(
@@ -1267,6 +1401,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ToolCallMetadata(
                                     server_name=tm.server_name,
                                     tool_name=tm.tool_name,
+                                    title=tm.title,
                                     arguments=_tool_metadata_arguments(tm),
                                     tool_call_id=tm.tool_call_id,
                                     approved=tm.approved,
@@ -1303,58 +1438,69 @@ class TenantModelAdapter(CompletionModelAdapter):
                         proxy_calls: list[tuple[str, dict[str, Any]]] = [
                             (
                                 tc["function"]["name"],
-                                cast(
-                                    dict[str, Any],
-                                    json.loads(tc["function"]["arguments"]),
-                                )
-                                if tc["function"]["arguments"]
-                                else {},
+                                self._parse_tool_arguments(tc["function"]["arguments"]),
                             )
                             for tc in approved_tcs
                         ]
-                        results = cast(
-                            list[dict[str, Any]],
-                            await mcp_proxy.call_tools_parallel(proxy_calls),
-                        )
+                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
                         execution_metadata: list[ToolCallMetadata] = []
+                        captured_refs: list[McpToolReference] = []
+                        seen_prefixes: set[str] = set()
                         for tc, res in zip(approved_tcs, results):
                             result_data = res
-                            text = ""
-                            if result_data.get("content"):
-                                for ci in result_data["content"]:
-                                    if ci.get("type") == "text":
-                                        text += ci.get("text", "")
+                            content_list = cast(
+                                list[dict[str, Any]], result_data.get("content") or []
+                            )
+                            (
+                                llm_text,
+                                display_text,
+                                refs_for_call,
+                            ) = _build_tool_result_with_references(
+                                content_list=content_list,
+                                tool_call_id=tc["id"],
+                                mcp_tool_name=tc["function"]["name"],
+                                existing_prefixes=seen_prefixes,
+                            )
+                            captured_refs.extend(refs_for_call)
                             result_status = "succeeded"
                             if result_data.get("is_error"):
-                                text = json.dumps(
-                                    {"error": text or "Tool execution failed"}
+                                error_payload = json.dumps(
+                                    {"error": llm_text or "Tool execution failed"}
                                 )
+                                llm_text = error_payload
+                                display_text = error_payload
                                 result_status = "failed"
                             messages.append(
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
-                                    "content": text,
+                                    "content": llm_text,
                                 }
                             )
                             tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
                             if tool_info:
-                                server_name, tool_name = tool_info
+                                server_name, tool_name, title = tool_info
                             elif "__" in tc["function"]["name"]:
                                 server_name, tool_name = tc["function"]["name"].split(
                                     "__", 1
                                 )
+                                title = None
                             else:
-                                server_name, tool_name = "", tc["function"]["name"]
+                                server_name, tool_name, title = (
+                                    "",
+                                    tc["function"]["name"],
+                                    None,
+                                )
                             execution_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
                                     tool_name=tool_name,
+                                    title=title,
                                     arguments=tool_args_by_call_id.get(tc["id"] or ""),
                                     tool_call_id=tc["id"],
                                     approved=True,
                                     result_status=result_status,
-                                    result=text,
+                                    result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
                                 )
                             )
@@ -1363,6 +1509,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             yield Completion(
                                 response_type=ResponseType.TOOL_CALL,
                                 tool_calls_metadata=execution_metadata,
+                                mcp_tool_references=(
+                                    captured_refs if captured_refs else None
+                                ),
                             )
 
                     # Add denied tool results
@@ -1383,17 +1532,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
                         tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
                         if tool_info:
-                            server_name, tool_name = tool_info
+                            server_name, tool_name, title = tool_info
                         elif "__" in tc["function"]["name"]:
                             server_name, tool_name = tc["function"]["name"].split(
                                 "__", 1
                             )
+                            title = None
                         else:
-                            server_name, tool_name = "", tc["function"]["name"]
+                            server_name, tool_name, title = (
+                                "",
+                                tc["function"]["name"],
+                                None,
+                            )
                         denied_metadata.append(
                             ToolCallMetadata(
                                 server_name=server_name,
                                 tool_name=tool_name,
+                                title=title,
                                 arguments=tool_args_by_call_id.get(tc["id"] or ""),
                                 tool_call_id=tc["id"],
                                 approved=False,
@@ -1410,6 +1565,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=denied_metadata,
                         )
+
+                    # Re-fetch tools in case a tool we just ran (e.g. load_tools
+                    # on a progressive-discovery server) activated new tools via
+                    # notifications/tools/list_changed. Updates the advertised
+                    # tools on litellm_kwargs (consumed by the follow-up below)
+                    # and returns a fresh allow-list for next round's validation.
+                    allowed_tools = await self._refresh_mcp_tools_after_round(
+                        mcp_proxy=mcp_proxy,
+                        intric_tools=intric_tools,
+                        tool_names=[tc["function"]["name"] for tc in tool_calls],
+                        litellm_kwargs=litellm_kwargs,
+                        allowed_tools=allowed_tools,
+                    )
 
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = cast(
@@ -1428,8 +1596,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                     async for comp in _drain_stream(follow_up, result):
                         yield comp
 
-                if tool_round >= max_rounds:
+                if result.has_tool_calls and tool_round >= max_rounds:
                     logger.warning(f"[MCP] Reached max tool rounds ({max_rounds})")
+                    raise OpenAIException(
+                        "The model exceeded the maximum number of tool rounds.",
+                        code="tool_round_limit",
+                    )
 
             # Final stop — attach accumulated usage
             yield Completion(text="", stop=True, usage=result.usage)
@@ -1440,17 +1612,30 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
-            logger.error(
-                f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
-                exc_info=True,
-            )
+            if _is_provider_unavailable_error(exc):
+                self._record_provider_unavailable(phase="stream_iteration", exc=exc)
+                # Streaming Completion events expose numeric error_code, not JSON details.
+                error = PROVIDER_UNAVAILABLE_MESSAGE
+                error_code = 503
+            else:
+                logger.error(
+                    f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
+                    exc_info=True,
+                )
+                error = litellm_transport.STREAM_ERROR_MESSAGE
+                error_code = 500
+
             yield Completion(
                 text="",
-                error=f"Stream error: {str(exc)}",
-                error_code=500,
+                error=error,
+                error_code=error_code,
                 response_type=ResponseType.ERROR,
                 stop=True,
             )
+
+    @override
+    def get_model_route(self) -> str:
+        return self.litellm_model
 
     @override
     def get_token_limit_of_model(self) -> int:

@@ -1,3 +1,4 @@
+<!-- eslint-disable intric/no-hardcoded-text -- SVG flag with embedded CSS; no human-facing text -->
 <svg
   id="Ebene_2"
   xmlns="http://www.w3.org/2000/svg"

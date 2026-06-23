@@ -20,8 +20,8 @@ from intric.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
+    require_file_delete_scope_guard,
     require_resource_permission_for_method,
-    require_tenant_scope_for_delete,
 )
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.federation_router import router as federation_router
@@ -41,8 +41,17 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
     router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
+from intric.governance_policy.presentation.governance_policy_router import (
+    router as governance_policy_router,
+)
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
+from intric.help_assistants.api.admin_router import (
+    router as help_assistants_admin_router,
+)
+from intric.help_assistants.api.run_router import (
+    router as help_assistants_run_router,
+)
 from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
 from intric.integration.presentation.admin_sharepoint_router import (
@@ -68,6 +77,9 @@ from intric.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from intric.modules.module_router import router as module_router
+from intric.prompt_library.presentation.prompt_library_router import (
+    router as prompt_library_router,
+)
 from intric.prompts.api.prompt_router import router as prompt_router
 from intric.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
@@ -388,7 +400,7 @@ router.include_router(
             )
         ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
-        Depends(require_tenant_scope_for_delete()),
+        Depends(require_file_delete_scope_guard()),
     ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
@@ -480,6 +492,18 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
+    prompt_library_router,
+    prefix="/admin/prompt-library",
+    tags=["admin", "prompt-library"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    governance_policy_router,
+    prefix="/admin/governance-policy",
+    tags=["admin", "governance-policy"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
 )
 router.include_router(
@@ -487,6 +511,17 @@ router.include_router(
     prefix="/admin",
     tags=["admin"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    help_assistants_admin_router,
+    prefix="/admin/help-assistants",
+    tags=["admin", "help-assistants"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    help_assistants_run_router,
+    prefix="/help-assistants",
+    tags=["help-assistants"],
 )
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
 

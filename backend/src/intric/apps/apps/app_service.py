@@ -133,7 +133,7 @@ class AppService:
         if (
             template.completion_model
             and template.completion_model.id
-            and space.is_completion_model_in_space(template.completion_model.id)
+            and space.is_completion_model_available(template.completion_model.id)
         ):
             completion_model = space.get_completion_model(template.completion_model.id)
 
@@ -253,7 +253,7 @@ class AppService:
 
         completion_model = None
         if completion_model_id is not None:
-            if not space.is_completion_model_in_space(
+            if not space.is_completion_model_available(
                 completion_model_id=completion_model_id
             ):
                 raise BadRequestException(
@@ -389,6 +389,16 @@ class AppService:
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
         )
+
+        # Document-derived images (e.g. rendered PDF pages) enrich the
+        # completion payload only — the run's recorded input files stay the
+        # user's own uploads.
+        if app.completion_model is not None and app.completion_model.vision:
+            files = await self.file_service.with_derived_images(files)
+            if app.attachments:
+                app.attachments = await self.file_service.with_derived_images(
+                    app.attachments
+                )
 
         return await app.run(
             files=files,

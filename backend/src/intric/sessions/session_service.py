@@ -1,12 +1,15 @@
-from collections.abc import Sequence
+import asyncio
+from collections.abc import Coroutine, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import CompletionModel
 from intric.assistants.assistant_service import AssistantService
 from intric.authentication.auth_models import is_service_api_key
+from intric.completion_models.infrastructure.context_builder import count_tokens
+from intric.database.database import sessionmanager
 from intric.files.file_models import File
 from intric.group_chat.application.group_chat_service import GroupChatService
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -16,6 +19,7 @@ from intric.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from intric.main.logging import get_logger
 from intric.questions.question import QuestionAdd, ToolCallInfo
 from intric.questions.questions_repo import QuestionRepository
 from intric.sessions.session import (
@@ -28,7 +32,92 @@ from intric.sessions.sessions_repo import SessionRepository
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
+    from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+        McpSessionLifecycleService,
+    )
+
+logger = get_logger(__name__)
+
+
+def safe_count_tokens(text: str, model_name: str | None) -> int:
+    """Best-effort token count. tiktoken can raise on unknown model names — falling back
+    to 0 keeps the surrounding persistence path alive when an exotic model is in use."""
+    if not model_name:
+        return 0
+    try:
+        return count_tokens(text, model_name)
+    except Exception:
+        logger.warning(
+            "count_tokens failed; falling back to 0",
+            extra={"model": model_name},
+            exc_info=True,
+        )
+        return 0
+
+
+# Keep strong references to background save tasks so the GC can't collect them
+# mid-flight. asyncio.create_task returns a weak reference internally; without a
+# strong ref a "lucky" GC pass can cancel the task silently — which on this code
+# path would be silent data loss on exactly the scenario the PR exists to protect.
+_background_save_tasks: set[asyncio.Task[None]] = set()
+
+
+def schedule_background_save(coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+    """Schedule a fire-and-forget background save with GC protection.
+
+    asyncio.create_task internally holds only a weak reference; without the
+    module-level set keeping a strong one, the GC can collect the task mid-flight
+    and silently drop the persistence write. The add_done_callback hook discards
+    the task from the set once it completes.
+    """
+    task = asyncio.create_task(coro)
+    _background_save_tasks.add(task)
+    task.add_done_callback(_background_save_tasks.discard)
+    return task
+
+
+async def persist_partial_question_answer(
+    *,
+    tenant_id: UUID,
+    question_id: UUID,
+    answer: str,
+    num_tokens_answer: int,
+    completion_model_id: UUID | None = None,
+    reasoning: str | None = None,
+) -> None:
+    """Persist the answer text on a previously-created placeholder question using a fresh
+    DB session.
+
+    Called from the streaming generator's `finally` on abort. Decoupled from request scope
+    so the write survives even when FastAPI tears down the request-scoped AsyncSession.
+    Exceptions are logged and swallowed (except cancellation) — this is best-effort
+    cleanup, not a path that should fail the parent task.
+    """
+    try:
+        async with sessionmanager.session() as session, session.begin():
+            repo = QuestionRepository(session)
+            await repo.update_with_answer(
+                question_id=question_id,
+                tenant_id=tenant_id,
+                answer=answer,
+                num_tokens_answer=num_tokens_answer,
+                completion_model_id=completion_model_id,
+                reasoning=reasoning,
+            )
+        logger.info(
+            "Persisted partial chat answer on stream abort",
+            extra={
+                "question_id": str(question_id),
+                "answer_chars": len(answer),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist partial chat answer on stream abort",
+            extra={"question_id": str(question_id)},
+        )
 
 
 class SessionService:
@@ -39,6 +128,7 @@ class SessionService:
         user: UserInDB,
         assistant_service: AssistantService | None = None,
         group_chat_service: GroupChatService | None = None,
+        mcp_session_lifecycle_service: "McpSessionLifecycleService | None" = None,
     ):
         super().__init__()
         self.session_repo = session_repo
@@ -46,6 +136,7 @@ class SessionService:
         self.user = user
         self.assistant_service = assistant_service
         self.group_chat_service = group_chat_service
+        self.mcp_session_lifecycle_service = mcp_session_lifecycle_service
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncIterator[None]:
@@ -131,6 +222,18 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def get_tool_call_result(
+        self,
+        session: SessionInDB,
+        tool_call_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Return (result, mcp_tool_name) for one visible tool call."""
+        for question in session.questions or []:
+            for tc in question.tool_calls or []:
+                if tc.tool_call_id and tc.tool_call_id == tool_call_id:
+                    return tc.result, tc.mcp_tool_name
+        return None, None
+
     async def get_sessions_by_assistant(
         self,
         assistant_id: UUID,
@@ -164,6 +267,10 @@ class SessionService:
         owned_session = self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+        if self.mcp_session_lifecycle_service is not None:
+            await self.mcp_session_lifecycle_service.terminate_for_chat_session(
+                owned_session.id
+            )
         return await self.session_repo.delete(owned_session.id)
 
     async def create_session(
@@ -183,44 +290,96 @@ class SessionService:
         async with self._write_transaction():
             return await self.session_repo.add(session_add)
 
-    async def add_question_to_session(
+    async def create_question_placeholder(
         self,
         *,
         question: str,
-        answer: str,
-        num_tokens_question: int,
-        num_tokens_answer: int,
         session: SessionInDB,
-        completion_model: CompletionModel | None = None,
-        info_blob_chunks: list[InfoBlobChunkInDBWithScore],
         files: Sequence[File] | None = None,
-        generated_files: Sequence[File] | None = None,
-        logging_details: LoggingDetails | None = None,
         assistant_id: UUID | None = None,
-        web_search_results: Sequence["WebSearchResult"] | None = None,
-        tool_calls: list[ToolCallInfo] | None = None,
-    ) -> object:
+        completion_model: CompletionModel | None = None,
+    ) -> UUID:
+        """Persist a placeholder Question row with the user's message and an empty answer.
+
+        Returns the new question's id so the caller can complete the row when the LLM
+        stream finishes (normally or via abort). This guarantees the user's message is
+        durably stored before any LLM token streams out.
+
+        Note: a placeholder row commits with the router's request transaction, so it
+        remains in the DB even if the LLM call later raises (rate limit, model
+        unavailable, network drop). The conversation lists endpoint will surface those
+        rows with `answer=""` — that is intentional, the row reflects what the user
+        asked.
+
+        `num_tokens_question` is seeded with `count_tokens(question, model_name)` so
+        analytics don't undercount aborted requests. The normal-completion path later
+        overwrites it with the provider-reported prompt token count.
+        """
         completion_model_id = completion_model.id if completion_model else None
+        completion_model_name = completion_model.name if completion_model else None
+        initial_question_tokens = safe_count_tokens(question, completion_model_name)
         question_add = QuestionAdd(
             tenant_id=self.user.tenant_id,
             question=question,
-            answer=answer,
-            num_tokens_question=num_tokens_question,
-            num_tokens_answer=num_tokens_answer,
+            answer="",
+            num_tokens_question=initial_question_tokens,
+            num_tokens_answer=0,
             completion_model_id=completion_model_id,
             session_id=session.id,
-            logging_details=logging_details,
+            logging_details=None,
             assistant_id=assistant_id,
-            tool_calls=tool_calls,
+            tool_calls=None,
         )
 
         async with self._write_transaction():
-            return await self.question_repo.add(
+            question_record = await self.question_repo.add(
                 question_add,
-                info_blob_chunks=info_blob_chunks,
+                info_blob_chunks=[],
                 files=list(files or []),
-                generated_files=list(generated_files or []),
-                web_search_results=list(web_search_results or []),
+                generated_files=[],
+                web_search_results=[],
+            )
+
+        assert question_record is not None, (
+            "question_repo.add must return the newly inserted row"
+        )
+        return question_record.id
+
+    async def complete_question_with_answer(
+        self,
+        *,
+        question_id: UUID,
+        answer: str,
+        num_tokens_question: int,
+        num_tokens_answer: int,
+        completion_model: CompletionModel | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore],
+        generated_files: Sequence[File] | None = None,
+        logging_details: LoggingDetails | None = None,
+        web_search_results: Sequence["WebSearchResult"] | None = None,
+        tool_calls: list[ToolCallInfo] | None = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
+        reasoning: str | None = None,
+    ) -> None:
+        """Update a placeholder Question row with the final assistant answer."""
+        completion_model_id = completion_model.id if completion_model else None
+        async with self._write_transaction():
+            await self.question_repo.update_with_answer(
+                question_id=question_id,
+                tenant_id=self.user.tenant_id,
+                answer=answer,
+                num_tokens_question=num_tokens_question,
+                num_tokens_answer=num_tokens_answer,
+                completion_model_id=completion_model_id,
+                tool_calls=tool_calls,
+                reasoning=reasoning,
+                info_blob_chunks=info_blob_chunks,
+                generated_files=list(generated_files) if generated_files else None,
+                web_search_results=list(web_search_results)
+                if web_search_results
+                else None,
+                logging_details=logging_details,
+                mcp_tool_references=mcp_tool_references,
             )
 
     async def leave_feedback(

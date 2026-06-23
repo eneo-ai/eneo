@@ -76,8 +76,30 @@ class AIModel(Entity):
         return None
 
     @property
+    def litellm_deprecation_date(self) -> Optional[str]:
+        from intric.ai_models.deprecation_lookup import get_litellm_deprecation_date
+
+        return get_litellm_deprecation_date(
+            self.name, getattr(self, "provider_type", None)
+        )
+
+    @property
+    def is_effectively_deprecated(self) -> bool:
+        from intric.ai_models.deprecation_lookup import is_model_effectively_deprecated
+
+        return is_model_effectively_deprecated(
+            self.name,
+            getattr(self, "provider_type", None),
+            manually_deprecated=self.is_deprecated,
+        )
+
+    @property
     def can_access(self):
-        return not self.is_locked and not self.is_deprecated and self.is_org_enabled
+        return (
+            not self.is_locked
+            and not self.is_effectively_deprecated
+            and self.is_org_enabled
+        )
 
     def meets_security_classification(
         self, security_classification: Optional["SecurityClassification"] = None

@@ -46,6 +46,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     TIKTOKEN_CACHE_DIR=/tiktoken
 
+# OTel service version — pass --build-arg OTEL_SERVICE_VERSION=<version> at
+# build time so it surfaces as resource.service.version in every log line and
+# span. CI passes the release tag / branch-sha here. Defaults to "unknown" for
+# local builds that don't supply it.
+ARG OTEL_SERVICE_VERSION=unknown
+ENV OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION}
+
 WORKDIR /app
 
 # Run as unprivileged user

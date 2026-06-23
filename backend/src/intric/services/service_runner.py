@@ -60,11 +60,19 @@ class ServiceRunner:
         assert self.service.completion_model is not None, (
             "Service must have a completion model"
         )
+
+        # Document-derived images (e.g. rendered PDF pages) enrich the
+        # completion payload only — the persisted question and the returned
+        # files stay the user's own uploads.
+        completion_files = files
+        if self.service.completion_model.vision:
+            completion_files = await self.file_service.with_derived_images(files)
+
         # Query the AI models
         ai_response = await self.completion_service.get_response(
             model=self.service.completion_model,  # pyright: ignore[reportArgumentType]  # two CompletionModel classes coexist: ai_models.completion_model vs completion_models.domain; structural mismatch, works at runtime
             text_input=input,
-            files=files,
+            files=completion_files,
             prompt=self.prompt,
             info_blob_chunks=datastore_result.chunks,
             model_kwargs=self.service.completion_model_kwargs,

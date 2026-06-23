@@ -6,11 +6,12 @@
 
   let cls: string = "";
   export { cls as class };
+  export let ariaLabel: string | undefined = undefined;
 
   const { featureFlags, environment } = getAppContext();
 </script>
 
-<nav class="{cls} flex flex-grow flex-col gap-0.5 py-3">
+<nav aria-label={ariaLabel} class="{cls} flex flex-grow flex-col gap-0.5 py-3">
   <slot />
   <div class="flex-grow"></div>
   {#if featureFlags.showHelpCenter}

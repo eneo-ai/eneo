@@ -15,15 +15,18 @@
       "gap-4",
       "px-[1.45rem]",
       "py-2.5",
-      "hover:font-medium",
-      "hover:tracking-normal",
-      "hover:text-primary"
+      "transition-colors",
+      "hover:text-primary",
+      "focus-visible:ring-ring",
+      "focus-visible:ring-2",
+      "focus-visible:ring-inset",
+      "focus-visible:outline-none"
     ],
     {
       variants: {
         active: {
           true: ["bg-hover-dimmer", "hover:bg-hover-default", "font-medium"],
-          false: ["hover:bg-hover-dimmer", "tracking-[0.008rem]", "text-secondary"]
+          false: ["hover:bg-hover-dimmer", "text-secondary"]
         }
       }
     }

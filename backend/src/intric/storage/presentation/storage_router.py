@@ -8,12 +8,18 @@ from fastapi import APIRouter, Depends
 
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.storage.presentation.storage_models import StorageInfoModel, StorageModel
 
 router = APIRouter()
 
 
-@router.get("/", response_model=StorageModel)
+@router.get(
+    "/",
+    response_model=StorageModel,
+    description="Get aggregated storage usage for the tenant.",
+    responses=responses.get_responses([]),
+)
 async def get_storage(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> StorageModel:
@@ -26,7 +32,12 @@ async def get_storage(
     return model
 
 
-@router.get("/spaces/", response_model=StorageInfoModel)
+@router.get(
+    "/spaces/",
+    response_model=StorageInfoModel,
+    description="Get per-space storage usage breakdown for the tenant.",
+    responses=responses.get_responses([]),
+)
 async def get_spaces(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> StorageInfoModel:

@@ -100,6 +100,7 @@ async def test_create_from_template_prefers_template_model_when_available(
 
     space = MagicMock()
     space.is_completion_model_in_space.return_value = template_in_space
+    space.is_completion_model_available.return_value = template_in_space
     space.get_completion_model.return_value = template_model
 
     created_app = MagicMock()

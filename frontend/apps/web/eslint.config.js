@@ -30,7 +30,56 @@ export default ts.config(
     }
   },
   {
-    ignores: ["build/", ".svelte-kit/", "dist/", "src/lib/paraglide/"]
+    // `**/dev/**` routes are throwaway UI prototypes / previews (see their
+    // READMEs); their demo copy is intentionally not translated, so exempt them
+    // from the lint rules that would otherwise force paraglide messages.
+    ignores: [
+      "build/",
+      ".svelte-kit/",
+      ".svelte-kit-e2e/",
+      "coverage/",
+      "playwright-report/",
+      "test-results/",
+      "dist/",
+      "**/paraglide/",
+      "**/dev/**"
+    ]
+  },
+  {
+    // Block hardcoded human-facing text — every human-facing string must go
+    // through paraglide (m.*). Enforced across the whole web app.
+    // The `ignore` patterns below allow genuinely non-translatable literals
+    // inline (brand, keyboard keys, technical identifiers). They are matched
+    // against the trimmed text, so they are position-independent — unlike
+    // inline eslint-disable comments, prettier reflowing markup cannot break
+    // them.
+    files: ["**/*.svelte"],
+    rules: {
+      "intric/no-hardcoded-text": [
+        "error",
+        {
+          ignore: [
+            "Eneo\\.ai", // product brand, used in page <title>s
+            "^(sk|pk)_$", // API key type prefixes
+            "^ENEO_[A-Z_]+$", // environment variable names
+            "^(Ctrl|Enter|Shift|Alt|Cmd|Tab|Esc)$" // keyboard keys in <kbd>
+          ]
+        }
+      ]
+    }
+  },
+  {
+    // Block raw colors in UI source — every color must go through eneo's
+    // semantic design tokens (bg-negative-dimmer, text-warning-stronger, …) so
+    // it adapts to light/dark via `data-theme`. This also covers class strings
+    // assembled in scripts, generated markup, and component <style> blocks.
+    //
+    // Existing violations are tracked in eslint-suppressions.json. ESLint only
+    // suppresses that per-file count, so newly added violations fail CI.
+    files: ["src/**/*.{svelte,js,ts}"],
+    rules: {
+      "intric/no-raw-color": "error"
+    }
   },
   {
     rules: {

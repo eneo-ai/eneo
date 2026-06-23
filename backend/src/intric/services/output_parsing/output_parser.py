@@ -3,7 +3,7 @@ import json
 from abc import abstractmethod
 from typing import Protocol, cast
 
-from langchain import output_parsers
+from langchain_core import output_parsers
 from pydantic import BaseModel
 from typing_extensions import override
 

@@ -7,8 +7,12 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
+from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.logging_table import logging_table
+from intric.database.tables.mcp_tool_references_table import (
+    McpToolReference as McpToolReferencesTable,
+)
 from intric.database.tables.questions_table import (
     InfoBlobReferences,
     Questions,
@@ -24,7 +28,10 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.questions.question import Question, QuestionAdd
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
+    from intric.logging.logging import LoggingDetails
+    from intric.questions.question import ToolCallInfo
 
 
 class QuestionRepository:
@@ -52,6 +59,7 @@ class QuestionRepository:
             .selectinload(InfoBlobReferences.info_blob)
             .selectinload(InfoBlobs.website),
             selectinload(Questions.web_search_results),
+            selectinload(Questions.mcp_tool_references),
         ]
 
     def _add_options(
@@ -126,8 +134,110 @@ class QuestionRepository:
 
         await self.session.execute(stmt)
 
+    async def _add_mcp_tool_references(
+        self, mcp_tool_references: list["McpToolReference"], question_id: UUID
+    ):
+        stmt = sa.insert(McpToolReferencesTable).values(
+            [
+                dict(
+                    id=ref.id,
+                    question_id=question_id,
+                    tool_call_id=ref.tool_call_id,
+                    mcp_tool_name=ref.mcp_tool_name,
+                    uri=ref.uri,
+                    mime_type=ref.mime_type,
+                    content=ref.content,
+                    meta=ref.meta,
+                    order=ref.order,
+                )
+                for ref in mcp_tool_references
+            ]
+        )
+
+        await self.session.execute(stmt)
+
     async def get(self, id: UUID):
         return await self.delegate.get(id)
+
+    async def update_with_answer(
+        self,
+        *,
+        question_id: UUID,
+        tenant_id: UUID,
+        answer: str,
+        num_tokens_question: int | None = None,
+        num_tokens_answer: int | None = None,
+        completion_model_id: UUID | None = None,
+        tool_calls: list["ToolCallInfo"] | None = None,
+        reasoning: str | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        generated_files: list[File] | None = None,
+        web_search_results: list["WebSearchResult"] | None = None,
+        logging_details: "LoggingDetails | None" = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
+    ) -> None:
+        """Update an existing placeholder Question row with the final or partial answer.
+
+        Used both for normal stream completion (full answer + token counts + late-bound rows)
+        and for partial persistence on abort (just the answer text + estimated token counts).
+
+        tenant_id is required in the WHERE clause to defend against cross-tenant writes if a
+        caller ever supplies a stale question_id.
+        """
+        logging_details_id: object = None
+        if logging_details is not None:
+            log_stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table is imperatively mapped
+                sa.insert(logging_table)
+                .values(**logging_details.model_dump())
+                .returning(logging_table)
+            )
+            log_result = await self.session.execute(log_stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            logging_row = log_result.scalar_one()  # pyright: ignore[reportUnknownVariableType]
+            logging_details_id = logging_row.id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+        update_values: dict[str, Any] = {"answer": answer}
+        if num_tokens_question is not None:
+            update_values["num_tokens_question"] = num_tokens_question
+        if num_tokens_answer is not None:
+            update_values["num_tokens_answer"] = num_tokens_answer
+        if completion_model_id is not None:
+            update_values["completion_model_id"] = completion_model_id
+        if tool_calls is not None:
+            update_values["tool_calls"] = [tc.model_dump() for tc in tool_calls]
+        if reasoning is not None:
+            update_values["reasoning"] = reasoning
+        if logging_details_id is not None:
+            update_values["logging_details_id"] = logging_details_id
+
+        update_stmt = (
+            sa.update(Questions)
+            .where(Questions.id == question_id)
+            .where(Questions.tenant_id == tenant_id)
+            .values(**update_values)
+        )
+        await self.session.execute(update_stmt)
+
+        if info_blob_chunks:
+            await self._add_references(
+                question_id=question_id,  # type: ignore[arg-type]  # helper annotated as int but ID is UUID
+                chunks=info_blob_chunks,
+            )
+        if generated_files:
+            await self._add_files(
+                question_id=question_id,  # type: ignore[arg-type]  # helper annotated as int but ID is UUID
+                files=list(generated_files),
+                file_type="assistant",
+            )
+        if web_search_results:
+            await self._add_web_search_results(
+                web_search_results=list(web_search_results),
+                question_id=question_id,
+            )
+        if mcp_tool_references:
+            await self._add_mcp_tool_references(
+                mcp_tool_references=mcp_tool_references,
+                question_id=question_id,
+            )
 
     async def add(
         self,
@@ -136,6 +246,7 @@ class QuestionRepository:
         files: list[File] | None = None,
         generated_files: list[File] | None = None,
         web_search_results: list["WebSearchResult"] | None = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
     ):
         stmt = (
             sa.insert(Questions)
@@ -168,6 +279,12 @@ class QuestionRepository:
                 web_search_results=web_search_results, question_id=question_record.id
             )
 
+        if mcp_tool_references:
+            await self._add_mcp_tool_references(
+                mcp_tool_references=mcp_tool_references,
+                question_id=question_record.id,
+            )
+
         if question.logging_details is not None:
             stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table type is dynamically created and not fully typed
                 sa.insert(logging_table)
@@ -184,6 +301,15 @@ class QuestionRepository:
         stmt = (
             sa.select(Questions)
             .where(Questions.service_id == service_id)
+            # Helper-assistant questions must never surface in exports/analysis
+            # (PRD §4) — same exclusion as sessions_repo / analysis_repo.
+            .where(
+                ~sa.exists(
+                    sa.select(HelpAssistantRuns.id).where(
+                        HelpAssistantRuns.session_id == Questions.session_id
+                    )
+                )
+            )
             .order_by(Questions.created_at)
         )
 
@@ -198,6 +324,14 @@ class QuestionRepository:
             .join(Sessions)
             .join(Users)
             .where(Users.tenant_id == tenant_id)
+            # Exclude helper-assistant questions from tenant-wide exports.
+            .where(
+                ~sa.exists(
+                    sa.select(HelpAssistantRuns.id).where(
+                        HelpAssistantRuns.session_id == Sessions.id
+                    )
+                )
+            )
             .filter(Questions.created_at >= start_date)
             .filter(Questions.created_at <= end_date)
             .order_by(Questions.created_at)

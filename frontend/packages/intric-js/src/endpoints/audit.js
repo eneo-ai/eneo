@@ -118,8 +118,9 @@ export function initAudit(client) {
 
     /**
      * Get audit category configuration for the current tenant. Requires admin privileges.
-     * Returns all 7 audit categories with their enabled status, descriptions, action counts, and example actions.
-     * @returns {Promise<{categories: Array<{category: string, enabled: boolean, description: string, action_count: number, example_actions: string[]}>}>}
+     * Returns all 7 audit categories with their enabled status, action counts, and example actions.
+     * Display text is translated client-side by category key (no Swedish metadata in the payload).
+     * @returns {Promise<import('../types/schema').components["schemas"]["AuditConfigResponse"]>}
      * @throws {IntricError}
      * */
     getConfig: async () => {
@@ -133,7 +134,7 @@ export function initAudit(client) {
      * Update audit category configuration for the current tenant. Requires admin privileges.
      * Changes take effect immediately for new audit events. Historical logs are unaffected.
      * @param {{updates: Array<{category: string, enabled: boolean}>}} config - Category updates
-     * @returns {Promise<{categories: Array<{category: string, enabled: boolean, description: string, action_count: number, example_actions: string[]}>}>}
+     * @returns {Promise<import('../types/schema').components["schemas"]["AuditConfigResponse"]>}
      * @throws {IntricError}
      * */
     updateConfig: async (config) => {
@@ -147,9 +148,10 @@ export function initAudit(client) {
     },
 
     /**
-     * Get per-action audit configuration for all 65 actions. Requires admin privileges.
-     * Returns actions grouped by category with Swedish metadata.
-     * @returns {Promise<{actions: Array<{action: string, enabled: boolean, category: string, name_sv: string, description_sv: string}>}>}
+     * Get per-action audit configuration for all action types. Requires admin privileges.
+     * Returns actions grouped by category. Display text is translated client-side by
+     * action key (no Swedish metadata in the payload).
+     * @returns {Promise<import('../types/schema').components["schemas"]["ActionConfigResponse"]>}
      * @throws {IntricError}
      * */
     getActionConfig: async () => {
@@ -163,7 +165,7 @@ export function initAudit(client) {
      * Update action-level audit configuration. Requires admin privileges.
      * Changes are stored in the action_overrides JSONB column.
      * @param {{updates: Array<{action: string, enabled: boolean}>}} config - Action updates
-     * @returns {Promise<{actions: Array<{action: string, enabled: boolean, category: string, name_sv: string, description_sv: string}>}>}
+     * @returns {Promise<import('../types/schema').components["schemas"]["ActionConfigResponse"]>}
      * @throws {IntricError}
      * */
     updateActionConfig: async (config) => {

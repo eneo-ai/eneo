@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.templates.api.template_models import TemplateListPublic
 
 router = APIRouter()
@@ -13,6 +14,8 @@ USER_CONTAINER = Depends(WITH_USER_CONTAINER)
     "/",
     response_model=TemplateListPublic,
     status_code=200,
+    description="List all available templates (assistants and apps).",
+    responses=responses.get_responses([]),
 )
 async def get_templates(container: Container = USER_CONTAINER):
     """Get all types of templates"""

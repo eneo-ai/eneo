@@ -1,4 +1,5 @@
 # MIT License
+from enum import Enum
 from typing import Optional
 from uuid import UUID
 
@@ -6,6 +7,10 @@ from pydantic import BaseModel
 
 from intric.main.models import InDB, ModelId
 from intric.users.user import UserInDBBase, UserSparse
+
+
+class UserGroupState(str, Enum):
+    DELETED = "deleted"
 
 
 class UserGroupBase(BaseModel):

@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -57,9 +57,36 @@ from intric.spaces.api.space_models import (
 )
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
+if TYPE_CHECKING:
+    from intric.spaces.space import Space
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _space_response(container: Container, space: "Space") -> SpacePublic:
+    """Single serialization path for a full space response.
+
+    Resolves and attaches the personal default assistant's governance
+    effective_config (None for non-personal spaces or non-default assistants),
+    so the chat UI keeps governance filtering. Use this for any endpoint that
+    returns a full SpacePublic for a space that may be personal.
+    """
+    assembler = container.space_assembler()
+    effective_config = None
+    if (
+        space.default_assistant is not None
+        and space.default_assistant.is_default
+        and space.is_personal()
+    ):
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(
+            space.default_assistant, space_is_personal=space.is_personal()
+        )
+    return assembler.from_space_to_model(
+        space, default_assistant_effective_config=effective_config
+    )
 
 
 async def forbid_org_space(
@@ -86,6 +113,8 @@ async def forbid_org_space(
     "/",
     response_model=SpacePublic,
     status_code=201,
+    description="Create a new shared space.",
+    responses=responses.get_responses([403]),
 )
 async def create_space(
     create_space_req: CreateSpaceRequest,
@@ -130,17 +159,20 @@ async def get_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_space(id)
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)
 
 
 @router.patch(
     "/{id}/",
     response_model=SpacePublic,
     status_code=200,
+    description=(
+        "Update a space's settings (name, description, models, MCP servers, "
+        "security classification, data retention)."
+    ),
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_space(
@@ -149,7 +181,6 @@ async def update_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
-    assembler = container.space_assembler()
     current_user = container.user()
 
     old_space = await service.get_space(id)
@@ -291,7 +322,11 @@ async def update_space(
         ),
     )
 
-    return assembler.from_space_to_model(space)
+    # Serialize through the shared path so a patched personal space keeps the
+    # default assistant's governance effective_config — frontend SpacesManager
+    # overwrites currentSpace with this response, and a None effective_config
+    # makes the chat UI drop policy filtering until the next full GET.
+    return await _space_response(container, space)
 
 
 @router.get(
@@ -299,6 +334,7 @@ async def update_space(
     response_model=UpdateSpaceDryRunResponse,
     status_code=200,
     description="Get a preview of the impact of changing the security classification of a space.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_security_classification_impact_analysis(
     id: UUID,
@@ -319,6 +355,7 @@ async def get_security_classification_impact_analysis(
 @router.delete(
     "/{id}/",
     status_code=204,
+    description="Delete a space. Organization spaces cannot be deleted.",
     responses=responses.get_responses([403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -351,6 +388,8 @@ async def delete_space(
     "/",
     response_model=PaginatedResponse[SpaceSparse],
     status_code=200,
+    description="List spaces the current user can access.",
+    responses=responses.get_responses([]),
 )
 async def get_spaces(
     request: Request,
@@ -405,6 +444,7 @@ async def get_space_applications(
     "/{id}/applications/assistants/",
     response_model=AssistantPublic,
     status_code=201,
+    description="Create an assistant in a space, optionally from a template.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -497,6 +537,7 @@ async def create_group_chat(
     "/{id}/applications/apps/",
     response_model=AppPublic,
     status_code=201,
+    description="Create an app in a space, optionally from a template.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -538,6 +579,7 @@ async def create_app(
     "/{id}/applications/services/",
     response_model=CreateSpaceServiceResponse,
     status_code=201,
+    description="Create a service in a space.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -584,6 +626,7 @@ async def get_space_knowledge(
     "/{id}/knowledge/groups/",
     response_model=CollectionPublic,
     status_code=201,
+    description="Create a knowledge collection in a space.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def create_space_groups(
@@ -734,6 +777,8 @@ async def create_space_websites(
     "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
     status_code=202,  # Changed to 202 Accepted since job is queued
+    description="Add integration knowledge to a space. Returns a job to track import progress.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_space_integration_knowledge(
     id: UUID,
@@ -798,6 +843,8 @@ async def create_space_integration_knowledge(
     "/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
     response_model=CreateSpaceIntegrationKnowledgeBatchResponse,
     status_code=202,
+    description="Add multiple integration knowledge items to a space in a single batch.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_space_integration_knowledge_batch(
     id: UUID,
@@ -908,6 +955,8 @@ async def create_space_integration_knowledge_batch(
 @router.delete(
     "/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
     status_code=204,
+    description="Remove integration knowledge from a space.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_space_integration_knowledge(
     id: UUID,
@@ -952,6 +1001,8 @@ async def delete_space_integration_knowledge(
 @router.patch(
     "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
     response_model=list[IntegrationKnowledgePublic],
+    description="Rename an integration knowledge wrapper in a space.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def update_integration_knowledge_wrapper(
     id: UUID,
@@ -974,6 +1025,8 @@ async def update_integration_knowledge_wrapper(
 @router.delete(
     "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
     status_code=204,
+    description="Remove an integration knowledge wrapper and its items from a space.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_integration_knowledge_wrapper(
     id: UUID,
@@ -990,6 +1043,8 @@ async def delete_integration_knowledge_wrapper(
 @router.patch(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/",
     response_model=IntegrationKnowledgePublic,
+    description="Rename integration knowledge in a space.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def update_integration_knowledge(
     id: UUID,
@@ -1010,6 +1065,8 @@ async def update_integration_knowledge(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
     response_model=JobPublic,
     status_code=202,
+    description="Trigger a full re-sync of integration knowledge. Returns a job to track progress.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def trigger_integration_full_sync(
     id: UUID,
@@ -1048,7 +1105,8 @@ async def trigger_integration_full_sync(
 @router.post(
     "/{id}/members/",
     response_model=SpaceMember,
-    responses=responses.get_responses([403, 404]),
+    description="Add a user as a member of a space with a given role.",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def add_space_member(
@@ -1115,6 +1173,7 @@ async def add_space_member(
 @router.patch(
     "/{id}/members/{user_id}/",
     response_model=SpaceMember,
+    description="Change a space member's role.",
     responses=responses.get_responses([403, 404, 400]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1195,6 +1254,7 @@ async def change_role_of_member(
 @router.delete(
     "/{id}/members/{user_id}/",
     status_code=204,
+    description="Remove a member from a space.",
     responses=responses.get_responses([403, 404, 400]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1284,6 +1344,7 @@ async def get_space_group_members(
     "/{id}/group-members/",
     response_model=SpaceGroupMember,
     status_code=201,
+    description="Attach a user group to a space. Groups cannot be attached to personal spaces.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1339,6 +1400,7 @@ async def add_space_group_member(
 @router.patch(
     "/{id}/group-members/{group_id}/",
     response_model=SpaceGroupMember,
+    description="Change the role of a user group in a space.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1406,6 +1468,10 @@ async def change_group_member_role(
 @router.delete(
     "/{id}/group-members/{group_id}/",
     status_code=204,
+    description=(
+        "Remove a user group from a space. Members lose access granted via this "
+        "group, but may still have access through direct membership or other groups."
+    ),
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1464,29 +1530,34 @@ async def remove_space_group_member(
     )
 
 
-@router.get("/type/personal/", response_model=SpacePublic)
+@router.get(
+    "/type/personal/",
+    response_model=SpacePublic,
+    description="Get the current user's personal space.",
+    responses=responses.get_responses([]),
+)
 async def get_personal_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_personal_space()
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)
 
 
 @router.get(
     "/type/organization/",
     response_model=SpacePublic,
+    description="Get the organization (tenant) space. Requires admin permission.",
+    responses=responses.get_responses([403]),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def get_organization_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_or_create_tenant_space()
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)

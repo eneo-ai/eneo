@@ -123,10 +123,10 @@
 
           <div class="flex flex-col items-center gap-2 text-center">
             <h3 class="text-default text-lg font-semibold">
-              {m.no_templates_yet()}
+              {m.no_deleted_templates()}
             </h3>
             <p class="text-dimmer max-w-md text-sm">
-              {m.templates_empty_state_description()}
+              {m.deleted_templates_empty_state_description()}
             </p>
           </div>
         </div>

@@ -94,10 +94,10 @@ services:
       - proxy_tier
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.eneo-backend.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"  # CHANGE THIS
+      - "traefik.http.routers.eneo-backend.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/scim`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"  # CHANGE THIS
       - "traefik.http.routers.eneo-backend.entrypoints=web"
       - "traefik.http.routers.eneo-backend.middlewares=redirect-to-https"
-      - "traefik.http.routers.eneo-backend-secure.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"  # CHANGE THIS
+      - "traefik.http.routers.eneo-backend-secure.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/scim`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"  # CHANGE THIS
       - "traefik.http.routers.eneo-backend-secure.entrypoints=websecure"
       - "traefik.http.routers.eneo-backend-secure.tls=true"
       - "traefik.http.routers.eneo-backend-secure.tls.certresolver=letsencrypt"
