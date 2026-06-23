@@ -4,7 +4,8 @@ on:
   issue_comment:
     types: [created]
 
-permissions: {}
+permissions:
+  issues: write
 
 concurrency:
   group: eneo-ai-review-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}
@@ -12,9 +13,8 @@ concurrency:
 
 jobs:
   request-review:
-    # Coarse gate: a PR comment that starts with the trigger token. The Python step
-    # below is the precise, security-relevant gate (exact token after strip + allowlist
-    # + association), so a trailing space or newline no longer silently drops a request.
+    # Coarse gate: a PR comment starting with the trigger token. The Python step below is the
+    # precise, security-relevant gate (exact token after strip + allowlist + association).
     if: >-
       github.event.issue.pull_request &&
       (startsWith(github.event.comment.body, '@review') || startsWith(github.event.comment.body, '/review')) &&
@@ -28,6 +28,7 @@ jobs:
 
     steps:
       - name: Authorize requester and send signed review request
+        id: dispatch
         shell: python
         run: |
           import hashlib
@@ -41,10 +42,17 @@ jobs:
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
               event = json.load(handle)
 
-          # Precise gate: exactly "@review" or "/review" after trimming whitespace.
+
+          def ignore(reason):
+              # Clean no-op: the workflow ran but this was not a valid maintainer request.
+              # Exit 0 so ignored comments are NOT counted as failed runs (keeps metrics honest).
+              print(f"ignored: {reason}")
+              raise SystemExit(0)
+
+
           trigger = event["comment"]["body"].strip()
           if trigger not in {"@review", "/review"}:
-              raise SystemExit(f"ignored: trigger must be exactly '@review' or '/review' (got {trigger!r})")
+              ignore(f"trigger must be exactly '@review' or '/review' (got {trigger!r})")
 
           requester = event["comment"]["user"]["login"]
           allowed = {
@@ -53,13 +61,13 @@ jobs:
               if item
           }
           if not allowed:
-              raise SystemExit("ignored: AI_REVIEW_ALLOWED_USERS is empty; deny by default")
+              ignore("AI_REVIEW_ALLOWED_USERS is empty; deny by default")
           if requester.casefold() not in allowed:
-              raise SystemExit(f"ignored: {requester} is not allowlisted to invoke the reviewer")
+              ignore(f"{requester} is not allowlisted to invoke the reviewer")
 
           association = event["comment"].get("author_association", "")
           if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
-              raise SystemExit(f"ignored: {requester} is not a trusted repository maintainer ({association})")
+              ignore(f"{requester} is not a trusted repository maintainer ({association})")
 
           payload = {
               "repository": {"full_name": event["repository"]["full_name"]},
@@ -79,8 +87,8 @@ jobs:
                   "Content-Type": "application/json",
                   "User-Agent": "Eneo-AI-Review-Trigger/2.0",
                   "X-GitHub-Event": "issue_comment",
-                  # Keep this stable across workflow retries so Hermes' one-hour
-                  # idempotency cache cannot start a duplicate agent run.
+                  # Stable across retries so Hermes' one-hour idempotency cache cannot
+                  # start a duplicate agent run.
                   "X-GitHub-Delivery": str(event["comment"]["id"]),
                   "X-Hub-Signature-256": signature,
               },
@@ -95,3 +103,15 @@ jobs:
               raise SystemExit(f"Hermes rejected the request: HTTP {error.code} {detail}")
           except urllib.error.URLError as error:
               raise SystemExit(f"Hermes could not be reached: {error.reason}")
+
+          # Dispatched OK -> let the acknowledge step add a reaction to the trigger comment.
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("dispatched=true\n")
+
+      - name: Acknowledge receipt with an eyes reaction
+        if: steps.dispatch.outputs.dispatched == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: gh api --method POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes
