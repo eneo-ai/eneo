@@ -1,47 +1,16 @@
-"""End-to-end planner-turn runner wiring the orchestrator v2 helpers.
-
-The pipeline runs one planner LLM call plus up to
-`MAX_ORCHESTRATOR_REPAIR_RETRIES` repair attempts and returns an
-accepted `PlannerOutput` or a terminal `RejectionReason`. It does NOT
-persist anything — the caller builds the post-LLM assistant / tool
-conversation messages from the accepted output and then invokes
-`dispatch_planner_action` (for ask/commit/confirm). Proposal creation
-uses a separate task-specific tool-call boundary after the server
-selects that phase.
-
-Separating run from dispatch keeps the conversation-increment shape
-under the caller's control: the planner's action and its user-facing
-payload are only known after the LLM has produced the final accepted
-output, so the caller — which also owns SSE emission, locking, and
-lease bookkeeping — must be the one to assemble the messages persisted
-by `commit_turn`.
-
-The retry loop is owned here because the repair helper is per-call and
-the evaluator is stateless. Budget accounting:
-
-- `repaired` outcome → consumed retry slot (decrement toward budget)
-  and re-evaluate the repaired output against the same orchestration
-  context.
-- `not_repairable` outcome → terminal with the ORIGINAL rejection.
-  The helper short-circuited without calling the LLM, so
-  `llm_calls_made` is NOT bumped.
-- `commit_drift_blocked` → terminal with the drift rejection.
-  The LLM ran, so `llm_calls_made` IS bumped; drift is not a
-  retry-eligible condition, so `repair_attempts` is NOT bumped.
-- `parse_failed` from any LLM boundary gets the parse-repair loop unless
-  the failed completion was truncated. If parse-repair salvages a
-  semantic-repair response, that semantic repair consumes one retry
-  slot and the output is re-evaluated normally.
-"""
-
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
-from pydantic import ValidationError
-
+from intric.flows.ai_builder.ai_builder_ask_question_contract import (
+    canonical_ask_question_targets,
+    format_ask_question_targets,
+)
+from intric.flows.ai_builder.ai_builder_commit_invariance import (
+    CommitDriftError,
+    assert_architecture_commit_draft_matches_pinned,
+)
 from intric.flows.ai_builder.ai_builder_litellm_completion import (
     CompletionMetadata,
     call_planner_completion,
@@ -49,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_litellm_completion import (
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
     PlannerOutput,
+    RejectionCode,
     RejectionReason,
     evaluate_planner_output,
     parse_planner_output,
@@ -57,53 +27,25 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
 from intric.flows.ai_builder.ai_builder_planner_output_normalizer import (
     normalize_planner_output,
 )
-from intric.flows.ai_builder.ai_builder_repair import (
-    MAX_ORCHESTRATOR_REPAIR_RETRIES,
-    MAX_PARSE_REPAIR_RETRIES,
-    ParseRepairOutcome,
-    RepairOutcome,
-    build_repair_messages,
-    repair_parse_failure,
-    repair_planner_turn,
+from intric.flows.ai_builder.ai_builder_structured_turn import (
+    Message,
+    StructuredCompletion,
+    run_structured_turn,
 )
-from intric.flows.ai_builder.ai_builder_token_usage import (
-    CompletionTokenUsage,
-    combine_token_usage,
+from intric.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommit,
+    ArchitectureCommitDraft,
 )
+
+MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
+MAX_PARSE_REPAIR_RETRIES: Final[int] = 1
 
 PipelineOutcomeKind = Literal["accepted", "rejected", "parse_failed"]
 
 
 @dataclass(frozen=True, slots=True)
 class PipelineOutcome:
-    """Outcome of running one planner turn + up to N repair attempts.
-
-    `kind="accepted"`: the evaluator returned ``None`` on the final
-    parsed output. `accepted_output` carries the parsed PlannerOutput.
-    The caller inspects `accepted_output.planner_action.kind` to route
-    dispatch via `dispatch_planner_action` for ask_question /
-    commit_architecture / confirm_requirements.
-
-    `kind="rejected"`: `rejection` carries the terminal reason —
-    either the initial non-eligible rejection, the last rejection
-    after budget exhaustion, or a `repair_attempted_commit_drift`
-    produced by a drifted repair output.
-
-    `kind="parse_failed"`: the LLM returned a response that could not
-    be parsed as a PlannerOutput (truncation, schema drift, malformed
-    JSON). `final_completion` is populated so the caller can check
-    `finish_reason == "length"` and surface the existing
-    `planner_output_too_long` error code instead of a generic parse
-    failure. `parse_error_raw` and `parse_error_message` carry the
-    offending body and the validator message for telemetry.
-
-    `llm_calls_made` counts every `acompletion` call including the
-    initial turn. `repair_attempts` counts only the repair calls that
-    returned a `repaired` outcome (consumed a retry slot); drift,
-    non-repairable, and parse-failure outcomes do NOT consume a
-    retry slot.
-    """
-
     kind: PipelineOutcomeKind
     accepted_output: PlannerOutput | None = None
     rejection: RejectionReason | None = None
@@ -125,299 +67,208 @@ async def run_planner_pipeline(
     base_messages: list[dict[str, Any]],
     orchestration_context: OrchestrationContext,
 ) -> PipelineOutcome:
-    """Run one planner turn with a repair loop; return accepted/rejected.
-
-    `base_messages` is the chat-completion message list the caller has
-    already assembled (system prompt + prior conversation + current
-    user turn). `orchestration_context` is the evaluator's per-turn
-    context; the same context is re-used across repair attempts because
-    the session state has not been persisted yet.
-
-    On `accepted`, the caller must build the post-LLM assistant / tool
-    conversation messages from `accepted_output` and then call
-    `dispatch_planner_action(...)` to persist the turn atomically.
-    """
     prior_commit = orchestration_context.session_state.architecture_commit
 
-    initial_completion = await call_planner_completion(
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        messages=base_messages,
+    async def complete(messages: list[Message]) -> StructuredCompletion:
+        completion = await call_planner_completion(
+            litellm_client=litellm_client,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            messages=messages,
+        )
+        return StructuredCompletion(
+            raw_content=completion.raw_content,
+            metadata=completion.metadata,
+        )
+
+    result = await run_structured_turn(
+        initial_messages=base_messages,
+        complete=complete,
+        parse=parse_planner_output,
+        normalize=lambda output: normalize_planner_output(
+            output,
+            orchestration_context,
+        ),
+        validate=lambda output: evaluate_planner_output(
+            output,
+            orchestration_context,
+        ),
+        can_retry_semantic=_is_repair_eligible,
+        build_semantic_retry_messages=lambda output, rejection: build_repair_messages(
+            base_messages=base_messages,
+            output=output,
+            rejection=rejection,
+        ),
+        build_parse_retry_messages=build_parse_repair_messages,
+        summarize_parse_failure=summarize_parse_failure,
+        max_semantic_retries=MAX_ORCHESTRATOR_REPAIR_RETRIES,
+        max_parse_retries=MAX_PARSE_REPAIR_RETRIES,
+        repair_guard=lambda output: _detect_commit_drift(
+            prior=prior_commit,
+            after=output.planning_state_delta.architecture_commit,
+        ),
     )
-    llm_calls_made = 1
-    repair_attempts = 0
-    parse_repair_attempts = 0
-    final_metadata = initial_completion.metadata
-    token_usages: list[CompletionTokenUsage] = [initial_completion.metadata.usage]
-
-    initial_raw = initial_completion.raw_content
-    initial_parse_error: str | None = None
-    initial_parse_failure_diagnostics: dict[str, Any] | None = None
-    try:
-        initial_parsed = parse_planner_output(initial_raw)
-    except (ValidationError, json.JSONDecodeError) as exc:
-        initial_parsed = None
-        initial_parse_error = str(exc)
-        initial_parse_failure_diagnostics = summarize_parse_failure(initial_raw, exc)
-
-    def _cumulative_usage() -> CompletionTokenUsage:
-        return combine_token_usage(token_usages)
-
-    if initial_parsed is None:
-        # Truncation skips parse-repair: a corrective turn would just be
-        # a second chance to be truncated. Surface the existing
-        # `planner_output_too_long` path via the caller unchanged.
-        if final_metadata.finish_reason == "length":
-            return PipelineOutcome(
-                kind="parse_failed",
-                llm_calls_made=llm_calls_made,
-                repair_attempts=repair_attempts,
-                parse_repair_attempts=parse_repair_attempts,
-                final_completion=final_metadata,
-                cumulative_token_usage=_cumulative_usage(),
-                parse_error_raw=initial_raw,
-                parse_error_message=initial_parse_error,
-                parse_failure_diagnostics=initial_parse_failure_diagnostics,
-            )
-        parse_repair_result = await _run_parse_repair_loop(
-            litellm_client=litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            base_messages=base_messages,
-            failed_raw=initial_raw,
-            failed_error=initial_parse_error or "",
-        )
-        llm_calls_made += parse_repair_result.attempts
-        parse_repair_attempts = parse_repair_result.attempts
-        final_metadata = parse_repair_result.final_metadata
-        token_usages.extend(parse_repair_result.token_usages)
-        if parse_repair_result.repaired_output is None:
-            return PipelineOutcome(
-                kind="parse_failed",
-                llm_calls_made=llm_calls_made,
-                repair_attempts=repair_attempts,
-                parse_repair_attempts=parse_repair_attempts,
-                final_completion=final_metadata,
-                cumulative_token_usage=_cumulative_usage(),
-                parse_error_raw=parse_repair_result.failed_raw,
-                parse_error_message=parse_repair_result.failed_error,
-                parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
-            )
-        output = normalize_planner_output(
-            parse_repair_result.repaired_output,
-            orchestration_context,
-        )
-        raw = output.model_dump_json()
-    else:
-        output = normalize_planner_output(initial_parsed, orchestration_context)
-        raw = output.model_dump_json()
-
-    rejection = evaluate_planner_output(output, orchestration_context)
-
-    while rejection is not None and repair_attempts < MAX_ORCHESTRATOR_REPAIR_RETRIES:
-        repair_outcome: RepairOutcome = await repair_planner_turn(
-            litellm_client=litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            base_messages=base_messages,
-            failed_output_json=raw,
-            rejection=rejection,
-            prior_architecture_commit=prior_commit,
-        )
-        if repair_outcome.kind == "not_repairable":
-            return PipelineOutcome(
-                kind="rejected",
-                rejection=rejection,
-                llm_calls_made=llm_calls_made,
-                repair_attempts=repair_attempts,
-                parse_repair_attempts=parse_repair_attempts,
-                final_completion=final_metadata,
-                cumulative_token_usage=_cumulative_usage(),
-            )
-        llm_calls_made += 1
-        assert repair_outcome.completion_metadata is not None
-        final_metadata = repair_outcome.completion_metadata
-        token_usages.append(final_metadata.usage)
-        if repair_outcome.kind == "parse_failed":
-            if final_metadata.finish_reason == "length":
-                return PipelineOutcome(
-                    kind="parse_failed",
-                    llm_calls_made=llm_calls_made,
-                    repair_attempts=repair_attempts,
-                    parse_repair_attempts=parse_repair_attempts,
-                    final_completion=final_metadata,
-                    cumulative_token_usage=_cumulative_usage(),
-                    parse_error_raw=repair_outcome.parse_error_raw,
-                    parse_error_message=repair_outcome.parse_error_message,
-                    parse_failure_diagnostics=repair_outcome.parse_failure_diagnostics,
-                )
-            semantic_repair_messages = build_repair_messages(
-                base_messages=base_messages,
-                failed_output_json=raw,
-                rejection=rejection,
-            )
-            parse_repair_result = await _run_parse_repair_loop(
-                litellm_client=litellm_client,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                base_messages=semantic_repair_messages,
-                failed_raw=repair_outcome.parse_error_raw or "",
-                failed_error=repair_outcome.parse_error_message or "",
-            )
-            llm_calls_made += parse_repair_result.attempts
-            parse_repair_attempts += parse_repair_result.attempts
-            final_metadata = parse_repair_result.final_metadata
-            token_usages.extend(parse_repair_result.token_usages)
-            if parse_repair_result.repaired_output is not None:
-                output = normalize_planner_output(
-                    parse_repair_result.repaired_output,
-                    orchestration_context,
-                )
-                raw = output.model_dump_json()
-                repair_attempts += 1
-                rejection = evaluate_planner_output(output, orchestration_context)
-                continue
-            return PipelineOutcome(
-                kind="parse_failed",
-                llm_calls_made=llm_calls_made,
-                repair_attempts=repair_attempts,
-                parse_repair_attempts=parse_repair_attempts,
-                final_completion=final_metadata,
-                cumulative_token_usage=_cumulative_usage(),
-                parse_error_raw=parse_repair_result.failed_raw,
-                parse_error_message=parse_repair_result.failed_error,
-                parse_failure_diagnostics=parse_repair_result.failed_diagnostics,
-            )
-        if repair_outcome.kind == "commit_drift_blocked":
-            return PipelineOutcome(
-                kind="rejected",
-                rejection=repair_outcome.drift_rejection,
-                llm_calls_made=llm_calls_made,
-                repair_attempts=repair_attempts,
-                parse_repair_attempts=parse_repair_attempts,
-                final_completion=final_metadata,
-                cumulative_token_usage=_cumulative_usage(),
-            )
-        assert repair_outcome.repaired_output is not None
-        output = normalize_planner_output(
-            repair_outcome.repaired_output,
-            orchestration_context,
-        )
-        raw = output.model_dump_json()
-        repair_attempts += 1
-        rejection = evaluate_planner_output(output, orchestration_context)
-
-    if rejection is not None:
-        return PipelineOutcome(
-            kind="rejected",
-            rejection=rejection,
-            llm_calls_made=llm_calls_made,
-            repair_attempts=repair_attempts,
-            parse_repair_attempts=parse_repair_attempts,
-            final_completion=final_metadata,
-            cumulative_token_usage=_cumulative_usage(),
-        )
 
     return PipelineOutcome(
-        kind="accepted",
-        accepted_output=output,
-        llm_calls_made=llm_calls_made,
-        repair_attempts=repair_attempts,
-        parse_repair_attempts=parse_repair_attempts,
-        final_completion=final_metadata,
-        cumulative_token_usage=_cumulative_usage(),
+        kind=result.kind,
+        accepted_output=result.accepted_output,
+        rejection=result.rejection,
+        llm_calls_made=result.llm_calls_made,
+        repair_attempts=result.semantic_repair_attempts,
+        parse_repair_attempts=result.parse_repair_attempts,
+        final_completion=result.final_completion,
+        cumulative_token_usage=result.cumulative_token_usage,
+        parse_error_raw=result.parse_error_raw,
+        parse_error_message=result.parse_error_message,
+        parse_failure_diagnostics=result.parse_failure_diagnostics,
     )
 
 
-@dataclass(frozen=True, slots=True)
-class _ParseRepairResult:
-    """Internal result of the parse-repair loop.
+_REPAIR_ELIGIBLE_CODES: frozenset[RejectionCode] = frozenset(
+    {
+        "architecture_commit_premature_unresolved_choices",
+        "architecture_commit_missing_delta",
+        "off_topic_question",
+        "duplicate_question",
+    }
+)
 
-    `repaired_output` is ``None`` when every attempt still failed to
-    parse; the caller turns that into a `parse_failed` outcome with
-    the last attempt's sanitized failure data. `final_metadata` is
-    always the metadata of the last LLM call the loop made — initial
-    if no attempts ran, or the last repair attempt's completion.
-    """
+_PREMATURE_COMMIT_DIRECTIVE: Final[str] = (
+    "The valid next action is `ask_question` about one of the "
+    "unresolved slots named above. Emit `planner_action` with "
+    '`kind="ask_question"` and a `question_id` that targets one of '
+    "those slots. Do NOT emit `commit_architecture` again this turn."
+)
+_PRESERVE_COMMIT_DIRECTIVE: Final[str] = (
+    "Re-emit a planner JSON product that honors the constraint. Do "
+    "NOT change the committed architecture."
+)
+_DUPLICATE_QUESTION_DIRECTIVE: Final[str] = (
+    "Do NOT repeat the same `ask_question`. Use the latest user message "
+    "and conversation context as evidence. If the answer resolves the "
+    "slot, emit a valid non-duplicate next action such as "
+    "`confirm_requirements` or `commit_architecture` when all required "
+    "choices are resolved. If more information is still needed, ask a "
+    "different unresolved slot from the allowed target surface; do not "
+    "re-ask the rejected question ID this turn."
+)
+_MISSING_COMMIT_DELTA_DIRECTIVE: Final[str] = (
+    "If `planner_action.kind` is `commit_architecture`, keep "
+    "`planning_state_delta.architecture_commit` as null; the server derives "
+    "the architecture from resolved planning slots and the Flow Capability "
+    "Manifest. Do NOT emit `architecture_hash` or `committed_at`. If this "
+    "turn still lacks enough resolved state to commit, pivot to "
+    "`ask_question` for the unresolved slot instead of re-emitting "
+    "`commit_architecture`."
+)
 
-    attempts: int
-    repaired_output: PlannerOutput | None
-    final_metadata: CompletionMetadata
-    token_usages: tuple[CompletionTokenUsage, ...]
-    failed_raw: str
-    failed_error: str
-    failed_diagnostics: dict[str, Any] | None
 
-
-async def _run_parse_repair_loop(
+def build_repair_messages(
     *,
-    litellm_client: Any,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    base_messages: list[dict[str, Any]],
+    base_messages: list[Message],
+    output: PlannerOutput,
+    rejection: RejectionReason,
+) -> list[Message]:
+    return [
+        *base_messages,
+        {"role": "assistant", "content": output.model_dump_json()},
+        {
+            "role": "user",
+            "content": build_repair_user_message(rejection=rejection),
+        },
+    ]
+
+
+def build_parse_repair_messages(
+    base_messages: list[Message],
     failed_raw: str,
     failed_error: str,
-) -> _ParseRepairResult:
-    attempts = 0
-    last_raw = failed_raw
-    last_error = failed_error
-    last_diagnostics: dict[str, Any] | None = None
-    last_metadata: CompletionMetadata = CompletionMetadata(
-        finish_reason=None,
-        usage=CompletionTokenUsage(),
+) -> list[Message]:
+    return [
+        *base_messages,
+        {"role": "assistant", "content": failed_raw},
+        {
+            "role": "user",
+            "content": build_parse_repair_user_message(
+                parse_error_message=failed_error,
+            ),
+        },
+    ]
+
+
+def build_repair_user_message(*, rejection: RejectionReason) -> str:
+    return (
+        "The previous response was rejected because: "
+        f"{rejection.detail}. {_repair_directive_for(rejection.code)}"
     )
-    token_usages: list[CompletionTokenUsage] = []
-    while attempts < MAX_PARSE_REPAIR_RETRIES:
-        outcome: ParseRepairOutcome = await repair_parse_failure(
-            litellm_client=litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            base_messages=base_messages,
-            failed_output_raw=last_raw,
-            parse_error_message=last_error,
+
+
+def build_parse_repair_user_message(*, parse_error_message: str) -> str:
+    return (
+        "The previous response could not be parsed as a PlannerOutput "
+        f"JSON object. Parser error: {parse_error_message}. Re-emit the "
+        "response as a single raw JSON object matching the "
+        "PlannerOutput schema. Do NOT wrap the JSON in markdown code "
+        "fences. Do NOT add prose before or after the JSON. Do NOT "
+        "invent keys not declared in the schema. Reminders: "
+        "For `kind=commit_architecture`, prefer "
+        "`architecture_commit: null`; the server derives the architecture "
+        "from resolved planning slots and the Flow Capability Manifest. "
+        "Do NOT emit `architecture_hash` or `committed_at`; the server "
+        "owns those values."
+    )
+
+
+def _is_repair_eligible(rejection: RejectionReason) -> bool:
+    return rejection.code in _REPAIR_ELIGIBLE_CODES
+
+
+def _repair_directive_for(code: RejectionCode) -> str:
+    if code == "architecture_commit_premature_unresolved_choices":
+        return _PREMATURE_COMMIT_DIRECTIVE
+    if code == "architecture_commit_missing_delta":
+        return _MISSING_COMMIT_DELTA_DIRECTIVE
+    if code == "off_topic_question":
+        return _off_topic_question_directive()
+    if code == "duplicate_question":
+        return _DUPLICATE_QUESTION_DIRECTIVE
+    return _PRESERVE_COMMIT_DIRECTIVE
+
+
+def _off_topic_question_directive() -> str:
+    return (
+        "The valid next action is `ask_question`. Replace invented "
+        "domain-specific identifiers with one of the allowed targets "
+        "named in the rejection detail. Emit that target in both "
+        "`payload.question_id` and `payload.slot_name`; keep any narrower "
+        "domain concept in `payload.prompt` only. Canonical ask_question "
+        "targets are: "
+        f"{format_ask_question_targets(canonical_ask_question_targets())}."
+    )
+
+
+def _detect_commit_drift(
+    *,
+    prior: ArchitectureCommit | None,
+    after: ArchitectureCommitDraft | None,
+) -> RejectionReason | None:
+    if after is None:
+        return None
+    try:
+        assert_architecture_commit_draft_matches_pinned(before=prior, after=after)
+    except CommitDriftError as exc:
+        return RejectionReason(
+            code="repair_attempted_commit_drift",
+            detail=str(exc),
         )
-        attempts += 1
-        metadata = outcome.completion_metadata
-        assert metadata is not None
-        last_metadata = metadata
-        token_usages.append(last_metadata.usage)
-        if outcome.kind == "repaired":
-            assert outcome.repaired_output is not None
-            return _ParseRepairResult(
-                attempts=attempts,
-                repaired_output=outcome.repaired_output,
-                final_metadata=last_metadata,
-                token_usages=tuple(token_usages),
-                failed_raw=last_raw,
-                failed_error=last_error,
-                failed_diagnostics=None,
-            )
-        last_raw = outcome.parse_error_raw or ""
-        last_error = outcome.parse_error_message or ""
-        last_diagnostics = outcome.parse_failure_diagnostics
-        if last_metadata.finish_reason == "length":
-            return _ParseRepairResult(
-                attempts=attempts,
-                repaired_output=None,
-                final_metadata=last_metadata,
-                token_usages=tuple(token_usages),
-                failed_raw=last_raw,
-                failed_error=last_error,
-                failed_diagnostics=last_diagnostics,
-            )
-    return _ParseRepairResult(
-        attempts=attempts,
-        repaired_output=None,
-        final_metadata=last_metadata,
-        token_usages=tuple(token_usages),
-        failed_raw=last_raw,
-        failed_error=last_error,
-        failed_diagnostics=last_diagnostics if attempts > 0 else None,
-    )
+    return None
 
 
 __all__ = [
+    "MAX_ORCHESTRATOR_REPAIR_RETRIES",
+    "MAX_PARSE_REPAIR_RETRIES",
     "PipelineOutcome",
+    "build_parse_repair_user_message",
+    "build_repair_user_message",
     "run_planner_pipeline",
 ]

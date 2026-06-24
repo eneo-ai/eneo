@@ -1,8 +1,8 @@
 """End-to-end contract tests for the planner-turn pipeline runner.
 
 The pipeline runs one structured-JSON LLM call, validates via
-`evaluate_planner_output`, and on eligible rejections retries via
-`repair_planner_turn` up to `MAX_ORCHESTRATOR_REPAIR_RETRIES`. It does
+`evaluate_planner_output`, and on eligible rejections retries up to
+`MAX_ORCHESTRATOR_REPAIR_RETRIES`. It does
 NOT persist anything — the caller owns dispatch and proposal-processor
 handoff — so these tests mock the LLM transport only.
 
@@ -38,14 +38,14 @@ from intric.flows.ai_builder.ai_builder_action_policy import (
 from intric.flows.ai_builder.ai_builder_architecture_commit import (
     canonical_architecture_commit_payload,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    call_planner_completion,
+)
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     PipelineOutcome,
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
-from intric.flows.ai_builder.ai_builder_litellm_completion import (
-    call_planner_completion,
-)
 from intric.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
 )
@@ -689,6 +689,70 @@ class TestCommitDriftDuringRepair:
         assert outcome.rejection.code == "repair_attempted_commit_drift"
         assert outcome.llm_calls_made == 2
         assert outcome.repair_attempts == 0
+
+    async def test_parse_repaired_semantic_repair_uses_normal_evaluator_drift_code(
+        self,
+    ) -> None:
+        """A parse-repaired semantic retry re-enters normal evaluation.
+
+        Direct semantic-repair drift is blocked before normalization with
+        `repair_attempted_commit_drift`. If that repair response is malformed
+        and recovered by parse repair, the historic pipeline path re-ran the
+        normal evaluator instead; pin that narrower behavior so the generic
+        runner consolidation cannot change retry accounting silently.
+        """
+        original_commit = _make_commit(architecture_hash="a" * 64)
+        drifted_commit = _make_commit(architecture_hash="b" * 64)
+        drifted_commit.tuples_chain = [
+            StepTriple(
+                input_type="text",
+                output_type="json",
+                output_mode="pass_through",
+            )
+        ]
+        state = _make_planning_state(architecture_commit=original_commit)
+        malformed_repair = (
+            _planner_output_json(
+                kind="confirm_requirements",
+                architecture_commit=drifted_commit,
+            )
+            + "\n{}"
+        )
+        llm = AsyncMock()
+        llm.acompletion.side_effect = [
+            _llm_response(
+                _ask_question_json(
+                    question_id="primary_runtime_input",
+                    slot_name="primary_runtime_input",
+                )
+            ),
+            _llm_response(malformed_repair),
+            _llm_response(
+                _planner_output_json(
+                    kind="confirm_requirements",
+                    architecture_commit=drifted_commit,
+                )
+            ),
+        ]
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_make_context(
+                state=state,
+                asked_question_ids=frozenset({"primary_runtime_input"}),
+                required_slot_names=frozenset({"primary_runtime_input"}),
+            ),
+        )
+
+        assert outcome.kind == "rejected"
+        assert outcome.rejection is not None
+        assert outcome.rejection.code == "architecture_commit_drift_from_pinned"
+        assert outcome.llm_calls_made == 3
+        assert outcome.repair_attempts == 1
+        assert outcome.parse_repair_attempts == 1
 
 
 class TestPublicSurface:

@@ -1166,17 +1166,22 @@ def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> No
     completion_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
     )
-    repair_path = backend_root / Path(
+    deleted_repair_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_repair.py"
     )
     pipeline_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"
+    )
+    structured_turn_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_structured_turn.py"
     )
 
     completion_tree = ast.parse(
         completion_path.read_text(), filename=str(completion_path)
     )
     violations: list[str] = []
+    if deleted_repair_path.exists():
+        violations.append(f"{deleted_repair_path}: stale planner repair owner exists")
 
     acompletion_refs = [
         node
@@ -1187,7 +1192,7 @@ def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> No
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{completion_path}: acompletion refs {lines}")
 
-    for path in (repair_path, pipeline_path):
+    for path in (pipeline_path, structured_turn_path):
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and node.attr == "acompletion":
@@ -1204,13 +1209,23 @@ def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> No
     for module in sorted(completion_imports & banned_imports):
         violations.append(f"{completion_path}: imports {module}")
 
-    repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
-    for node in ast.walk(repair_tree):
-        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in {
-            "CompletionMetadata",
-            "completion_metadata_from_response",
-        }:
-            violations.append(f"{repair_path}:{node.lineno} defines {node.name}")
+    structured_turn_tree = ast.parse(
+        structured_turn_path.read_text(), filename=str(structured_turn_path)
+    )
+    structured_turn_imports = _imported_modules(structured_turn_tree)
+    banned_structured_turn_imports = {
+        "intric.flows.ai_builder.ai_builder_orchestrator",
+        "intric.flows.ai_builder.ai_builder_orchestration_pipeline",
+        "intric.flows.ai_builder.ai_builder_planner_turn",
+        "intric.flows.ai_builder.ai_builder_proposal_submission",
+        "intric.flows.ai_builder.ai_builder_proposal_tool_contracts",
+        "intric.flows.ai_builder.ai_builder_repo",
+        "intric.flows.ai_builder.ai_builder_session_turn",
+        "intric.flows.ai_builder.planning_state",
+        "intric.flows.domain.flow",
+    }
+    for module in sorted(structured_turn_imports & banned_structured_turn_imports):
+        violations.append(f"{structured_turn_path}: imports {module}")
 
     assert violations == []
 

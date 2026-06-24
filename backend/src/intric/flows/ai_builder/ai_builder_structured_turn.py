@@ -1,3 +1,5 @@
+"""Typed retry runner for one structured LLM output schema."""
+
 from __future__ import annotations
 
 import json

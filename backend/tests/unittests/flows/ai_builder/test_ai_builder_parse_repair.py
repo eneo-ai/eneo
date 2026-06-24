@@ -1,4 +1,4 @@
-"""Tests for parse-failure recovery in the AI Builder planner pipeline.
+"""Tests for parse-failure recovery in the AI Builder planner turn.
 
 Covers three lanes that keep the user out of the red banner when the
 LLM produces unparseable bytes:
@@ -10,12 +10,12 @@ LLM produces unparseable bytes:
 - `summarize_parse_failure` produces a privacy-safe log summary
   (fingerprint + validation `loc/type` + shape hints) without ever
   surfacing the raw body.
-- `run_planner_pipeline` calls `repair_parse_failure` once when the
-  initial LLM call returns unparseable bytes AND the initial
-  completion was not truncation. Successful repair routes through the
-  normal evaluator path; failed repair bubbles `parse_failed` with
-  `parse_repair_attempts=1` so operators can distinguish
-  parse-domain from evaluator-domain retries.
+- `run_planner_pipeline` runs one parse-repair attempt when the initial
+  LLM call returns unparseable bytes AND the initial completion was not
+  truncation. Successful repair routes through the normal evaluator
+  path; failed repair bubbles `parse_failed` with
+  `parse_repair_attempts=1` so operators can distinguish parse-domain
+  from evaluator-domain retries.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ import pytest
 from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
+    MAX_PARSE_REPAIR_RETRIES,
     PipelineOutcome,
     run_planner_pipeline,
 )
@@ -35,10 +36,6 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
     parse_planner_output,
     summarize_parse_failure,
-)
-from intric.flows.ai_builder.ai_builder_repair import (
-    MAX_PARSE_REPAIR_RETRIES,
-    repair_parse_failure,
 )
 from intric.flows.ai_builder.planning_state import PlanningState  # noqa: F401
 
@@ -202,95 +199,6 @@ class TestSummarizeParseFailure:
             summary = summarize_parse_failure(body, exc)
 
         assert summary["looks_like_markdown_fence"] is True
-
-
-class TestRepairParseFailure:
-    @pytest.mark.asyncio
-    async def test_returns_repaired_when_llm_emits_valid_json(self) -> None:
-        litellm_client = AsyncMock()
-        litellm_client.acompletion.return_value = _litellm_response(
-            _valid_ask_question_raw()
-        )
-
-        outcome = await repair_parse_failure(
-            litellm_client=litellm_client,
-            litellm_model="openai/gpt-5.4-mini",
-            litellm_kwargs={},
-            base_messages=[{"role": "user", "content": "build a flow"}],
-            failed_output_raw="not json",
-            parse_error_message="Expecting value",
-        )
-
-        assert outcome.kind == "repaired"
-        assert outcome.repaired_output is not None
-        assert outcome.repaired_output.planner_action.kind == "ask_question"
-
-    @pytest.mark.asyncio
-    async def test_returns_parse_failed_with_diagnostics_when_still_malformed(
-        self,
-    ) -> None:
-        litellm_client = AsyncMock()
-        litellm_client.acompletion.return_value = _litellm_response("still not json")
-
-        outcome = await repair_parse_failure(
-            litellm_client=litellm_client,
-            litellm_model="openai/gpt-5.4-mini",
-            litellm_kwargs={},
-            base_messages=[{"role": "user", "content": "build a flow"}],
-            failed_output_raw="not json",
-            parse_error_message="Expecting value",
-        )
-
-        assert outcome.kind == "parse_failed"
-        assert outcome.parse_failure_diagnostics is not None
-        assert outcome.parse_failure_diagnostics["parse_error_kind"] == (
-            "json_decode_error"
-        )
-
-    @pytest.mark.asyncio
-    async def test_prompt_includes_parse_error_message(self) -> None:
-        litellm_client = AsyncMock()
-        litellm_client.acompletion.return_value = _litellm_response(
-            _valid_ask_question_raw()
-        )
-
-        await repair_parse_failure(
-            litellm_client=litellm_client,
-            litellm_model="openai/gpt-5.4-mini",
-            litellm_kwargs={},
-            base_messages=[{"role": "user", "content": "build a flow"}],
-            failed_output_raw="not json at all",
-            parse_error_message="Expecting value: line 1 column 1",
-        )
-
-        call_kwargs = litellm_client.acompletion.call_args.kwargs
-        corrective_user = call_kwargs["messages"][-1]
-        assert corrective_user["role"] == "user"
-        assert "Expecting value: line 1 column 1" in corrective_user["content"]
-        assert "markdown code fences" in corrective_user["content"]
-
-    @pytest.mark.asyncio
-    async def test_parse_repair_inherits_structured_output_kwargs(self) -> None:
-        litellm_client = AsyncMock()
-        litellm_client.acompletion.return_value = _litellm_response(
-            _valid_ask_question_raw()
-        )
-
-        await repair_parse_failure(
-            litellm_client=litellm_client,
-            litellm_model="openai/gpt-5.4-mini",
-            litellm_kwargs={
-                "response_format": {"type": "json_object"},
-                "drop_params": True,
-            },
-            base_messages=[{"role": "user", "content": "build a flow"}],
-            failed_output_raw="not json at all",
-            parse_error_message="Expecting value: line 1 column 1",
-        )
-
-        call_kwargs = litellm_client.acompletion.call_args.kwargs
-        assert call_kwargs["response_format"] == {"type": "json_object"}
-        assert call_kwargs["drop_params"] is True
 
 
 class TestPipelineParseRepair:
