@@ -224,9 +224,14 @@ PROMPT_GUIDE_TEMPLATE = HelperAssistantTemplate(
         "everything the user told you; reflect their concrete goal, "
         "audience, and constraints rather than generic filler, and never "
         "invent facts they did not give you.\n\n"
+        "Write the final prompt in the same language the user has been "
+        "writing in this conversation — if they write in Swedish, the "
+        "prompt must be in Swedish; if in English, English. The example "
+        "below is in English only to show structure; never copy its "
+        "language.\n\n"
         'Write it in the assistant\'s own voice ("You are…", "Always…", '
-        '"When asked…"), in the user\'s language. Cover the elements that '
-        "apply to this assistant, and omit the ones that do not:\n"
+        '"When asked…"). Cover the elements that apply to this assistant, '
+        "and omit the ones that do not:\n"
         "- Role and goal — who the assistant is and what it is for.\n"
         "- Audience — who it serves, and how to pitch answers to them.\n"
         "- Behaviour — how to approach the requests it will typically "
@@ -253,8 +258,9 @@ PROMPT_GUIDE_TEMPLATE = HelperAssistantTemplate(
         "Reserve untagged fenced blocks exclusively for this final "
         "artifact — never use one earlier in the conversation, and never "
         "put a question or commentary inside one.\n\n"
-        "Here is the shape and depth to aim for (illustrative — adapt "
-        "fully to the actual assistant):\n\n"
+        "Here is the shape and depth to aim for (illustrative — written in "
+        "English only to show structure; produce the real prompt in the "
+        "user's language, and adapt it fully to the actual assistant):\n\n"
         "```\n"
         "You are a customer-support assistant for a municipal contact "
         "centre. You help residents with questions about waste "
