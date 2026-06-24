@@ -346,9 +346,6 @@ def _repair_leading_audio_shape(
             **first_item.model_dump(mode="python", exclude_unset=True),
             "input_source": InputSource.PREVIOUS_STEP,
             "input_type": InputType.TEXT,
-            "input_bindings": None,
-            "input_contract": None,
-            "input_config": None,
         }
     )
     warnings.append(

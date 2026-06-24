@@ -9,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
     compile_review_policy,
     compile_step_input_bindings,
+    derive_input_contract,
     derive_output_mode,
     make_plan_step_ref,
 )
@@ -24,6 +25,7 @@ from intric.flows.application.flow_draft_materialization import (
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from intric.flows.flow_authoring_name import normalize_flow_name
+from intric.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -273,7 +275,12 @@ def _compile_existing_step_modification(
     step = apply_existing_step_patch(existing, patch)
     fields = patch.model_fields_set
 
-    if "uses_previous_fields" in fields or "uses_form_fields" in fields:
+    if fields & {
+        "input_source",
+        "input_type",
+        "uses_previous_fields",
+        "uses_form_fields",
+    }:
         uses_form_fields = patch.uses_form_fields or []
         uses_previous_fields = patch.uses_previous_fields or []
         input_bindings = compile_step_input_bindings(
@@ -284,9 +291,16 @@ def _compile_existing_step_modification(
             uses_previous_outputs=[],
             prior_steps=prior_steps,
         )
-        updates: dict[str, object | None] = {}
-        if "input_bindings" not in fields:
-            updates["input_bindings"] = input_bindings
+        input_contract = derive_input_contract(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            prior_steps=prior_steps,
+            input_bindings=input_bindings,
+        )
+        updates: dict[str, object | None] = {
+            "input_bindings": input_bindings,
+            "input_contract": input_contract,
+        }
         if input_bindings is None:
             hint = compile_input_reference_instruction_hint(
                 uses_previous_fields=uses_previous_fields,
@@ -298,8 +312,10 @@ def _compile_existing_step_modification(
                         "instructions": f"{step.assistant_spec.instructions}\n\n{hint}"
                     }
                 )
-        if updates:
-            step = step.model_copy(update=updates)
+        step = step.model_copy(update=updates)
+        input_config = resolve_runtime_input_config(step_spec=step)
+        if input_config != step.input_config:
+            step = step.model_copy(update={"input_config": input_config})
 
     if "output_mode" not in fields:
         output_mode = _derive_existing_step_output_mode(

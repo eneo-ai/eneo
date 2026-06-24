@@ -755,6 +755,45 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
 
 
 @pytest.mark.asyncio
+async def test_ordered_audio_repair_clears_stale_runtime_input_config() -> None:
+    flow = _audio_document_flow(
+        first_step_input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "audio",
+                "required": True,
+                "max_files": 3,
+            }
+        }
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Keep the flow shape.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    steps = result.compiled_proposal.content.spec.steps
+    assert steps[1].existing_step_ref == "existing_step_1"
+    assert steps[1].input_source == InputSource.PREVIOUS_STEP
+    assert steps[1].input_type == InputType.TEXT
+    assert steps[1].input_config is None
+    assert steps[0].input_config is not None
+    transcript_runtime_input = steps[0].input_config["runtime_input"]
+    assert transcript_runtime_input["input_format"] == "audio"
+    assert transcript_runtime_input["required"] is True
+    assert transcript_runtime_input["max_files"] == 3
+
+
+@pytest.mark.asyncio
 async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> None:
     flow = _audio_document_flow()
 
@@ -870,7 +909,10 @@ def _form_metadata(*fields: dict[str, object]) -> dict[str, object]:
     return {"form_schema": {"fields": list(fields)}}
 
 
-def _audio_document_flow() -> SimpleNamespace:
+def _audio_document_flow(
+    *,
+    first_step_input_config: dict | None = None,
+) -> SimpleNamespace:
     meeting_contract = {
         "type": "object",
         "properties": {"meeting_context": {"type": "string"}},
@@ -885,6 +927,7 @@ def _audio_document_flow() -> SimpleNamespace:
             input_bindings={"question": "{{ step_input.text }}"},
             input_contract=None,
             output_contract=meeting_contract,
+            input_config=first_step_input_config,
         ),
         _flow_step(
             step_order=2,
