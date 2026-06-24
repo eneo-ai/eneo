@@ -8,6 +8,14 @@ owners, runtime journeys, blocked policy decisions, and guard tests.
 Use [Flow Package Layout](./package-layout.md) before adding or moving
 top-level Flow modules.
 
+Related decision notes:
+
+- [Eneo Capabilities And MCP Architecture Opinion](./eneo-capabilities-mcp-architecture-opinion.md)
+  records the recommended long-term capability/MCP boundary for Flow AI Builder,
+  Flows, and Assistants.
+- [Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md)
+  records the current Phase 4 question-recovery completion ownership finding.
+
 ## Mental Model
 
 | Concept | Source of truth | Meaning |
