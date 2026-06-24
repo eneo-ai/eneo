@@ -9,18 +9,18 @@ handoff — so these tests mock the LLM transport only.
 Coverage:
 
 - A single happy-path turn returns `accepted` with
-  `llm_calls_made=1`, `repair_attempts=0`.
+  `llm_calls_made=1`, `semantic_repair_attempts=0`.
 - One rejection + one repair that parses clean returns `accepted`
-  with `repair_attempts=1`, `llm_calls_made=2`.
+  with `semantic_repair_attempts=1`, `llm_calls_made=2`.
 - Three consecutive rejections exhaust the budget and return
-  `rejected` with `repair_attempts=3`, `llm_calls_made=4`.
+  `rejected` with `semantic_repair_attempts=3`, `llm_calls_made=4`.
 - A non-repair-eligible rejection short-circuits immediately with
-  `repair_attempts=0`, `llm_calls_made=1` — the repair helper does
+  `semantic_repair_attempts=0`, `llm_calls_made=1` — the repair helper does
   NOT call the LLM on a non-eligible code.
 - A repair output that drifts the committed architecture yields a
   terminal `rejected` outcome with `code="repair_attempted_commit_drift"`
   — the LLM ran (`llm_calls_made=2`) but the repair slot is NOT
-  consumed (`repair_attempts=0`).
+  consumed (`semantic_repair_attempts=0`).
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ from intric.flows.ai_builder.ai_builder_litellm_completion import (
     call_planner_completion,
 )
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
-    PipelineOutcome,
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
@@ -255,7 +254,7 @@ class TestHappyPath:
             _planner_output_json(kind="commit_architecture", architecture_commit=commit)
         )
 
-        outcome: PipelineOutcome = await run_planner_pipeline(
+        outcome = await run_planner_pipeline(
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -267,7 +266,7 @@ class TestHappyPath:
         assert outcome.accepted_output is not None
         assert outcome.accepted_output.planner_action.kind == "commit_architecture"
         assert outcome.llm_calls_made == 1
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
         assert outcome.rejection is None
         llm.acompletion.assert_awaited_once()
 
@@ -303,7 +302,7 @@ class TestRepairLoop:
         assert outcome.accepted_output.planner_action.kind == "confirm_requirements"
         assert outcome.accepted_output.planning_state_delta.architecture_commit is None
         assert outcome.llm_calls_made == 2
-        assert outcome.repair_attempts == 1
+        assert outcome.semantic_repair_attempts == 1
 
     async def test_repair_budget_exhaustion_returns_terminal_rejection(self) -> None:
         llm = AsyncMock()
@@ -330,7 +329,7 @@ class TestRepairLoop:
         assert outcome.rejection is not None
         assert outcome.rejection.code == "duplicate_question"
         assert outcome.llm_calls_made == 4
-        assert outcome.repair_attempts == 3
+        assert outcome.semantic_repair_attempts == 3
 
 
 @pytest.mark.asyncio
@@ -358,7 +357,7 @@ class TestShortCircuits:
         assert outcome.rejection is not None
         assert outcome.rejection.code == "version_mismatch"
         assert outcome.llm_calls_made == 1
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
 
     async def test_off_topic_question_repairs_to_canonical_slot(self) -> None:
         """An invented question id is LLM vocabulary drift, not a user-visible
@@ -401,7 +400,7 @@ class TestShortCircuits:
         assert accepted_payload.question_id == "runtime_metadata_fields"
         assert accepted_payload.slot_name == "runtime_metadata_fields"
         assert outcome.llm_calls_made == 2
-        assert outcome.repair_attempts == 1
+        assert outcome.semantic_repair_attempts == 1
 
     async def test_disallowed_question_pivots_to_commit_without_repair(self) -> None:
         """When the server policy has closed the question phase, do not ask
@@ -441,7 +440,7 @@ class TestShortCircuits:
             outcome.accepted_output.planning_state_delta.architecture_commit is not None
         )
         assert outcome.llm_calls_made == 1
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
 
     async def test_duplicate_question_repairs_to_action_pivot(self) -> None:
         """Repeating an already-asked question without a user reply is model
@@ -490,7 +489,7 @@ class TestShortCircuits:
         assert accepted_payload.question_id == "structured_analysis_need"
         assert accepted_payload.slot_name == "structured_analysis_need"
         assert outcome.llm_calls_made == 2
-        assert outcome.repair_attempts == 1
+        assert outcome.semantic_repair_attempts == 1
 
     async def test_parse_repairs_malformed_semantic_repair_output(self) -> None:
         """Parse repair must cover every LLM output, not only the initial call.
@@ -536,7 +535,7 @@ class TestShortCircuits:
         assert outcome.accepted_output is not None
         assert outcome.accepted_output.planner_action.kind == "ask_question"
         assert outcome.llm_calls_made == 3
-        assert outcome.repair_attempts == 1
+        assert outcome.semantic_repair_attempts == 1
         assert outcome.parse_repair_attempts == 1
 
     async def test_missing_commit_delta_is_server_normalized_without_repair(
@@ -581,7 +580,7 @@ class TestShortCircuits:
         ]
         assert outcome.accepted_output.planner_action.kind == "commit_architecture"
         assert outcome.llm_calls_made == 1
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
 
     async def test_llm_freehand_commit_tuple_is_replaced_by_server_architecture(
         self,
@@ -633,7 +632,7 @@ class TestShortCircuits:
         ]
         assert commit.chosen_patterns == ["summarize_text"]
         assert outcome.llm_calls_made == 1
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
 
 
 @pytest.mark.asyncio
@@ -644,7 +643,7 @@ class TestCommitDriftDuringRepair:
         """If repair drifts the committed architecture, the pipeline surfaces
         `repair_attempted_commit_drift` terminally — the LLM ran
         (llm_calls_made=2) but drift is NOT a consumed retry slot
-        (repair_attempts=0)."""
+        (semantic_repair_attempts=0)."""
         original_commit = _make_commit(architecture_hash="a" * 64)
         drifted_commit = _make_commit(
             architecture_hash="b" * 64,
@@ -688,7 +687,7 @@ class TestCommitDriftDuringRepair:
         assert outcome.rejection is not None
         assert outcome.rejection.code == "repair_attempted_commit_drift"
         assert outcome.llm_calls_made == 2
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
 
     async def test_parse_repaired_semantic_repair_uses_normal_evaluator_drift_code(
         self,
@@ -751,7 +750,7 @@ class TestCommitDriftDuringRepair:
         assert outcome.rejection is not None
         assert outcome.rejection.code == "architecture_commit_drift_from_pinned"
         assert outcome.llm_calls_made == 3
-        assert outcome.repair_attempts == 1
+        assert outcome.semantic_repair_attempts == 1
         assert outcome.parse_repair_attempts == 1
 
 
@@ -759,8 +758,7 @@ class TestPublicSurface:
     def test_module_exports(self) -> None:
         from intric.flows.ai_builder import ai_builder_orchestration_pipeline as module
 
-        for symbol in ("run_planner_pipeline", "PipelineOutcome"):
-            assert hasattr(module, symbol)
+        assert hasattr(module, "run_planner_pipeline")
 
 
 @pytest.mark.asyncio
@@ -857,7 +855,7 @@ class TestParseFailures:
         assert outcome.final_completion.usage.prompt_tokens == 700
         assert outcome.final_completion.usage.completion_tokens == 1024
         assert outcome.llm_calls_made == 2
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
         assert outcome.parse_error_raw is not None
         assert outcome.parse_error_message is not None
 

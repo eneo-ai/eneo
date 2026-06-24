@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 from intric.flows.ai_builder.ai_builder_ask_question_contract import (
     canonical_ask_question_targets,
@@ -12,7 +11,6 @@ from intric.flows.ai_builder.ai_builder_commit_invariance import (
     assert_architecture_commit_draft_matches_pinned,
 )
 from intric.flows.ai_builder.ai_builder_litellm_completion import (
-    CompletionMetadata,
     call_planner_completion,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import (
@@ -30,9 +28,9 @@ from intric.flows.ai_builder.ai_builder_planner_output_normalizer import (
 from intric.flows.ai_builder.ai_builder_structured_turn import (
     Message,
     StructuredCompletion,
+    StructuredTurnResult,
     run_structured_turn,
 )
-from intric.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ArchitectureCommitDraft,
@@ -40,23 +38,6 @@ from intric.flows.ai_builder.planning_state import (
 
 MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
 MAX_PARSE_REPAIR_RETRIES: Final[int] = 1
-
-PipelineOutcomeKind = Literal["accepted", "rejected", "parse_failed"]
-
-
-@dataclass(frozen=True, slots=True)
-class PipelineOutcome:
-    kind: PipelineOutcomeKind
-    accepted_output: PlannerOutput | None = None
-    rejection: RejectionReason | None = None
-    llm_calls_made: int = 0
-    repair_attempts: int = 0
-    parse_repair_attempts: int = 0
-    final_completion: CompletionMetadata | None = None
-    cumulative_token_usage: CompletionTokenUsage | None = None
-    parse_error_raw: str | None = None
-    parse_error_message: str | None = None
-    parse_failure_diagnostics: dict[str, Any] | None = None
 
 
 async def run_planner_pipeline(
@@ -66,7 +47,7 @@ async def run_planner_pipeline(
     litellm_kwargs: dict[str, Any],
     base_messages: list[dict[str, Any]],
     orchestration_context: OrchestrationContext,
-) -> PipelineOutcome:
+) -> StructuredTurnResult[PlannerOutput, RejectionReason]:
     prior_commit = orchestration_context.session_state.architecture_commit
 
     async def complete(messages: list[Message]) -> StructuredCompletion:
@@ -81,7 +62,7 @@ async def run_planner_pipeline(
             metadata=completion.metadata,
         )
 
-    result = await run_structured_turn(
+    return await run_structured_turn(
         initial_messages=base_messages,
         complete=complete,
         parse=parse_planner_output,
@@ -107,20 +88,6 @@ async def run_planner_pipeline(
             prior=prior_commit,
             after=output.planning_state_delta.architecture_commit,
         ),
-    )
-
-    return PipelineOutcome(
-        kind=result.kind,
-        accepted_output=result.accepted_output,
-        rejection=result.rejection,
-        llm_calls_made=result.llm_calls_made,
-        repair_attempts=result.semantic_repair_attempts,
-        parse_repair_attempts=result.parse_repair_attempts,
-        final_completion=result.final_completion,
-        cumulative_token_usage=result.cumulative_token_usage,
-        parse_error_raw=result.parse_error_raw,
-        parse_error_message=result.parse_error_message,
-        parse_failure_diagnostics=result.parse_failure_diagnostics,
     )
 
 
@@ -267,7 +234,6 @@ def _detect_commit_drift(
 __all__ = [
     "MAX_ORCHESTRATOR_REPAIR_RETRIES",
     "MAX_PARSE_REPAIR_RETRIES",
-    "PipelineOutcome",
     "build_parse_repair_user_message",
     "build_repair_user_message",
     "run_planner_pipeline",

@@ -34,7 +34,6 @@ from intric.flows.ai_builder.ai_builder_dispatcher import (
 )
 from intric.flows.ai_builder.ai_builder_litellm_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
-    PipelineOutcome,
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import (
@@ -48,6 +47,7 @@ from intric.flows.ai_builder.ai_builder_response_format import (
     PlannerResponseFormatSelection,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_structured_turn import StructuredTurnResult
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -72,7 +72,7 @@ class TurnTelemetry:
     `wall_clock_ms` is the end-to-end turn duration measured around the
     pipeline + dispatcher composition; on v2 this is dominated by LLM
     latency so we do not separate a per-call timing yet. `llm_calls_made`
-    and `repair_attempts` are forwarded from `PipelineOutcome` unchanged.
+    and `repair_attempts` are forwarded from the structured turn result.
 
     `architecture_commit_populated` is the per-turn rate signal the
     metric contract requires: `True` iff the turn was a successfully
@@ -117,7 +117,7 @@ class PlannerTurnResult:
       carry the unparseable body and the validator complaint string.
     `llm_calls_made` / `repair_attempts` mirror the pipeline counters
     so the caller's telemetry does not have to reach back into the
-    outcome's `PipelineOutcome`.
+    structured turn result.
     """
 
     kind: PlannerTurnOutcomeKind
@@ -191,8 +191,9 @@ async def run_planner_turn(
     now_ms = telemetry_now_ms if telemetry_now_ms is not None else _default_now_ms
     turn_started_ms = now_ms()
 
+    pipeline_outcome: StructuredTurnResult[PlannerOutput, RejectionReason]
     if precomputed_output is None:
-        pipeline_outcome: PipelineOutcome = await run_planner_pipeline(
+        pipeline_outcome = await run_planner_pipeline(
             litellm_client=litellm_client,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
@@ -202,12 +203,12 @@ async def run_planner_turn(
     else:
         rejection = evaluate_planner_output(precomputed_output, orchestration_context)
         pipeline_outcome = (
-            PipelineOutcome(
+            StructuredTurnResult(
                 kind="rejected",
                 rejection=rejection,
             )
             if rejection is not None
-            else PipelineOutcome(
+            else StructuredTurnResult(
                 kind="accepted",
                 accepted_output=precomputed_output,
             )
@@ -227,7 +228,7 @@ async def run_planner_turn(
             outcome_kind=outcome_kind,
             wall_clock_ms=max(0, now_ms() - turn_started_ms),
             llm_calls_made=pipeline_outcome.llm_calls_made,
-            repair_attempts=pipeline_outcome.repair_attempts,
+            repair_attempts=pipeline_outcome.semantic_repair_attempts,
             parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             architecture_commit_populated=architecture_commit_populated,
             prompt_tokens=(
@@ -276,7 +277,7 @@ async def run_planner_turn(
             parse_error_message=pipeline_outcome.parse_error_message,
             parse_failure_diagnostics=pipeline_outcome.parse_failure_diagnostics,
             llm_calls_made=pipeline_outcome.llm_calls_made,
-            repair_attempts=pipeline_outcome.repair_attempts,
+            repair_attempts=pipeline_outcome.semantic_repair_attempts,
             parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             turn_telemetry=_telemetry(
                 "parse_failed", architecture_commit_populated=False
@@ -288,7 +289,7 @@ async def run_planner_turn(
             rejection=pipeline_outcome.rejection,
             final_completion=pipeline_outcome.final_completion,
             llm_calls_made=pipeline_outcome.llm_calls_made,
-            repair_attempts=pipeline_outcome.repair_attempts,
+            repair_attempts=pipeline_outcome.semantic_repair_attempts,
             parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
             turn_telemetry=_telemetry("rejected", architecture_commit_populated=False),
         )
@@ -318,7 +319,7 @@ async def run_planner_turn(
         dispatch_result=dispatch_result,
         final_completion=pipeline_outcome.final_completion,
         llm_calls_made=pipeline_outcome.llm_calls_made,
-        repair_attempts=pipeline_outcome.repair_attempts,
+        repair_attempts=pipeline_outcome.semantic_repair_attempts,
         parse_repair_attempts=pipeline_outcome.parse_repair_attempts,
         turn_telemetry=dispatched_telemetry,
     )

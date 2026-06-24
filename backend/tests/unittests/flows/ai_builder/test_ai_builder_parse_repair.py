@@ -29,7 +29,6 @@ from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     MAX_PARSE_REPAIR_RETRIES,
-    PipelineOutcome,
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import (
@@ -210,7 +209,7 @@ class TestPipelineParseRepair:
             _litellm_response(_valid_ask_question_raw()),
         ]
 
-        outcome: PipelineOutcome = await run_planner_pipeline(
+        outcome = await run_planner_pipeline(
             litellm_client=litellm_client,
             litellm_model="openai/gpt-5.4-mini",
             litellm_kwargs={},
@@ -221,7 +220,7 @@ class TestPipelineParseRepair:
         assert outcome.kind == "accepted"
         assert outcome.llm_calls_made == 2
         assert outcome.parse_repair_attempts == 1
-        assert outcome.repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 0
 
     @pytest.mark.asyncio
     async def test_initial_parse_fail_and_repair_also_fails_returns_parse_failed(
