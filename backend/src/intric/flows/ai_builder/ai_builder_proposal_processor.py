@@ -280,22 +280,16 @@ class AIBuilderProposalProcessor:
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
         request = StructuredQuestionRecoveryRequest(
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            llm_messages=ctx.llm_messages,
+            ctx=ctx,
             tool_call=tool_call,
-            tool_schemas=ctx.tool_schemas,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            max_output_tokens=ctx.max_output_tokens,
-            flow=ctx.flow,
-            assistant_metadata=ctx.assistant_metadata,
-            usage_tracker=ctx.usage_tracker,
         )
         async for item in stream_structured_question_tool_call(
             repo=self.repo,
-            litellm_client=self.litellm_client,
+            discovery_litellm_client=self.litellm_client,
+            repair_completion=make_usage_tracked_proposal_completion(
+                litellm_client=self.litellm_client,
+                usage_tracker=ctx.usage_tracker,
+            ),
             self_correction_temperature=self.self_correction_temperature,
             request=request,
         ):

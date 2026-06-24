@@ -194,11 +194,17 @@ async def test_dispatch_known_tool_call_routes_question_recovery_dispatch_result
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.function.name = ASK_STRUCTURED_QUESTION_TOOL_NAME
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-question",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     ctx = _make_context(
         available_model_refs={"model-a"},
         available_kb_refs={"kb-a"},
         resource_catalog=MagicMock(),
         assistant_snapshots=MagicMock(),
+        usage_tracker=usage_tracker,
     )
     recovered_call = _make_tool_call(
         CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -219,7 +225,13 @@ async def test_dispatch_known_tool_call_routes_question_recovery_dispatch_result
     async def _handled_events(**_kwargs):
         yield {"event": "requirements_summary", "data": "{}"}
 
+    repair_completion = AsyncMock()
     with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "make_usage_tracked_proposal_completion",
+            return_value=repair_completion,
+        ) as make_repair_completion,
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.stream_structured_question_tool_call",
             side_effect=_question_items,
@@ -236,7 +248,13 @@ async def test_dispatch_known_tool_call_routes_question_recovery_dispatch_result
 
     assert [event["event"] for event in events] == ["status", "requirements_summary"]
     request = stream_question.call_args.kwargs["request"]
+    assert request.ctx is ctx
     assert request.tool_call is tool_call
+    assert stream_question.call_args.kwargs["repair_completion"] is repair_completion
+    make_repair_completion.assert_called_once_with(
+        litellm_client=processor.litellm_client,
+        usage_tracker=usage_tracker,
+    )
     assert handle_tool_call.call_args.kwargs["tool_calls"] == [recovered_call]
     assert handle_tool_call.call_args.kwargs["request_id"] == "question-recovery"
     assert handle_tool_call.call_args.kwargs["available_model_refs"] == {"model-a"}

@@ -2,20 +2,20 @@
 
 ## Five-line TL;DR
 
-1. The next safe Phase 4 slice is question-recovery completion ownership, not framework adoption.
-2. Question recovery currently hand-builds completion requests and imports the LiteLLM completion function directly.
-3. The cleaner slice is to reuse `ProposalTurnContext.completion_request(...)` and pass the tracked completion callable from the processor.
+1. The Phase 4 question-recovery completion ownership slice is implemented.
+2. `StructuredQuestionRecoveryRequest` now carries only `ProposalTurnContext` and the original tool call.
+3. `AIBuilderProposalProcessor` passes the tracked completion callable explicitly into question recovery.
 4. Keep Protocol-to-alias cleanup out of this behavioral slice unless a later mechanical commit scopes the full sweep.
-5. Implement question recovery only first; keep any Protocol-to-alias cleanup as a separate mechanical decision.
+5. Stop before broader retry, planner, capability, or MCP work; those need separate preflight proof.
 
-## Current Decision
+## Implemented Decision
 
-The next implementation slice is question recovery only:
+This slice consolidated question-recovery completion ownership only:
 
 ```text
 StructuredQuestionRecoveryRequest:
-  before: flat repeated turn fields + direct LiteLLM completion call
-  after: ProposalTurnContext + original tool call
+  ctx: ProposalTurnContext
+  tool_call: Any
 
 stream_structured_question_tool_call:
   receives the tracked completion callable as an explicit dependency
@@ -29,18 +29,23 @@ That should be done separately from the `ProposalCompletionFn` Protocol deletion
 flowchart LR
   Processor["AIBuilderProposalProcessor"]
   QR["ai_builder_question_recovery"]
+  CompletionFactory["make_usage_tracked_proposal_completion"]
   Completion["ai_builder_litellm_completion"]
   Repair["ai_builder_proposal_repair"]
   Submission["ai_builder_proposal_submission"]
 
   Processor --> QR
-  QR --> Completion
+  Processor --> CompletionFactory
+  CompletionFactory --> Completion
+  QR -->|"repair_completion(request)"| CompletionFactory
   Submission --> Completion
   Submission --> Repair
   Repair --> Completion
 ```
 
-The ownership smell is not that question recovery uses LLM completion at all. The smell is that it is a repair path but does not use the same tracked completion callable pattern as the other repair paths.
+Question recovery still uses LLM completion, but only through the injected
+repair callable. It no longer imports the provider-completion module or builds
+provider request objects itself.
 
 ## Evidence
 
@@ -51,9 +56,10 @@ The ownership smell is not that question recovery uses LLM completion at all. Th
 | `ProposalTurnContext.completion_request(...)` already builds typed completion requests from turn context. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144` |
 | LiteLLM completion normalization and usage tracking are owned by `call_proposal_completion`. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` |
 | `make_usage_tracked_proposal_completion(...)` already returns a tracked callable for repair paths. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:135` |
-| Question recovery imports `call_proposal_completion` directly. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:33` |
-| Question recovery hand-builds `ProposalCompletionRequest` in the recovery retry loop. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:307` |
-| The processor currently re-explodes context fields into a flat `StructuredQuestionRecoveryRequest`. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:282` |
+| `StructuredQuestionRecoveryRequest` carries `ctx` and `tool_call` only. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:63` |
+| Question recovery receives `repair_completion` explicitly. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:81` |
+| Question recovery builds retry completion requests through `ctx.completion_request(..., counts_as_repair=True)`. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:294` |
+| The processor owns tracked completion callable construction for question recovery. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:282` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:289` |
 | Proposal submission already uses `ctx.completion_request(...)` for active submission. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:264` |
 | Proposal repair already takes injected `repair_completion` callables. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:91` |
 
@@ -86,18 +92,18 @@ Question recovery builds retry requests through ProposalTurnContext.completion_r
 Question recovery still marks its completion as counts_as_repair=True.
 ```
 
-## Proposed Narrow Slice
+## Implemented Slice
 
-### Do
+Completed:
 
-1. Replace flat repeated fields in `StructuredQuestionRecoveryRequest` with `ctx: ProposalTurnContext` plus `tool_call`.
-2. Build the request in `AIBuilderProposalProcessor._handle_question_recovery_dispatch(...)` using the existing context.
-3. Construct `make_usage_tracked_proposal_completion(...)` in the processor and pass the returned callable explicitly to `stream_structured_question_tool_call(...)`.
-4. Replace the manual `ProposalCompletionRequest(...)` construction in question recovery with `ctx.completion_request(...)`.
-5. Update question recovery tests to inject a fake completion callable through the function call.
-6. Update import-ownership tests so question recovery imports nothing from `ai_builder_litellm_completion`.
+1. Replaced flat repeated fields in `StructuredQuestionRecoveryRequest` with `ctx: ProposalTurnContext` plus `tool_call`.
+2. Built the request in `AIBuilderProposalProcessor._handle_question_recovery_dispatch(...)` from the existing context.
+3. Constructed `make_usage_tracked_proposal_completion(...)` in the processor and passed the returned callable explicitly to `stream_structured_question_tool_call(...)`.
+4. Replaced manual `ProposalCompletionRequest(...)` construction in question recovery with `ctx.completion_request(...)`.
+5. Updated question recovery tests to pass fake completion callables through the function call.
+6. Updated import-ownership tests so question recovery imports nothing from `ai_builder_litellm_completion`.
 
-### Do Not
+Not changed:
 
 - Do not redesign repair retry policy.
 - Do not touch Flow runtime, persistence/schema, OpenAPI contracts, or XYFlow.
@@ -162,7 +168,7 @@ That keeps the behavioral refactor separate from the mechanical type cleanup.
 
 ## Implementation Sketch
 
-This is the shape to implement if we choose Option A:
+This is the implemented shape:
 
 ```python
 @dataclass(frozen=True)
@@ -213,31 +219,14 @@ Those remain Phase 4/Phase 5 decisions, not part of this narrow slice.
 
 ## Recommended Next Action
 
-When implementation resumes, choose one of these:
-
-### Preferred
-
-Implement only question-recovery consolidation:
-
-```text
-ctx request data + explicit injected completion callable + ctx.completion_request(...)
-```
-
-Then validate:
-
-```bash
-docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
-  /home/vscode/.local/bin/uv run pytest \
-  tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py
-```
-
-Then run pyright/ruff on touched backend files.
-
-### Secondary
-
-After the first commit is green, decide whether to delete `ProposalCompletionFn` in a separate mechanical commit.
+Stop and re-audit before choosing another Phase 4 candidate. The next candidate
+should have its own preflight proof and deletion gate. Do not roll the
+Protocol-to-alias cleanup, retry consolidation, planner changes, capability
+dedupe, or MCP/capability architecture into this slice.
 
 ## Final Opinion
 
-This is worth doing, but the first plan tried to combine one behavioral ownership cleanup with one mechanical type cleanup. The cleanest path is to land the behavioral cleanup first. It directly supports Phase 4 by removing one scattered completion caller and one duplicated request construction path. The Protocol deletion is probably correct, but it should not ride along unless its tests and ownership guards are updated in the same commit.
+This slice removed one scattered provider-completion caller and one duplicated
+request-construction path without introducing a new abstraction. The Protocol
+deletion may still be correct, but it should not ride along unless its tests
+and ownership guards are updated in the same mechanical commit.

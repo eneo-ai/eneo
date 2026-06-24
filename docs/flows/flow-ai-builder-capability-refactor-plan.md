@@ -36,8 +36,8 @@ MCP never becomes the owner.
 | Finding | Evidence |
 | --- | --- |
 | Proposal completion already has a current provider boundary. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` defines `call_proposal_completion`. |
-| There are currently two direct proposal completion callers. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:307` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261`. |
-| The first Phase 4 slice is dependency inversion, not deletion of the executor. | `call_proposal_completion` should survive; question recovery should stop importing it directly and should use the existing tracked completion/request-builder pattern described in the boundary doc. |
+| Question recovery no longer calls provider proposal completion directly. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:81` receives `repair_completion`; `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:294` awaits it with `ctx.completion_request(...)`. |
+| The first Phase 4 slice was dependency inversion, not deletion of the executor. | `call_proposal_completion` survives at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94`; active submission still calls it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261`; the usage-tracked factory wraps it at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:143`. |
 | Question recovery still needs LiteLLM context for discovery runtime. | The boundary doc records that the completion import is the smell, not all `litellm_client` usage. |
 | `ProposalTurnContext.completion_request(...)` is the existing typed request builder. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144`. |
 | Flow Capability Manifest already owns engine feature truth. | `backend/src/intric/flows/flow_capability_manifest.py:454` defines `CAPABILITY_REGISTRY`. |
@@ -82,20 +82,20 @@ The Phase 5A packet owns the next go/no-go recommendation.
 
 Phase 4 may touch only Flow AI Builder runtime/planner/proposal code and tests unless a direct shared owner requires a narrow dependency update.
 
-### Primary Slice
+### Implemented Primary Slice
 
 Question-recovery completion ownership. The detailed design and test matrix live in [Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md).
 
-The honest target:
+The implemented target:
 
 - `call_proposal_completion` remains the current proposal-completion provider boundary;
 - active first-pass proposal submission may still call it directly through `ctx.completion_request(...)`;
-- question recovery should stop importing/calling it directly;
-- question recovery should receive the tracked completion callable as an explicit dependency from the owner that has the active turn context;
-- question recovery should still use `litellm_client` where discovery runtime requires it;
-- `counts_as_repair=True`, retry exhaustion, backend-owned questions, and streaming order must survive.
+- question recovery no longer imports or calls it directly;
+- question recovery receives the tracked completion callable as an explicit dependency from the owner that has the active turn context;
+- question recovery still uses discovery LiteLLM context where discovery runtime requires it;
+- `counts_as_repair=True`, retry exhaustion, backend-owned questions, and streaming order survived the slice.
 
-The request object should carry turn data only: `ProposalTurnContext` and the
+The request object carries turn data only: `ProposalTurnContext` and the
 original tool call. The executable completion dependency belongs in the
 function argument list, beside the repository, discovery LiteLLM client, and
 temperature dependencies.
@@ -133,9 +133,10 @@ worktree and recorded in the final packet.
 ## Baseline Commands For First Source Slice
 
 The first source commit after this planning update must record the baseline SHA
-immediately before source edits. As of this plan revision, the source baseline
-is `dfe1e71c0`; docs-only commits after that must be called out as docs-only
-when comparing behavior.
+immediately before source edits. For this slice, the source baseline was
+`dfe1e71c0`, and the baseline commands ran from docs-only commit `76f6afde0`
+before source edits. Treat `76f6afde0` as a docs-only wrapper around the same
+source behavior when comparing baseline results.
 
 Run these exact focused commands before the question-recovery source change:
 
@@ -253,28 +254,11 @@ consolidation: removing a wrong-layer dependency can justify a narrow cleanup
 slice, but a new capability abstraction must delete or consolidate an existing
 duplicate owner in the same migration.
 
-## Immediate Next Step After This Plan
+## Next Step After This Slice
 
 Do not start Phase 5A.
 
-Do not treat "finish Phase 4" as one source-code goal. The next source-code
-goal should land only the question-recovery completion-ownership slice, then
-stop and re-audit the remaining Phase 4 candidates.
-
-After review of this plan, the first implementation candidate is the smallest Phase 4 consolidation:
-
-```text
-Consolidate question-recovery completion ownership by deleting the direct
-call_proposal_completion import/call from ai_builder_question_recovery.py and
-reusing the existing tracked completion callable + ProposalTurnContext request
-builder, while preserving discovery-runtime LiteLLM usage.
-```
-
-Before the source change, record the baseline SHA and exact focused test
-commands. If any focused test already fails, record the failing node ids and
-output artifact before using that failure as baseline evidence.
-
-Update the import-ownership red guard before removing the current
-`call_proposal_completion` import. Other ownership/behavior guards should also
-be updated before the production source change when they can be made red
-without encoding an implementation detail.
+Do not treat "finish Phase 4" as one source-code goal. Stop and re-audit the
+remaining Phase 4 candidates before selecting another slice. Each next slice
+needs its own preflight proof, red guard where practical, deletion gate, and
+focused validation.

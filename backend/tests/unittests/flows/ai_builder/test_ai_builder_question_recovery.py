@@ -18,7 +18,14 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    make_usage_tracked_proposal_completion,
+)
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionRequest,
+    ProposalTurnContext,
+)
 from intric.flows.ai_builder.ai_builder_question_recovery import (
     RecoveredToolDispatchRequest,
     StructuredQuestionRecoveryRequest,
@@ -122,22 +129,31 @@ def _make_request(
     conversation: list[ConversationMessage] | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
 ) -> StructuredQuestionRecoveryRequest:
+    conversation_value = conversation or [ConversationMessage(role="user", content="Bygg")]
     return StructuredQuestionRecoveryRequest(
-        turn=_make_turn(),
-        conversation=conversation or [ConversationMessage(role="user", content="Bygg")],
-        new_messages_start=len(conversation or []),
-        llm_messages=[{"role": "system", "content": "Prompt"}],
+        ctx=ProposalTurnContext(
+            turn=_make_turn(),
+            conversation=conversation_value,
+            new_messages_start=len(conversation or []),
+            llm_messages=[{"role": "system", "content": "Prompt"}],
+            tool_schemas=tool_schemas
+            or [{"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            max_output_tokens=4096,
+            request_id="req-question-recovery",
+            usage_tracker=usage_tracker,
+        ),
         tool_call=tool_call
         or _make_tool_call(ASK_STRUCTURED_QUESTION_TOOL_NAME, _question_payload()),
-        tool_schemas=tool_schemas
-        or [{"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        max_output_tokens=4096,
-        flow=None,
-        assistant_metadata=None,
-        usage_tracker=usage_tracker,
     )
+
+
+async def _unused_completion(_: ProposalCompletionRequest) -> SimpleNamespace:
+    raise AssertionError("question recovery should not request completion")
 
 
 def _runtime_result(followup: BackendQuestion | None = None) -> DiscoveryRuntimeResult:
@@ -183,16 +199,13 @@ async def test_question_recovery_uses_backend_followup_when_only_question_tool_a
             "build_discovery_runtime_result",
             new=AsyncMock(return_value=_runtime_result(_backend_question())),
         ) as build_runtime,
-        patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
-            new=AsyncMock(),
-        ) as proposal_completion,
     ):
         events = [
             item
             async for item in stream_structured_question_tool_call(
                 repo=repo,
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=_unused_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(
                     conversation=_conversation_with_answered_final_output_mode()
@@ -203,7 +216,6 @@ async def test_question_recovery_uses_backend_followup_when_only_question_tool_a
     assert [event["event"] for event in events] == ["text", "question"]
     build_runtime.assert_awaited_once()
     repo.commit_turn.assert_awaited_once()
-    proposal_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -222,6 +234,9 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
             "output_description": "Flödet producerar en PDF-sammanfattning.",
         },
     )
+    proposal_completion = AsyncMock(
+        return_value=_make_response_with_tool_calls(summary_call)
+    )
 
     with (
         patch(
@@ -233,16 +248,13 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=True,
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
-            new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
-        ) as proposal_completion,
     ):
         items = [
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=proposal_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(
                     conversation=_conversation_with_answered_final_output_mode()
@@ -259,10 +271,12 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
     assert [schema["function"]["name"] for schema in dispatch.tool_schemas] == [
         CONFIRM_REQUIREMENTS_TOOL_NAME
     ]
-    assert proposal_completion.await_args.kwargs["request"].tool_choice == {
+    completion_request = proposal_completion.await_args.args[0]
+    assert completion_request.tool_choice == {
         "type": "function",
         "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
     }
+    assert completion_request.counts_as_repair is True
     assert build_runtime.await_count == 2
 
 
@@ -278,16 +292,13 @@ async def test_question_recovery_returns_typed_error_when_no_followup_exists() -
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=False,
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
-            new=AsyncMock(),
-        ) as proposal_completion,
     ):
         events = [
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=_unused_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(
                     conversation=_conversation_with_answered_final_output_mode()
@@ -299,11 +310,12 @@ async def test_question_recovery_returns_typed_error_when_no_followup_exists() -
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "question_recovery_unavailable"
     assert build_runtime.await_count == 2
-    proposal_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_question_recovery_handles_empty_completion_choices() -> None:
+    proposal_completion = AsyncMock(return_value=SimpleNamespace(choices=()))
+
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery."
@@ -314,16 +326,13 @@ async def test_question_recovery_handles_empty_completion_choices() -> None:
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=True,
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
-            new=AsyncMock(return_value=SimpleNamespace(choices=())),
-        ),
     ):
         events = [
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=proposal_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(
                     conversation=_conversation_with_answered_final_output_mode()
@@ -346,6 +355,13 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
         _question_payload(),
     )
 
+    proposal_completion = AsyncMock(
+        side_effect=[
+            _make_response_with_tool_calls(repeated_question),
+            _make_response_with_tool_calls(repeated_question),
+        ]
+    )
+
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery."
@@ -356,21 +372,13 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=False,
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
-            new=AsyncMock(
-                side_effect=[
-                    _make_response_with_tool_calls(repeated_question),
-                    _make_response_with_tool_calls(repeated_question),
-                ]
-            ),
-        ) as proposal_completion,
     ):
         items = [
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=proposal_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(
                     tool_call=repeated_question,
@@ -394,7 +402,7 @@ async def test_question_recovery_streams_repairing_before_completion_resolves() 
     completion_started = asyncio.Event()
     release_completion = asyncio.Event()
 
-    async def _completion(**_kwargs):
+    async def _completion(_: ProposalCompletionRequest) -> SimpleNamespace:
         completion_started.set()
         await release_completion.wait()
         return _make_response_with_text("Kan du förtydliga?")
@@ -409,14 +417,11 @@ async def test_question_recovery_streams_repairing_before_completion_resolves() 
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=False,
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
-            new=_completion,
-        ),
     ):
         stream = stream_structured_question_tool_call(
             repo=AsyncMock(),
-            litellm_client=AsyncMock(),
+            discovery_litellm_client=AsyncMock(),
+            repair_completion=_completion,
             self_correction_temperature=0.2,
             request=_make_request(
                 conversation=_conversation_with_answered_final_output_mode(),
@@ -460,7 +465,8 @@ async def test_handle_structured_question_persists_supported_backend_question() 
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=_unused_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(),
             )
@@ -494,7 +500,8 @@ async def test_handle_structured_question_persists_fallback_text_for_invalid_que
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=_unused_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(tool_call=invalid_question),
             )
@@ -530,7 +537,8 @@ async def test_handle_structured_question_rejects_invalid_tool_arguments(
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=AsyncMock(),
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=_unused_completion,
                 self_correction_temperature=0.2,
                 request=_make_request(tool_call=tool_call),
             )
@@ -570,7 +578,11 @@ async def test_question_recovery_completion_counts_as_repair() -> None:
             item
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
-                litellm_client=litellm_client,
+                discovery_litellm_client=AsyncMock(),
+                repair_completion=make_usage_tracked_proposal_completion(
+                    litellm_client=litellm_client,
+                    usage_tracker=tracker,
+                ),
                 self_correction_temperature=0.2,
                 request=_make_request(
                     conversation=_conversation_with_answered_final_output_mode(),
@@ -584,5 +596,8 @@ async def test_question_recovery_completion_counts_as_repair() -> None:
         ]
 
     assert [event["event"] for event in events] == ["status", "text"]
+    litellm_client.acompletion.assert_awaited_once()
     telemetry = tracker.build_planner_telemetry(tool_call_count=1)
     assert telemetry["repair_attempts"] == 1
+    assert telemetry["llm_calls_made"] == 1
+    assert telemetry["total_tokens"] == 5

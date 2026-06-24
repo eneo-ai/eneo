@@ -95,7 +95,7 @@ CONFIRM_REQUIREMENTS_METHODS = frozenset(
 QUESTION_RECOVERY_ALLOWED_ANY_NAMES = frozenset(
     {
         "assistant_metadata",
-        "litellm_client",
+        "discovery_litellm_client",
         "litellm_kwargs",
         "llm_messages",
         "tool_call",
@@ -925,13 +925,11 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
         for stmt in request_class.body
         if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
     ]
-    if len(request_fields) > 12:
+    if request_fields != ["ctx", "tool_call"]:
         violations.append(
             f"{question_path}:{request_class.lineno} fields {request_fields}"
         )
 
-    tracked_completion_import_count = 0
-    direct_completion_import_count = 0
     for node in ast.walk(question_tree):
         if isinstance(node, ast.ImportFrom):
             if node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS:
@@ -939,11 +937,9 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
                     f"{question_path}:{node.lineno} imports {node.module}"
                 )
             if node.module == "intric.flows.ai_builder.ai_builder_litellm_completion":
-                for alias in node.names:
-                    if alias.name == "call_proposal_completion_with_usage":
-                        tracked_completion_import_count += 1
-                    if alias.name == "call_proposal_completion":
-                        direct_completion_import_count += 1
+                violations.append(
+                    f"{question_path}:{node.lineno} imports completion provider"
+                )
 
         if isinstance(node, ast.ClassDef) and node.name.endswith(
             ("Processor", "Service", "Manager")
@@ -952,6 +948,20 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
 
         if isinstance(node, ast.Attribute) and node.attr == "acompletion":
             violations.append(f"{question_path}:{node.lineno} calls acompletion")
+
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "ProposalCompletionRequest":
+                violations.append(
+                    f"{question_path}:{node.lineno} builds ProposalCompletionRequest"
+                )
+            if (
+                isinstance(func, ast.Name)
+                and func.id == "make_usage_tracked_proposal_completion"
+            ):
+                violations.append(
+                    f"{question_path}:{node.lineno} constructs completion factory"
+                )
 
         if isinstance(node, ast.Name) and node.id in {
             "AIBuilderProposalProcessor",
@@ -984,16 +994,6 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
                     f"{question_path}:{node.lineno} field {node.target.id} uses Any"
                 )
 
-    if tracked_completion_import_count:
-        violations.append(
-            f"{question_path}: call_proposal_completion_with_usage imports "
-            f"{tracked_completion_import_count}"
-        )
-    if direct_completion_import_count != 1:
-        violations.append(
-            f"{question_path}: call_proposal_completion imports "
-            f"{direct_completion_import_count}"
-        )
     if question_text.count('"question-recovery"') != 1:
         violations.append(f"{question_path}: question-recovery literal count changed")
 
