@@ -7,12 +7,9 @@ field meanings change. Success rows omit failure fields because JSON logging
 does not need null-valued keys.
 
 `ToolProcessingFailureKind` is the internal repair-loop taxonomy.
-`recoverable_parse` receives one extra self-correction attempt, so the repair
-loop can distinguish malformed input from validation and quality feedback.
-`ProposalFailureKind` is the sanitized proposal telemetry taxonomy: it maps
-`recoverable_parse` to `parse`, adds `missing_submission_tool` for responses
-that did not call the required proposal tool, and records backend-owned
-architecture failures without treating them as repair invocations.
+`ProposalFailureKind` adds `missing_submission_tool` for responses that did
+not call the required proposal tool, and records backend-owned architecture
+failures without treating them as repair invocations.
 """
 
 from __future__ import annotations
@@ -45,7 +42,6 @@ if TYPE_CHECKING:
 
 ToolProcessingFailureKind = Literal[
     "parse",
-    "recoverable_parse",
     "validation",
     "quality",
 ]
@@ -97,7 +93,7 @@ def _completion_text_from_response(response: Any) -> str:
 def proposal_repair_reason_from_tool_failure(
     failure_kind: ToolProcessingFailureKind | None,
 ) -> ProposalRepairReason:
-    if failure_kind in {"parse", "recoverable_parse"}:
+    if failure_kind == "parse":
         return "parse"
     if failure_kind == "validation":
         return "validation"

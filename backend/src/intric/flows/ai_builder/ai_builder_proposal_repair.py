@@ -55,9 +55,6 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
-_EXTRA_RETRY_FAILURE_KINDS: frozenset[ToolProcessingFailureKind] = frozenset(
-    {"recoverable_parse"}
-)
 EventBatch = tuple[dict[str, str], ...]
 MAX_SELF_CORRECTION_RETRIES = 3
 
@@ -122,7 +119,6 @@ class ForcedToolAfterTextRequest:
 @dataclass(frozen=True, slots=True)
 class _ProposalRepairRetryState:
     attempts_remaining: int
-    extra_retry_available: bool = True
     text_feedback_retry_available: bool = True
     retry_count: int = 0
 
@@ -138,40 +134,24 @@ class _ProposalRepairRetryState:
     def next_retry_count(self) -> int:
         return self.retry_count + 1
 
-    def can_retry(self, *, failure_kind: ToolProcessingFailureKind | None) -> bool:
-        return self.attempts_remaining > 0 or (
-            failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available
-        )
+    def can_retry(self) -> bool:
+        return self.attempts_remaining > 0
 
-    def can_retry_text_feedback(
-        self, *, failure_kind: ToolProcessingFailureKind | None
-    ) -> bool:
-        return self.text_feedback_retry_available and self.can_retry(
-            failure_kind=failure_kind
-        )
+    def can_retry_text_feedback(self) -> bool:
+        return self.text_feedback_retry_available and self.can_retry()
 
-    def consume(
-        self, *, failure_kind: ToolProcessingFailureKind | None
-    ) -> "_ProposalRepairRetryState":
+    def consume(self) -> "_ProposalRepairRetryState":
         if self.attempts_remaining > 0:
             return replace(
                 self,
                 attempts_remaining=self.attempts_remaining - 1,
                 retry_count=self.retry_count + 1,
             )
-        if failure_kind in _EXTRA_RETRY_FAILURE_KINDS and self.extra_retry_available:
-            return replace(
-                self,
-                extra_retry_available=False,
-                retry_count=self.retry_count + 1,
-            )
         return self
 
-    def consume_text_feedback(
-        self, *, failure_kind: ToolProcessingFailureKind | None
-    ) -> "_ProposalRepairRetryState":
+    def consume_text_feedback(self) -> "_ProposalRepairRetryState":
         return replace(
-            self.consume(failure_kind=failure_kind),
+            self.consume(),
             text_feedback_retry_available=False,
         )
 
@@ -190,7 +170,7 @@ def build_self_correction_error_event(
         feedback=feedback,
         failure_kind=failure_kind,
     )
-    if failure_kind in {"parse", "recoverable_parse"}:
+    if failure_kind == "parse":
         code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PAYLOAD
     elif failure_kind == "quality":
         code = AIBuilderErrorCode.SELF_CORRECTION_QUALITY_FAILURE
@@ -210,7 +190,7 @@ def _self_correction_user_message(
     failure_kind: ToolProcessingFailureKind | None,
 ) -> str:
     details = (feedback or "").casefold()
-    if failure_kind in {"parse", "recoverable_parse"}:
+    if failure_kind == "parse":
         return (
             "The AI Builder returned an incomplete plan configuration and could "
             "not repair it automatically. Try again, or use a more capable model "
@@ -331,17 +311,10 @@ def _build_retry_feedback(
     target_tool_name: str,
     target_kind: TargetKind,
     feedback: str,
-    failure_kind: ToolProcessingFailureKind | None,
     failure_codes: frozenset[str] = frozenset(),
     retry_count: int = 1,
 ) -> str:
     suffix = f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
-    if failure_kind in _EXTRA_RETRY_FAILURE_KINDS:
-        suffix = (
-            "Arrays like steps[] and form_fields[] must contain only complete JSON objects. "
-            "Do not include comments, placeholders, status notes, or quoted fragments inside arrays. "
-            f"Rebuild any broken array entries as normal JSON objects and return one complete {target_tool_name} call."
-        )
     # target_kind is session-scoped; outline repair rules only belong to propose_flow.
     if target_tool_name == PROPOSE_FLOW_TOOL_NAME and target_kind == TargetKind.CREATE:
         outline_rules = [
@@ -540,28 +513,23 @@ async def request_self_correction(
         assistant_text = _safe_assistant_text(getattr(message, "content", None))
 
         if hasattr(message, "tool_calls") and message.tool_calls:
-            retry_feedback: (
-                tuple[LLMCompletionToolCall, str, ToolProcessingFailureKind | None]
-                | None
-            ) = None
+            retry_feedback: tuple[LLMCompletionToolCall, str] | None = None
             for correction_tool_call in message.tool_calls:
                 if correction_tool_call.function.name != target_tool_name:
                     continue
                 try:
                     arguments = json.loads(correction_tool_call.function.arguments)
                 except Exception as error:
-                    if retry_state.can_retry(failure_kind="parse"):
+                    if retry_state.can_retry():
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
                                 target_tool_name=target_tool_name,
                                 target_kind=target_kind,
                                 feedback=_invalid_tool_arguments_message(error),
-                                failure_kind="parse",
                                 failure_codes=frozenset(),
                                 retry_count=retry_state.next_retry_count,
                             ),
-                            "parse",
                         )
                         break
                     yield build_self_correction_error_event(
@@ -589,7 +557,7 @@ async def request_self_correction(
                 )
                 terminal_events = _repair_terminal_events(tool_result)
                 if not terminal_events:
-                    if retry_state.can_retry(failure_kind=tool_result.failure_kind):
+                    if retry_state.can_retry():
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
@@ -597,11 +565,9 @@ async def request_self_correction(
                                 target_kind=target_kind,
                                 feedback=tool_result.feedback
                                 or "Invalid tool payload.",
-                                failure_kind=tool_result.failure_kind,
                                 failure_codes=tool_result.failure_codes,
                                 retry_count=retry_state.next_retry_count,
                             ),
-                            tool_result.failure_kind,
                         )
                         break
                     yield build_self_correction_error_event(
@@ -616,8 +582,8 @@ async def request_self_correction(
                 return
 
             if retry_feedback is not None:
-                correction_tool_call, feedback, failure_kind = retry_feedback
-                retry_state = retry_state.consume(failure_kind=failure_kind)
+                correction_tool_call, feedback = retry_feedback
+                retry_state = retry_state.consume()
                 correction_messages = build_tool_retry_messages(
                     llm_messages=correction_messages,
                     tool_call=correction_tool_call,
@@ -660,20 +626,15 @@ async def request_self_correction(
             forced_failure_kind = forced_outcome.failure_kind or "validation"
             if (
                 forced_outcome.feedback is not None
-                and retry_state.can_retry_text_feedback(
-                    failure_kind=forced_failure_kind
-                )
+                and retry_state.can_retry_text_feedback()
             ):
                 text_retry_feedback = _build_retry_feedback(
                     target_tool_name=target_tool_name,
                     target_kind=target_kind,
                     feedback=forced_outcome.feedback,
-                    failure_kind=forced_failure_kind,
                     retry_count=retry_state.next_retry_count,
                 )
-                retry_state = retry_state.consume_text_feedback(
-                    failure_kind=forced_failure_kind
-                )
+                retry_state = retry_state.consume_text_feedback()
                 correction_messages = append_text_retry_feedback_turn(
                     llm_messages=correction_messages,
                     assistant_content=assistant_text,

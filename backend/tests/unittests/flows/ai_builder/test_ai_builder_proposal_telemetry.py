@@ -142,8 +142,7 @@ def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:
     assert payload["proposal_first_attempt_failure_kind"] == "missing_submission_tool"
 
 
-def test_proposal_repair_reason_sanitizes_recoverable_parse() -> None:
-    assert proposal_repair_reason_from_tool_failure("recoverable_parse") == "parse"
+def test_proposal_repair_reason_maps_tool_failures() -> None:
     assert proposal_repair_reason_from_tool_failure("parse") == "parse"
     assert proposal_repair_reason_from_tool_failure("validation") == "validation"
     assert proposal_repair_reason_from_tool_failure("quality") == "quality"

@@ -465,7 +465,6 @@ def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
         target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="missing field X",
-        failure_kind="validation",
         retry_count=1,
     )
     assert feedback.startswith("CORRECTION STILL INVALID:")
@@ -477,7 +476,6 @@ def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -
         target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="missing field X",
-        failure_kind="validation",
         retry_count=2,
     )
     assert feedback.startswith("FINAL CORRECTION ATTEMPT")
@@ -489,7 +487,6 @@ def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
         target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="missing field X",
-        failure_kind="validation",
         retry_count=3,
     )
     assert feedback.startswith("FINAL CORRECTION ATTEMPT")
@@ -500,14 +497,12 @@ def test_build_retry_feedback_keeps_create_outline_rules_out_of_edit_mode() -> N
         target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="duplicate name",
-        failure_kind="validation",
         failure_codes=frozenset({"duplicate_step_name"}),
     )
     edit_feedback = _build_retry_feedback(
         target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.EDIT,
         feedback="duplicate name",
-        failure_kind="validation",
         failure_codes=frozenset({"duplicate_step_name"}),
     )
 
@@ -605,32 +600,8 @@ async def test_request_self_correction_bumps_temperature_from_first_retry_onward
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_grants_one_extra_retry_for_recoverable_parse() -> (
-    None
-):
-    temps, retry_feedback, events = await _run_repair_capturing(
-        max_retries=3,
-        failure_kind="recoverable_parse",
-        base_temperature=0.35,
-        bumped_temperature=0.6,
-    )
-
-    assert temps == [0.35, 0.6, 0.6, 0.6, 0.6]
-    assert len(retry_feedback) == 5
-    assert retry_feedback[0].startswith("VALIDATION FAILED")
-    assert retry_feedback[1].startswith("CORRECTION STILL INVALID:")
-    assert retry_feedback[2].startswith("FINAL CORRECTION ATTEMPT")
-    assert retry_feedback[3].startswith("FINAL CORRECTION ATTEMPT")
-    assert retry_feedback[4].startswith("FINAL CORRECTION ATTEMPT")
-    assert events[-1]["event"] == "error"
-    payload = json.loads(events[-1]["data"])
-    assert payload["code"] == "self_correction_invalid_payload"
-    assert "still bad" not in payload["message"]
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_kind", ["parse", "validation", "quality"])
-async def test_request_self_correction_rejects_non_extra_failure_after_normal_budget(
+async def test_request_self_correction_rejects_failure_after_normal_budget(
     failure_kind: str,
 ) -> None:
     temps, retry_feedback, events = await _run_repair_capturing(
