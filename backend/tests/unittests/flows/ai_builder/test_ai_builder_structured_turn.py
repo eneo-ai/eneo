@@ -90,7 +90,9 @@ class TestPlannerParserFence:
 
 
 class _FakeCompletions:
-    def __init__(self, *raw_contents: str, finish_reasons: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, *raw_contents: str, finish_reasons: tuple[str, ...] = ()
+    ) -> None:
         self._raw_contents = list(raw_contents)
         self._finish_reasons = list(finish_reasons)
         self.messages: list[list[Message]] = []
@@ -121,7 +123,11 @@ def _accept_all(_: PlannerOutput) -> str | None:
 
 
 def _reject_ask_question(output: PlannerOutput) -> str | None:
-    return "ask_question_not_allowed" if output.planner_action.kind == "ask_question" else None
+    return (
+        "ask_question_not_allowed"
+        if output.planner_action.kind == "ask_question"
+        else None
+    )
 
 
 def _can_retry(reason: str) -> bool:
@@ -147,19 +153,10 @@ def _parse_retry_messages(
     ]
 
 
-def _guard_commit_architecture(output: PlannerOutput) -> str | None:
-    return (
-        "repair_attempted_commit_drift"
-        if output.planner_action.kind == "commit_architecture"
-        else None
-    )
-
-
 async def _run_planner_structured_turn(
     *,
     complete: Callable[[list[Message]], Awaitable[StructuredCompletion]],
     validate: Callable[[PlannerOutput], str | None],
-    repair_guard: Callable[[PlannerOutput], str | None] | None = None,
     max_semantic_retries: int = 3,
 ) -> Any:
     return await run_structured_turn(
@@ -174,7 +171,6 @@ async def _run_planner_structured_turn(
         summarize_parse_failure=summarize_parse_failure,
         max_semantic_retries=max_semantic_retries,
         max_parse_retries=1,
-        repair_guard=repair_guard,
     )
 
 
@@ -232,24 +228,6 @@ class TestStructuredTurnRunner:
         assert result.semantic_repair_attempts == 1
         assert result.parse_repair_attempts == 0
         assert completions.messages[1][-1]["content"] == "Fix: ask_question_not_allowed"
-
-    @pytest.mark.asyncio
-    async def test_semantic_retry_rejection_does_not_consume_attempt_on_guard(self) -> None:
-        completions = _FakeCompletions(
-            _planner_output_json("ask_question"),
-            _planner_output_json("commit_architecture"),
-        )
-
-        result = await _run_planner_structured_turn(
-            complete=completions.complete,
-            validate=_reject_ask_question,
-            repair_guard=_guard_commit_architecture,
-        )
-
-        assert result.kind == "rejected"
-        assert result.rejection == "repair_attempted_commit_drift"
-        assert result.llm_calls_made == 2
-        assert result.semantic_repair_attempts == 0
 
     @pytest.mark.asyncio
     async def test_parse_repair_after_semantic_retry_counts_both_domains(self) -> None:

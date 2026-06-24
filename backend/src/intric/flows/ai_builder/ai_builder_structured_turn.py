@@ -29,16 +29,13 @@ class StructuredCompletion:
     metadata: CompletionMetadata
 
 
-StructuredCompletionFn = Callable[
-    [list[Message]], Awaitable[StructuredCompletion]
-]
+StructuredCompletionFn = Callable[[list[Message]], Awaitable[StructuredCompletion]]
 StructuredParser = Callable[[str], OutputT]
 StructuredNormalizer = Callable[[OutputT], OutputT]
 StructuredValidator = Callable[[OutputT], DiagnosticT | None]
 StructuredRetryEligibility = Callable[[DiagnosticT], bool]
 StructuredSemanticRetryMessages = Callable[[OutputT, DiagnosticT], list[Message]]
 StructuredParseRetryMessages = Callable[[list[Message], str, str], list[Message]]
-StructuredRepairGuard = Callable[[OutputT], DiagnosticT | None]
 StructuredParseFailureSummarizer = Callable[[str, Exception], dict[str, Any]]
 
 
@@ -90,7 +87,6 @@ async def run_structured_turn(
     summarize_parse_failure: StructuredParseFailureSummarizer,
     max_semantic_retries: int,
     max_parse_retries: int,
-    repair_guard: StructuredRepairGuard[OutputT, DiagnosticT] | None = None,
 ) -> StructuredTurnResult[OutputT, DiagnosticT]:
     initial_completion = await complete(initial_messages)
     llm_calls_made = 1
@@ -237,19 +233,6 @@ async def run_structured_turn(
             semantic_repair_attempts += 1
             continue
 
-        guarded_rejection = (
-            repair_guard(parsed_repair.output) if repair_guard is not None else None
-        )
-        if guarded_rejection is not None:
-            return StructuredTurnResult(
-                kind="rejected",
-                rejection=guarded_rejection,
-                llm_calls_made=llm_calls_made,
-                semantic_repair_attempts=semantic_repair_attempts,
-                parse_repair_attempts=parse_repair_attempts,
-                final_completion=final_metadata,
-                cumulative_token_usage=cumulative_usage(),
-            )
         output = normalize(parsed_repair.output)
         semantic_repair_attempts += 1
 

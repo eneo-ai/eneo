@@ -17,10 +17,9 @@ Coverage:
 - A non-repair-eligible rejection short-circuits immediately with
   `semantic_repair_attempts=0`, `llm_calls_made=1` — the repair helper does
   NOT call the LLM on a non-eligible code.
-- A repair output that drifts the committed architecture yields a
-  terminal `rejected` outcome with `code="repair_attempted_commit_drift"`
-  — the LLM ran (`llm_calls_made=2`) but the repair slot is NOT
-  consumed (`semantic_repair_attempts=0`).
+- A repair output that drifts the committed architecture is rejected by
+  the same semantic validator as initial output, so retry accounting is
+  consistent across direct and parse-repaired repair responses.
 """
 
 from __future__ import annotations
@@ -637,13 +636,10 @@ class TestShortCircuits:
 
 @pytest.mark.asyncio
 class TestCommitDriftDuringRepair:
-    async def test_drift_in_repair_output_yields_terminal_drift_rejection(
+    async def test_drift_in_repair_output_uses_normal_evaluator_drift_code(
         self,
     ) -> None:
-        """If repair drifts the committed architecture, the pipeline surfaces
-        `repair_attempted_commit_drift` terminally — the LLM ran
-        (llm_calls_made=2) but drift is NOT a consumed retry slot
-        (semantic_repair_attempts=0)."""
+        """Repair drift uses normal semantic validation and retry accounting."""
         original_commit = _make_commit(architecture_hash="a" * 64)
         drifted_commit = _make_commit(
             architecture_hash="b" * 64,
@@ -685,20 +681,18 @@ class TestCommitDriftDuringRepair:
 
         assert outcome.kind == "rejected"
         assert outcome.rejection is not None
-        assert outcome.rejection.code == "repair_attempted_commit_drift"
+        assert outcome.rejection.code == "architecture_commit_drift_from_pinned"
+        assert "architecture_commit draft mutated" in outcome.rejection.detail
         assert outcome.llm_calls_made == 2
-        assert outcome.semantic_repair_attempts == 0
+        assert outcome.semantic_repair_attempts == 1
 
     async def test_parse_repaired_semantic_repair_uses_normal_evaluator_drift_code(
         self,
     ) -> None:
         """A parse-repaired semantic retry re-enters normal evaluation.
 
-        Direct semantic-repair drift is blocked before normalization with
-        `repair_attempted_commit_drift`. If that repair response is malformed
-        and recovered by parse repair, the historic pipeline path re-ran the
-        normal evaluator instead; pin that narrower behavior so the generic
-        runner consolidation cannot change retry accounting silently.
+        Direct and parse-repaired semantic-repair drift both use normal
+        evaluator rejection, so retry accounting stays consistent.
         """
         original_commit = _make_commit(architecture_hash="a" * 64)
         drifted_commit = _make_commit(architecture_hash="b" * 64)

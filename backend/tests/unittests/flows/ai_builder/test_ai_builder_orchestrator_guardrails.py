@@ -812,7 +812,6 @@ class TestRejectionCodeExhaustiveness:
             "architecture_commit_unresolvable_capability",
             "architecture_commit_unresolvable_pattern",
             "architecture_commit_drift_from_pinned",
-            "repair_attempted_commit_drift",
         }
     )
 

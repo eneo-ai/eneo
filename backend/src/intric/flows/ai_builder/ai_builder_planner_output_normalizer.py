@@ -30,11 +30,17 @@ def normalize_planner_output(
     model can choose the action but omit or freehand the accompanying
     architecture draft. When the current server state has enough
     resolved slots, overwrite that draft with the deterministic
-    server-derived one.
+    server-derived one. Once architecture is pinned, preserve any raw
+    model-authored delta so the evaluator can compare it to the pinned
+    body.
     """
     normalized = _pivot_disallowed_question_to_commit(output, context)
 
     if not isinstance(normalized.planner_action, CommitArchitectureAction):
+        return normalized
+
+    if context.session_state.architecture_commit is not None:
+        # Already-pinned sessions must leave model-authored deltas visible to the evaluator.
         return normalized
 
     draft = derive_architecture_commit_draft(context.session_state)

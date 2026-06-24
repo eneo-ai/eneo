@@ -6,10 +6,6 @@ from intric.flows.ai_builder.ai_builder_ask_question_contract import (
     canonical_ask_question_targets,
     format_ask_question_targets,
 )
-from intric.flows.ai_builder.ai_builder_commit_invariance import (
-    CommitDriftError,
-    assert_architecture_commit_draft_matches_pinned,
-)
 from intric.flows.ai_builder.ai_builder_litellm_completion import (
     call_planner_completion,
 )
@@ -31,10 +27,6 @@ from intric.flows.ai_builder.ai_builder_structured_turn import (
     StructuredTurnResult,
     run_structured_turn,
 )
-from intric.flows.ai_builder.planning_state import (
-    ArchitectureCommit,
-    ArchitectureCommitDraft,
-)
 
 MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
 MAX_PARSE_REPAIR_RETRIES: Final[int] = 1
@@ -48,8 +40,6 @@ async def run_planner_pipeline(
     base_messages: list[dict[str, Any]],
     orchestration_context: OrchestrationContext,
 ) -> StructuredTurnResult[PlannerOutput, RejectionReason]:
-    prior_commit = orchestration_context.session_state.architecture_commit
-
     async def complete(messages: list[Message]) -> StructuredCompletion:
         completion = await call_planner_completion(
             litellm_client=litellm_client,
@@ -84,10 +74,6 @@ async def run_planner_pipeline(
         summarize_parse_failure=summarize_parse_failure,
         max_semantic_retries=MAX_ORCHESTRATOR_REPAIR_RETRIES,
         max_parse_retries=MAX_PARSE_REPAIR_RETRIES,
-        repair_guard=lambda output: _detect_commit_drift(
-            prior=prior_commit,
-            after=output.planning_state_delta.architecture_commit,
-        ),
     )
 
 
@@ -212,23 +198,6 @@ def _off_topic_question_directive() -> str:
         "targets are: "
         f"{format_ask_question_targets(canonical_ask_question_targets())}."
     )
-
-
-def _detect_commit_drift(
-    *,
-    prior: ArchitectureCommit | None,
-    after: ArchitectureCommitDraft | None,
-) -> RejectionReason | None:
-    if after is None:
-        return None
-    try:
-        assert_architecture_commit_draft_matches_pinned(before=prior, after=after)
-    except CommitDriftError as exc:
-        return RejectionReason(
-            code="repair_attempted_commit_drift",
-            detail=str(exc),
-        )
-    return None
 
 
 __all__ = [

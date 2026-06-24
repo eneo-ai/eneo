@@ -2,10 +2,10 @@
 
 The architecture commit is the pinned contract between the planner's
 discovery phase and downstream persistence. Any code that transforms a
-planner response after the commit lands — the repair helper, the
-post-commit invariance check in the dispatcher, the materialization
-bridge before it writes a draft flow — must verify the transform did
-not silently drift the commit.
+planner response after the commit lands — the orchestrator evaluator,
+the post-commit invariance check in the dispatcher, the materialization
+bridge before it writes a draft flow — must verify the transform did not
+silently drift the commit.
 
 Persisted-commit preservation uses full canonical-form equality via
 `model_dump(mode="json")`. LLM-facing draft preservation is structural:
@@ -13,11 +13,10 @@ the model may re-emit the semantic body, but server-owned fields
 (`architecture_hash`, `committed_at`) are never model-authored and are
 therefore ignored for draft-vs-pinned comparison.
 
-Callers that need a structured rejection rather than an exception
-(e.g. the repair helper, which surfaces drift as a `RejectionReason`
-with code `repair_attempted_commit_drift`) catch `CommitDriftError`
-and translate. The helper itself stays exception-based so it fails
-loud by default on every unchecked call site.
+Callers that need a structured rejection rather than an exception catch
+`CommitDriftError` and translate it at their own boundary. The helper
+itself stays exception-based so it fails loud by default on every
+unchecked call site.
 """
 
 from __future__ import annotations
@@ -52,16 +51,12 @@ def assert_architecture_commit_unchanged(
         but divergent body is corrupt state, not preservation.
       - `before=set, after` byte-identical: no raise.
 
-    Caller composition: the evaluator's `_check_commit_preservation`
-    and the repair helper's `_detect_commit_drift` implement
-    preservation-by-absence on top of this strict contract — they
-    short-circuit on `after is None` before invoking this helper
-    because the planner-protocol teaches the model to populate
-    `planning_state_delta.architecture_commit` only on
-    `commit_architecture` turns. The `after=None` raise path stays
-    in the helper as a defensive default for any future caller that
-    needs strict preservation (so forgetting to short-circuit fails
-    loud rather than silently accepting a dropped commit).
+    Caller composition: some boundaries implement preservation-by-absence
+    on top of this strict contract, short-circuiting on `after is None`
+    before invoking the matching invariant helper. The `after=None` raise
+    path stays here as a defensive default for callers that need strict
+    persisted-state preservation, so forgetting to short-circuit fails
+    loud rather than silently accepting a dropped commit.
     """
     if before is None:
         return
