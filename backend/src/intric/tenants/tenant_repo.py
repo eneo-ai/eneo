@@ -131,6 +131,28 @@ class TenantRepository:
         model = await self.delegate.get_model_from_query(stmt)
         return cast(TenantInDB, model)
 
+    async def update_show_model_pricing(
+        self,
+        tenant_id: UUID,
+        show_model_pricing: bool,
+    ) -> TenantInDB:
+        tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(
+                show_model_pricing=show_model_pricing,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
+
     async def delete_tenant_by_id(self, id: UUID) -> TenantInDB:
         return cast(TenantInDB, await self.delegate.delete(id))
 

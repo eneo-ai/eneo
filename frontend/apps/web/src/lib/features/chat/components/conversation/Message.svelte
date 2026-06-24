@@ -60,8 +60,13 @@
   const showSpinner = $derived.by(() => {
     const isGeneratingImage = message.generated_files.length > 0;
     const hasStartedStreaming = message.answer.trim().length > 0;
+    // Once reasoning text is streaming, the ReasoningTrace is the thinking
+    // indicator, so suppress the standalone badge to avoid a double indicator.
+    const hasReasoning =
+      (((message as Record<string, unknown>).reasoning as string | undefined) ?? "").trim().length >
+      0;
     // Show typing indicator only while waiting for text to start, not during streaming
-    return isLast && isLoading && !isGeneratingImage && !hasStartedStreaming;
+    return isLast && isLoading && !isGeneratingImage && !hasStartedStreaming && !hasReasoning;
   });
 
   const isReasoning = $derived.by(() => {

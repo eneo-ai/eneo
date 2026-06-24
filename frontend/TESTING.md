@@ -107,9 +107,35 @@ string (`E2E mock completion: pong`) — fast, free, and identical every run. No
 real provider is ever called. To keep credentials simple the stack runs with
 encryption off, so the seeded api-key is plaintext (and meaningless).
 
-> **Status:** the full suite (login, unauthenticated redirect, authenticated
-> landing, and the deterministic chat stream) runs green in CI on every PR via the
-> `Frontend E2E` job, and locally with `bun run test:all` (or `bun run test:e2e`).
+> **Status:** the suite covers login, rejected credentials, unauthenticated
+> redirects, authenticated landing, primary navigation, account data, logout,
+> deterministic chat streaming, and reopening persisted chat history. It runs in
+> CI on every PR via the `Frontend E2E` job, and locally with `bun run test:all`
+> (or `bun run test:e2e`).
+
+### E2E coverage strategy
+
+Keep the E2E layer focused on high-value user journeys that cross the browser,
+SvelteKit, and backend boundary. Rendering variants and pure business logic
+belong in component or unit tests.
+
+The prioritized flow plan, including mandatory CI candidates and required test
+infrastructure, is documented in
+[`E2E_FLOW_PLAN.md`](./E2E_FLOW_PLAN.md).
+
+| Area                | Covered now                                                                                   | Next high-value coverage                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Authentication      | Successful login, rejected credentials, protected-route redirect, logout/session invalidation | Expired sessions, OIDC callback failures, tenant switching                            |
+| App shell           | Authenticated landing, primary navigation, admin access, account details                      | Mobile navigation, permission-restricted navigation                                   |
+| Chat                | Send, stream, persist, reopen, reload                                                         | New conversation, rename/delete history, attachments, model switching, error recovery |
+| Spaces              | Navigation to the space list                                                                  | Create/edit/delete a shared space, member permissions                                 |
+| Assistants and apps | Route loading only through shared navigation                                                  | Create, configure, publish, run, and delete                                           |
+| Knowledge           | Not covered end-to-end                                                                        | Upload/index/delete a document, collection and website lifecycle                      |
+| Administration      | Admin shell loads                                                                             | User lifecycle, roles, model/provider configuration, audit logs                       |
+
+Prioritize one happy path and one failure or permission path for each critical
+workflow. Seed deterministic fixtures in `e2e/seed.py` instead of relying on test
+ordering, production data, or third-party services.
 
 ## Writing tests
 
@@ -224,11 +250,9 @@ Two jobs in `.github/workflows/ci.yml` run on every PR:
   backend built from its Dockerfile) and runs the full Playwright suite, uploading
   the HTML report as an artifact.
 
-**`Frontend E2E` is currently non-blocking:** it is *not* in the aggregate `CI`
-job's `needs:` list, so a red E2E run does not fail the PR (it adds real CI time —
-backend image build + frontend build + browser run — and the suite is newer/more
-prone to flake). To make it blocking, add the `Frontend E2E` check to branch
-protection in repo settings.
+**`Frontend E2E` is blocking:** it is included in the aggregate `CI` job's
+`needs:` list and result check, so a failed E2E run makes the required `CI` status
+fail.
 
 ## Coverage
 

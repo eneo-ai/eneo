@@ -76,6 +76,7 @@ class MCPServerTools(BasePublic):
         ForeignKey(MCPServers.id, ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text)
     input_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     is_enabled_by_default: Mapped[bool] = mapped_column(

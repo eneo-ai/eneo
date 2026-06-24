@@ -82,6 +82,7 @@ class MCPServerAssembler:
                 {
                     "id": str(tool.id),
                     "name": tool.name,
+                    "title": tool.title,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
                     "is_enabled": tool.is_enabled_by_default,
@@ -135,6 +136,7 @@ class MCPServerSettingsAssembler:
                 id=tool.id,
                 mcp_server_id=tool.mcp_server_id,
                 name=tool.name,
+                title=tool.title,
                 description=tool.description,
                 input_schema=tool.input_schema,
                 is_enabled_by_default=tool.is_enabled_by_default,

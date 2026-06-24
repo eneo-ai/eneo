@@ -635,6 +635,7 @@ jobs:
       - script-tests
       - route-metadata
       - frontend
+      - frontend-e2e
       - schema-drift
       - docker-builds
 
@@ -647,6 +648,7 @@ jobs:
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
           DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
         run: |
@@ -673,6 +675,7 @@ jobs:
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
+          check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
           check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
 

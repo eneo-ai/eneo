@@ -102,7 +102,7 @@ async def test_user_can_not_access_completion_models(service: AIModelsService):
         assert not model.can_access
 
 
-async def test_completion_models_use_effective_deprecation(
+async def test_completion_models_keep_litellm_deprecation_advisory(
     service: AIModelsService,
 ):
     service.user = TEST_ADMIN_USER
@@ -122,11 +122,13 @@ async def test_completion_models_use_effective_deprecation(
     ):
         models = await service.get_completion_models()
 
-    assert models[0].is_deprecated is True
-    assert models[0].can_access is False
+    assert models[0].is_deprecated is False
+    assert models[0].can_access is True
 
 
-async def test_embedding_models_use_effective_deprecation(service: AIModelsService):
+async def test_embedding_models_keep_litellm_deprecation_advisory(
+    service: AIModelsService,
+):
     service.user = TEST_ADMIN_USER
     model = TEST_EMBEDDING_MODEL.model_copy(
         update={
@@ -143,8 +145,8 @@ async def test_embedding_models_use_effective_deprecation(service: AIModelsServi
     ):
         models = await service.get_embedding_models()
 
-    assert models[0].is_deprecated is True
-    assert models[0].can_access is False
+    assert models[0].is_deprecated is False
+    assert models[0].can_access is True
 
 
 async def test_completion_models_flags_settings_not_exists(service: AIModelsService):

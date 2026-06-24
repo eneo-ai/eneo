@@ -113,6 +113,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_module_added_to_tenant,
     description: m.audit_action_module_added_to_tenant_description
   },
+  governance_policy_updated: {
+    name: m.audit_action_governance_policy_updated,
+    description: m.audit_action_governance_policy_updated_description
+  },
+  prompt_library_entry_created: {
+    name: m.audit_action_prompt_library_entry_created,
+    description: m.audit_action_prompt_library_entry_created_description
+  },
+  prompt_library_entry_updated: {
+    name: m.audit_action_prompt_library_entry_updated,
+    description: m.audit_action_prompt_library_entry_updated_description
+  },
+  prompt_library_entry_deleted: {
+    name: m.audit_action_prompt_library_entry_deleted,
+    description: m.audit_action_prompt_library_entry_deleted_description
+  },
   scim_user_provisioned: {
     name: m.audit_action_scim_user_provisioned,
     description: m.audit_action_scim_user_provisioned_description
@@ -436,6 +452,30 @@ const ACTION_MESSAGES = {
   audit_log_exported: {
     name: m.audit_action_audit_log_exported,
     description: m.audit_action_audit_log_exported_description
+  },
+  help_assistant_role_assigned: {
+    name: m.audit_action_help_assistant_role_assigned,
+    description: m.audit_action_help_assistant_role_assigned_description
+  },
+  help_assistant_role_unassigned: {
+    name: m.audit_action_help_assistant_role_unassigned,
+    description: m.audit_action_help_assistant_role_unassigned_description
+  },
+  help_assistant_role_toggled_enabled: {
+    name: m.audit_action_help_assistant_role_toggled_enabled,
+    description: m.audit_action_help_assistant_role_toggled_enabled_description
+  },
+  help_assistant_role_toggled_visible: {
+    name: m.audit_action_help_assistant_role_toggled_visible,
+    description: m.audit_action_help_assistant_role_toggled_visible_description
+  },
+  help_assistant_installed: {
+    name: m.audit_action_help_assistant_installed,
+    description: m.audit_action_help_assistant_installed_description
+  },
+  help_assistant_uninstalled: {
+    name: m.audit_action_help_assistant_uninstalled,
+    description: m.audit_action_help_assistant_uninstalled_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

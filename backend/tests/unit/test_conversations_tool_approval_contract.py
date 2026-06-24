@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4, UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -15,7 +15,11 @@ from intric.audit.infrastructure.rate_limiting import (
     RateLimitExceededError,
     RateLimitResult,
 )
-from intric.conversations.conversations_router import approve_tools
+from intric.conversations.conversations_router import (
+    approve_tools,
+    get_tool_call_result,
+)
+from intric.main.exceptions import UnauthorizedException
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalContext,
     ToolApprovalContextLookupResult,
@@ -59,6 +63,60 @@ def _make_context(user, assistant_id=None) -> ToolApprovalContext:
         session_id=uuid4(),
         assistant_id=assistant_id or uuid4(),
     )
+
+
+@pytest.mark.asyncio
+async def test_tool_result_rechecks_current_session_access():
+    session = SimpleNamespace(
+        id=uuid4(), group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    session_service.get_tool_call_result.return_value = ("result", "server__tool")
+    container = SimpleNamespace(session_service=lambda: session_service)
+    authorize = AsyncMock()
+
+    with patch(
+        "intric.conversations.conversations_router._authorize_session_access",
+        new=authorize,
+    ):
+        response = await get_tool_call_result(
+            session_id=session.id,
+            tool_call_id="call_1",
+            container=container,
+        )
+
+    authorize.assert_awaited_once_with(container, session)
+    session_service.get_tool_call_result.assert_awaited_once_with(
+        session=session,
+        tool_call_id="call_1",
+    )
+    assert response.result == "result"
+
+
+@pytest.mark.asyncio
+async def test_tool_result_is_not_read_when_current_access_is_revoked():
+    session = SimpleNamespace(
+        id=uuid4(), group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container = SimpleNamespace(session_service=lambda: session_service)
+
+    with (
+        patch(
+            "intric.conversations.conversations_router._authorize_session_access",
+            new=AsyncMock(side_effect=UnauthorizedException("revoked")),
+        ),
+        pytest.raises(UnauthorizedException, match="revoked"),
+    ):
+        await get_tool_call_result(
+            session_id=session.id,
+            tool_call_id="call_1",
+            container=container,
+        )
+
+    session_service.get_tool_call_result.assert_not_awaited()
 
 
 @pytest.mark.asyncio

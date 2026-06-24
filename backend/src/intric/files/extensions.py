@@ -13,6 +13,9 @@ MIMETYPE_EXTENSIONS_MAPPER = {
     TextMimeTypes.PPTX.value: [".pptx"],
     TextMimeTypes.XLSX.value: [".xlsx"],
     TextMimeTypes.XLS.value: [".xls"],
+    TextMimeTypes.JSON.value: [".json"],
+    TextMimeTypes.XML.value: [".xml"],
+    TextMimeTypes.XML_APP.value: [".xml"],
     # Legacy formats (for detection/rejection)
     TextMimeTypes.DOC.value: [".doc"],
     TextMimeTypes.PPT.value: [".ppt"],
@@ -31,4 +34,6 @@ MIMETYPE_EXTENSIONS_MAPPER = {
     ImageMimeTypes.JPEG.value: [".jpeg", ".jpg", ".jpe"],
     ImageMimeTypes.WEBP.value: [".webp"],
     ImageMimeTypes.AVIF.value: [".avif"],
+    ImageMimeTypes.HEIC.value: [".heic"],
+    ImageMimeTypes.HEIF.value: [".heif"],
 }

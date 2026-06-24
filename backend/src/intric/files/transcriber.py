@@ -5,17 +5,13 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-import sqlalchemy as sa
-
-from intric.database.tables.model_providers_table import ModelProviders
 from intric.files import audio
 from intric.files.audio import AudioMimeTypes
 from intric.files.file_models import File
 from intric.main.config import SETTINGS, Settings
-from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
-from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
-    TenantModelCredentialResolver,
+from intric.model_providers.infrastructure.litellm_provider import (
+    load_active_litellm_provider,
 )
 from intric.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
@@ -112,23 +108,6 @@ class Transcriber:
                 "Please ensure the Transcriber is initialized with a database session."
             )
 
-        # Load provider data from database
-        stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-        result = await self.session.execute(stmt)
-        provider_db = result.scalar_one_or_none()
-
-        if provider_db is None:
-            raise ProviderNotFoundException(
-                f"Model provider '{model.provider_id}' not found. "
-                "The provider may have been deleted or is not accessible."
-            )
-
-        if not provider_db.is_active:
-            raise ProviderInactiveException(
-                f"The model provider '{provider_db.name}' is currently inactive. "
-                "Please contact your administrator to enable the provider."
-            )
-
         if self.encryption_service is None:
             raise ValueError(
                 f"Transcription model '{model.name}' requires an encryption service "
@@ -136,13 +115,19 @@ class Transcriber:
                 "initialized with an encryption_service."
             )
 
-        # Create credential resolver
-        credential_resolver = TenantModelCredentialResolver(
-            provider_id=provider_db.id,
-            provider_type=provider_db.provider_type,
-            credentials=provider_db.credentials,
-            config=provider_db.config,
-            encryption_service=self.encryption_service,
+        if self.tenant is None:
+            raise ValueError(
+                f"Transcription model '{model.name}' requires tenant context "
+                "to load its provider."
+            )
+
+        provider = await load_active_litellm_provider(
+            session=self.session,
+            provider_id=model.provider_id,
+            tenant_id=self.tenant.id,
+        )
+        credential_resolver = provider.create_credential_resolver(
+            self.encryption_service
         )
 
         logger.info(
@@ -151,7 +136,7 @@ class Transcriber:
                 "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
-                "provider_type": provider_db.provider_type,
+                "provider_type": provider.provider_type,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
             },
         )
@@ -159,7 +144,7 @@ class Transcriber:
         return LiteLLMTranscriptionAdapter(
             model=model,
             credential_resolver=credential_resolver,
-            provider_type=provider_db.provider_type,
+            provider_type=provider.provider_type,
         )
 
     async def transcribe_from_filepath(

@@ -50,6 +50,7 @@ from intric.sessions.session import (
     SSEToolApprovalTimeout,
     SSEToolCall,
     ToolApprovalResponse,
+    ToolCallResultPublic,
 )
 from intric.sessions.session_protocol import (
     to_session_public,
@@ -352,15 +353,20 @@ async def chat(
             version=version,
             use_web_search=request.use_web_search,
             require_tool_approval=request.require_tool_approval,
+            disabled_mcp_server_ids=request.disabled_mcp_server_ids,
         )
 
-    return await to_conversation_response(response=response, stream=request.stream)
+    return await to_conversation_response(
+        response=response,
+        stream=request.stream,
+        show_pricing=container.user().can_view_model_pricing,
+    )
 
 
 @router.post(
     "/preflight",
     response_model=PreflightResponse,
-    description="Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).",
+    description="Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).",
     responses=responses.get_responses([400, 403, 404, 429]),
 )
 async def preflight_tokens(
@@ -370,11 +376,12 @@ async def preflight_tokens(
         get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
     ),
 ):
-    """Returns the exact token cost the next chat request will add.
+    """Returns an estimated token cost for the next chat request.
 
     Excludes knowledge/RAG and web-search content (selected at request time
-    and unknowable up-front). Designed to be called debounced from the input
-    field — the cost is dominated by tokenization (~5-20ms).
+    and unknowable up-front). Provider tokenization remains authoritative.
+    Designed to be called debounced from the input field — the cost is
+    dominated by tokenization (~5-20ms).
 
     Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
     ~150 req/min, so the limit catches scripted abuse while leaving multiple
@@ -539,6 +546,37 @@ async def get_conversation(
     await _authorize_session_access(container, session)
 
     return to_session_public(session)
+
+
+@router.get(
+    "/{session_id}/tool-calls/{tool_call_id}/result/",
+    response_model=ToolCallResultPublic,
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+async def get_tool_call_result(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    tool_call_id: Annotated[
+        str, Path(description="The LLM-issued tool_call_id within this session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+):
+    """Lazy-load a single tool call's upstream response text."""
+    session_service = container.session_service()
+    session = await session_service.get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+    result, mcp_tool_name = await session_service.get_tool_call_result(
+        session=session, tool_call_id=tool_call_id
+    )
+    if result is None and mcp_tool_name is None:
+        raise NotFoundException("Tool call not found in this session")
+    return ToolCallResultPublic(
+        tool_call_id=tool_call_id,
+        result=result,
+        mcp_tool_name=mcp_tool_name,
+    )
 
 
 @router.delete(

@@ -94,12 +94,36 @@ from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor
 from intric.files.text import TextExtractor
 from intric.files.transcriber import Transcriber
+from intric.governance_policy.application.effective_config_service import (
+    EffectiveConfigService,
+)
+from intric.governance_policy.application.governance_policy_service import (
+    GovernancePolicyService,
+)
+from intric.governance_policy.infrastructure.governance_policy_repo_impl import (
+    GovernancePolicyRepoImpl,
+)
+from intric.governance_policy.presentation.governance_policy_assembler import (
+    GovernancePolicyAssembler,
+)
 from intric.group_chat.application.group_chat_service import GroupChatService
 from intric.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
 )
 from intric.groups_legacy.group_repo import GroupRepository
 from intric.groups_legacy.group_service import GroupService
+from intric.help_assistants.application.helper_run_service import HelperRunService
+from intric.help_assistants.application.org_space_assistant_role_service import (
+    OrgSpaceAssistantRoleService,
+)
+from intric.help_assistants.domain.factory import HelperAssistantsFactory
+from intric.help_assistants.infrastructure.help_assistant_assignment_history_repo import (
+    HelpAssistantAssignmentHistoryRepo,
+)
+from intric.help_assistants.infrastructure.helper_run_repo import HelperRunRepo
+from intric.help_assistants.infrastructure.org_space_assistant_role_repo import (
+    OrgSpaceAssistantRoleRepo,
+)
 from intric.icons.icon_repo import IconRepository
 from intric.icons.icon_service import IconService
 from intric.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
@@ -235,9 +259,18 @@ from intric.mcp_servers.application.mcp_server_service import MCPServerService
 from intric.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
+from intric.mcp_servers.application.mcp_session_lifecycle_service import (
+    McpSessionLifecycleService,
+)
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
+)
+from intric.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+    MCPProxySessionFactory,
+)
+from intric.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
+    ChatSessionMcpStateRepo,
 )
 from intric.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -252,7 +285,19 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
     MCPServerToolAssembler,
 )
+from intric.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
 from intric.modules.module_repo import ModuleRepository
+from intric.prompt_library.application.prompt_library_service import (
+    PromptLibraryService,
+)
+from intric.prompt_library.infrastructure.prompt_library_repo_impl import (
+    PromptLibraryRepoImpl,
+)
+from intric.prompt_library.presentation.prompt_library_assembler import (
+    PromptLibraryAssembler,
+)
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.prompts.prompt_factory import PromptFactory
 from intric.prompts.prompt_repo import PromptRepository
@@ -482,6 +527,7 @@ class Container(containers.DeclarativeContainer):
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
     app_template_factory = providers.Factory(AppTemplateFactory)
     feature_flag_factory = providers.Factory(FeatureFlagFactory)
+    helper_assistants_factory = providers.Factory(HelperAssistantsFactory)
 
     # App factory must be defined before it's used by the space factory
     app_factory = providers.Factory(
@@ -527,6 +573,7 @@ class Container(containers.DeclarativeContainer):
     storage_assembler = providers.Factory(StorageInfoAssembler)
     app_assembler = providers.Factory(
         AppAssembler,
+        user=user,
         prompt_assembler=prompt_assembler,
     )
     app_run_assembler = providers.Factory(AppRunAssembler)
@@ -583,6 +630,30 @@ class Container(containers.DeclarativeContainer):
     settings_repo = providers.Factory(SettingsRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
+    )
+    prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
+    prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
+    governance_policy_repo = providers.Factory(
+        GovernancePolicyRepoImpl, session=session
+    )
+    governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
+    org_space_assistant_role_repo = providers.Factory(
+        OrgSpaceAssistantRoleRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    help_assistant_assignment_history_repo = providers.Factory(
+        HelpAssistantAssignmentHistoryRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    helper_run_repo = providers.Factory(
+        HelperRunRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    model_provider_repository = providers.Factory(
+        ModelProviderRepository, session=session, tenant_id=user.provided.tenant_id
     )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
@@ -1034,6 +1105,12 @@ class Container(containers.DeclarativeContainer):
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
     )
+    prompt_library_service = providers.Factory(
+        PromptLibraryService,
+        user=user,
+        repo=prompt_library_repo,
+        governance_policy_repo=governance_policy_repo,
+    )
     file_protocol = providers.Factory(
         FileProtocol,
         file_size_service=file_size_service,
@@ -1054,11 +1131,26 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
+    chat_session_mcp_state_repo = providers.Factory(
+        ChatSessionMcpStateRepo,
+        session=session,
+    )
+    mcp_proxy_session_factory = providers.Factory(
+        MCPProxySessionFactory,
+        encryption_service=encryption_service,
+    )
+    mcp_session_lifecycle_service = providers.Factory(
+        McpSessionLifecycleService,
+        state_repo=chat_session_mcp_state_repo,
+        mcp_server_repo=mcp_server_repo,
+        proxy_factory=mcp_proxy_session_factory,
+    )
     session_service = providers.Factory(
         SessionService,
         user=user,
         question_repo=question_repo,
         session_repo=session_repo,
+        mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
@@ -1066,6 +1158,32 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         group_service=group_service,
+    )
+    # Personal assistant governance services are declared before assistant_service
+    # because runtime enforcement injects effective_config_service into
+    # AssistantService — the DI chain has to be top-to-bottom resolvable.
+    mcp_server_settings_service = providers.Factory(
+        MCPServerSettingsService,
+        mcp_server_repo=mcp_server_repo,
+        user=user,
+        encryption_service=encryption_service,
+    )
+    governance_policy_service = providers.Factory(
+        GovernancePolicyService,
+        user=user,
+        repo=governance_policy_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
+        prompt_library_service=prompt_library_service,
+        model_provider_repository=model_provider_repository,
+    )
+    effective_config_service = providers.Factory(
+        EffectiveConfigService,
+        user=user,
+        policy_repo=governance_policy_repo,
+        prompt_library_repo=prompt_library_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
     )
     assistant_service = providers.Factory(
         AssistantService,
@@ -1087,7 +1205,37 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         references_service=references_service,
         icon_repo=icon_repo,
+        org_space_assistant_role_repo=org_space_assistant_role_repo,
+        help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+        effective_config_service=effective_config_service,
+    )
+    org_space_assistant_role_service = providers.Factory(
+        OrgSpaceAssistantRoleService,
+        user=user,
+        role_repo=org_space_assistant_role_repo,
+        history_repo=help_assistant_assignment_history_repo,
+        assistant_service=assistant_service,
+        assistant_repo=assistant_repo,
+        prompt_service=prompt_service,
+        users_repo=user_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        space_service=space_service,
+        audit_service=audit_service,
+        factory=helper_assistants_factory,
+    )
+    helper_run_service = providers.Factory(
+        HelperRunService,
+        user=user,
+        helper_run_repo=helper_run_repo,
+        role_service=org_space_assistant_role_service,
+        assistant_service=assistant_service,
+        session_repo=session_repo,
+        question_repo=question_repo,
+        completion_service=completion_service,
+        references_service=references_service,
+        factory=helper_assistants_factory,
+        audit_service=audit_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1169,12 +1317,6 @@ class Container(containers.DeclarativeContainer):
         MCPServerService,
         mcp_server_repo=mcp_server_repo,
         mcp_server_tool_repo=mcp_server_tool_repo,
-        user=user,
-        encryption_service=encryption_service,
-    )
-    mcp_server_settings_service = providers.Factory(
-        MCPServerSettingsService,
-        mcp_server_repo=mcp_server_repo,
         user=user,
         encryption_service=encryption_service,
     )

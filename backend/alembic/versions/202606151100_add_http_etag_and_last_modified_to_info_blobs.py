@@ -1,8 +1,8 @@
 """add http_etag and http_last_modified to info_blobs
 
 Revision ID: b3f9a2e81c04
-Revises: a1d4c7e90f23
-Create Date: 2026-06-10 12:00:00.000000
+Revises: 202606151000
+Create Date: 2026-06-15 11:00:00.000000
 
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "b3f9a2e81c04"
-down_revision = "a1d4c7e90f23"
+down_revision = "202606151000"
 branch_labels = None
 depends_on = None
 

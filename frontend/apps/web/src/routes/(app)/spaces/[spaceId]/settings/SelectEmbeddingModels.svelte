@@ -7,11 +7,9 @@
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { EmbeddingModel } from "@intric/intric-js";
-  import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
-  import { Input, Tooltip } from "@intric/ui";
+  import ModelAvailabilityList from "$lib/features/ai-models/components/ModelAvailabilityList.svelte";
   import { derived } from "svelte/store";
   import { Settings } from "$lib/components/layout";
-  import { sortModels } from "$lib/features/ai-models/sortModels";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { SvelteSet } from "svelte/reactivity";
@@ -19,7 +17,6 @@
   export let selectableModels: (EmbeddingModel & {
     meets_security_classification?: boolean | null | undefined;
   })[];
-  sortModels(selectableModels);
 
   const {
     state: { currentSpace },
@@ -82,27 +79,10 @@
     {/if}
   </svelte:fragment>
 
-  {#each selectableModels as model (model.id)}
-    {@const meetsClassification = model.meets_security_classification ?? true}
-    <Tooltip
-      text={meetsClassification ? undefined : m.model_does_not_meet_security_classification()}
-    >
-      <div
-        class="border-default hover:bg-hover-dimmer cursor-pointer border-b py-4 pr-4 pl-2"
-        class:pointer-events-none={!meetsClassification}
-        class:opacity-60={!meetsClassification}
-      >
-        <Input.Switch
-          value={$currentlySelectedModels.includes(model.id)}
-          sideEffect={() => {
-            if (meetsClassification) {
-              toggleModel(model);
-            }
-          }}
-        >
-          <ModelNameAndVendor {model} />
-        </Input.Switch>
-      </div>
-    </Tooltip>
-  {/each}
+  <ModelAvailabilityList
+    models={selectableModels}
+    selectedIds={$currentlySelectedModels}
+    loadingIds={loading}
+    onToggle={toggleModel}
+  />
 </Settings.Row>

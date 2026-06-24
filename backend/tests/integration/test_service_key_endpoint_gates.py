@@ -323,6 +323,21 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", f"/api/v1/groups/{_STUB_ID}/info-blobs/", {"info_blobs": []}),
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
+    (
+        "POST",
+        "/api/v1/help-assistants/runs/",
+        {
+            "kind": "prompt_guide",
+            "target_type": "assistant",
+            "target_id": _STUB_ID,
+            "question": "x",
+        },
+    ),
+    (
+        "POST",
+        f"/api/v1/help-assistants/runs/{_STUB_ID}/turns/",
+        {"question": "x"},
+    ),
 ]
 
 

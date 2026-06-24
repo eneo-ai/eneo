@@ -2,7 +2,16 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Table, text
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Table,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import Base, BasePublic
@@ -26,6 +35,7 @@ class Users(BasePublic):
     used_tokens: Mapped[int] = mapped_column(default=0)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     quota_limit: Mapped[Optional[int]] = mapped_column(BigInteger)
+    is_system_user: Mapped[bool] = mapped_column(server_default=false(), nullable=False)
 
     tenant: Mapped[Tenants] = relationship()
     api_key: Mapped["ApiKeys"] = relationship(cascade="all, delete-orphan")
@@ -46,6 +56,11 @@ class Users(BasePublic):
             "email",
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_users_system_user",
+            "is_system_user",
+            postgresql_where=text("is_system_user = true"),
         ),
     )
 

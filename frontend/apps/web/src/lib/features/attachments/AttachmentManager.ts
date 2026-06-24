@@ -5,6 +5,7 @@ import { ATTACHMENTS } from "$lib/core/constants";
 import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { getUploadErrorMessage } from "$lib/features/attachments/getUploadErrorMessage";
 import { toast } from "$lib/components/toast";
+import { m } from "$lib/paraglide/messages";
 
 export type Attachment = {
   id: string;
@@ -48,6 +49,10 @@ type AttachmentManagerParams = {
     rules?: AttachmentRules | Readable<AttachmentRules>;
     /** Callback to run once a file has been uploaded to intric */
     onFileUploaded?: (file: UploadedFile) => void;
+    /** When true, upload/validation errors are exposed via the `uploadError`
+     * store for the consumer to render inline (e.g. next to the chat input)
+     * instead of being shown as a toast. */
+    inlineErrors?: boolean;
   };
 };
 
@@ -61,6 +66,7 @@ export { initAttachmentManager, getAttachmentManager };
 
 function createAttachmentManager(data: AttachmentManagerParams) {
   const { intric } = data;
+  const inlineErrors = data.options?.inlineErrors ?? false;
   const attachmentRules = (() => {
     const rules = data.options?.rules ?? {};
     if (
@@ -75,6 +81,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
 
   // Handling uploads ----------------------------------------
   const attachments = writable<Attachment[]>([]);
+  // The most recent upload/validation problem, held until the user fixes the
+  // input or dismisses it. Consumers that pass `inlineErrors` render this next
+  // to their input instead of relying on a transient toast.
+  const uploadError = writable<string | null>(null);
 
   const waitingUploads: string[] = [];
   const runningUploads: string[] = [];
@@ -171,8 +181,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
         if (error instanceof Error && error.message.includes("Cancelled")) {
           console.warn(`Cancelled upload for ${file.name}`);
         } else {
-          const message = getUploadErrorMessage(error, file.name);
-          toast.error(`We encountered an error uploading the file ${file.name}: ${message}`);
+          const reason = getUploadErrorMessage(error);
+          const message = m.attachment_upload_failed({ fileName: file.name, reason });
+          uploadError.set(message);
+          if (!inlineErrors) toast.error(message);
         }
         attachments.update(($attachments) => $attachments.filter((u) => u.id !== currentUpload));
       } finally {
@@ -185,11 +197,20 @@ function createAttachmentManager(data: AttachmentManagerParams) {
 
   function clearUploads() {
     attachments.set([]);
+    uploadError.set(null);
+  }
+
+  function clearUploadError() {
+    uploadError.set(null);
   }
 
   function queueValidUploadsDetailed(files: File[], rules?: AttachmentRules) {
     const errors: AttachmentValidationError[] = [];
     const selectedRules = rules ?? get(attachmentRules);
+
+    // A fresh attempt clears any stale problem (e.g. the user retries with a
+    // smaller file) before we re-evaluate this batch.
+    uploadError.set(null);
 
     for (const file of files) {
       const $attachments = get(attachments);
@@ -197,7 +218,7 @@ function createAttachmentManager(data: AttachmentManagerParams) {
       if (selectedRules.maxTotalCount && $attachments.length >= selectedRules.maxTotalCount) {
         errors.push({
           kind: "max_total_count",
-          message: `You can only attach a maximum number of ${selectedRules.maxTotalCount} files at a time.`
+          message: m.attachment_error_max_count({ count: selectedRules.maxTotalCount })
         });
         break;
       }
@@ -211,7 +232,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           errors.push({
             kind: "unsupported_type",
             fileName: file.name,
-            message: `${file.name}: File type ${mimetype} is not supported for this operation.`
+            message: m.attachment_error_unsupported_type({
+              fileName: file.name,
+              fileType: mimetype
+            })
           });
           continue;
         }
@@ -222,9 +246,11 @@ function createAttachmentManager(data: AttachmentManagerParams) {
             fileName: file.name,
             fileSizeBytes: file.size,
             maxSizeBytes: format.maxSize,
-            message:
-              `${file.name}: File is ${formatBytes(file.size)}, ` +
-              `maximum allowed is ${formatBytes(format.maxSize)}.`
+            message: m.file_too_large_detail({
+              fileName: file.name,
+              currentSize: formatBytes(file.size),
+              maxSize: formatBytes(format.maxSize)
+            })
           });
           continue;
         }
@@ -242,9 +268,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
           fileName: file.name,
           fileSizeBytes: file.size,
           maxSizeBytes: selectedRules.maxTotalSize,
-          message:
-            `${file.name}: Skipping file. Can only upload a total of ` +
-            `${formatBytes(selectedRules.maxTotalSize)} at a time.`
+          message: m.attachment_error_max_total_size({
+            fileName: file.name,
+            maxSize: formatBytes(selectedRules.maxTotalSize)
+          })
         });
         continue;
       }
@@ -252,7 +279,11 @@ function createAttachmentManager(data: AttachmentManagerParams) {
       queueUploads([file]);
     }
 
-    return errors.length > 0 ? errors : null;
+    if (errors.length > 0) {
+      uploadError.set(errors.map((error) => error.message).join("\n"));
+      return errors;
+    }
+    return null;
   }
 
   function queueValidUploads(files: File[], rules?: AttachmentRules) {
@@ -267,7 +298,10 @@ function createAttachmentManager(data: AttachmentManagerParams) {
       isUploading: derived(attachments, ($attachments) =>
         $attachments.some((upload) => upload.status !== "completed")
       ),
-      attachmentRules
+      attachmentRules,
+      /** Latest upload/validation problem (or null); rendered inline by consumers
+       * that opt in via `options.inlineErrors`. */
+      uploadError: { subscribe: uploadError.subscribe }
     },
     /**
      * Will test the supplied files and upload the files passing the rule set.
@@ -277,6 +311,8 @@ function createAttachmentManager(data: AttachmentManagerParams) {
     queueValidUploads,
     queueValidUploadsDetailed,
     /** Will reset the current attachment list */
-    clearUploads
+    clearUploads,
+    /** Dismiss the current inline upload error */
+    clearUploadError
   });
 }

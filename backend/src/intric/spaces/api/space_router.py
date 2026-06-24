@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -57,9 +57,36 @@ from intric.spaces.api.space_models import (
 )
 from intric.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
+if TYPE_CHECKING:
+    from intric.spaces.space import Space
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _space_response(container: Container, space: "Space") -> SpacePublic:
+    """Single serialization path for a full space response.
+
+    Resolves and attaches the personal default assistant's governance
+    effective_config (None for non-personal spaces or non-default assistants),
+    so the chat UI keeps governance filtering. Use this for any endpoint that
+    returns a full SpacePublic for a space that may be personal.
+    """
+    assembler = container.space_assembler()
+    effective_config = None
+    if (
+        space.default_assistant is not None
+        and space.default_assistant.is_default
+        and space.is_personal()
+    ):
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(
+            space.default_assistant, space_is_personal=space.is_personal()
+        )
+    return assembler.from_space_to_model(
+        space, default_assistant_effective_config=effective_config
+    )
 
 
 async def forbid_org_space(
@@ -132,11 +159,10 @@ async def get_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_space(id)
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)
 
 
 @router.patch(
@@ -155,7 +181,6 @@ async def update_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
-    assembler = container.space_assembler()
     current_user = container.user()
 
     old_space = await service.get_space(id)
@@ -297,7 +322,11 @@ async def update_space(
         ),
     )
 
-    return assembler.from_space_to_model(space)
+    # Serialize through the shared path so a patched personal space keeps the
+    # default assistant's governance effective_config — frontend SpacesManager
+    # overwrites currentSpace with this response, and a None effective_config
+    # makes the chat UI drop policy filtering until the next full GET.
+    return await _space_response(container, space)
 
 
 @router.get(
@@ -1511,11 +1540,10 @@ async def get_personal_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_personal_space()
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)
 
 
 @router.get(
@@ -1529,8 +1557,7 @@ async def get_organization_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_or_create_tenant_space()
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)

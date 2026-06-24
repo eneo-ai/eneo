@@ -96,5 +96,17 @@ export default defineConfig({
     __GIT_COMMIT_SHA__: process.env.CF_PAGES_COMMIT_SHA
       ? `"${process.env.CF_PAGES_COMMIT_SHA}"`
       : `"${process.env.VERCEL_GIT_COMMIT_SHA}"`
+  },
+  // Bundle these runtime deps into the SSR output so the production node
+  // runner can find them. The frontend Dockerfile's runner stage copies
+  // apps/web/build + apps/web/package.json but DOES NOT install node_modules,
+  // so anything Vite externalizes for SSR (i.e. listed in apps/web/dependencies)
+  // crashes at startup with ERR_MODULE_NOT_FOUND on the first SSR render that
+  // needs it. marked + dompurify were added to apps/web/dependencies for the
+  // Prompt Guide markdown component; without `noExternal` here they would be
+  // externalized, and the chat page (which renders messages via @intric/ui's
+  // Markdown, also using marked) would 500 on hard refresh.
+  ssr: {
+    noExternal: ["marked", "dompurify"]
   }
 });

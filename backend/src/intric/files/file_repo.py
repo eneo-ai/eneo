@@ -41,6 +41,21 @@ class FileRepository:
 
         return files
 
+    async def get_by_parent_ids(
+        self, parent_ids: list[UUID], user_id: UUID
+    ) -> list[File]:
+        if not parent_ids:
+            return []
+
+        stmt = (
+            sa.select(Files)
+            .where(Files.parent_file_id.in_(parent_ids))
+            .where(Files.user_id == user_id)
+            .order_by(Files.created_at)
+        )
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
+
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
         if file is None:
@@ -48,7 +63,16 @@ class FileRepository:
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
+        # Derived files (parent_file_id set) are internal vision inputs and
+        # not part of the user's own upload library.
+        stmt = (
+            sa.select(Files)
+            .where(Files.user_id == user_id)
+            .where(Files.parent_file_id.is_(None))
+            .order_by(Files.created_at)
+        )
+        files_in_db = await self.session.scalars(stmt)
+        return [File.model_validate(file) for file in files_in_db]
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(

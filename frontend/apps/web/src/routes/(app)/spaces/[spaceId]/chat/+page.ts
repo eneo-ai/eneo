@@ -1,3 +1,4 @@
+import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { PAGINATION } from "$lib/core/constants";
 import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerType";
@@ -72,6 +73,16 @@ export const load: PageLoad = async (event) => {
   const initialSessionPromise = loadSession();
 
   const partner = await partnerPromise;
+
+  // Help assistants run behind the scenes to support users and must never be
+  // opened as a chat (the backend ask-guard also blocks the actual ask). This
+  // covers any stale or hand-built chat URL pointing at a helper.
+  if (
+    partnerType === "assistant" &&
+    (partner as { is_help_assistant?: boolean })?.is_help_assistant
+  ) {
+    throw error(404);
+  }
 
   return {
     chatPartner: partner,

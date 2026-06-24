@@ -302,7 +302,6 @@
             <SelectAIModelV2
               bind:selectedModel={$update.transcription_model}
               availableModels={$currentSpace.transcription_models}
-              showCost={false}
               {aria}
             ></SelectAIModelV2>
           </Settings.Row>
@@ -320,7 +319,6 @@
           <SelectAIModelV2
             bind:selectedModel={$update.completion_model}
             availableModels={$currentSpace.completion_models}
-            showCost={false}
             {aria}
           ></SelectAIModelV2>
         </Settings.Row>

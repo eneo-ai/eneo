@@ -28,6 +28,7 @@ class MCPServerToolMapper:
             updated_at=db_model.updated_at,  # type: ignore[arg-type]
             mcp_server_id=db_model.mcp_server_id,
             name=db_model.name,
+            title=db_model.title,
             description=db_model.description,
             input_schema=db_model.input_schema,
             is_enabled_by_default=db_model.is_enabled_by_default,
@@ -49,6 +50,7 @@ class MCPServerToolMapper:
             "id": entity.id,
             "mcp_server_id": entity.mcp_server_id,
             "name": entity.name,
+            "title": entity.title,
             "description": entity.description,
             "input_schema": entity.input_schema,
             "is_enabled_by_default": entity.is_enabled_by_default,

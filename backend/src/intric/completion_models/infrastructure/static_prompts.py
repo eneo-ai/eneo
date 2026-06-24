@@ -1,5 +1,20 @@
 # flake8: noqa
 
+# Inline instruction appended after the MCP resource blocks. Lives next to the
+# data so the model gets the citation rule whenever a tool returns resources,
+# without requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires
+# when knowledge/web_search results are present, leaving MCP-only flows untaught).
+# Each resource is a self-describing, triple-quoted block whose attribution rides
+# in the server-provided text; Eneo prepends only a source_id line for citation.
+MCP_TOOL_REFERENCES_INSTRUCTION = (
+    "The tool returned one or more sources above, each delimited by triple "
+    "quotes and opening with a source_id line. When you use information from a "
+    "source, cite it with an inline self-closing tag immediately after the "
+    'relevant text: <inref id="<source_id>"/>, using that source\'s 8-character '
+    "source_id. If the user asks about a source, refer to its title, never the "
+    "source_id."
+)
+
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
 Only use the sources to answer questions. You MUST reference every source you use by adding an inline XML self-closing tag immediately after the information: <inref id="<source_id>"/>
 

@@ -406,11 +406,14 @@ class AdminService:
             f"Admin user {self.user.username} listing deleted users in tenant {self.user.tenant_id}"
         )
 
-        # Query for deleted users directly (deleted_at IS NOT NULL)
+        # Query for deleted users directly (deleted_at IS NOT NULL).
+        # System users cannot be deleted (see SystemUserProtected), but the
+        # exclusion keeps `is_system_user` the single authoritative marker.
         query = (
             sa.select(Users)
             .where(Users.tenant_id == self.user.tenant_id)
             .where(Users.deleted_at.is_not(None))
+            .where(Users.is_system_user.is_(False))
             .order_by(Users.deleted_at.desc())
         )
 

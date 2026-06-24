@@ -243,7 +243,7 @@ function createJobManager(data: { intric: Intric }) {
           })
           .catch((error) => {
             const fallbackMessage = m.file_upload_error();
-            const message = getUploadErrorMessage(error, upload.file.name);
+            const message = getUploadErrorMessage(error);
             toast.error(`${fallbackMessage}: ${upload.file.name}: ${message}`);
             runningUploads.delete(uploadId);
             upload.status = "failed";

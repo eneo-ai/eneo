@@ -248,6 +248,69 @@ async def test_model_with_nonexistent_provider_raises_error(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_model_cannot_resolve_provider_from_another_tenant(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """Provider IDs are scoped by tenant even if a model references a valid UUID."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    async with db_container() as container:
+        session = container.session()
+        provider = ModelProviders(
+            tenant_id=test_tenant.id,
+            name="Tenant-isolated Provider",
+            provider_type="openai",
+            credentials={"api_key": "sk-test-key-123"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        model = CompletionModel(
+            user=admin_user,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="cross-tenant",
+            name="gpt-4o",
+            max_input_tokens=8192,
+            max_output_tokens=4096,
+            vision=False,
+            family="openai",
+            hosting="usa",
+            org="OpenAI",
+            stability="stable",
+            open_source=False,
+            description=None,
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            base_url=None,
+            litellm_model_name=None,
+            provider_id=provider.id,
+        )
+        service = CompletionService(
+            context_builder=Mock(),
+            tenant=SimpleNamespace(id=uuid4()),
+            config=test_settings,
+            session=session,
+        )
+
+        with pytest.raises(ProviderNotFoundException):
+            await service._get_adapter(model)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_adapter_creation_succeeds_with_valid_provider(
     db_container,
     test_tenant,

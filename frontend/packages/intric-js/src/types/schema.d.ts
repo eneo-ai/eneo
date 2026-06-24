@@ -1088,7 +1088,7 @@ export interface paths {
     put?: never;
     /**
      * Update Assistant
-     * @description Update an assistant. Omitted fields are not updated.
+     * @description Update an assistant. Omitted fields are left unchanged.
      */
     post: operations["update_assistant_api_v1_assistants__id___post"];
     /**
@@ -1358,7 +1358,7 @@ export interface paths {
     put?: never;
     /**
      * Preflight Tokens
-     * @description Returns the exact token cost the next chat request will add (excludes knowledge/RAG and web-search content).
+     * @description Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).
      */
     post: operations["preflight_tokens_api_v1_conversations_preflight_post"];
     delete?: never;
@@ -1386,6 +1386,26 @@ export interface paths {
      * @description Deletes a specific conversation (session).
      */
     delete: operations["delete_conversation_api_v1_conversations__session_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Tool Call Result
+     * @description Lazy-load a single tool call's upstream response text.
+     */
+    get: operations["get_tool_call_result_api_v1_conversations__session_id__tool_calls__tool_call_id__result__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -2123,6 +2143,26 @@ export interface paths {
      * @description Update tenant API key notification policy under api_key_policy.notification_policy.
      */
     put: operations["update_api_key_notification_policy_api_v1_admin_api_keys_notification_policy_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/settings/model-pricing-visibility": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set model pricing visibility
+     * @description Toggle whether model input/output prices are shown to regular users across the organization.
+     */
+    put: operations["update_model_pricing_visibility_api_v1_admin_settings_model_pricing_visibility_put"];
     post?: never;
     delete?: never;
     options?: never;
@@ -5632,6 +5672,90 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/prompt-library/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Prompt Library Entries */
+    get: operations["list_prompt_library_entries_api_v1_admin_prompt_library__get"];
+    put?: never;
+    /**
+     * Create Prompt Library Entry
+     * @description Create a prompt library entry
+     */
+    post: operations["create_prompt_library_entry_api_v1_admin_prompt_library__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/prompt-library/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Prompt Library Entry */
+    get: operations["get_prompt_library_entry_api_v1_admin_prompt_library__id___get"];
+    /**
+     * Update Prompt Library Entry
+     * @description Update a prompt library entry
+     */
+    put: operations["update_prompt_library_entry_api_v1_admin_prompt_library__id___put"];
+    post?: never;
+    /**
+     * Delete Prompt Library Entry
+     * @description Delete a prompt library entry
+     */
+    delete: operations["delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/prompt-library/{id}/versions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Prompt Library Entry Versions */
+    get: operations["list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/governance-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Governance Policy */
+    get: operations["get_governance_policy_api_v1_admin_governance_policy__get"];
+    /**
+     * Update Governance Policy
+     * @description Update the personal assistant governance policy
+     */
+    put: operations["update_governance_policy_api_v1_admin_governance_policy__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -5807,6 +5931,191 @@ export interface paths {
      * @description Complete the OAuth flow by exchanging the authorization code for tokens. This will configure the service account for the tenant's SharePoint access. Requires admin role.
      */
     post: operations["service_account_auth_callback_api_v1_admin_sharepoint_service_account_auth_callback_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Roles
+     * @description List the Help-Assistant roles installed for the calling tenant.
+     */
+    get: operations["list_roles_api_v1_admin_help_assistants_roles__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Templates
+     * @description Shipped Help Assistant templates not yet installed for the tenant.
+     */
+    get: operations["list_templates_api_v1_admin_help_assistants_templates__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Active Role */
+    get: operations["get_active_role_api_v1_admin_help_assistants_roles__kind___get"];
+    put?: never;
+    /**
+     * Install Helper
+     * @description Install a shipped Help-Assistant template (blank helper + active role).
+     */
+    post: operations["install_helper_api_v1_admin_help_assistants_roles__kind___post"];
+    /**
+     * Uninstall Helper
+     * @description Uninstall the active helper for a kind (deletes its role and assistant).
+     */
+    delete: operations["uninstall_helper_api_v1_admin_help_assistants_roles__kind___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/enabled": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle Enabled
+     * @description Enable or disable a helper role for the tenant.
+     */
+    patch: operations["toggle_enabled_api_v1_admin_help_assistants_roles__kind__enabled_patch"];
+    trace?: never;
+  };
+  "/api/v1/admin/help-assistants/roles/{kind}/visible": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Toggle Visible
+     * @description Show or hide a helper role from end users.
+     */
+    patch: operations["toggle_visible_api_v1_admin_help_assistants_roles__kind__visible_patch"];
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start Helper Run
+     * @description Start a new helper run for a target assistant (JSON or SSE).
+     */
+    post: operations["start_helper_run_api_v1_help_assistants_runs__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/{run_id}/turns/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Continue Helper Run
+     * @description Follow-up turn on an existing helper run (JSON or SSE).
+     */
+    post: operations["continue_helper_run_api_v1_help_assistants_runs__run_id__turns__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/help-assistants/runs/{run_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Helper Run Status
+     * @description Transition a helper run to a terminal status (completed/abandoned/failed).
+     */
+    patch: operations["update_helper_run_status_api_v1_help_assistants_runs__run_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/help-assistants/availability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Helper Availability
+     * @description Pre-flight signal for whether the prompt-guide button should render.
+     */
+    get: operations["get_helper_availability_api_v1_help_assistants_availability_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -7050,6 +7359,10 @@ export interface components {
       | "api_key_used"
       | "api_key_auth_failed"
       | "tenant_policy_updated"
+      | "governance_policy_updated"
+      | "prompt_library_entry_created"
+      | "prompt_library_entry_updated"
+      | "prompt_library_entry_deleted"
       | "module_added"
       | "module_added_to_tenant"
       | "assistant_created"
@@ -7116,6 +7429,12 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "help_assistant_role_assigned"
+      | "help_assistant_role_unassigned"
+      | "help_assistant_role_toggled_enabled"
+      | "help_assistant_role_toggled_visible"
+      | "help_assistant_installed"
+      | "help_assistant_uninstalled"
       | "scim_user_provisioned"
       | "scim_user_reconciled"
       | "scim_user_reactivated"
@@ -8198,6 +8517,11 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
       model?: components["schemas"]["CompletionModelPublic"] | null;
     };
     /**
@@ -8414,6 +8738,14 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
+      effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
+      /**
+       * Is Help Assistant
+       * @description True when this assistant currently fills a Help Assistant role (it has an active row in org_space_assistant_roles). Help assistants have logging permanently disabled; the edit UI uses this flag to surface that explanation. Only the single-assistant GET endpoint computes it; other responses default to False.
+       * @default false
+       */
+      is_help_assistant?: boolean;
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -8820,6 +9152,34 @@ export interface components {
     AuthUrlPublic: {
       /** Auth Url */
       auth_url: string;
+    };
+    /**
+     * AvailabilityResponse
+     * @description Cheap read-only signal for the prompt-guide toolbar button (PRD §5, §10).
+     *
+     *     Returned by ``GET /help-assistants/availability``. The frontend hides
+     *     the toolbar button whenever ``available`` is False; ``disabled_reason``
+     *     lets the admin UX surface the underlying cause without parsing a
+     *     human-readable message.
+     *
+     *     The helper assistant id is intentionally absent — the modal never
+     *     needs it (helper resolution is server-side per :class:`StartRunRequest`)
+     *     and exposing it here would defeat the "helper assistants are hidden
+     *     from every listing" invariant.
+     */
+    AvailabilityResponse: {
+      /** Available */
+      available: boolean;
+      /** Disabled Reason */
+      disabled_reason?:
+        | (
+            | "no_assignment"
+            | "role_disabled"
+            | "role_not_visible"
+            | "no_completion_model"
+            | "no_edit_rights"
+          )
+        | null;
     };
     /** Body_Login_api_v1_users_login_token__post */
     Body_Login_api_v1_users_login_token__post: {
@@ -9448,6 +9808,19 @@ export interface components {
      * @enum {string}
      */
     ContentDisposition: "attachment" | "inline";
+    /**
+     * ContinueTurnRequest
+     * @description Body for ``POST /runs/{run_id}/turns/`` — follow-up turn.
+     */
+    ContinueTurnRequest: {
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
@@ -9502,6 +9875,11 @@ export interface components {
        * @default false
        */
       require_tool_approval?: boolean;
+      /**
+       * Disabled Mcp Server Ids
+       * @default []
+       */
+      disabled_mcp_server_ids?: string[];
     };
     /** Counts */
     Counts: {
@@ -10068,6 +10446,14 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
+      effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
+      /**
+       * Is Help Assistant
+       * @description True when this assistant currently fills a Help Assistant role (it has an active row in org_space_assistant_roles). Help assistants have logging permanently disabled; the edit UI uses this flag to surface that explanation. Only the single-assistant GET endpoint computes it; other responses default to False.
+       * @default false
+       */
+      is_help_assistant?: boolean;
     };
     /**
      * DeleteCredentialResponse
@@ -10137,6 +10523,30 @@ export interface components {
        * @description List of setting keys that were removed
        */
       deleted_keys: string[];
+    };
+    /**
+     * EffectiveConfigPublic
+     * @description Frontend hint surface for personal-assistant governance.
+     *
+     *     Only meaningful on default assistants in personal spaces. `prompt_locked`
+     *     is exposed as a boolean — we never leak the admin-prompt text to the
+     *     user-facing API.
+     */
+    EffectiveConfigPublic: {
+      /** Models Enforced */
+      models_enforced: boolean;
+      /** Available Models */
+      available_models: components["schemas"]["CompletionModelSparse"][];
+      locked_model: components["schemas"]["CompletionModelSparse"] | null;
+      default_model: components["schemas"]["CompletionModelSparse"] | null;
+      /** Mcp Enforced */
+      mcp_enforced: boolean;
+      /** Available Mcp Servers */
+      available_mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
+      /** Default Disabled Mcp Server Ids */
+      default_disabled_mcp_server_ids?: string[];
+      /** Prompt Locked */
+      prompt_locked: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -10493,6 +10903,8 @@ export interface components {
       | "file"
       | "website"
       | "tenant_settings"
+      | "governance_policy"
+      | "prompt_library_entry"
       | "credential"
       | "federation_config"
       | "api_key"
@@ -10557,7 +10969,9 @@ export interface components {
       | 9036
       | 9037
       | 9038
-      | 9039;
+      | 9039
+      | 9040
+      | 9041;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -10875,6 +11289,22 @@ export interface components {
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublicLegacy"][];
     };
+    /** GovernancePolicyPublic */
+    GovernancePolicyPublic: {
+      models_restriction: components["schemas"]["ModelsRestrictionPublic"];
+      mcp_restriction: components["schemas"]["McpRestrictionPublic"];
+      prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      /** Updated At */
+      updated_at: string | null;
+      /** Updated By User Id */
+      updated_by_user_id: string | null;
+    };
+    /** GovernancePolicyUpdate */
+    GovernancePolicyUpdate: {
+      models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
+      mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
+      prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
+    };
     /** GroupChatAssistantPublic */
     GroupChatAssistantPublic: {
       /**
@@ -11137,6 +11567,84 @@ export interface components {
       watchdog_stale_threshold_seconds: number;
       /** Heartbeat Ttl Expected Seconds */
       heartbeat_ttl_expected_seconds: number;
+    };
+    /**
+     * HelperKind
+     * @description Kinds of Help Assistants shipped with Eneo.
+     * @enum {string}
+     */
+    HelperKind: "prompt_guide";
+    /**
+     * HelperRunPublic
+     * @description One row of ``help_assistant_runs`` exposed to the client.
+     */
+    HelperRunPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      kind: components["schemas"]["HelperKind"];
+      /** Assistant Id */
+      assistant_id: string | null;
+      /** Target Type */
+      target_type: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Actor User Id */
+      actor_user_id: string | null;
+      status: components["schemas"]["HelperRunStatus"];
+      /** Completed At */
+      completed_at: string | null;
+      /** Created At */
+      created_at: string | null;
+      /** Updated At */
+      updated_at: string | null;
+    };
+    /**
+     * HelperRunResponsePublic
+     * @description Non-stream response body for the helper-run ask paths.
+     *
+     *     ``answer`` is the final completion text; ``references`` are the
+     *     info-blob chunks pulled into the helper assistant's prompt. ``run``
+     *     carries enough context for the modal to drive its Apply / Abandon
+     *     buttons (id + status).
+     */
+    HelperRunResponsePublic: {
+      run: components["schemas"]["HelperRunPublic"];
+      /** Answer */
+      answer: string;
+      /** References */
+      references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+      /** Error */
+      error?: string | null;
+    };
+    /**
+     * HelperRunStatus
+     * @enum {string}
+     */
+    HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+    /**
+     * HelperTemplatePublic
+     * @description A shipped Help Assistant template available to install.
+     *
+     *     Drives the admin "Add help assistant" picker — one entry per shipped
+     *     ``HelperKind`` that is not already installed for the tenant.
+     */
+    HelperTemplatePublic: {
+      kind: components["schemas"]["HelperKind"];
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
     };
     /** IconPublic */
     IconPublic: {
@@ -11700,6 +12208,8 @@ export interface components {
       mcp_server_id: string;
       /** Name */
       name: string;
+      /** Title */
+      title?: string | null;
       /** Description */
       description: string | null;
       /** Input Schema */
@@ -11801,6 +12311,67 @@ export interface components {
       /** Is Enabled */
       is_enabled: boolean;
     };
+    /** McpRestrictionInput */
+    McpRestrictionInput: {
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Servers
+       * @default []
+       */
+      servers?: components["schemas"]["PolicyMcpServerInput"][];
+      /**
+       * Disabled Tool Ids
+       * @default []
+       */
+      disabled_tool_ids?: string[];
+    };
+    /** McpRestrictionPublic */
+    McpRestrictionPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Servers */
+      servers: components["schemas"]["PolicyMcpServerPublic"][];
+      /** Disabled Tool Ids */
+      disabled_tool_ids: string[];
+    };
+    /**
+     * McpToolReferencePublic
+     * @description One MCP resource block captured from a tool call.
+     *
+     *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+     *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+     *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+     *     gracefully when meta is empty.
+     */
+    McpToolReferencePublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Uri */
+      uri: string;
+      /** Mime Type */
+      mime_type?: string | null;
+      /** Content */
+      content?: string | null;
+      /**
+       * Meta
+       * @default {}
+       */
+      meta?: {
+        [key: string]: unknown;
+      };
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -11824,10 +12395,17 @@ export interface components {
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+      /**
        * Tool Calls
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
       /**
        * Num Tokens Question
        * @default 0
@@ -11862,10 +12440,17 @@ export interface components {
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+      /**
        * Tool Calls
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Reasoning */
+      reasoning?: string | null;
       /**
        * Num Tokens Question
        * @default 0
@@ -12076,6 +12661,14 @@ export interface components {
        * @default false
        */
       force_override?: boolean;
+    };
+    /**
+     * ModelPricingVisibility
+     * @description Org-wide toggle for showing model input/output prices to regular users.
+     */
+    ModelPricingVisibility: {
+      /** Show Model Pricing */
+      show_model_pricing: boolean;
     };
     /**
      * ModelProviderCreate
@@ -12325,6 +12918,30 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelSecurityStatus"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
+    };
+    /** ModelsRestrictionInput */
+    ModelsRestrictionInput: {
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Models
+       * @default []
+       */
+      models?: components["schemas"]["PolicyCompletionModelInput"][];
+      /**
+       * Provider Ids
+       * @default []
+       */
+      provider_ids?: string[];
+    };
+    /** ModelsRestrictionPublic */
+    ModelsRestrictionPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Models */
+      models: components["schemas"]["PolicyCompletionModelPublic"][];
+      /** Provider Ids */
+      provider_ids: string[];
     };
     /** ModuleBase */
     ModuleBase: {
@@ -12722,6 +13339,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[HelperTemplatePublic] */
+    PaginatedResponse_HelperTemplatePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["HelperTemplatePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[InfoBlobPublicNoText] */
     PaginatedResponse_InfoBlobPublicNoText_: {
       /**
@@ -12813,6 +13443,32 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[PromptLibraryEntrySparse] */
+    PaginatedResponse_PromptLibraryEntrySparse_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PromptLibraryEntrySparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[PromptLibraryVersionPublic] */
+    PaginatedResponse_PromptLibraryVersionPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PromptLibraryVersionPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -12820,6 +13476,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["PromptSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[RoleAssignmentPublic] */
+    PaginatedResponse_RoleAssignmentPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RoleAssignmentPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -13402,6 +14071,52 @@ export interface components {
       /** Description */
       description: string;
     };
+    /** PolicyCompletionModelInput */
+    PolicyCompletionModelInput: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** PolicyCompletionModelPublic */
+    PolicyCompletionModelPublic: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /** Is Default */
+      is_default: boolean;
+    };
+    /** PolicyMcpServerInput */
+    PolicyMcpServerInput: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /**
+       * Is Default Enabled
+       * @default true
+       */
+      is_default_enabled?: boolean;
+    };
+    /** PolicyMcpServerPublic */
+    PolicyMcpServerPublic: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Is Default Enabled */
+      is_default_enabled: boolean;
+    };
     /**
      * PreflightRequest
      * @description Request shape for /conversations/preflight.
@@ -13432,11 +14147,12 @@ export interface components {
     };
     /**
      * PreflightResponse
-     * @description Exact token cost the next request will add to the context window.
+     * @description Estimated token cost the next request will add to the context window.
      *
      *     Excludes knowledge/RAG chunks and web-search results — those are selected
-     *     at request time. The frontend pairs this delta with the persisted history
-     *     tokens to project total context fill.
+     *     at request time. Provider tokenization is authoritative and can differ from
+     *     this local estimate, especially for multimodal inputs. The frontend pairs
+     *     this delta with the persisted history tokens to project total context fill.
      *
      *     `model_name` and `context_window` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model
@@ -13473,6 +14189,137 @@ export interface components {
       text: string;
       /** Description */
       description?: string | null;
+    };
+    /** PromptEnforcementInput */
+    PromptEnforcementInput: {
+      /** Enabled */
+      enabled: boolean;
+      /** Prompt Library Id */
+      prompt_library_id?: string | null;
+    };
+    /** PromptEnforcementPublic */
+    PromptEnforcementPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Prompt Library Id */
+      prompt_library_id: string | null;
+    };
+    /** PromptLibraryEntryCreate */
+    PromptLibraryEntryCreate: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text: string;
+    };
+    /** PromptLibraryEntryPublic */
+    PromptLibraryEntryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Text */
+      text: string;
+      /** Current Version */
+      current_version: number;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * PromptLibraryEntrySparse
+     * @description List view — text excluded for payload size.
+     */
+    PromptLibraryEntrySparse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Current Version */
+      current_version: number;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** PromptLibraryEntryUpdate */
+    PromptLibraryEntryUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text?: string | null;
+    };
+    /** PromptLibraryVersionPublic */
+    PromptLibraryVersionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Prompt Library Id
+       * Format: uuid
+       */
+      prompt_library_id: string;
+      /** Version */
+      version: number;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Text */
+      text: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** PromptPublic */
     PromptPublic: {
@@ -13657,6 +14504,50 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
+    };
+    /**
+     * RoleAssignmentPublic
+     * @description One row of ``org_space_assistant_roles``.
+     *
+     *     ``assistant_name`` is a display convenience for the admin table: it is
+     *     resolved (via the assistant load) only on the read endpoints
+     *     (``list_roles`` / ``get_active_role``) the UI renders from. Mutation
+     *     responses leave it ``None`` because the admin page re-fetches the list
+     *     after every mutation, so the displayed name always comes from a read.
+     */
+    RoleAssignmentPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Org Space Id
+       * Format: uuid
+       */
+      org_space_id: string;
+      kind: components["schemas"]["HelperKind"];
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Assistant Name */
+      assistant_name?: string | null;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Is Visible To Users */
+      is_visible_to_users: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** RoleCreateRequest */
     RoleCreateRequest: {
@@ -14531,6 +15422,32 @@ export interface components {
       data_retention_days?: number | null;
     };
     /**
+     * StartRunRequest
+     * @description Body for ``POST /runs/`` — start a new helper run.
+     *
+     *     ``target_type`` is currently always ``"assistant"`` (PRD §5). The
+     *     service validates it; the model keeps the field open-ended so a future
+     *     target kind (group chat, app run) can be added without a wire-format
+     *     bump.
+     */
+    StartRunRequest: {
+      kind: components["schemas"]["HelperKind"];
+      /** Target Type */
+      target_type: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
+    };
+    /**
      * StateFilter
      * @description Filter for user state in admin users list
      * @enum {string}
@@ -14843,6 +15760,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
     };
     /** TenantCompletionModelCreate */
     TenantCompletionModelCreate: {
@@ -14900,6 +15822,7 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantCompletionModelUpdate */
@@ -14930,6 +15853,7 @@ export interface components {
       input_cost_per_token?: number | string | null;
       /** Output Cost Per Token */
       output_cost_per_token?: number | string | null;
+      model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Is Default */
       is_default?: boolean | null;
       security_classification?: components["schemas"]["ModelId"] | null;
@@ -15101,6 +16025,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Default Role Id */
       default_role_id?: string | null;
       /**
@@ -15227,6 +16156,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
       /** Default Role Id */
@@ -15480,6 +16414,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Default Role Id */
       default_role_id?: string | null;
       /**
@@ -15505,6 +16444,11 @@ export interface components {
       };
       /** Favorite Providers */
       favorite_providers?: string[];
+    };
+    /** ToggleRequest */
+    ToggleRequest: {
+      /** Value */
+      value: boolean;
     };
     /** ToggleSettingUpdate */
     ToggleSettingUpdate: {
@@ -15588,6 +16532,8 @@ export interface components {
       server_name: string;
       /** Tool Name */
       tool_name: string;
+      /** Title */
+      title?: string | null;
       /** Arguments */
       arguments?: {
         [key: string]: unknown;
@@ -15598,6 +16544,22 @@ export interface components {
       approved?: boolean | null;
       /** Result Status */
       result_status?: string | null;
+      /** Result */
+      result?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+    };
+    /**
+     * ToolCallResultPublic
+     * @description Lazy-loaded payload for a single tool call's upstream response.
+     *
+     *     Only the niche "Visa svar" view fetches this — keeping it out of the
+     *     streaming hot path lets the SSE payload stay small even when a tool
+     *     returns several KB of text.
+     */
+    ToolCallResultPublic: {
+      /** Tool Call Id */
+      tool_call_id: string;
       /** Result */
       result?: string | null;
       /** Mcp Tool Name */
@@ -15928,6 +16890,17 @@ export interface components {
     /** UpdateSpaceMemberRequest */
     UpdateSpaceMemberRequest: {
       role: components["schemas"]["SpaceRoleValue"];
+    };
+    /**
+     * UpdateStatusRequest
+     * @description Body for ``PATCH /runs/{run_id}/`` — terminal status transition.
+     *
+     *     The service rejects ``IN_PROGRESS`` (only terminal statuses transition)
+     *     and rejects repeat transitions, so the wire model accepts every value
+     *     and lets the service do the policy enforcement.
+     */
+    UpdateStatusRequest: {
+      status: components["schemas"]["HelperRunStatus"];
     };
     /** UseTools */
     UseTools: {
@@ -17211,6 +18184,19 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
     };
+    /**
+     * SSEReasoning
+     * @description Event carrying a chunk of the model's reasoning/thinking text.
+     */
+    SSEReasoning: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Reasoning */
+      reasoning: string;
+    };
     /** SSEIntricEvent */
     SSEIntricEvent: {
       /**
@@ -17234,6 +18220,11 @@ export interface components {
       intric_event_type?: components["schemas"]["IntricEventType"];
       /** Tools */
       tools: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /**
      * SSEToolApprovalRequired
@@ -17319,6 +18310,11 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /** SSEError */
     SSEError: {
@@ -21208,6 +22204,11 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Web Search References */
             web_search_references: components["schemas"]["WebSearchResultPublic"][];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
             model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
@@ -21361,6 +22362,43 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+               *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+               *     gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
               };
               /** ModelKwargCapability */
               ModelKwargCapability: {
@@ -21583,6 +22621,11 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Web Search References */
             web_search_references: components["schemas"]["WebSearchResultPublic"][];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
             model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
@@ -21736,6 +22779,43 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+               *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+               *     gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
               };
               /** ModelKwargCapability */
               ModelKwargCapability: {
@@ -22677,6 +23757,11 @@ export interface operations {
                 intric_event_type?: components["schemas"]["IntricEventType"];
                 /** Tools */
                 tools: components["schemas"]["ToolCallInfo"][];
+                /**
+                 * Mcp Tool References
+                 * @default []
+                 */
+                mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
                   /**
                    * IntricEventType
@@ -22689,6 +23774,43 @@ export interface operations {
                     | "tool_approval_timeout"
                     | "token_usage";
                   /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+                   *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+                   *     gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
+                  };
+                  /**
                    * ToolCallInfo
                    * @description Info about a single tool being called.
                    */
@@ -22697,6 +23819,8 @@ export interface operations {
                     server_name: string;
                     /** Tool Name */
                     tool_name: string;
+                    /** Title */
+                    title?: string | null;
                     /** Arguments */
                     arguments?: {
                       [key: string]: unknown;
@@ -22746,6 +23870,8 @@ export interface operations {
                     server_name: string;
                     /** Tool Name */
                     tool_name: string;
+                    /** Title */
+                    title?: string | null;
                     /** Arguments */
                     arguments?: {
                       [key: string]: unknown;
@@ -22795,6 +23921,8 @@ export interface operations {
                     server_name: string;
                     /** Tool Name */
                     tool_name: string;
+                    /** Title */
+                    title?: string | null;
                     /** Arguments */
                     arguments?: {
                       [key: string]: unknown;
@@ -22864,6 +23992,11 @@ export interface operations {
                 tools: components["schemas"]["UseTools"];
                 /** Web Search References */
                 web_search_references: components["schemas"]["WebSearchResultPublic"][];
+                /**
+                 * Mcp Tool References
+                 * @default []
+                 */
+                mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -22919,6 +24052,43 @@ export interface operations {
                     embedding_model_id: string;
                     /** Size */
                     size: number;
+                  };
+                  /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+                   *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+                   *     gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
                   };
                   /** ToolAssistant */
                   ToolAssistant: {
@@ -23146,6 +24316,67 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_tool_call_result_api_v1_conversations__session_id__tool_calls__tool_call_id__result__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The LLM-issued tool_call_id within this session */
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ToolCallResultPublic"];
+        };
       };
       /** @description Bad Request */
       400: {
@@ -25377,6 +26608,75 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ApiKeyNotificationPolicyResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
+  update_model_pricing_visibility_api_v1_admin_settings_model_pricing_visibility_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelPricingVisibility"];
+      };
+    };
+    responses: {
+      /** @description Updated model pricing visibility. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelPricingVisibility"];
         };
       };
       /** @description Bad Request */
@@ -35866,6 +37166,382 @@ export interface operations {
       };
     };
   };
+  list_prompt_library_entries_api_v1_admin_prompt_library__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryEntrySparse_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_prompt_library_entry_api_v1_admin_prompt_library__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PromptLibraryEntryCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_prompt_library_entry_api_v1_admin_prompt_library__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_prompt_library_entry_api_v1_admin_prompt_library__id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PromptLibraryEntryUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryVersionPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_governance_policy_api_v1_admin_governance_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GovernancePolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_governance_policy_api_v1_admin_governance_policy__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GovernancePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GovernancePolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   sharepoint_webhook_validation_api_v1_integrations_sharepoint_webhook__get: {
     parameters: {
       query?: {
@@ -36343,6 +38019,711 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_roles_api_v1_admin_help_assistants_roles__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_RoleAssignmentPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_templates_api_v1_admin_help_assistants_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_HelperTemplatePublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_active_role_api_v1_admin_help_assistants_roles__kind___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"] | null;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  install_helper_api_v1_admin_help_assistants_roles__kind___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  uninstall_helper_api_v1_admin_help_assistants_roles__kind___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  toggle_enabled_api_v1_admin_help_assistants_roles__kind__enabled_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  toggle_visible_api_v1_admin_help_assistants_roles__kind__visible_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: components["schemas"]["HelperKind"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RoleAssignmentPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  start_helper_run_api_v1_help_assistants_runs__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StartRunRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunResponsePublic"];
+          "text/event-stream": {
+            run: components["schemas"]["HelperRunPublic"];
+            /** Answer */
+            answer: string;
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            /** Error */
+            error?: string | null;
+            $defs: {
+              /**
+               * HelperKind
+               * @description Kinds of Help Assistants shipped with Eneo.
+               * @enum {string}
+               */
+              HelperKind: "prompt_guide";
+              /**
+               * HelperRunPublic
+               * @description One row of ``help_assistant_runs`` exposed to the client.
+               */
+              HelperRunPublic: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                kind: components["schemas"]["HelperKind"];
+                /** Assistant Id */
+                assistant_id: string | null;
+                /** Target Type */
+                target_type: string;
+                /**
+                 * Target Id
+                 * Format: uuid
+                 */
+                target_id: string;
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Actor User Id */
+                actor_user_id: string | null;
+                status: components["schemas"]["HelperRunStatus"];
+                /** Completed At */
+                completed_at: string | null;
+                /** Created At */
+                created_at: string | null;
+                /** Updated At */
+                updated_at: string | null;
+              };
+              /**
+               * HelperRunStatus
+               * @enum {string}
+               */
+              HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  continue_helper_run_api_v1_help_assistants_runs__run_id__turns__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ContinueTurnRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunResponsePublic"];
+          "text/event-stream": {
+            run: components["schemas"]["HelperRunPublic"];
+            /** Answer */
+            answer: string;
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            /** Error */
+            error?: string | null;
+            $defs: {
+              /**
+               * HelperKind
+               * @description Kinds of Help Assistants shipped with Eneo.
+               * @enum {string}
+               */
+              HelperKind: "prompt_guide";
+              /**
+               * HelperRunPublic
+               * @description One row of ``help_assistant_runs`` exposed to the client.
+               */
+              HelperRunPublic: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                kind: components["schemas"]["HelperKind"];
+                /** Assistant Id */
+                assistant_id: string | null;
+                /** Target Type */
+                target_type: string;
+                /**
+                 * Target Id
+                 * Format: uuid
+                 */
+                target_id: string;
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Actor User Id */
+                actor_user_id: string | null;
+                status: components["schemas"]["HelperRunStatus"];
+                /** Completed At */
+                completed_at: string | null;
+                /** Created At */
+                created_at: string | null;
+                /** Updated At */
+                updated_at: string | null;
+              };
+              /**
+               * HelperRunStatus
+               * @enum {string}
+               */
+              HelperRunStatus: "in_progress" | "completed" | "abandoned" | "failed";
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_helper_run_status_api_v1_help_assistants_runs__run_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateStatusRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperRunPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_helper_availability_api_v1_help_assistants_availability_get: {
+    parameters: {
+      query: {
+        kind: components["schemas"]["HelperKind"];
+        target_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AvailabilityResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {

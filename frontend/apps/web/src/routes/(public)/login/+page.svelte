@@ -687,7 +687,10 @@
           <input type="text" hidden value={page.url.searchParams.get("next") ?? ""} name="next" />
 
           {#if loginFailed}
-            <div class="label-negative bg-label-dimmer text-label-stronger rounded-lg p-4">
+            <div
+              role="alert"
+              class="label-negative bg-label-dimmer text-label-stronger rounded-lg p-4"
+            >
               <p>{m.incorrect_credentials()}</p>
 
               <!-- Correlation ID Section for Developer Debugging -->
