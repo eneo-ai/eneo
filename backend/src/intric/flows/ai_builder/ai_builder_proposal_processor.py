@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -65,6 +64,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_parsing import (
+    ToolArgumentParseError,
+    parse_tool_call_arguments,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -394,8 +397,8 @@ class AIBuilderProposalProcessor:
             )
         )
         try:
-            arguments = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError as error:
+            arguments = parse_tool_call_arguments(tool_call.function.arguments)
+        except ToolArgumentParseError as error:
             async for event in run_tool_self_correction(
                 build_proposal_self_correction_request(
                     ctx=ctx,

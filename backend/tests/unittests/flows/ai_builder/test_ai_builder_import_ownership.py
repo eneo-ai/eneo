@@ -2297,6 +2297,23 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
     assert violations == []
 
 
+def test_tool_call_argument_json_parsing_has_single_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    source_root = backend_root / "src/intric/flows/ai_builder"
+
+    violations: list[str] = []
+    for path in source_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if _is_json_loads_function_arguments_call(node):
+                violations.append(
+                    f"{path}:{node.lineno} parses provider tool-call arguments "
+                    "outside ai_builder_tool_parsing.parse_tool_call_arguments"
+                )
+
+    assert violations == []
+
+
 def _annotation_uses_any(annotation: ast.expr | None) -> bool:
     return annotation is not None and any(
         isinstance(node, ast.Name) and node.id == "Any" for node in ast.walk(annotation)
@@ -2314,6 +2331,24 @@ def _attribute_chain(node: ast.Attribute) -> str:
     else:
         parts.append(ast.unparse(current))
     return ".".join(reversed(parts))
+
+
+def _is_json_loads_function_arguments_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if not (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "loads"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+    ):
+        return False
+    return any(
+        isinstance(child, ast.Attribute)
+        and _attribute_chain(child).endswith(".function.arguments")
+        for argument in node.args
+        for child in ast.walk(argument)
+    )
 
 
 def _top_level_public_names(tree: ast.Module) -> frozenset[str]:

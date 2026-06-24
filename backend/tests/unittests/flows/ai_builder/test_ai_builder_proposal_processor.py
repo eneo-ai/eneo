@@ -1773,6 +1773,47 @@ async def test_handle_confirm_requirements_parse_failure_triggers_self_correctio
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw_arguments", "expected_detail"),
+    [
+        ("{not json", "Expecting property name"),
+        ("[1, 2]", "arguments must be a JSON object"),
+    ],
+)
+async def test_handle_confirm_requirements_invalid_tool_arguments_self_correct(
+    raw_arguments: str,
+    expected_detail: str,
+) -> None:
+    processor = _make_processor()
+    tool_call = MagicMock()
+    tool_call.id = "call_confirm"
+    tool_call.function.name = CONFIRM_REQUIREMENTS_TOOL_NAME
+    tool_call.function.arguments = raw_arguments
+    ctx = _make_context()
+
+    async def _events():
+        yield {"event": "status", "data": '{"status":"repairing"}'}
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor."
+        "run_tool_self_correction",
+        return_value=_events(),
+    ) as repair:
+        events = [
+            event
+            async for event in processor._handle_confirm_requirements(
+                ctx=ctx, tool_call=tool_call
+            )
+        ]
+
+    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    request = repair.call_args.args[0]
+    assert request.error_message.startswith("Invalid requirements summary: ")
+    assert expected_detail in request.error_message
+    assert request.retry_config.target_tool_name == CONFIRM_REQUIREMENTS_TOOL_NAME
+
+
+@pytest.mark.asyncio
 async def test_handle_confirm_requirements_owner_events_skip_self_correction() -> None:
     processor = _make_processor()
     tool_call = _make_tool_call(

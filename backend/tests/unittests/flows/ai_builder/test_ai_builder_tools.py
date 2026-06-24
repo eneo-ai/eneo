@@ -116,6 +116,10 @@ class TestParseToolCallArguments:
             "plan_rationale": "Create"
         }
 
+    def test_parse_tool_call_arguments_rejects_malformed_json(self) -> None:
+        with pytest.raises(ToolArgumentParseError, match="Expecting property name"):
+            parse_tool_call_arguments("{not json")
+
     @pytest.mark.parametrize("arguments", ["[1, 2]", '"text"', "3", "null"])
     def test_parse_tool_call_arguments_rejects_non_object_json(
         self, arguments: str

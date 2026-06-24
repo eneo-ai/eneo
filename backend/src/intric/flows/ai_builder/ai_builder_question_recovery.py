@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, TypeAlias
 
@@ -46,6 +45,10 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_parsing import (
+    ToolArgumentParseError,
+    parse_tool_call_arguments,
+)
 from intric.flows.ai_builder.ai_builder_tool_turn_persistence import (
     persist_tool_turn,
 )
@@ -130,8 +133,8 @@ async def stream_structured_question_tool_call(
         return
 
     try:
-        arguments = json.loads(request.tool_call.function.arguments)
-    except json.JSONDecodeError as error:
+        arguments = parse_tool_call_arguments(request.tool_call.function.arguments)
+    except ToolArgumentParseError as error:
         yield build_ai_builder_error_event(
             message=f"Invalid question: {error}",
             code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,

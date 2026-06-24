@@ -505,6 +505,46 @@ async def test_handle_structured_question_persists_fallback_text_for_invalid_que
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw_arguments", "expected_detail"),
+    [
+        ("{not json", "Expecting property name"),
+        ("[1, 2]", "arguments must be a JSON object"),
+    ],
+)
+async def test_handle_structured_question_rejects_invalid_tool_arguments(
+    raw_arguments: str,
+    expected_detail: str,
+) -> None:
+    tool_call = MagicMock()
+    tool_call.id = "call_question"
+    tool_call.function.name = ASK_STRUCTURED_QUESTION_TOOL_NAME
+    tool_call.function.arguments = raw_arguments
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_question_recovery."
+        "build_discovery_runtime_result",
+        new=AsyncMock(return_value=_runtime_result()),
+    ):
+        events = [
+            item
+            async for item in stream_structured_question_tool_call(
+                repo=AsyncMock(),
+                litellm_client=AsyncMock(),
+                self_correction_temperature=0.2,
+                request=_make_request(tool_call=tool_call),
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "invalid_question_payload"
+    assert payload["phase"] == "question"
+    assert payload["message"].startswith("Invalid question: ")
+    assert expected_detail in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_question_recovery_completion_counts_as_repair() -> None:
     tracker = ProposalTurnTelemetry(
         request_id="req-question",

@@ -829,6 +829,63 @@ async def test_request_self_correction_handles_empty_completion_choices() -> Non
 
 
 @pytest.mark.asyncio
+async def test_request_self_correction_rejects_malformed_correction_tool_arguments() -> (
+    None
+):
+    tool_call = SimpleNamespace(
+        id="call_invalid_repair",
+        function=SimpleNamespace(name=PROPOSE_FLOW_TOOL_NAME, arguments="{not json"),
+    )
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=None, tool_calls=[tool_call])
+            )
+        ]
+    )
+    process_invocation = AsyncMock()
+
+    async def call_proposal_completion(
+        _: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        return response
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        turn=_make_turn(),
+        request_id="req-malformed-repair",
+        conversation=[],
+        new_messages_start=0,
+        error_message="Invalid propose_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Call propose_flow.",
+        flow=None,
+    ):
+        events.append(event)
+
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["request_id"] == "req-malformed-repair"
+    assert payload["code"] == "self_correction_invalid_payload"
+    process_invocation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_request_self_correction_retries_forced_retry_validation_feedback() -> (
     None
 ):

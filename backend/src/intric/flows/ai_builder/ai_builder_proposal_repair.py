@@ -48,6 +48,10 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_parsing import (
+    ToolArgumentParseError,
+    parse_tool_call_arguments,
+)
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.main.logging import get_logger
 
@@ -518,8 +522,10 @@ async def request_self_correction(
                 if correction_tool_call.function.name != target_tool_name:
                     continue
                 try:
-                    arguments = json.loads(correction_tool_call.function.arguments)
-                except Exception as error:
+                    arguments = parse_tool_call_arguments(
+                        correction_tool_call.function.arguments
+                    )
+                except ToolArgumentParseError as error:
                     if retry_state.can_retry():
                         retry_feedback = (
                             correction_tool_call,
@@ -754,8 +760,8 @@ async def retry_forced_tool_after_text(
         if tool_call.function.name != target_tool_name:
             continue
         try:
-            arguments = json.loads(tool_call.function.arguments)
-        except Exception as error:
+            arguments = parse_tool_call_arguments(tool_call.function.arguments)
+        except ToolArgumentParseError as error:
             logger.warning("Forced proposal retry returned invalid payload: %s", error)
             return ForcedToolRetryOutcome(
                 feedback=_invalid_tool_arguments_message(error),
