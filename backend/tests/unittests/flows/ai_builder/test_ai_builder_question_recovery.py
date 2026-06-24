@@ -255,7 +255,7 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
                 repo=AsyncMock(),
                 discovery_litellm_client=AsyncMock(),
                 repair_completion=proposal_completion,
-                self_correction_temperature=0.2,
+                self_correction_temperature=0.37,
                 request=_make_request(
                     conversation=_conversation_with_answered_final_output_mode()
                 ),
@@ -276,6 +276,15 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
         "type": "function",
         "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
     }
+    assert completion_request.temperature == 0.37
+    assert completion_request.litellm_model == "openai/gpt-5.4"
+    assert completion_request.max_output_tokens == 4096
+    completion_tool_names = [
+        schema["function"]["name"] for schema in completion_request.tool_schemas
+    ]
+    assert completion_tool_names == [
+        CONFIRM_REQUIREMENTS_TOOL_NAME
+    ]
     assert completion_request.counts_as_repair is True
     assert build_runtime.await_count == 2
 
@@ -350,16 +359,23 @@ async def test_question_recovery_handles_empty_completion_choices() -> None:
 async def test_question_recovery_exhausts_repeated_structured_question_after_retry() -> (
     None
 ):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-question",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     repeated_question = _make_tool_call(
         ASK_STRUCTURED_QUESTION_TOOL_NAME,
         _question_payload(),
     )
 
-    proposal_completion = AsyncMock(
-        side_effect=[
-            _make_response_with_tool_calls(repeated_question),
-            _make_response_with_tool_calls(repeated_question),
-        ]
+    litellm_client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[
+                _make_response_with_tool_calls(repeated_question),
+                _make_response_with_tool_calls(repeated_question),
+            ]
+        )
     )
 
     with (
@@ -378,7 +394,10 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
             async for item in stream_structured_question_tool_call(
                 repo=AsyncMock(),
                 discovery_litellm_client=AsyncMock(),
-                repair_completion=proposal_completion,
+                repair_completion=make_usage_tracked_proposal_completion(
+                    litellm_client=litellm_client,
+                    usage_tracker=tracker,
+                ),
                 self_correction_temperature=0.2,
                 request=_make_request(
                     tool_call=repeated_question,
@@ -387,6 +406,7 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
                         {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}},
                         {"function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME}},
                     ],
+                    usage_tracker=tracker,
                 ),
             )
         ]
@@ -394,7 +414,9 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
     assert [item["event"] for item in items] == ["status", "error"]
     payload = json.loads(items[-1]["data"])
     assert payload["code"] == "question_recovery_exhausted"
-    assert proposal_completion.await_count == 2
+    assert litellm_client.acompletion.await_count == 2
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+    assert telemetry["repair_attempts"] == 2
 
 
 @pytest.mark.asyncio

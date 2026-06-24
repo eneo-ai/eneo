@@ -106,7 +106,7 @@ These are candidates, not automatic work. Each requires preflight proof of a can
 
 | Candidate | Required Deletion Gate |
 | --- | --- |
-| Proposal completion callable cleanup | Delete the one-method `ProposalCompletionFn` Protocol only in a separate mechanical commit that updates all imports, tests, and ownership guards. |
+| Proposal completion callable cleanup | Reassess `ProposalCompletionFn` only if replacing it reduces total production code and ownership-guard complexity. |
 | Planner orchestration repair consolidation | Fold `ai_builder_orchestration_pipeline.py` repair behavior into the typed turn runner only if tests prove identical retry/error semantics. |
 | Builder step capability duplicates | Defer unless the whole change stays Builder-local and mechanically deletes a duplicate owner. Otherwise this belongs in a later Flow capability-deduplication slice. |
 | Prompt hard-rule duplication | Defer unless every touched rule stays within Builder runtime/planner ownership. Future capability work should enforce: every model-visible capability claim must have canonical enforcement. |
