@@ -1409,6 +1409,15 @@ def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers()
         ):
             violations.append(f"{repair_path}:{node.lineno} defines {node.name}")
 
+    for node in repair_tree.body:
+        if (
+            isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "retry_forced_tool_after_text"
+        ):
+            violations.append(
+                f"{repair_path}:{node.lineno} preserves public forced-retry core"
+            )
+
     for name in {
         "ProposalSelfCorrectionRequest",
         "ForcedToolAfterTextRequest",

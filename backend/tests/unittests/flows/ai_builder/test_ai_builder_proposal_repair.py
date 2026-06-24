@@ -29,7 +29,6 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ProposalSelfCorrectionRequest,
     _build_retry_feedback,
     build_tool_retry_messages,
-    retry_forced_tool_after_text,
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
 )
@@ -37,6 +36,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionFn,
     ProposalCompletionRequest,
     ToolProcessingResult,
     ToolRetryConfig,
@@ -121,6 +121,7 @@ def _make_self_correction_request(
     available_kb_refs: set[str] | None = None,
     max_output_tokens: int = 1024,
     forced_tool_prompt: str = "Call propose_flow.",
+    usage_tracker: ProposalTurnTelemetry | None = None,
 ) -> ProposalSelfCorrectionRequest:
     return ProposalSelfCorrectionRequest(
         turn=_make_turn(),
@@ -156,6 +157,67 @@ def _make_self_correction_request(
         ),
         forced_proposal_temperature=forced_proposal_temperature,
         flow=None,
+        usage_tracker=usage_tracker,
+    )
+
+
+def _make_forced_tool_after_text_request(
+    *,
+    assistant_text: str,
+    repair_completion: ProposalCompletionFn,
+    process_tool_invocation: Callable[
+        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+    ],
+    forced_proposal_temperature: float,
+    target_kind: TargetKind,
+    correction_messages: list[dict[str, Any]] | None = None,
+    tool_schemas: list[dict[str, Any]] | None = None,
+    litellm_model: str = "openai/gpt-5.4",
+    litellm_kwargs: dict[str, Any] | None = None,
+    turn: SessionSendTurn | None = None,
+    conversation: list[ConversationMessage] | None = None,
+    new_messages_start: int = 0,
+    available_model_refs: set[str] | None = None,
+    available_kb_refs: set[str] | None = None,
+    max_output_tokens: int = 1024,
+    forced_tool_prompt: str = "Call propose_flow.",
+    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+    request_id: str | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
+) -> ForcedToolAfterTextRequest:
+    return ForcedToolAfterTextRequest(
+        correction_messages=(
+            [{"role": "system", "content": "Prompt"}]
+            if correction_messages is None
+            else correction_messages
+        ),
+        assistant_text=assistant_text,
+        tool_schemas=(
+            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+            if tool_schemas is None
+            else tool_schemas
+        ),
+        litellm_model=litellm_model,
+        litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
+        turn=_make_turn() if turn is None else turn,
+        conversation=[] if conversation is None else conversation,
+        new_messages_start=new_messages_start,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        max_output_tokens=max_output_tokens,
+        retry_config=ToolRetryConfig(
+            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=target_kind,
+            forced_tool_prompt=forced_tool_prompt,
+            process_tool_invocation=process_tool_invocation,
+        ),
+        forced_proposal_temperature=forced_proposal_temperature,
+        repair_completion=repair_completion,
+        resource_catalog=None,
+        flow=None,
+        build_assistant_metadata=build_assistant_metadata,
+        request_id=request_id,
+        usage_tracker=usage_tracker,
     )
 
 
@@ -209,7 +271,7 @@ def test_build_tool_retry_messages_normalizes_oversized_tool_call_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
+async def test_run_forced_tool_retry_after_text_builds_typed_invocation() -> None:
     turn = _make_turn()
     captured_invocation: ToolRetryInvocation | None = None
 
@@ -222,31 +284,27 @@ async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
             event={"event": "plan", "data": "{}"},
         )
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=turn,
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=AsyncMock(
-            return_value=_tool_response(
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
-            )
-        ),
-        process_tool_invocation=process_invocation,
-        flow=None,
-        resource_catalog=None,
-        build_assistant_metadata=lambda: {"planner_telemetry": {"request_id": "req"}},
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text="Här är mitt förslag.",
+            turn=turn,
+            forced_proposal_temperature=0.1,
+            repair_completion=AsyncMock(
+                return_value=_tool_response(
+                    tool_name=PROPOSE_FLOW_TOOL_NAME,
+                    arguments={
+                        "flow_name": "Test",
+                        "plan_rationale": "R",
+                        "steps": [],
+                    },
+                )
+            ),
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+            build_assistant_metadata=lambda: {
+                "planner_telemetry": {"request_id": "req"}
+            },
+        )
     )
 
     assert result.events == ({"event": "plan", "data": "{}"},)
@@ -261,7 +319,7 @@ async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None:
+async def test_run_forced_tool_retry_after_text_surfaces_tool_user_message() -> None:
     async def process_invocation(
         _: ToolRetryInvocation,
     ) -> ToolProcessingResult:
@@ -269,30 +327,23 @@ async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None
             user_message="Det markerade steget använder ingen chattmodell."
         )
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=AsyncMock(
-            return_value=_tool_response(
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
-            )
-        ),
-        process_tool_invocation=process_invocation,
-        flow=None,
-        resource_catalog=None,
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text="Här är mitt förslag.",
+            forced_proposal_temperature=0.1,
+            repair_completion=AsyncMock(
+                return_value=_tool_response(
+                    tool_name=PROPOSE_FLOW_TOOL_NAME,
+                    arguments={
+                        "flow_name": "Test",
+                        "plan_rationale": "R",
+                        "steps": [],
+                    },
+                )
+            ),
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     )
 
     assert result.events == (
@@ -304,7 +355,7 @@ async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_accepts_diagnostic_json_text_with_step_assumptions() -> (
+async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_with_step_assumptions() -> (
     None
 ):
     observed_assumptions: list[str] = []
@@ -319,25 +370,14 @@ async def test_retry_forced_tool_after_text_accepts_diagnostic_json_text_with_st
         observed_assumptions.extend(outline.assumptions)
         return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text=assistant_text,
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        flow=None,
-        resource_catalog=None,
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text=assistant_text,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     )
 
     assert result.events == ({"event": "plan", "data": "{}"},)
@@ -350,7 +390,7 @@ async def test_retry_forced_tool_after_text_accepts_diagnostic_json_text_with_st
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_text() -> (
+async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_as_text() -> (
     None
 ):
     processed_arguments: dict[str, object] = {}
@@ -363,30 +403,21 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         processed_arguments.update(invocation.arguments)
         return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text=json.dumps(
-            {
-                "flow_name": "Text JSON outline",
-                "plan_rationale": "The model returned JSON as prose.",
-                "steps": [{"name": "Analyze", "task": "Analyze the input."}],
-            }
-        ),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=turn,
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        flow=None,
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text=json.dumps(
+                {
+                    "flow_name": "Text JSON outline",
+                    "plan_rationale": "The model returned JSON as prose.",
+                    "steps": [{"name": "Analyze", "task": "Analyze the input."}],
+                }
+            ),
+            turn=turn,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     )
 
     assert result.events == ({"event": "plan", "data": "{}"},)
@@ -395,7 +426,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedback() -> (
+async def test_run_forced_tool_retry_after_text_preserves_json_text_validation_feedback() -> (
     None
 ):
     call_proposal_completion = AsyncMock()
@@ -409,30 +440,21 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
             failure_kind="validation",
         )
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text=json.dumps(
-            {
-                "flow_name": "Invalid text JSON outline",
-                "plan_rationale": "The model returned invalid JSON as prose.",
-                "steps": [],
-            }
-        ),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=turn,
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        flow=None,
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text=json.dumps(
+                {
+                    "flow_name": "Invalid text JSON outline",
+                    "plan_rationale": "The model returned invalid JSON as prose.",
+                    "steps": [],
+                }
+            ),
+            turn=turn,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     )
 
     assert result.events is None
@@ -444,7 +466,7 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedback() -> (
+async def test_run_forced_tool_retry_after_text_preserves_forced_payload_parse_feedback() -> (
     None
 ):
     turn = _make_turn()
@@ -460,24 +482,15 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
         ]
     )
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text="Här är mitt förslag.",
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=turn,
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=AsyncMock(return_value=response),
-        process_tool_invocation=AsyncMock(),
-        flow=None,
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text="Här är mitt förslag.",
+            turn=turn,
+            forced_proposal_temperature=0.1,
+            repair_completion=AsyncMock(return_value=response),
+            process_tool_invocation=AsyncMock(),
+            target_kind=TargetKind.CREATE,
+        )
     )
 
     assert result.events is None
@@ -488,30 +501,21 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_preserves_information_request_empty_outcome() -> (
+async def test_run_forced_tool_retry_after_text_preserves_information_request_empty_outcome() -> (
     None
 ):
     call_proposal_completion = AsyncMock()
     turn = _make_turn()
 
-    result = await retry_forced_tool_after_text(
-        correction_messages=[{"role": "system", "content": "Prompt"}],
-        assistant_text="Vilken modell ska jag använda?",
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        turn=turn,
-        conversation=[],
-        new_messages_start=0,
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        forced_tool_prompt="Call propose_flow.",
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=AsyncMock(),
-        flow=None,
+    result = await run_forced_tool_retry_after_text(
+        _make_forced_tool_after_text_request(
+            assistant_text="Vilken modell ska jag använda?",
+            turn=turn,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=AsyncMock(),
+            target_kind=TargetKind.CREATE,
+        )
     )
 
     assert result == ForcedToolRetryOutcome()
@@ -1129,24 +1133,13 @@ async def test_forced_tool_repair_architecture_error_uses_sanitized_event_and_te
         )
 
     result = await run_forced_tool_retry_after_text(
-        ForcedToolAfterTextRequest(
+        _make_forced_tool_after_text_request(
             correction_messages=[{"role": "user", "content": "Build"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            turn=_make_turn(),
             conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
             new_messages_start=1,
-            available_model_refs=None,
-            available_kb_refs=None,
             max_output_tokens=4096,
-            retry_config=ToolRetryConfig(
-                target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-                target_kind=TargetKind.CREATE,
-                forced_tool_prompt="Now call propose_flow.",
-                process_tool_invocation=process_invocation,
-            ),
+            forced_tool_prompt="Now call propose_flow.",
             forced_proposal_temperature=0.3,
             repair_completion=AsyncMock(
                 return_value=_tool_response(
@@ -1158,6 +1151,8 @@ async def test_forced_tool_repair_architecture_error_uses_sanitized_event_and_te
                     },
                 )
             ),
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
             request_id="req-forced-runtime",
             usage_tracker=tracker,
         )
@@ -1167,6 +1162,64 @@ async def test_forced_tool_repair_architecture_error_uses_sanitized_event_and_te
     assert [event["event"] for event in result.events] == ["error"]
     payload = json.loads(result.events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
+    telemetry = tracker.build_planner_telemetry()
+    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
+    assert telemetry["proposal_repair_invocation_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_self_correction_forced_text_architecture_error_uses_sanitized_event_and_telemetry() -> (
+    None
+):
+    tracker = ProposalTurnTelemetry(
+        request_id="req-self-correction-forced-text-tracker",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    text_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Här är den korrigerade planen.",
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+    tool_response = _tool_response(
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={"flow_name": "Broken", "plan_rationale": "R", "steps": []},
+    )
+    repair_completion = AsyncMock(side_effect=[text_response, tool_response])
+
+    async def process_invocation(_: ToolRetryInvocation) -> ToolProcessingResult:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            detail="forced retry materialization failed",
+        )
+
+    request = _make_self_correction_request(
+        request_id="req-self-correction-forced-text",
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        new_messages_start=1,
+        error_message="Invalid flow",
+        llm_messages=[{"role": "user", "content": "Build"}],
+        self_correction_temperature=0.2,
+        self_correction_bumped_temperature=0.5,
+        max_self_correction_retries=3,
+        forced_proposal_temperature=0.3,
+        repair_completion=repair_completion,
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        usage_tracker=tracker,
+    )
+
+    events = [event async for event in run_tool_self_correction(request)]
+
+    assert [event["event"] for event in events] == ["status", "error"]
+    payload = json.loads(events[1]["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    assert payload["request_id"] == "req-self-correction-forced-text"
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
     assert telemetry["proposal_repair_invocation_count"] == 0

@@ -566,27 +566,28 @@ async def _request_self_correction_events(
             if looks_like_information_request(assistant_text):
                 yield build_text_event(assistant_text)
                 return
-            forced_outcome = await retry_forced_tool_after_text(
-                correction_messages=correction_messages,
-                assistant_text=assistant_text,
-                tool_schemas=request.tool_schemas,
-                litellm_model=request.litellm_model,
-                litellm_kwargs=request.litellm_kwargs,
-                turn=request.turn,
-                conversation=request.conversation,
-                new_messages_start=request.new_messages_start,
-                available_model_refs=request.available_model_refs,
-                available_kb_refs=request.available_kb_refs,
-                max_output_tokens=request.max_output_tokens,
-                target_tool_name=retry_config.target_tool_name,
-                forced_tool_prompt=retry_config.forced_tool_prompt,
-                forced_proposal_temperature=request.forced_proposal_temperature,
-                call_proposal_completion=request.repair_completion,
-                process_tool_invocation=retry_config.process_tool_invocation,
-                resource_catalog=request.resource_catalog,
-                flow=request.flow,
-                build_assistant_metadata=request.build_assistant_metadata,
-                request_id=request.request_id,
+            forced_outcome = await run_forced_tool_retry_after_text(
+                ForcedToolAfterTextRequest(
+                    correction_messages=correction_messages,
+                    assistant_text=assistant_text,
+                    tool_schemas=request.tool_schemas,
+                    litellm_model=request.litellm_model,
+                    litellm_kwargs=request.litellm_kwargs,
+                    turn=request.turn,
+                    conversation=request.conversation,
+                    new_messages_start=request.new_messages_start,
+                    available_model_refs=request.available_model_refs,
+                    available_kb_refs=request.available_kb_refs,
+                    max_output_tokens=request.max_output_tokens,
+                    retry_config=retry_config,
+                    forced_proposal_temperature=request.forced_proposal_temperature,
+                    repair_completion=request.repair_completion,
+                    resource_catalog=request.resource_catalog,
+                    flow=request.flow,
+                    build_assistant_metadata=request.build_assistant_metadata,
+                    request_id=request.request_id,
+                    usage_tracker=request.usage_tracker,
+                )
             )
             if forced_outcome.events is not None:
                 for event in forced_outcome.events:
@@ -632,46 +633,24 @@ async def _request_self_correction_events(
         return
 
 
-async def retry_forced_tool_after_text(
-    *,
-    correction_messages: list[dict[str, Any]],
-    assistant_text: str,
-    tool_schemas: list[dict[str, Any]],
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    turn: SessionSendTurn,
-    conversation: list[ConversationMessage],
-    new_messages_start: int,
-    available_model_refs: set[str] | None,
-    available_kb_refs: set[str] | None,
-    max_output_tokens: int,
-    target_tool_name: str,
-    forced_tool_prompt: str,
-    forced_proposal_temperature: float,
-    call_proposal_completion: ProposalCompletionFn,
-    process_tool_invocation: Callable[
-        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
-    ],
-    resource_catalog: AIBuilderResourceCatalog | None = None,
-    flow: "Flow | None" = None,
-    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
-    request_id: str | None = None,
+async def _execute_forced_tool_retry(
+    request: ForcedToolAfterTextRequest,
 ) -> ForcedToolRetryOutcome:
-    if looks_like_information_request(assistant_text):
+    if looks_like_information_request(request.assistant_text):
         return ForcedToolRetryOutcome()
 
     direct_outcome = await _try_process_json_text_as_tool_arguments(
-        assistant_text=assistant_text,
-        turn=turn,
-        conversation=conversation,
-        new_messages_start=new_messages_start,
-        available_model_refs=available_model_refs,
-        available_kb_refs=available_kb_refs,
-        target_tool_name=target_tool_name,
-        process_tool_invocation=process_tool_invocation,
-        resource_catalog=resource_catalog,
-        flow=flow,
-        build_assistant_metadata=build_assistant_metadata,
+        assistant_text=request.assistant_text,
+        turn=request.turn,
+        conversation=request.conversation,
+        new_messages_start=request.new_messages_start,
+        available_model_refs=request.available_model_refs,
+        available_kb_refs=request.available_kb_refs,
+        target_tool_name=request.retry_config.target_tool_name,
+        process_tool_invocation=request.retry_config.process_tool_invocation,
+        resource_catalog=request.resource_catalog,
+        flow=request.flow,
+        build_assistant_metadata=request.build_assistant_metadata,
     )
     if (
         direct_outcome.events is not None
@@ -680,26 +659,26 @@ async def retry_forced_tool_after_text(
     ):
         return direct_outcome
 
-    forced_messages = list(correction_messages) + [
-        {"role": "assistant", "content": assistant_text},
+    forced_messages = list(request.correction_messages) + [
+        {"role": "assistant", "content": request.assistant_text},
         {
             "role": "user",
-            "content": forced_tool_prompt,
+            "content": request.retry_config.forced_tool_prompt,
         },
     ]
 
     try:
-        response = await call_proposal_completion(
+        response = await request.repair_completion(
             ProposalCompletionRequest(
                 messages=forced_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
-                temperature=forced_proposal_temperature,
+                tool_schemas=request.tool_schemas,
+                litellm_model=request.litellm_model,
+                litellm_kwargs=request.litellm_kwargs,
+                max_output_tokens=request.max_output_tokens,
+                temperature=request.forced_proposal_temperature,
                 tool_choice={
                     "type": "function",
-                    "function": {"name": target_tool_name},
+                    "function": {"name": request.retry_config.target_tool_name},
                 },
                 counts_as_repair=True,
             )
@@ -708,7 +687,7 @@ async def retry_forced_tool_after_text(
         logger.error(
             "Forced proposal retry failed",
             exc_info=error,
-            extra={"request_id": request_id},
+            extra={"request_id": request.request_id},
         )
         return ForcedToolRetryOutcome()
 
@@ -721,7 +700,7 @@ async def retry_forced_tool_after_text(
         return ForcedToolRetryOutcome()
 
     for tool_call in message.tool_calls:
-        if tool_call.function.name != target_tool_name:
+        if tool_call.function.name != request.retry_config.target_tool_name:
             continue
         try:
             arguments = parse_tool_call_arguments(tool_call.function.arguments)
@@ -732,19 +711,19 @@ async def retry_forced_tool_after_text(
                 failure_kind="parse",
             )
 
-        tool_result = await process_tool_invocation(
+        tool_result = await request.retry_config.process_tool_invocation(
             _build_tool_retry_invocation(
-                turn=turn,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
+                turn=request.turn,
+                conversation=request.conversation,
+                new_messages_start=request.new_messages_start,
                 arguments=arguments,
-                assistant_content=assistant_text,
+                assistant_content=request.assistant_text,
                 tool_call_id=tool_call.id,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                resource_catalog=resource_catalog,
-                flow=flow,
-                build_assistant_metadata=build_assistant_metadata,
+                available_model_refs=request.available_model_refs,
+                available_kb_refs=request.available_kb_refs,
+                resource_catalog=request.resource_catalog,
+                flow=request.flow,
+                build_assistant_metadata=request.build_assistant_metadata,
             )
         )
         terminal_events = _repair_terminal_events(tool_result)
@@ -768,28 +747,7 @@ async def run_forced_tool_retry_after_text(
     request: ForcedToolAfterTextRequest,
 ) -> ForcedToolRetryOutcome:
     try:
-        return await retry_forced_tool_after_text(
-            correction_messages=request.correction_messages,
-            assistant_text=request.assistant_text,
-            tool_schemas=request.tool_schemas,
-            litellm_model=request.litellm_model,
-            litellm_kwargs=request.litellm_kwargs,
-            turn=request.turn,
-            conversation=request.conversation,
-            new_messages_start=request.new_messages_start,
-            available_model_refs=request.available_model_refs,
-            available_kb_refs=request.available_kb_refs,
-            max_output_tokens=request.max_output_tokens,
-            target_tool_name=request.retry_config.target_tool_name,
-            forced_tool_prompt=request.retry_config.forced_tool_prompt,
-            forced_proposal_temperature=request.forced_proposal_temperature,
-            call_proposal_completion=request.repair_completion,
-            process_tool_invocation=request.retry_config.process_tool_invocation,
-            resource_catalog=request.resource_catalog,
-            flow=request.flow,
-            build_assistant_metadata=request.build_assistant_metadata,
-            request_id=request.request_id,
-        )
+        return await _execute_forced_tool_retry(request)
     except AIBuilderArchitectureError as error:
         resolved_request_id = request.request_id or (
             request.usage_tracker.request_id
