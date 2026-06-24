@@ -267,12 +267,16 @@ def _tool_call_id_segment(value: str, *, max_length: int) -> str:
 
 
 class RuntimeToolFunction(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
 
 class RuntimeToolCall(Protocol):
-    id: str
-    function: RuntimeToolFunction
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def function(self) -> RuntimeToolFunction: ...
 
 
 def _metadata_mapping(metadata: object) -> Mapping[str, Any] | None:

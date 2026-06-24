@@ -9,6 +9,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_tool_parsing import (
+    ToolArgumentParseError,
+    parse_tool_call_arguments,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -104,6 +108,20 @@ class TestParseStructuredQuestion:
                     "options": [{"label": "A"}, {"label": "B"}],
                 }
             )
+
+
+class TestParseToolCallArguments:
+    def test_parse_tool_call_arguments_accepts_json_object(self) -> None:
+        assert parse_tool_call_arguments('{"plan_rationale":"Create"}') == {
+            "plan_rationale": "Create"
+        }
+
+    @pytest.mark.parametrize("arguments", ["[1, 2]", '"text"', "3", "null"])
+    def test_parse_tool_call_arguments_rejects_non_object_json(
+        self, arguments: str
+    ) -> None:
+        with pytest.raises(ToolArgumentParseError, match="JSON object"):
+            parse_tool_call_arguments(arguments)
 
 
 class TestExtractHelpers:

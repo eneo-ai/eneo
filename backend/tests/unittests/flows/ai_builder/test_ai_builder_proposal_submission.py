@@ -576,6 +576,7 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
         },
         tool_call_id="call-create-finalize",
     )
+    assistant_metadata = {"planner_telemetry": {"preexisting": True}}
 
     with (
         patch(
@@ -591,7 +592,11 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
         ),
     ):
         dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(text_content="Provider prose"), tool_call=tool_call
+            ctx=_make_context(
+                text_content="Provider prose",
+                assistant_metadata=assistant_metadata,
+            ),
+            tool_call=tool_call,
         )
         assert dispatched is not None
         events = [event async for event in dispatched]
@@ -599,6 +604,8 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
     assert events == [{"event": "plan", "data": "{}"}]
     request = finalize.await_args.args[0]
     assert request.assistant_content == "Här är mitt förslag:"
+    assert request.assistant_metadata is assistant_metadata
+    assert request.metadata_tool_call is tool_call
 
 
 @pytest.mark.asyncio

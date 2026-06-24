@@ -126,10 +126,10 @@ PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
 PROPOSAL_SUBMISSION_METHODS = frozenset(
     {
         "active_submission_tool_schemas",
-        "_finalize_retry_compiled_proposal",
+        "_finalize_invocation_proposal",
         "_handle_create_propose_flow_tool_call",
         "_handle_edit_propose_flow_tool_call",
-        "_process_retry_invocation",
+        "_process_submission_invocation",
         "_proposal_retry_config",
         "preflight_scoped_model_revision_if_requested",
         "retry_forced_proposal_after_text",
@@ -140,10 +140,10 @@ PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
     {
         "_active_submission_tool_schemas",
         "_build_self_correction_request",
-        "_finalize_retry_compiled_proposal",
+        "_finalize_invocation_proposal",
         "_handle_create_propose_flow_tool_call",
         "_handle_edit_propose_flow_tool_call",
-        "_process_retry_invocation",
+        "_process_submission_invocation",
         "_proposal_retry_config",
         "_record_failed_proposal_attempt_repair",
         "_resolve_submission_prerequisite_events",
@@ -156,9 +156,11 @@ PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS = frozenset(
         "_create_propose_flow_retry_config",
         "_edit_flow_retry_config",
         "_edit_propose_flow_retry_config",
+        "_finalize_retry_compiled_proposal",
         "_handle_edit_flow_tool_call",
         "_handle_outline_flow_tool_call",
         "_outline_flow_retry_config",
+        "_process_retry_invocation",
     }
 )
 PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
@@ -1530,14 +1532,14 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         retry_finalizers = [
             node
             for node in submission_methods.values()
-            if node.name == "_finalize_retry_compiled_proposal"
+            if node.name == "_finalize_invocation_proposal"
         ]
         if len(retry_finalizers) != 1:
             violations.append(
                 f"{submission_path}:{submission_classes[0].lineno} "
-                f"retry finalizer count {len(retry_finalizers)}"
+                f"invocation finalizer count {len(retry_finalizers)}"
             )
-        for method_name in ("_proposal_retry_config", "_process_retry_invocation"):
+        for method_name in ("_proposal_retry_config", "_process_submission_invocation"):
             method = submission_methods.get(method_name)
             if method is None:
                 violations.append(f"{submission_path}: missing {method_name}")
@@ -1556,7 +1558,7 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         finalization_request_call_count = submission_text.count(
             "CompiledProposalFinalizationRequest("
         )
-        if finalization_request_call_count != 4:
+        if finalization_request_call_count != 2:
             violations.append(
                 f"{submission_path}: CompiledProposalFinalizationRequest calls "
                 f"{finalization_request_call_count}"

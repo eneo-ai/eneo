@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     is_supported_structured_question_id,
 )
+
+
+class ToolArgumentParseError(ValueError):
+    """Raised when provider tool-call arguments are not a JSON object."""
+
+
+def parse_tool_call_arguments(arguments: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError as error:
+        raise ToolArgumentParseError(str(error)) from error
+    if not isinstance(parsed, dict):
+        raise ToolArgumentParseError("arguments must be a JSON object")
+    return cast(dict[str, Any], parsed)
 
 
 def extract_assumptions(arguments: dict[str, Any]) -> list[str]:

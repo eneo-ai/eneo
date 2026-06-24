@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -88,6 +87,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_parsing import (
+    ToolArgumentParseError,
+    parse_tool_call_arguments,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
@@ -421,7 +424,7 @@ class ProposalSubmissionOwner:
         async def _process_tool_invocation(
             invocation: ToolRetryInvocation,
         ) -> ToolProcessingResult:
-            return await self._process_retry_invocation(
+            return await self._process_submission_invocation(
                 invocation=invocation,
                 target_kind=target_kind,
                 planning_state=planning_state,
@@ -443,7 +446,7 @@ class ProposalSubmissionOwner:
             process_tool_invocation=_process_tool_invocation,
         )
 
-    async def _process_retry_invocation(
+    async def _process_submission_invocation(
         self,
         *,
         invocation: ToolRetryInvocation,
@@ -454,6 +457,7 @@ class ProposalSubmissionOwner:
         prior_plan_for_revision: BuilderPlan | None,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
+        metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
         if target_kind == TargetKind.CREATE:
             result = await process_outline_arguments(
@@ -483,16 +487,17 @@ class ProposalSubmissionOwner:
             )
         if result.compiled_proposal is None:
             return result
-        return await self._finalize_retry_compiled_proposal(
+        return await self._finalize_invocation_proposal(
             invocation=invocation,
             tool_name=PROPOSE_FLOW_TOOL_NAME,
             target_kind=target_kind,
             compiled=result.compiled_proposal,
             request_id=request_id,
             usage_tracker=usage_tracker,
+            metadata_tool_call=metadata_tool_call,
         )
 
-    async def _finalize_retry_compiled_proposal(
+    async def _finalize_invocation_proposal(
         self,
         *,
         invocation: ToolRetryInvocation,
@@ -501,6 +506,7 @@ class ProposalSubmissionOwner:
         compiled: CompiledProposal,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry | None,
+        metadata_tool_call: RuntimeToolCall | None,
     ) -> ToolProcessingResult:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
             CompiledProposalFinalizationRequest(
@@ -513,7 +519,7 @@ class ProposalSubmissionOwner:
                 assistant_content=invocation.assistant_content,
                 assistant_metadata=invocation.assistant_metadata,
                 tool_call_id=invocation.tool_call_id,
-                metadata_tool_call=None,
+                metadata_tool_call=metadata_tool_call,
                 compiled=compiled,
                 resource_catalog=invocation.resource_catalog,
                 flow=invocation.flow,
@@ -642,7 +648,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: Any,
+        tool_call: LLMCompletionToolCall,
     ) -> AsyncGenerator[dict[str, str], None]:
         (
             blocked,
@@ -667,8 +673,8 @@ class ProposalSubmissionOwner:
         )
 
         try:
-            arguments = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError as error:
+            arguments = parse_tool_call_arguments(tool_call.function.arguments)
+        except ToolArgumentParseError as error:
             async for event in self._run_proposal_self_correction(
                 ctx=ctx,
                 error_message=f"Invalid propose_flow arguments: {error}",
@@ -680,41 +686,25 @@ class ProposalSubmissionOwner:
             return
 
         try:
-            outline_result = await process_outline_arguments(
-                turn=ctx.turn,
-                conversation=ctx.conversation,
-                arguments=arguments,
-                tool_call_id=tool_call.id,
-                available_model_refs=ctx.available_model_refs,
-                available_kb_refs=ctx.available_kb_refs,
-                resource_catalog=ctx.resource_catalog,
+            outline_result = await self._process_submission_invocation(
+                invocation=_initial_submission_invocation(
+                    ctx=ctx,
+                    arguments=arguments,
+                    assistant_content="Här är mitt förslag:",
+                    tool_call=tool_call,
+                ),
+                target_kind=TargetKind.CREATE,
                 planning_state=ctx.planning_state,
+                assistant_snapshots=None,
                 plan_edit_context=ctx.plan_edit_context,
                 prior_plan_for_revision=ctx.prior_plan_for_revision,
+                request_id=ctx.request_id,
+                usage_tracker=ctx.usage_tracker,
+                metadata_tool_call=tool_call,
             )
-            if outline_result.compiled_proposal is not None:
-                outline_result = (
-                    await self._compiled_proposal_finalizer.finalize_compiled_proposal(
-                        CompiledProposalFinalizationRequest(
-                            turn=ctx.turn,
-                            conversation=ctx.conversation,
-                            new_messages_start=ctx.new_messages_start,
-                            tool_name=PROPOSE_FLOW_TOOL_NAME,
-                            target_kind=TargetKind.CREATE,
-                            arguments=arguments,
-                            assistant_content="Här är mitt förslag:",
-                            assistant_metadata=ctx.assistant_metadata,
-                            tool_call_id=tool_call.id,
-                            metadata_tool_call=tool_call,
-                            compiled=outline_result.compiled_proposal,
-                            resource_catalog=ctx.resource_catalog,
-                            flow=ctx.flow,
-                            request_id=ctx.request_id,
-                            usage_tracker=ctx.usage_tracker,
-                        )
-                    )
-                )
         except AIBuilderArchitectureError as error:
+            # Create proposal architecture failures are user-visible proposal
+            # errors; edit keeps propagating the same exception by design.
             record_proposal_architecture_failure(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
@@ -822,7 +812,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: Any,
+        tool_call: LLMCompletionToolCall,
     ) -> AsyncGenerator[dict[str, str], None]:
         # Edit submissions operate on an existing flow; discovery prerequisites
         # belong to create submissions before the first plan exists.
@@ -836,8 +826,8 @@ class ProposalSubmissionOwner:
             usage_tracker=ctx.usage_tracker,
         )
         try:
-            raw_args = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError as error:
+            raw_args = parse_tool_call_arguments(tool_call.function.arguments)
+        except ToolArgumentParseError as error:
             async for event in self._run_proposal_self_correction(
                 ctx=ctx,
                 error_message=f"Invalid propose_flow arguments: {error}",
@@ -848,40 +838,22 @@ class ProposalSubmissionOwner:
                 yield event
             return
 
-        edit_result = await process_edit_arguments(
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            arguments=raw_args,
-            available_model_refs=ctx.available_model_refs,
-            available_kb_refs=ctx.available_kb_refs,
-            flow=ctx.flow,
+        edit_result = await self._process_submission_invocation(
+            invocation=_initial_submission_invocation(
+                ctx=ctx,
+                arguments=raw_args,
+                assistant_content=ctx.text_content or "",
+                tool_call=tool_call,
+            ),
+            target_kind=TargetKind.EDIT,
+            planning_state=None,
             assistant_snapshots=ctx.assistant_snapshots,
-            resource_catalog=ctx.resource_catalog,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
+            request_id=ctx.request_id,
+            usage_tracker=ctx.usage_tracker,
+            metadata_tool_call=tool_call,
         )
-        if edit_result.compiled_proposal is not None:
-            edit_result = (
-                await self._compiled_proposal_finalizer.finalize_compiled_proposal(
-                    CompiledProposalFinalizationRequest(
-                        turn=ctx.turn,
-                        conversation=ctx.conversation,
-                        new_messages_start=ctx.new_messages_start,
-                        tool_name=PROPOSE_FLOW_TOOL_NAME,
-                        target_kind=TargetKind.EDIT,
-                        arguments=raw_args,
-                        assistant_content=ctx.text_content or "",
-                        assistant_metadata=ctx.assistant_metadata,
-                        tool_call_id=tool_call.id,
-                        metadata_tool_call=tool_call,
-                        compiled=edit_result.compiled_proposal,
-                        resource_catalog=ctx.resource_catalog,
-                        flow=ctx.flow,
-                        request_id=ctx.request_id,
-                        usage_tracker=ctx.usage_tracker,
-                    )
-                )
-            )
         if edit_result.event is None:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 edit_result.failure_kind
@@ -897,6 +869,28 @@ class ProposalSubmissionOwner:
             return
 
         yield edit_result.event
+
+
+def _initial_submission_invocation(
+    *,
+    ctx: ProposalTurnContext,
+    arguments: dict[str, Any],
+    assistant_content: str,
+    tool_call: LLMCompletionToolCall,
+) -> ToolRetryInvocation:
+    return ToolRetryInvocation(
+        turn=ctx.turn,
+        conversation=ctx.conversation,
+        new_messages_start=ctx.new_messages_start,
+        arguments=arguments,
+        assistant_content=assistant_content,
+        tool_call_id=tool_call.id,
+        available_model_refs=ctx.available_model_refs,
+        available_kb_refs=ctx.available_kb_refs,
+        resource_catalog=ctx.resource_catalog,
+        flow=ctx.flow,
+        assistant_metadata=ctx.assistant_metadata,
+    )
 
 
 def _record_proposal_repair_invocation(
