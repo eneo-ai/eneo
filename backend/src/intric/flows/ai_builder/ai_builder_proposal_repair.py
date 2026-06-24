@@ -394,16 +394,34 @@ async def run_tool_self_correction(
         async for event in _request_self_correction_events(request):
             yield event
     except AIBuilderArchitectureError as error:
-        record_proposal_architecture_failure(
-            request.usage_tracker,
+        for event in _architecture_error_events(
+            error=error,
+            usage_tracker=request.usage_tracker,
             request_id=request.request_id,
             tool_name=request.retry_config.target_tool_name,
-        )
-        yield build_proposal_architecture_error_event(
+        ):
+            yield event
+
+
+def _architecture_error_events(
+    *,
+    error: AIBuilderArchitectureError,
+    usage_tracker: ProposalTurnTelemetry | None,
+    request_id: str | None,
+    tool_name: str,
+) -> EventBatch:
+    record_proposal_architecture_failure(
+        usage_tracker,
+        request_id=request_id,
+        tool_name=tool_name,
+    )
+    return (
+        build_proposal_architecture_error_event(
             error,
-            request_id=request.request_id,
-            tool_name=request.retry_config.target_tool_name,
-        )
+            request_id=request_id,
+            tool_name=tool_name,
+        ),
+    )
 
 
 async def _request_self_correction_events(
@@ -778,18 +796,12 @@ async def run_forced_tool_retry_after_text(
             if request.usage_tracker is not None
             else None
         )
-        record_proposal_architecture_failure(
-            request.usage_tracker,
-            request_id=resolved_request_id,
-            tool_name=request.retry_config.target_tool_name,
-        )
         return ForcedToolRetryOutcome(
-            events=(
-                build_proposal_architecture_error_event(
-                    error,
-                    request_id=resolved_request_id,
-                    tool_name=request.retry_config.target_tool_name,
-                ),
+            events=_architecture_error_events(
+                error=error,
+                usage_tracker=request.usage_tracker,
+                request_id=resolved_request_id,
+                tool_name=request.retry_config.target_tool_name,
             )
         )
 
