@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -28,7 +29,6 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ProposalSelfCorrectionRequest,
     _build_retry_feedback,
     build_tool_retry_messages,
-    request_self_correction,
     retry_forced_tool_after_text,
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
@@ -94,6 +94,68 @@ def _make_turn() -> SessionSendTurn:
         tenant_id=uuid4(),
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         base_planning_state_version=3,
+    )
+
+
+def _make_self_correction_request(
+    *,
+    repair_completion: Any,
+    process_tool_invocation: Callable[
+        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+    ],
+    self_correction_temperature: float,
+    self_correction_bumped_temperature: float,
+    max_self_correction_retries: int,
+    forced_proposal_temperature: float,
+    target_kind: TargetKind,
+    request_id: str = "req-self-correction",
+    conversation: list[ConversationMessage] | None = None,
+    new_messages_start: int = 0,
+    error_message: str = "Invalid propose_flow draft.",
+    llm_messages: list[dict[str, Any]] | None = None,
+    tool_call: Any | None = None,
+    tool_schemas: list[dict[str, Any]] | None = None,
+    litellm_model: str = "openai/gpt-5.4",
+    litellm_kwargs: dict[str, Any] | None = None,
+    available_model_refs: set[str] | None = None,
+    available_kb_refs: set[str] | None = None,
+    max_output_tokens: int = 1024,
+    forced_tool_prompt: str = "Call propose_flow.",
+) -> ProposalSelfCorrectionRequest:
+    return ProposalSelfCorrectionRequest(
+        turn=_make_turn(),
+        request_id=request_id,
+        conversation=[] if conversation is None else conversation,
+        new_messages_start=new_messages_start,
+        error_message=error_message,
+        llm_messages=(
+            [{"role": "user", "content": "go"}]
+            if llm_messages is None
+            else llm_messages
+        ),
+        tool_call=_original_tool_call() if tool_call is None else tool_call,
+        tool_schemas=(
+            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+            if tool_schemas is None
+            else tool_schemas
+        ),
+        litellm_model=litellm_model,
+        litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        max_output_tokens=max_output_tokens,
+        self_correction_temperature=self_correction_temperature,
+        self_correction_bumped_temperature=self_correction_bumped_temperature,
+        max_self_correction_retries=max_self_correction_retries,
+        repair_completion=repair_completion,
+        retry_config=ToolRetryConfig(
+            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=target_kind,
+            forced_tool_prompt=forced_tool_prompt,
+            process_tool_invocation=process_tool_invocation,
+        ),
+        forced_proposal_temperature=forced_proposal_temperature,
+        flow=None,
     )
 
 
@@ -547,29 +609,18 @@ async def _run_repair_capturing(
         )
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        error_message="original invalid",
-        llm_messages=[{"role": "user", "content": "go"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=base_temperature,
-        self_correction_bumped_temperature=bumped_temperature,
-        max_self_correction_retries=max_retries,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.CREATE,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="original invalid",
+            llm_messages=[{"role": "user", "content": "go"}],
+            self_correction_temperature=base_temperature,
+            self_correction_bumped_temperature=bumped_temperature,
+            max_self_correction_retries=max_retries,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     ):
         events.append(event)
 
@@ -577,7 +628,7 @@ async def _run_repair_capturing(
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_uses_base_temperature_on_initial_correction() -> (
+async def test_run_tool_self_correction_uses_base_temperature_on_initial_correction() -> (
     None
 ):
     temps, _, _ = await _run_repair_capturing(
@@ -587,7 +638,7 @@ async def test_request_self_correction_uses_base_temperature_on_initial_correcti
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_bumps_temperature_from_first_retry_onward() -> (
+async def test_run_tool_self_correction_bumps_temperature_from_first_retry_onward() -> (
     None
 ):
     temps, _, _ = await _run_repair_capturing(
@@ -601,7 +652,7 @@ async def test_request_self_correction_bumps_temperature_from_first_retry_onward
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_kind", ["parse", "validation", "quality"])
-async def test_request_self_correction_rejects_failure_after_normal_budget(
+async def test_run_tool_self_correction_rejects_failure_after_normal_budget(
     failure_kind: str,
 ) -> None:
     temps, retry_feedback, events = await _run_repair_capturing(
@@ -627,7 +678,7 @@ async def test_request_self_correction_rejects_failure_after_normal_budget(
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_adds_duplicate_name_outline_guidance() -> None:
+async def test_run_tool_self_correction_adds_duplicate_name_outline_guidance() -> None:
     _, retry_feedback, _ = await _run_repair_capturing(
         max_retries=1,
         failure_kind="validation",
@@ -639,7 +690,7 @@ async def test_request_self_correction_adds_duplicate_name_outline_guidance() ->
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_emits_error_event_when_planner_bails_to_conversational_text() -> (
+async def test_run_tool_self_correction_emits_error_event_when_planner_bails_to_conversational_text() -> (
     None
 ):
     text_response = SimpleNamespace(
@@ -668,29 +719,18 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         return ToolProcessingResult(feedback="still bad", failure_kind="validation")
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        error_message="Structured field nesting depth cannot exceed 3.",
-        llm_messages=[{"role": "user", "content": "build flow"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=3,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.CREATE,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="Structured field nesting depth cannot exceed 3.",
+            llm_messages=[{"role": "user", "content": "build flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=3,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     ):
         events.append(event)
 
@@ -716,7 +756,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_uses_request_id_on_forced_retry_validation_error() -> (
+async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validation_error() -> (
     None
 ):
     text_response = SimpleNamespace(
@@ -753,30 +793,19 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
         )
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        request_id="req-repair-feedback",
-        conversation=[],
-        new_messages_start=0,
-        error_message="Invalid propose_flow draft.",
-        llm_messages=[{"role": "user", "content": "build flow"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=0,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.CREATE,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            request_id="req-repair-feedback",
+            error_message="Invalid propose_flow draft.",
+            llm_messages=[{"role": "user", "content": "build flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=0,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     ):
         events.append(event)
 
@@ -788,37 +817,26 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_handles_empty_completion_choices() -> None:
+async def test_run_tool_self_correction_handles_empty_completion_choices() -> None:
     async def call_proposal_completion(
         _: ProposalCompletionRequest,
     ) -> SimpleNamespace:
         return SimpleNamespace(choices=())
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        request_id="req-empty-choices",
-        conversation=[],
-        new_messages_start=0,
-        error_message="Invalid propose_flow draft.",
-        llm_messages=[{"role": "user", "content": "build flow"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=0,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=AsyncMock(),
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.CREATE,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            request_id="req-empty-choices",
+            error_message="Invalid propose_flow draft.",
+            llm_messages=[{"role": "user", "content": "build flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=0,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=AsyncMock(),
+            target_kind=TargetKind.CREATE,
+        )
     ):
         events.append(event)
 
@@ -829,7 +847,7 @@ async def test_request_self_correction_handles_empty_completion_choices() -> Non
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_rejects_malformed_correction_tool_arguments() -> (
+async def test_run_tool_self_correction_rejects_malformed_correction_tool_arguments() -> (
     None
 ):
     tool_call = SimpleNamespace(
@@ -851,30 +869,19 @@ async def test_request_self_correction_rejects_malformed_correction_tool_argumen
         return response
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        request_id="req-malformed-repair",
-        conversation=[],
-        new_messages_start=0,
-        error_message="Invalid propose_flow draft.",
-        llm_messages=[{"role": "user", "content": "build flow"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=0,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.CREATE,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            request_id="req-malformed-repair",
+            error_message="Invalid propose_flow draft.",
+            llm_messages=[{"role": "user", "content": "build flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=0,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     ):
         events.append(event)
 
@@ -886,7 +893,7 @@ async def test_request_self_correction_rejects_malformed_correction_tool_argumen
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_retries_forced_retry_validation_feedback() -> (
+async def test_run_tool_self_correction_retries_forced_retry_validation_feedback() -> (
     None
 ):
     text_response = SimpleNamespace(
@@ -941,29 +948,18 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        error_message="Invalid propose_flow draft.",
-        llm_messages=[{"role": "user", "content": "edit flow"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=3,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.EDIT,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="Invalid propose_flow draft.",
+            llm_messages=[{"role": "user", "content": "edit flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=3,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.EDIT,
+        )
     ):
         events.append(event)
 
@@ -976,7 +972,7 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_limits_text_feedback_retry_budget() -> None:
+async def test_run_tool_self_correction_limits_text_feedback_retry_budget() -> None:
     text_response = SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -1021,29 +1017,18 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         )
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        error_message="Invalid propose_flow draft.",
-        llm_messages=[{"role": "user", "content": "edit flow"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=3,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.EDIT,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="Invalid propose_flow draft.",
+            llm_messages=[{"role": "user", "content": "edit flow"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=3,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.EDIT,
+        )
     ):
         events.append(event)
 
@@ -1059,7 +1044,7 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_still_yields_text_for_legitimate_info_request() -> (
+async def test_run_tool_self_correction_still_yields_text_for_legitimate_info_request() -> (
     None
 ):
     info_request_text = "Vilken modell ska jag använda?"
@@ -1085,29 +1070,18 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         return ToolProcessingResult(feedback="still bad", failure_kind="validation")
 
     events: list[dict[str, str]] = []
-    async for event in request_self_correction(
-        turn=_make_turn(),
-        conversation=[],
-        new_messages_start=0,
-        error_message="original invalid",
-        llm_messages=[{"role": "user", "content": "go"}],
-        tool_call=_original_tool_call(),
-        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        available_model_refs=None,
-        available_kb_refs=None,
-        max_output_tokens=1024,
-        self_correction_temperature=0.35,
-        self_correction_bumped_temperature=0.6,
-        max_self_correction_retries=3,
-        forced_proposal_temperature=0.1,
-        call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=process_invocation,
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-        target_kind=TargetKind.CREATE,
-        forced_tool_prompt="Call propose_flow.",
-        flow=None,
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="original invalid",
+            llm_messages=[{"role": "user", "content": "go"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=3,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
     ):
         events.append(event)
 
@@ -1120,7 +1094,7 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_applies_stronger_prompt_on_second_retry() -> (
+async def test_run_tool_self_correction_applies_stronger_prompt_on_second_retry() -> (
     None
 ):
     _, retry_feedback, _ = await _run_repair_capturing(
