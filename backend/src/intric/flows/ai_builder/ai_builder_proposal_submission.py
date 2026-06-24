@@ -181,11 +181,7 @@ class ProposalSubmissionOwner:
         tool_name = tool_call.function.name
         if tool_name != PROPOSE_FLOW_TOOL_NAME:
             return None
-        if ctx.flow is None:
-            return self._handle_create_propose_flow_tool_call(
-                ctx=ctx, tool_call=tool_call
-            )
-        return self._handle_edit_propose_flow_tool_call(ctx=ctx, tool_call=tool_call)
+        return self._handle_propose_flow_tool_call(ctx=ctx, tool_call=tool_call)
 
     def contains_submission_tool_call(
         self,
@@ -644,29 +640,36 @@ class ProposalSubmissionOwner:
             )
         ]
 
-    async def _handle_create_propose_flow_tool_call(
+    async def _handle_propose_flow_tool_call(
         self,
         *,
         ctx: ProposalTurnContext,
         tool_call: LLMCompletionToolCall,
     ) -> AsyncGenerator[dict[str, str], None]:
-        (
-            blocked,
-            prerequisite_events,
-        ) = await self._resolve_submission_prerequisite_events(
-            ctx=ctx,
-            requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-        )
-        for event in prerequisite_events:
-            yield event
-        if blocked:
-            return
+        target_kind = TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT
+        is_create = target_kind == TargetKind.CREATE
+        assistant_snapshots = None if is_create else ctx.assistant_snapshots
+        planning_state = ctx.planning_state if is_create else None
+        if is_create:
+            (
+                blocked,
+                prerequisite_events,
+            ) = await self._resolve_submission_prerequisite_events(
+                ctx=ctx,
+                requirements_not_confirmed_message=(
+                    "Requirements must be confirmed before creating a flow."
+                ),
+            )
+            for event in prerequisite_events:
+                yield event
+            if blocked:
+                return
 
         retry_config = self._proposal_retry_config(
-            target_kind=TargetKind.CREATE,
-            assistant_snapshots=None,
+            target_kind=target_kind,
+            assistant_snapshots=assistant_snapshots,
             request_id=ctx.request_id,
-            planning_state=ctx.planning_state,
+            planning_state=planning_state,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
             usage_tracker=ctx.usage_tracker,
@@ -685,17 +688,20 @@ class ProposalSubmissionOwner:
                 yield event
             return
 
+        assistant_content = (
+            "Här är mitt förslag:" if is_create else ctx.text_content or ""
+        )
         try:
-            outline_result = await self._process_submission_invocation(
+            result = await self._process_submission_invocation(
                 invocation=_initial_submission_invocation(
                     ctx=ctx,
                     arguments=arguments,
-                    assistant_content="Här är mitt förslag:",
+                    assistant_content=assistant_content,
                     tool_call=tool_call,
                 ),
-                target_kind=TargetKind.CREATE,
-                planning_state=ctx.planning_state,
-                assistant_snapshots=None,
+                target_kind=target_kind,
+                planning_state=planning_state,
+                assistant_snapshots=assistant_snapshots,
                 plan_edit_context=ctx.plan_edit_context,
                 prior_plan_for_revision=ctx.prior_plan_for_revision,
                 request_id=ctx.request_id,
@@ -703,6 +709,8 @@ class ProposalSubmissionOwner:
                 metadata_tool_call=tool_call,
             )
         except AIBuilderArchitectureError as error:
+            if not is_create:
+                raise
             # Create proposal architecture failures are user-visible proposal
             # errors; edit keeps propagating the same exception by design.
             record_proposal_architecture_failure(
@@ -716,16 +724,21 @@ class ProposalSubmissionOwner:
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
             )
             return
-        if outline_result.user_message is not None:
-            yield build_text_event(outline_result.user_message)
+        if is_create and result.user_message is not None:
+            yield build_text_event(result.user_message)
             return
-        if not outline_result.has_events:
+        if not result.has_events:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
-                outline_result.failure_kind
+                result.failure_kind
+            )
+            fallback_feedback = (
+                "Invalid propose_flow draft."
+                if is_create
+                else "Invalid propose_flow arguments."
             )
             async for event in self._run_proposal_self_correction(
                 ctx=ctx,
-                error_message=outline_result.feedback or "Invalid propose_flow draft.",
+                error_message=result.feedback or fallback_feedback,
                 tool_call=tool_call,
                 retry_config=retry_config,
                 reason=proposal_repair_reason,
@@ -733,7 +746,7 @@ class ProposalSubmissionOwner:
                 yield event
             return
 
-        for event in outline_result.iter_events():
+        for event in result.iter_events():
             yield event
 
     async def _retry_forced_proposal_after_text(
@@ -807,68 +820,6 @@ class ProposalSubmissionOwner:
             )
         )
         return outcome.events
-
-    async def _handle_edit_propose_flow_tool_call(
-        self,
-        *,
-        ctx: ProposalTurnContext,
-        tool_call: LLMCompletionToolCall,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        # Edit submissions operate on an existing flow; discovery prerequisites
-        # belong to create submissions before the first plan exists.
-        retry_config = self._proposal_retry_config(
-            target_kind=TargetKind.EDIT,
-            assistant_snapshots=ctx.assistant_snapshots,
-            request_id=ctx.request_id,
-            planning_state=None,
-            plan_edit_context=ctx.plan_edit_context,
-            prior_plan_for_revision=ctx.prior_plan_for_revision,
-            usage_tracker=ctx.usage_tracker,
-        )
-        try:
-            raw_args = parse_tool_call_arguments(tool_call.function.arguments)
-        except ToolArgumentParseError as error:
-            async for event in self._run_proposal_self_correction(
-                ctx=ctx,
-                error_message=f"Invalid propose_flow arguments: {error}",
-                tool_call=tool_call,
-                retry_config=retry_config,
-                reason="parse",
-            ):
-                yield event
-            return
-
-        edit_result = await self._process_submission_invocation(
-            invocation=_initial_submission_invocation(
-                ctx=ctx,
-                arguments=raw_args,
-                assistant_content=ctx.text_content or "",
-                tool_call=tool_call,
-            ),
-            target_kind=TargetKind.EDIT,
-            planning_state=None,
-            assistant_snapshots=ctx.assistant_snapshots,
-            plan_edit_context=ctx.plan_edit_context,
-            prior_plan_for_revision=ctx.prior_plan_for_revision,
-            request_id=ctx.request_id,
-            usage_tracker=ctx.usage_tracker,
-            metadata_tool_call=tool_call,
-        )
-        if edit_result.event is None:
-            proposal_repair_reason = proposal_repair_reason_from_tool_failure(
-                edit_result.failure_kind
-            )
-            async for event in self._run_proposal_self_correction(
-                ctx=ctx,
-                error_message=edit_result.feedback or "Invalid propose_flow arguments.",
-                tool_call=tool_call,
-                retry_config=retry_config,
-                reason=proposal_repair_reason,
-            ):
-                yield event
-            return
-
-        yield edit_result.event
 
 
 def _initial_submission_invocation(

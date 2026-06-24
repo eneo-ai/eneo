@@ -391,7 +391,7 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
 
 
 @pytest.mark.asyncio
-async def test_handle_create_propose_flow_tool_call_returns_architecture_error_without_repair() -> (
+async def test_create_propose_flow_architecture_error_returns_event_without_repair() -> (
     None
 ):
     submission = _make_submission()
@@ -579,6 +579,88 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
         events = [event async for event in dispatched]
 
     assert events == list(expected_events)
+
+
+@pytest.mark.asyncio
+async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
+    submission = _make_submission()
+    compiled = _compiled_edit_proposal()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+        tool_call_id="call-edit-events",
+    )
+    expected_events = (
+        {"event": "status", "data": '{"status":"one"}'},
+        {"event": "plan", "data": "{}"},
+    )
+    process_edit = AsyncMock(
+        return_value=ToolProcessingResult(compiled_proposal=compiled)
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(
+            event=expected_events[0],
+            events=expected_events[1:],
+        )
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            new=process_edit,
+        ),
+        patch.object(
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(flow=_flow_with_description("Old description")),
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert events == list(expected_events)
+
+
+@pytest.mark.asyncio
+async def test_edit_propose_flow_user_message_routes_to_self_correction() -> None:
+    submission = _make_submission()
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+        tool_call_id="call-edit-user-message",
+    )
+    process_edit = AsyncMock(
+        return_value=ToolProcessingResult(
+            user_message="I need one more detail.",
+            failure_kind="validation",
+        )
+    )
+
+    async def _repair_events(_request):
+        yield {"event": "status", "data": '{"status":"repairing"}'}
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+            new=process_edit,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "run_tool_self_correction",
+            side_effect=_repair_events,
+        ) as repair,
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(flow=_flow_with_description("Old description")),
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    repair.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1019,7 +1101,7 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
 
 
 @pytest.mark.asyncio
-async def test_handle_edit_propose_flow_preserves_description_advisory_without_completion() -> (
+async def test_edit_propose_flow_preserves_description_advisory_without_completion() -> (
     None
 ):
     litellm_client = AsyncMock()
@@ -1169,9 +1251,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
 
 
 @pytest.mark.asyncio
-async def test_handle_edit_propose_flow_parse_failure_triggers_self_correction() -> (
-    None
-):
+async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> None:
     submission = _make_submission()
     tool_call = MagicMock()
     tool_call.id = "call_edit"
