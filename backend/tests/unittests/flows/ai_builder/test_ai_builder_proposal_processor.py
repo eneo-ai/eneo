@@ -100,6 +100,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_processor,
     _make_response_with_tool_calls,
     _make_tool_call,
+    _make_usage,
     _store_compiled_plan,
 )
 
@@ -166,31 +167,16 @@ def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
     )
 
     tracker.record_response(
-        _make_response_with_tool_calls(
-            _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {"flow_name": "Initial"}),
-            prompt_tokens=10,
-            completion_tokens=2,
-            total_tokens=12,
-        ),
-        messages=[{"role": "user", "content": "Build"}],
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=10, completion_tokens=2, total_tokens=12),
     )
     tracker.record_response(
-        _make_response_with_tool_calls(
-            _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {"flow_name": "Auxiliary"}),
-            prompt_tokens=4,
-            completion_tokens=1,
-            total_tokens=5,
-        ),
-        messages=[{"role": "user", "content": "Auxiliary"}],
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=4, completion_tokens=1, total_tokens=5),
     )
     tracker.record_response(
-        _make_response_with_tool_calls(
-            _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {"flow_name": "Repaired"}),
-            prompt_tokens=3,
-            completion_tokens=2,
-            total_tokens=5,
-        ),
-        messages=[{"role": "user", "content": "Repair"}],
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         counts_as_repair=True,
     )
 

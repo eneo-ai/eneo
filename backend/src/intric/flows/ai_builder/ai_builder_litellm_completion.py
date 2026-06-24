@@ -116,9 +116,17 @@ async def call_proposal_completion(
     )
     response = normalize_litellm_completion_response(raw_response)
     if usage_tracker is not None:
-        usage_tracker.record_response(
+        completion_text, finish_reason = _first_text_and_finish_reason(response)
+        metadata = _completion_metadata_from_response(
             response,
+            litellm_model=usage_tracker.model,
             messages=request.messages,
+            completion_text=completion_text,
+            finish_reason=finish_reason,
+        )
+        usage_tracker.record_response(
+            finish_reason=metadata.finish_reason,
+            usage=metadata.usage,
             counts_as_repair=request.counts_as_repair,
         )
     return response

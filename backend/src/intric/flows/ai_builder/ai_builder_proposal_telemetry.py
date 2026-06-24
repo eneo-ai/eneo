@@ -33,7 +33,6 @@ from intric.flows.ai_builder.ai_builder_telemetry import (
 from intric.flows.ai_builder.ai_builder_token_usage import (
     CompletionTokenUsage,
     combine_token_usage,
-    completion_token_usage_from_response,
 )
 from intric.main.logging import get_logger
 
@@ -78,16 +77,6 @@ logger = get_logger(__name__)
 
 def _safe_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
-
-
-def _completion_text_from_response(response: Any) -> str:
-    parts: list[str] = []
-    for choice in getattr(response, "choices", []) or []:
-        message = getattr(choice, "message", None)
-        content = getattr(message, "content", None)
-        if isinstance(content, str) and content:
-            parts.append(content)
-    return "\n".join(parts)
 
 
 def proposal_repair_reason_from_tool_failure(
@@ -135,23 +124,15 @@ class ProposalTurnTelemetry:
 
     def record_response(
         self,
-        response: Any,
         *,
-        messages: list[dict[str, Any]],
+        finish_reason: str | None,
+        usage: CompletionTokenUsage,
         counts_as_repair: bool = False,
     ) -> None:
-        choice = response.choices[0] if getattr(response, "choices", None) else None
-        self.finish_reason = _safe_str(getattr(choice, "finish_reason", None))
+        self.finish_reason = finish_reason
         if counts_as_repair:
             self.repair_attempts += 1
-        self.token_usages.append(
-            completion_token_usage_from_response(
-                response,
-                model_name=self.model,
-                messages=messages,
-                completion_text=_completion_text_from_response(response),
-            )
-        )
+        self.token_usages.append(usage)
 
     def record_first_attempt(
         self,

@@ -20,6 +20,10 @@ from intric.flows.ai_builder.ai_builder_proposal_submission import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
 )
+from intric.flows.ai_builder.ai_builder_token_usage import (
+    TOKEN_USAGE_SOURCE_PROVIDER,
+    CompletionTokenUsage,
+)
 
 
 def _make_processor(**overrides: object) -> AIBuilderProposalProcessor:
@@ -47,6 +51,21 @@ def _make_submission(**overrides: object) -> ProposalSubmissionOwner:
     }
     defaults.update(overrides)
     return ProposalSubmissionOwner(**defaults)
+
+
+def _make_usage(
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+) -> CompletionTokenUsage:
+    return CompletionTokenUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        source=TOKEN_USAGE_SOURCE_PROVIDER,
+        estimated=False,
+    )
 
 
 def _stored_plan_result(*, plan: object | None = None, proposal: object | None = None):

@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import get_args
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -33,36 +32,13 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.application.flow_authoring_command import FlowAuthoringPreview
+from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_usage
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _FAILURE_KIND_SOURCE_FILES = (
     _REPO_ROOT / "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py",
     _REPO_ROOT / "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py",
 )
-
-
-def _make_response(
-    *,
-    prompt_tokens: int,
-    completion_tokens: int,
-    total_tokens: int,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                finish_reason="tool_calls",
-                message=SimpleNamespace(
-                    tool_calls=[],
-                    content=None,
-                ),
-            )
-        ],
-        usage=SimpleNamespace(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-        ),
-    )
 
 
 def _tool_processing_failure_kinds_from_source() -> set[str]:
@@ -98,8 +74,8 @@ def test_proposal_turn_telemetry_extends_canonical_planner_payload() -> None:
         target_kind=TargetKind.CREATE,
     )
     telemetry.record_response(
-        _make_response(prompt_tokens=10, completion_tokens=3, total_tokens=13),
-        messages=[{"role": "user", "content": "Build"}],
+        finish_reason="tool_calls",
+        usage=_make_usage(prompt_tokens=10, completion_tokens=3, total_tokens=13),
     )
     assert telemetry.record_first_attempt(
         tool_name=PROPOSE_FLOW_TOOL_NAME,

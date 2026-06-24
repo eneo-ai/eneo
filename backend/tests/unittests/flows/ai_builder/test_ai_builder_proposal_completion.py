@@ -254,6 +254,7 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
     assert result.usage.total_tokens == 8
     telemetry = tracker.build_planner_telemetry(tool_call_count=0)
     assert telemetry["llm_calls_made"] == 1
+    assert telemetry["finish_reason"] == "stop"
     assert telemetry["total_tokens"] == 8
     assert telemetry["repair_attempts"] == 0
 
