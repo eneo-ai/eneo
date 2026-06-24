@@ -6,7 +6,7 @@
 2. Keep this document as the phase-order and merge-gate packet; do not duplicate detailed slice design here.
 3. Treat PR #480 and Dify as references, not architectures to copy.
 4. Every implementation slice must delete a named duplicate owner or remove a named wrong-layer dependency in the same migration.
-5. Stop after Phase 4 with a Phase 5A go/no-go packet; do not implement Assistant configuration, shared descriptors, or MCP in this goal.
+5. Stop after Phase 4 with the Phase 5A go/no-go packet; do not implement Assistant configuration, shared descriptors, or MCP in this goal.
 
 ## Document Precedence
 
@@ -18,6 +18,8 @@ Related docs keep their existing ownership:
   owns the long-term capability/MCP rationale.
 - [Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md)
   owns the detailed question-recovery completion slice and its failure-mode-to-test mapping.
+- [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md)
+  owns final Phase 4 completion evidence, retry-loop disposition, and the Phase 5A go/no-go packet.
 - This document owns the active goal sequence: Phase 4 completion, then a Phase 5A go/no-go packet, then stop.
 
 If a later decision record supersedes any of these, it should explicitly say so and delete or shrink stale guidance in the same change.
@@ -82,23 +84,21 @@ The Phase 5A packet owns the next go/no-go recommendation.
 
 Phase 4 may touch only Flow AI Builder runtime/planner/proposal code and tests unless a direct shared owner requires a narrow dependency update.
 
-### Implemented Primary Slice
+### Implemented Phase 4 Source Slices
 
-Question-recovery completion ownership. The detailed design and test matrix live in [Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md).
+The completion packet records the before/after metrics and final disposition.
+This section keeps the active plan aligned with source reality.
 
-The implemented target:
+| Slice | Canonical owner after Phase 4 | Deletion / consolidation |
+| --- | --- | --- |
+| Shared planner/proposal provider completion | `ai_builder_litellm_completion.py` | Collapsed separate planner/proposal completion modules into one provider boundary. |
+| Planner retry execution | `ai_builder_structured_turn.py` | Moved planner parse/semantic retry execution into one typed turn runner; `ai_builder_orchestration_pipeline.py` remains a thin planner adapter. |
+| Generic repair wrapper | Deleted | Removed the broad repair wrapper module after `run_structured_turn(...)` owned the needed planner behavior. |
+| Proposal repair runtime wrapper | Deleted | Carried proposal repair through `ProposalTurnContext` instead of a parallel wrapper. |
+| Question-recovery completion ownership | `AIBuilderProposalProcessor` creates the tracked callable; `ai_builder_question_recovery.py` receives it | Deleted question recovery's direct provider-completion import and manual request construction. |
 
-- `call_proposal_completion` remains the current proposal-completion provider boundary;
-- active first-pass proposal submission may still call it directly through `ctx.completion_request(...)`;
-- question recovery no longer imports or calls it directly;
-- question recovery receives the tracked completion callable as an explicit dependency from the owner that has the active turn context;
-- question recovery still uses discovery LiteLLM context where discovery runtime requires it;
-- `counts_as_repair=True`, retry exhaustion, backend-owned questions, and streaming order survived the slice.
-
-The request object carries turn data only: `ProposalTurnContext` and the
-original tool call. The executable completion dependency belongs in the
-function argument list, beside the repository, discovery LiteLLM client, and
-temperature dependencies.
+Question-recovery completion ownership remains documented in detail in
+[Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md).
 
 ### Candidate Follow-up Slices
 
@@ -106,8 +106,9 @@ These are candidates, not automatic work. Each requires preflight proof of a can
 
 | Candidate | Required Deletion Gate |
 | --- | --- |
-| Proposal completion callable cleanup | Reassess `ProposalCompletionFn` only if replacing it reduces total production code and ownership-guard complexity. |
-| Planner orchestration repair consolidation | Fold `ai_builder_orchestration_pipeline.py` repair behavior into the typed turn runner only if tests prove identical retry/error semantics. |
+| Proposal completion callable cleanup | Skipped for Phase 4. Reassess `ProposalCompletionFn` only if replacing it reduces total production code and ownership-guard complexity. |
+| Planner orchestration repair consolidation | Completed for retry execution. Do not fold planner prompt/message helpers further unless that deletes more than it moves. |
+| Streamed repair skeleton duplication | Deferred. Proposal repair, question recovery, and confirm requirements share repair-event skeletons, but each owns distinct product semantics. Only replace them with one typed streamed-repair contract if the same change deletes the current `tool_call: Any`, event-dict, and message-dict residuals. |
 | Builder step capability duplicates | Defer unless the whole change stays Builder-local and mechanically deletes a duplicate owner. Otherwise this belongs in a later Flow capability-deduplication slice. |
 | Prompt hard-rule duplication | Defer unless every touched rule stays within Builder runtime/planner ownership. Future capability work should enforce: every model-visible capability claim must have canonical enforcement. |
 | Capability projection complexity | Shrink `ai_builder_capability_projection.py` only if Phase 4 typed-turn deletion or FCM projection makes state fields unnecessary. |
@@ -128,17 +129,19 @@ worktree and recorded in the final packet.
 | Complexity | Before/after production file count, production LOC, `dict[str, Any]` count, and direct provider-caller count are recorded. |
 | Documentation | This plan and the question-recovery boundary doc match the actual post-change symbols. |
 | Baseline failures | Any pre-existing failure claim records baseline SHA, exact command, failing node ids, and output artifact or checksum. |
-| Stop | Phase 5A packet is written; no Phase 5 implementation has started. |
+| Stop | [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md) is written; no Phase 5 implementation has started. |
 
-## Baseline Commands For First Source Slice
+Current Phase 4 status: source slices are complete. The stop gate is this plan
+plus the final completion packet.
 
-The first source commit after this planning update must record the baseline SHA
-immediately before source edits. For this slice, the source baseline was
-`dfe1e71c0`, and the baseline commands ran from docs-only commit `76f6afde0`
+## Historical Baseline Commands For Question-Recovery Slice
+
+The question-recovery source slice has already landed. Its source baseline was
+`dfe1e71c0`, and baseline commands ran from docs-only commit `76f6afde0`
 before source edits. Treat `76f6afde0` as a docs-only wrapper around the same
-source behavior when comparing baseline results.
+source behavior when comparing historical baseline results.
 
-Run these exact focused commands before the question-recovery source change:
+Focused validation for that slice used:
 
 ```bash
 docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
@@ -165,8 +168,8 @@ docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
   /home/vscode/.local/bin/uv run lint-imports --no-cache
 ```
 
-If any command fails before source edits, record the command, baseline SHA,
-failing node ids, and artifact/checksum before continuing.
+Future source slices must record their own baseline SHA and focused validation;
+do not reuse this historical question-recovery baseline for Phase 5A.
 
 ## Phase 4 Acceptance Gates
 
@@ -258,7 +261,14 @@ duplicate owner in the same migration.
 
 Do not start Phase 5A.
 
-Do not treat "finish Phase 4" as one source-code goal. Stop and re-audit the
-remaining Phase 4 candidates before selecting another slice. Each next slice
-needs its own preflight proof, red guard where practical, deletion gate, and
-focused validation.
+The Phase 5A go/no-go packet is now
+[Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
+It recommends a conditional go for Phase 5A planning and red tests only:
+
+- no implementation in Phase 4;
+- no broad PR #480 cherry-pick;
+- no MCP adapter before one Assistant command owner exists;
+- red tests first for omission, clearing, Flow-managed ownership, governance,
+  audit, and any explicit revision/idempotency policy.
+
+Any Phase 5A source work requires a new explicit goal.
