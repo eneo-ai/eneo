@@ -407,9 +407,11 @@ class ProposalSubmissionOwner:
             )
         )
 
-    def _create_propose_flow_retry_config(
+    def _proposal_retry_config(
         self,
         *,
+        target_kind: TargetKind,
+        assistant_snapshots: AssistantAuthoringSnapshots | None,
         request_id: str,
         planning_state: PlanningState | None,
         plan_edit_context: AIBuilderPlanEditContext | None,
@@ -419,6 +421,41 @@ class ProposalSubmissionOwner:
         async def _process_tool_invocation(
             invocation: ToolRetryInvocation,
         ) -> ToolProcessingResult:
+            return await self._process_retry_invocation(
+                invocation=invocation,
+                target_kind=target_kind,
+                planning_state=planning_state,
+                assistant_snapshots=assistant_snapshots,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
+                request_id=request_id,
+                usage_tracker=usage_tracker,
+            )
+
+        return ToolRetryConfig(
+            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=target_kind,
+            forced_tool_prompt=(
+                PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT
+                if target_kind == TargetKind.CREATE
+                else PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT
+            ),
+            process_tool_invocation=_process_tool_invocation,
+        )
+
+    async def _process_retry_invocation(
+        self,
+        *,
+        invocation: ToolRetryInvocation,
+        target_kind: TargetKind,
+        planning_state: PlanningState | None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None,
+        plan_edit_context: AIBuilderPlanEditContext | None,
+        prior_plan_for_revision: BuilderPlan | None,
+        request_id: str,
+        usage_tracker: ProposalTurnTelemetry | None,
+    ) -> ToolProcessingResult:
+        if target_kind == TargetKind.CREATE:
             result = await process_outline_arguments(
                 turn=invocation.turn,
                 conversation=invocation.conversation,
@@ -431,36 +468,7 @@ class ProposalSubmissionOwner:
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
             )
-            if result.compiled_proposal is None:
-                return result
-            return await self._finalize_retry_compiled_proposal(
-                invocation=invocation,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                target_kind=TargetKind.CREATE,
-                compiled=result.compiled_proposal,
-                request_id=request_id,
-                usage_tracker=usage_tracker,
-            )
-
-        return ToolRetryConfig(
-            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-            target_kind=TargetKind.CREATE,
-            forced_tool_prompt=PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
-            process_tool_invocation=_process_tool_invocation,
-        )
-
-    def _edit_propose_flow_retry_config(
-        self,
-        *,
-        assistant_snapshots: AssistantAuthoringSnapshots | None,
-        request_id: str,
-        plan_edit_context: AIBuilderPlanEditContext | None,
-        prior_plan_for_revision: BuilderPlan | None,
-        usage_tracker: ProposalTurnTelemetry | None,
-    ) -> ToolRetryConfig:
-        async def _process_tool_invocation(
-            invocation: ToolRetryInvocation,
-        ) -> ToolProcessingResult:
+        else:
             result = await process_edit_arguments(
                 turn=invocation.turn,
                 conversation=invocation.conversation,
@@ -473,22 +481,15 @@ class ProposalSubmissionOwner:
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
             )
-            if result.compiled_proposal is None:
-                return result
-            return await self._finalize_retry_compiled_proposal(
-                invocation=invocation,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                target_kind=TargetKind.EDIT,
-                compiled=result.compiled_proposal,
-                request_id=request_id,
-                usage_tracker=usage_tracker,
-            )
-
-        return ToolRetryConfig(
-            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-            target_kind=TargetKind.EDIT,
-            forced_tool_prompt=PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT,
-            process_tool_invocation=_process_tool_invocation,
+        if result.compiled_proposal is None:
+            return result
+        return await self._finalize_retry_compiled_proposal(
+            invocation=invocation,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            target_kind=target_kind,
+            compiled=result.compiled_proposal,
+            request_id=request_id,
+            usage_tracker=usage_tracker,
         )
 
     async def _finalize_retry_compiled_proposal(
@@ -655,7 +656,9 @@ class ProposalSubmissionOwner:
         if blocked:
             return
 
-        retry_config = self._create_propose_flow_retry_config(
+        retry_config = self._proposal_retry_config(
+            target_kind=TargetKind.CREATE,
+            assistant_snapshots=None,
             request_id=ctx.request_id,
             planning_state=ctx.planning_state,
             plan_edit_context=ctx.plan_edit_context,
@@ -772,22 +775,14 @@ class ProposalSubmissionOwner:
             request_id=request_id,
             reason="missing_submission_tool",
         )
-        retry_config = (
-            self._create_propose_flow_retry_config(
-                request_id=request_id,
-                planning_state=planning_state,
-                plan_edit_context=plan_edit_context,
-                prior_plan_for_revision=prior_plan_for_revision,
-                usage_tracker=usage_tracker,
-            )
-            if flow is None
-            else self._edit_propose_flow_retry_config(
-                assistant_snapshots=assistant_snapshots,
-                request_id=request_id,
-                plan_edit_context=plan_edit_context,
-                prior_plan_for_revision=prior_plan_for_revision,
-                usage_tracker=usage_tracker,
-            )
+        retry_config = self._proposal_retry_config(
+            target_kind=TargetKind.CREATE if flow is None else TargetKind.EDIT,
+            assistant_snapshots=assistant_snapshots,
+            request_id=request_id,
+            planning_state=planning_state,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
+            usage_tracker=usage_tracker,
         )
         outcome = await run_forced_tool_retry_after_text(
             ForcedToolAfterTextRequest(
@@ -831,9 +826,11 @@ class ProposalSubmissionOwner:
     ) -> AsyncGenerator[dict[str, str], None]:
         # Edit submissions operate on an existing flow; discovery prerequisites
         # belong to create submissions before the first plan exists.
-        retry_config = self._edit_propose_flow_retry_config(
+        retry_config = self._proposal_retry_config(
+            target_kind=TargetKind.EDIT,
             assistant_snapshots=ctx.assistant_snapshots,
             request_id=ctx.request_id,
+            planning_state=None,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
             usage_tracker=ctx.usage_tracker,

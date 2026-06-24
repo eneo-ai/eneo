@@ -126,11 +126,11 @@ PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
 PROPOSAL_SUBMISSION_METHODS = frozenset(
     {
         "active_submission_tool_schemas",
-        "_create_propose_flow_retry_config",
-        "_edit_propose_flow_retry_config",
         "_finalize_retry_compiled_proposal",
         "_handle_create_propose_flow_tool_call",
         "_handle_edit_propose_flow_tool_call",
+        "_process_retry_invocation",
+        "_proposal_retry_config",
         "preflight_scoped_model_revision_if_requested",
         "retry_forced_proposal_after_text",
         "_active_submission_tool_schemas",
@@ -140,11 +140,11 @@ PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
     {
         "_active_submission_tool_schemas",
         "_build_self_correction_request",
-        "_create_propose_flow_retry_config",
-        "_edit_propose_flow_retry_config",
         "_finalize_retry_compiled_proposal",
         "_handle_create_propose_flow_tool_call",
         "_handle_edit_propose_flow_tool_call",
+        "_process_retry_invocation",
+        "_proposal_retry_config",
         "_record_failed_proposal_attempt_repair",
         "_resolve_submission_prerequisite_events",
         "_retry_forced_proposal_after_text",
@@ -153,7 +153,9 @@ PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
 )
 PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS = frozenset(
     {
+        "_create_propose_flow_retry_config",
         "_edit_flow_retry_config",
+        "_edit_propose_flow_retry_config",
         "_handle_edit_flow_tool_call",
         "_handle_outline_flow_tool_call",
         "_outline_flow_retry_config",
@@ -1535,10 +1537,7 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
                 f"{submission_path}:{submission_classes[0].lineno} "
                 f"retry finalizer count {len(retry_finalizers)}"
             )
-        for method_name in (
-            "_create_propose_flow_retry_config",
-            "_edit_propose_flow_retry_config",
-        ):
+        for method_name in ("_proposal_retry_config", "_process_retry_invocation"):
             method = submission_methods.get(method_name)
             if method is None:
                 violations.append(f"{submission_path}: missing {method_name}")

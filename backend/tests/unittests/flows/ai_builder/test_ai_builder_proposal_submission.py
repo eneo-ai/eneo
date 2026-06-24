@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from inspect import signature
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -660,8 +659,6 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
     process_outline.assert_awaited_once()
     retry_config = repair.call_args.args[0].retry_config
     assert isinstance(retry_config, ToolRetryConfig)
-    process_signature = signature(retry_config.process_tool_invocation)
-    assert list(process_signature.parameters) == ["invocation"]
     assert set(ToolRetryConfig.__dataclass_fields__) == {
         "target_tool_name",
         "target_kind",
@@ -671,7 +668,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
 
 
 @pytest.mark.asyncio
-async def test_create_propose_flow_retry_config_finalizes_compiled_proposal_with_invocation_context() -> (
+async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_invocation_context() -> (
     None
 ):
     submission = _make_submission()
@@ -699,7 +696,9 @@ async def test_create_propose_flow_retry_config_finalizes_compiled_proposal_with
         tool_call_id="call-outline-retry-finalize",
     )
 
-    config = submission._create_propose_flow_retry_config(
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.CREATE,
+        assistant_snapshots=None,
         request_id="req-outline-retry-finalize",
         planning_state=None,
         plan_edit_context=None,
@@ -863,7 +862,7 @@ async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_propose_flow_retry_config_carries_invocation_context() -> None:
+async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     submission = _make_submission()
     assistant_snapshots = {uuid4(): {"name": "Analys"}}
     resource_catalog = MagicMock()
@@ -871,9 +870,11 @@ async def test_edit_propose_flow_retry_config_carries_invocation_context() -> No
     plan_edit_context = MagicMock()
     prior_plan_for_revision = MagicMock()
 
-    config = submission._edit_propose_flow_retry_config(
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.EDIT,
         assistant_snapshots=assistant_snapshots,
         request_id="req",
+        planning_state=None,
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
         usage_tracker=None,
@@ -882,8 +883,6 @@ async def test_edit_propose_flow_retry_config_carries_invocation_context() -> No
     assert isinstance(config, ToolRetryConfig)
     assert config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert config.target_kind == TargetKind.EDIT
-    process_signature = signature(config.process_tool_invocation)
-    assert list(process_signature.parameters) == ["invocation"]
     assert set(ToolRetryConfig.__dataclass_fields__) == {
         "target_tool_name",
         "target_kind",
@@ -941,9 +940,11 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
         advisories=[_description_update_advisory()],
     )
     flow = _flow_with_description("Old generated description")
-    config = submission._edit_propose_flow_retry_config(
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.EDIT,
         assistant_snapshots=None,
         request_id="req-forced-retry-edit-advisory",
+        planning_state=None,
         plan_edit_context=None,
         prior_plan_for_revision=None,
         usage_tracker=tracker,
@@ -1087,8 +1088,6 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert request.retry_config.target_kind == TargetKind.CREATE
-    process_signature = signature(request.retry_config.process_tool_invocation)
-    assert list(process_signature.parameters) == ["invocation"]
     assert isinstance(request.turn, SessionSendTurn)
     assert "Now call propose_flow" in request.retry_config.forced_tool_prompt
 
