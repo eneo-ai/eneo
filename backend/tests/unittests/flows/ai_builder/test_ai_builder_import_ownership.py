@@ -2314,6 +2314,21 @@ def test_tool_call_argument_json_parsing_has_single_owner() -> None:
     assert violations == []
 
 
+def test_normalized_tool_calls_are_not_runtime_probed() -> None:
+    violations: list[str] = []
+    for path in _python_files():
+        if "src/intric/flows/ai_builder" not in path.as_posix():
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if _is_hasattr_tool_calls_call(node):
+                violations.append(
+                    f"{path}:{node.lineno} probes normalized message.tool_calls"
+                )
+
+    assert violations == []
+
+
 def _annotation_uses_any(annotation: ast.expr | None) -> bool:
     return annotation is not None and any(
         isinstance(node, ast.Name) and node.id == "Any" for node in ast.walk(annotation)
@@ -2348,6 +2363,17 @@ def _is_json_loads_function_arguments_call(node: ast.AST) -> bool:
         and _attribute_chain(child).endswith(".function.arguments")
         for argument in node.args
         for child in ast.walk(argument)
+    )
+
+
+def _is_hasattr_tool_calls_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "hasattr"
+        and len(node.args) == 2
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "tool_calls"
     )
 
 

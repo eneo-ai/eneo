@@ -122,7 +122,7 @@ def _forced_submission_response(
     if submission_tool_name != PROPOSE_FLOW_TOOL_NAME:
         return None
 
-    tool_calls = tuple(message.tool_calls or ())
+    tool_calls = message.tool_calls
     if len(tool_calls) != 1:
         return None
 

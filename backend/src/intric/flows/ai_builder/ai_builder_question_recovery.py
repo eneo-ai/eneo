@@ -342,7 +342,7 @@ async def _stream_non_question_continuation(
             return
 
         message = response.choices[0].message
-        tool_calls = message.tool_calls if hasattr(message, "tool_calls") else None
+        tool_calls = message.tool_calls
         if tool_calls:
             repeated_question_call = next(
                 (

@@ -514,9 +514,9 @@ async def request_self_correction(
 
         choice = response.choices[0]
         message = choice.message
-        assistant_text = _safe_assistant_text(getattr(message, "content", None))
+        assistant_text = _safe_assistant_text(message.content)
 
-        if hasattr(message, "tool_calls") and message.tool_calls:
+        if message.tool_calls:
             retry_feedback: tuple[LLMCompletionToolCall, str] | None = None
             for correction_tool_call in message.tool_calls:
                 if correction_tool_call.function.name != target_tool_name:
@@ -753,7 +753,7 @@ async def retry_forced_tool_after_text(
 
     choice = response.choices[0]
     message = choice.message
-    if not (hasattr(message, "tool_calls") and message.tool_calls):
+    if not message.tool_calls:
         return ForcedToolRetryOutcome()
 
     for tool_call in message.tool_calls:

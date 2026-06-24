@@ -17,6 +17,11 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import (
+    LLMCompletionMessage,
+    LLMCompletionToolCall,
+    LLMCompletionToolCallFunction,
+)
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_WITHOUT,
@@ -75,6 +80,21 @@ def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource
     }
 
 
+def _normalized_tool_call(name: str) -> LLMCompletionToolCall:
+    return LLMCompletionToolCall(
+        id=f"call-{name}",
+        function=LLMCompletionToolCallFunction(name=name, arguments="{}"),
+    )
+
+
+def _normalized_message(
+    *,
+    tool_calls: tuple[LLMCompletionToolCall, ...],
+    content: str = "text",
+) -> LLMCompletionMessage:
+    return LLMCompletionMessage(content=content, tool_calls=tool_calls)
+
+
 def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
@@ -101,29 +121,32 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
 @pytest.mark.parametrize(
     ("message", "submission_tool_name"),
     [
-        (SimpleNamespace(tool_calls=None, content="text"), PROPOSE_FLOW_TOOL_NAME),
-        (SimpleNamespace(tool_calls=[], content="text"), PROPOSE_FLOW_TOOL_NAME),
+        (_normalized_message(tool_calls=()), PROPOSE_FLOW_TOOL_NAME),
         (
-            SimpleNamespace(
-                tool_calls=[
-                    _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {}),
-                    _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {}),
-                ],
-                content="text",
+            _normalized_message(
+                tool_calls=(
+                    _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),
+                    _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),
+                ),
             ),
             PROPOSE_FLOW_TOOL_NAME,
         ),
         (
-            SimpleNamespace(
-                tool_calls=[_make_tool_call(PROPOSE_FLOW_TOOL_NAME, {})],
-                content="text",
+            _normalized_message(
+                tool_calls=(_normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),),
             ),
             "confirm_requirements",
+        ),
+        (
+            _normalized_message(
+                tool_calls=(_normalized_tool_call("confirm_requirements"),),
+            ),
+            PROPOSE_FLOW_TOOL_NAME,
         ),
     ],
 )
 def test_forced_submission_response_rejects_missing_parallel_wrong_or_unsupported_tools(
-    message: SimpleNamespace, submission_tool_name: str
+    message: LLMCompletionMessage, submission_tool_name: str
 ) -> None:
     assert (
         _forced_submission_response(
@@ -135,10 +158,13 @@ def test_forced_submission_response_rejects_missing_parallel_wrong_or_unsupporte
 
 
 def test_forced_submission_response_accepts_one_active_submission_tool() -> None:
-    tool_call = _make_tool_call(PROPOSE_FLOW_TOOL_NAME, {})
+    tool_call = _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME)
 
     response = _forced_submission_response(
-        message=SimpleNamespace(tool_calls=[tool_call], content="Här är planen."),
+        message=_normalized_message(
+            tool_calls=(tool_call,),
+            content="Här är planen.",
+        ),
         submission_tool_name=PROPOSE_FLOW_TOOL_NAME,
     )
 
