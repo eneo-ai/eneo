@@ -310,25 +310,9 @@ class ProposalSubmissionOwner:
                     return
 
         forced_events = await self._retry_forced_proposal_after_text(
+            ctx=ctx,
             correction_messages=llm_messages,
             assistant_text=message.content or "",
-            tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            resource_catalog=resource_catalog,
-            max_output_tokens=max_output_tokens,
-            flow=flow,
-            assistant_snapshots=assistant_snapshots,
-            planning_state=planning_state,
-            plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
-            usage_tracker=usage_tracker,
-            assistant_metadata=assistant_metadata,
         )
         if forced_events is not None:
             for event in forced_events:
@@ -752,71 +736,35 @@ class ProposalSubmissionOwner:
     async def _retry_forced_proposal_after_text(
         self,
         *,
+        ctx: ProposalTurnContext,
         correction_messages: list[dict[str, Any]],
         assistant_text: str,
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow: "Flow | None" = None,
-        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-        planning_state: PlanningState | None = None,
-        plan_edit_context: AIBuilderPlanEditContext | None = None,
-        prior_plan_for_revision: BuilderPlan | None = None,
-        usage_tracker: ProposalTurnTelemetry,
-        assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
-        request_id = usage_tracker.request_id
         self._record_failed_proposal_attempt_repair(
-            usage_tracker=usage_tracker,
-            request_id=request_id,
+            usage_tracker=ctx.usage_tracker,
+            request_id=ctx.request_id,
             reason="missing_submission_tool",
         )
         retry_config = self._proposal_retry_config(
-            target_kind=TargetKind.CREATE if flow is None else TargetKind.EDIT,
-            assistant_snapshots=assistant_snapshots,
-            request_id=request_id,
-            planning_state=planning_state,
-            plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
-            usage_tracker=usage_tracker,
+            target_kind=TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT,
+            assistant_snapshots=ctx.assistant_snapshots,
+            request_id=ctx.request_id,
+            planning_state=ctx.planning_state,
+            plan_edit_context=ctx.plan_edit_context,
+            prior_plan_for_revision=ctx.prior_plan_for_revision,
+            usage_tracker=ctx.usage_tracker,
         )
         outcome = await run_forced_tool_retry_after_text(
             ForcedToolAfterTextRequest(
+                ctx=ctx,
                 correction_messages=correction_messages,
                 assistant_text=assistant_text,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                turn=turn,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                available_model_refs=available_model_refs,
-                available_kb_refs=available_kb_refs,
-                max_output_tokens=max_output_tokens,
                 retry_config=retry_config,
                 forced_proposal_temperature=self.forced_proposal_temperature,
                 repair_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
-                    usage_tracker=usage_tracker,
+                    usage_tracker=ctx.usage_tracker,
                 ),
-                resource_catalog=resource_catalog,
-                flow=flow,
-                build_assistant_metadata=(
-                    lambda: assistant_metadata_with_usage(
-                        conversation=conversation,
-                        base_metadata=assistant_metadata,
-                        usage_tracker=usage_tracker,
-                    )
-                ),
-                request_id=request_id,
-                usage_tracker=usage_tracker,
             )
         )
         return outcome.events

@@ -49,7 +49,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
-from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.flow_authoring_spec import OutputType
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
@@ -60,7 +59,6 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_context,
     _make_flow_spec,
     _make_retry_invocation,
-    _make_turn,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _flow_with_description,
@@ -1173,6 +1171,16 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
         model="openai/gpt-5.4",
         target_kind=TargetKind.CREATE,
     )
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        new_messages_start=1,
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        max_output_tokens=4096,
+        request_id=tracker.request_id,
+        usage_tracker=tracker,
+    )
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
@@ -1183,27 +1191,16 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
         ),
     ) as retry_forced_tool:
         result = await submission._retry_forced_proposal_after_text(
+            ctx=ctx,
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            turn=_make_turn(),
-            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
-            new_messages_start=1,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            max_output_tokens=4096,
-            flow=None,
-            usage_tracker=tracker,
         )
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert request.retry_config.target_kind == TargetKind.CREATE
-    assert isinstance(request.turn, SessionSendTurn)
+    assert request.ctx is ctx
     assert "Now call propose_flow" in request.retry_config.forced_tool_prompt
 
 
@@ -1217,6 +1214,18 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
         model="openai/gpt-5.4",
         target_kind=TargetKind.EDIT,
     )
+    flow = SimpleNamespace(steps=[])
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Redigera flödet")],
+        new_messages_start=1,
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        max_output_tokens=4096,
+        request_id=tracker.request_id,
+        flow=flow,
+        usage_tracker=tracker,
+    )
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
@@ -1227,26 +1236,16 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
         ),
     ) as retry_forced_tool:
         result = await submission._retry_forced_proposal_after_text(
+            ctx=ctx,
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            turn=_make_turn(),
-            conversation=[ConversationMessage(role="user", content="Redigera flödet")],
-            new_messages_start=1,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            max_output_tokens=4096,
-            flow=SimpleNamespace(steps=[]),
-            usage_tracker=tracker,
         )
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert request.retry_config.target_kind == TargetKind.EDIT
+    assert request.ctx is ctx
     assert "propose_flow" in request.retry_config.forced_tool_prompt
 
 

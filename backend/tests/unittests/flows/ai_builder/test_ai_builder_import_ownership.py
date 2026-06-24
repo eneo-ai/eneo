@@ -114,12 +114,9 @@ CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES = frozenset(
 PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
     {
         "arguments",
-        "build_assistant_metadata",
         "correction_messages",
-        "litellm_kwargs",
         "llm_messages",
         "tool_call",
-        "tool_schemas",
         "value",
     }
 )
@@ -1389,6 +1386,25 @@ def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers()
     repair_text = repair_path.read_text()
     repair_tree = ast.parse(repair_text, filename=str(repair_path))
     violations: list[str] = []
+
+    for node in ast.walk(repair_tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if (
+                node.module
+                == "intric.flows.ai_builder.ai_builder_proposal_tool_contracts"
+            ):
+                for alias in node.names:
+                    if alias.name == "ProposalCompletionRequest":
+                        violations.append(
+                            f"{repair_path}:{node.lineno} imports {alias.name}"
+                        )
+
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "ProposalCompletionRequest":
+                violations.append(
+                    f"{repair_path}:{node.lineno} builds ProposalCompletionRequest"
+                )
 
     processor_class = next(
         node

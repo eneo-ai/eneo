@@ -52,6 +52,7 @@ from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads imp
     expected_step_assumption_strings,
     self_correction_outline_with_step_assumptions_payload,
 )
+from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
 
 
 def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNamespace:
@@ -122,29 +123,34 @@ def _make_self_correction_request(
     max_output_tokens: int = 1024,
     forced_tool_prompt: str = "Call propose_flow.",
     usage_tracker: ProposalTurnTelemetry | None = None,
+    assistant_metadata: dict[str, Any] | None = None,
 ) -> ProposalSelfCorrectionRequest:
     return ProposalSelfCorrectionRequest(
-        turn=_make_turn(),
-        request_id=request_id,
-        conversation=[] if conversation is None else conversation,
-        new_messages_start=new_messages_start,
+        ctx=_make_context(
+            turn=_make_turn(),
+            conversation=[] if conversation is None else conversation,
+            new_messages_start=new_messages_start,
+            llm_messages=(
+                [{"role": "user", "content": "go"}]
+                if llm_messages is None
+                else llm_messages
+            ),
+            tool_schemas=(
+                [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+                if tool_schemas is None
+                else tool_schemas
+            ),
+            litellm_model=litellm_model,
+            litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            max_output_tokens=max_output_tokens,
+            request_id=request_id,
+            usage_tracker=usage_tracker,
+            assistant_metadata=assistant_metadata,
+        ),
         error_message=error_message,
-        llm_messages=(
-            [{"role": "user", "content": "go"}]
-            if llm_messages is None
-            else llm_messages
-        ),
         tool_call=_original_tool_call() if tool_call is None else tool_call,
-        tool_schemas=(
-            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
-            if tool_schemas is None
-            else tool_schemas
-        ),
-        litellm_model=litellm_model,
-        litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
-        available_model_refs=available_model_refs,
-        available_kb_refs=available_kb_refs,
-        max_output_tokens=max_output_tokens,
         self_correction_temperature=self_correction_temperature,
         self_correction_bumped_temperature=self_correction_bumped_temperature,
         max_self_correction_retries=max_self_correction_retries,
@@ -156,8 +162,6 @@ def _make_self_correction_request(
             process_tool_invocation=process_tool_invocation,
         ),
         forced_proposal_temperature=forced_proposal_temperature,
-        flow=None,
-        usage_tracker=usage_tracker,
     )
 
 
@@ -181,30 +185,38 @@ def _make_forced_tool_after_text_request(
     available_kb_refs: set[str] | None = None,
     max_output_tokens: int = 1024,
     forced_tool_prompt: str = "Call propose_flow.",
-    build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+    assistant_metadata: dict[str, Any] | None = None,
     request_id: str | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
 ) -> ForcedToolAfterTextRequest:
+    resolved_request_id = request_id or (
+        usage_tracker.request_id if usage_tracker is not None else "req-forced-tool"
+    )
     return ForcedToolAfterTextRequest(
+        ctx=_make_context(
+            turn=_make_turn() if turn is None else turn,
+            conversation=[] if conversation is None else conversation,
+            new_messages_start=new_messages_start,
+            tool_schemas=(
+                [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
+                if tool_schemas is None
+                else tool_schemas
+            ),
+            litellm_model=litellm_model,
+            litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            max_output_tokens=max_output_tokens,
+            request_id=resolved_request_id,
+            usage_tracker=usage_tracker,
+            assistant_metadata=assistant_metadata,
+        ),
         correction_messages=(
             [{"role": "system", "content": "Prompt"}]
             if correction_messages is None
             else correction_messages
         ),
         assistant_text=assistant_text,
-        tool_schemas=(
-            [{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}]
-            if tool_schemas is None
-            else tool_schemas
-        ),
-        litellm_model=litellm_model,
-        litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
-        turn=_make_turn() if turn is None else turn,
-        conversation=[] if conversation is None else conversation,
-        new_messages_start=new_messages_start,
-        available_model_refs=available_model_refs,
-        available_kb_refs=available_kb_refs,
-        max_output_tokens=max_output_tokens,
         retry_config=ToolRetryConfig(
             target_tool_name=PROPOSE_FLOW_TOOL_NAME,
             target_kind=target_kind,
@@ -213,11 +225,6 @@ def _make_forced_tool_after_text_request(
         ),
         forced_proposal_temperature=forced_proposal_temperature,
         repair_completion=repair_completion,
-        resource_catalog=None,
-        flow=None,
-        build_assistant_metadata=build_assistant_metadata,
-        request_id=request_id,
-        usage_tracker=usage_tracker,
     )
 
 
@@ -301,9 +308,7 @@ async def test_run_forced_tool_retry_after_text_builds_typed_invocation() -> Non
             ),
             process_tool_invocation=process_invocation,
             target_kind=TargetKind.CREATE,
-            build_assistant_metadata=lambda: {
-                "planner_telemetry": {"request_id": "req"}
-            },
+            assistant_metadata={"planner_telemetry": {"request_id": "req"}},
         )
     )
 
@@ -1241,14 +1246,12 @@ async def test_self_correction_repair_architecture_error_uses_sanitized_event_an
             detail="critic invariant failed",
         )
 
-    request = ProposalSelfCorrectionRequest(
-        turn=_make_turn(),
+    request = _make_self_correction_request(
         request_id="req-self-correction-runtime",
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         new_messages_start=1,
         error_message="Invalid flow",
         llm_messages=[{"role": "user", "content": "Build"}],
-        tool_call=_original_tool_call(),
         tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
@@ -1264,12 +1267,9 @@ async def test_self_correction_repair_architecture_error_uses_sanitized_event_an
                 arguments={"flow_name": "Broken", "plan_rationale": "R", "steps": []},
             )
         ),
-        retry_config=ToolRetryConfig(
-            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
-            target_kind=TargetKind.CREATE,
-            forced_tool_prompt="Now call propose_flow.",
-            process_tool_invocation=process_invocation,
-        ),
+        process_tool_invocation=process_invocation,
+        target_kind=TargetKind.CREATE,
+        forced_tool_prompt="Now call propose_flow.",
         forced_proposal_temperature=0.3,
         usage_tracker=tracker,
     )
