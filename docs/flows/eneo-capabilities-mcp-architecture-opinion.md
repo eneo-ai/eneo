@@ -122,6 +122,21 @@ flowchart TB
   HTTP --> AS
 ```
 
+### Capability Concepts
+
+Use these names precisely in future Phase 5 work.
+
+| Concept | Owns | Must not own |
+| --- | --- | --- |
+| Feature manifest | Static supported behavior and semantic constraints | Actor-specific authorization or mutations |
+| Command/query contract | Typed request/result and domain operation | UI rendering or transport |
+| Availability snapshot | Actor/tenant/space/target-specific currently available subset | Persistence and mutation |
+| Adapter exposure | HTTP/MCP/UI schema and translation | Business validation, transactions, or audit policy |
+
+Permission requirements may be visible for discovery, but authoritative
+permission enforcement remains in the command or service that performs the
+operation.
+
 ### Descriptor Responsibilities
 
 Descriptors should answer discovery and legality questions:
@@ -212,28 +227,20 @@ AssistantCapabilityDescriptor
 | Adopting MCP Apps or AI SDK for rendering now | Does not delete named Phase 4 modules yet. |
 | Turning descriptors into mutation handlers | Blurs discovery metadata with write behavior. |
 
-## Recommended Sequencing
+## Future Sequencing
 
-1. Finish Phase 4 deletion work first.
-   - Collapse remaining custom LLM/planner/retry/repair runtime into the smallest typed turn runner.
-   - Do not add capability architecture during the deletion phase unless it deletes named modules.
-2. Phase 5 proposal: read-only capability descriptor unification.
-   - Create a small shared descriptor shape.
-   - Adapt Flow's existing FCM into that shape.
-   - Add parity tests so descriptor exposure matches canonical validators and command services.
-   - Do not add MCP mutation tools yet.
-3. Assistant capability parity.
-   - Generalize the Assistant capability idea from PR #480 into the same descriptor/command split.
-   - Reuse assistant update services as command owners.
-   - Keep assistant identity, auth, tenant/space, audit, and confirmation server-owned.
-4. MCP adapter.
-   - Generate or thinly map MCP tools from descriptors.
-   - MCP handlers call canonical command/query services.
-   - MCP handlers contain no domain authoring logic.
-5. Builder consumption.
-   - Builder reads descriptor sets and hashes.
-   - Builder prompts/tool schemas derive from descriptors.
-   - Builder still applies through direct Eneo command services.
+Do not treat this opinion as an implementation phase order. The active Phase 4
+plan stops at a Phase 5A go/no-go packet, and that packet owns the next
+recommendation.
+
+Future goals should evaluate these candidates separately:
+
+| Candidate | Required proof before implementation |
+| --- | --- |
+| Read-only capability descriptor unification | Existing FCM can adapt to shared descriptors without weakening FCM invariants, and the migration deletes duplicate Builder capability projection logic. |
+| Assistant capability parity | Assistant update commands have a clear canonical service owner independent of MCP, with confirmation, identity, authorization, audit, and Flow-managed boundaries server-owned. |
+| MCP adapter | Descriptors and command/query contracts already exist; MCP handlers can remain translation-only and contain no domain authoring logic. |
+| Builder consumption | Builder prompt/tool surfaces can derive from descriptor sets without introducing internal Builder-to-MCP calls or a second validation owner. |
 
 ## Go / No-Go Criteria For Starting This
 
@@ -242,7 +249,7 @@ AssistantCapabilityDescriptor
 | Phase 4 | Custom Builder LLM/runtime surfaces are collapsed enough that a capability layer is not hiding old complexity. |
 | Flow descriptors | Existing FCM can adapt to shared descriptors without weakening FCM invariants. |
 | Assistant descriptors | Assistant update commands have a clear canonical service owner independent of MCP. |
-| Tests | Bidirectional parity tests prove descriptors, validators, permissions, and generated tool exposure agree. |
+| Tests | Every model-visible capability claim has canonical enforcement. Not every internal validator needs a model-visible descriptor. |
 | Reviewability | A new senior engineer can trace one capability from descriptor to command to audit event in one sitting. |
 
 ## Open Questions
@@ -260,4 +267,3 @@ AssistantCapabilityDescriptor
 The MCP/tool idea is strategically strong, but the durable architecture is not "make everything MCP." It is "make Eneo functionality capability-addressable, typed, permissioned, and auditable, then expose those capabilities through MCP and other adapters."
 
 For Flow AI Builder, the biggest long-term win is dynamic capability discovery from the platform. The biggest risk is loopback MCP becoming an internal service boundary. The correct line is: descriptors are shared, command services execute, MCP adapts.
-

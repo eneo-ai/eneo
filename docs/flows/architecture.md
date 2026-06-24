@@ -15,6 +15,9 @@ Related decision notes:
   Flows, and Assistants.
 - [Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md)
   records the current Phase 4 question-recovery completion ownership finding.
+- [Flow AI Builder Capability Refactor Plan](./flow-ai-builder-capability-refactor-plan.md)
+  records the active phase order and deletion gates for finishing Phase 4 before
+  any Assistant configuration, shared descriptor, or MCP adapter work.
 
 ## Mental Model
 

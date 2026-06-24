@@ -4,23 +4,24 @@
 
 1. The next safe Phase 4 slice is question-recovery completion ownership, not framework adoption.
 2. Question recovery currently hand-builds completion requests and imports the LiteLLM completion function directly.
-3. The cleaner slice is to reuse `ProposalTurnContext.completion_request(...)` and inject the tracked completion callable from the processor/submission owner.
-4. Claude blocked the first plan because it bundled the Protocol-to-alias rename without fully scoping blast radius and test guards.
-5. Implementation should pause until we choose either "question recovery only" or "question recovery plus global callable alias sweep."
+3. The cleaner slice is to reuse `ProposalTurnContext.completion_request(...)` and pass the tracked completion callable from the processor.
+4. Keep Protocol-to-alias cleanup out of this behavioral slice unless a later mechanical commit scopes the full sweep.
+5. Implement question recovery only first; keep any Protocol-to-alias cleanup as a separate mechanical decision.
 
 ## Current Decision
 
-Pause implementation. The idea is valid, but the slice should be tightened before coding.
-
-The best next implementation slice is likely:
+The next implementation slice is question recovery only:
 
 ```text
 StructuredQuestionRecoveryRequest:
   before: flat repeated turn fields + direct LiteLLM completion call
-  after: ProposalTurnContext + original tool call + injected tracked completion callable
+  after: ProposalTurnContext + original tool call
+
+stream_structured_question_tool_call:
+  receives the tracked completion callable as an explicit dependency
 ```
 
-That should be done separately from the `ProposalCompletionFn` Protocol deletion unless we deliberately commit to a global sweep.
+That should be done separately from the `ProposalCompletionFn` Protocol deletion unless a later mechanical commit deliberately scopes the full sweep.
 
 ## Current Source Shape
 
@@ -46,14 +47,14 @@ The ownership smell is not that question recovery uses LLM completion at all. Th
 | Evidence | File |
 | --- | --- |
 | `ProposalCompletionFn` is a one-method Protocol with only `__call__(ProposalCompletionRequest)`. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:38` |
-| `ProposalCompletionRequest` is still a useful typed boundary for provider completion. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:45` |
+| `ProposalCompletionRequest` is still a useful typed boundary for provider completion. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:46` |
 | `ProposalTurnContext.completion_request(...)` already builds typed completion requests from turn context. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144` |
 | LiteLLM completion normalization and usage tracking are owned by `call_proposal_completion`. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` |
 | `make_usage_tracked_proposal_completion(...)` already returns a tracked callable for repair paths. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:135` |
 | Question recovery imports `call_proposal_completion` directly. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:33` |
 | Question recovery hand-builds `ProposalCompletionRequest` in the recovery retry loop. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:307` |
 | The processor currently re-explodes context fields into a flat `StructuredQuestionRecoveryRequest`. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:282` |
-| Proposal submission already uses `ctx.completion_request(...)` for active submission. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261` |
+| Proposal submission already uses `ctx.completion_request(...)` for active submission. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:264` |
 | Proposal repair already takes injected `repair_completion` callables. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:91` |
 
 ## Cleaner Target Shape
@@ -89,12 +90,12 @@ Question recovery still marks its completion as counts_as_repair=True.
 
 ### Do
 
-1. Add a typed completion callable field to `StructuredQuestionRecoveryRequest`.
-2. Replace flat repeated fields in `StructuredQuestionRecoveryRequest` with `ctx: ProposalTurnContext` plus `tool_call`.
-3. Build the request in `AIBuilderProposalProcessor._handle_question_recovery_dispatch(...)` using the existing context and `make_usage_tracked_proposal_completion(...)`.
+1. Replace flat repeated fields in `StructuredQuestionRecoveryRequest` with `ctx: ProposalTurnContext` plus `tool_call`.
+2. Build the request in `AIBuilderProposalProcessor._handle_question_recovery_dispatch(...)` using the existing context.
+3. Construct `make_usage_tracked_proposal_completion(...)` in the processor and pass the returned callable explicitly to `stream_structured_question_tool_call(...)`.
 4. Replace the manual `ProposalCompletionRequest(...)` construction in question recovery with `ctx.completion_request(...)`.
-5. Update question recovery tests to inject a fake completion callable through the request.
-6. Update import-ownership tests so question recovery must not import `call_proposal_completion`.
+5. Update question recovery tests to inject a fake completion callable through the function call.
+6. Update import-ownership tests so question recovery imports nothing from `ai_builder_litellm_completion`.
 
 ### Do Not
 
@@ -104,11 +105,11 @@ Question recovery still marks its completion as counts_as_repair=True.
 - Do not delete behavior tests unless the covered behavior was deleted.
 - Do not change the Flow capability or authoring command model in this slice.
 
-## Protocol-to-Alias Question
+## Protocol-to-Alias Decision
 
-The one-method `ProposalCompletionFn` Protocol is probably removable. Ponytail says a one-method Protocol with one implementation shape is ceremony.
-
-But Claude correctly blocked bundling that rename into the first question-recovery slice unless the blast radius is explicitly handled.
+The one-method `ProposalCompletionFn` Protocol is probably removable, but that
+is a mechanical type cleanup with its own blast radius. Do not bundle it into
+the question-recovery behavior change.
 
 | Option | Benefit | Risk | Recommendation |
 | --- | --- | --- | --- |
@@ -126,32 +127,7 @@ ProposalCompletion: TypeAlias = Callable[
 
 And the ownership test must assert that exact shape, not just search for strings.
 
-## Claude Review Result
-
-Claude reviewed the plan under the Ponytail lens and returned:
-
-```text
-VERDICT: changes_required
-GREEN_LIGHT: no
-MIN_SCORE: 6
-```
-
-### Valid Claude Blockers
-
-| Blocker | Why It Is Valid |
-| --- | --- |
-| `test_ai_builder_proposal_repair.py` also imports `ProposalCompletionFn`. | A Protocol rename would break tests unless included in the blast radius. |
-| `FINALIZATION_FORBIDDEN_COMPLETION_NAMES` would become a stale guard if the alias name changes. | Ownership tests must guard the current name, not a dead string. |
-| `test_proposal_completion_has_single_request_boundary` currently assumes a `ClassDef ProposalCompletionFn`. | Deleting the Protocol would make the test error instead of producing a meaningful failure. |
-| Red tests for injection were not named. | The plan must prove telemetry and direct-completion import guards still work. |
-
-### Claude Cleaner Design Challenge
-
-Claude's strongest point:
-
-> The question-recovery consolidation does not require the Protocol-to-alias rename.
-
-I agree. The cleanest implementation order is:
+The cleanest implementation order is:
 
 1. First commit: question recovery uses context plus injected tracked completion.
 2. Second commit, if still worth it: replace the one-method Protocol with a typed callable alias across all production/tests/guards.
@@ -170,13 +146,15 @@ That keeps the behavioral refactor separate from the mechanical type cleanup.
 | Repeated structured question exhaustion | Protects retry budget. |
 | Streaming `repairing` before completion returns | Protects user-visible stream order. |
 | `counts_as_repair=True` telemetry | Protects repair accounting. |
-| Import ownership guard | Protects the canonical LiteLLM completion owner. |
+| Import ownership guard | Protects the current LiteLLM proposal-completion provider boundary. |
 
 ### Tests That Must Fail If The Refactor Breaks
 
 | Failure Mode | Required Guard |
 | --- | --- |
-| Question recovery imports `call_proposal_completion` again. | AST ownership test requires zero direct imports. |
+| Question recovery imports from `ai_builder_litellm_completion` again. | AST ownership test requires zero imports from that module. |
+| Question recovery constructs `ProposalCompletionRequest(...)` directly. | AST ownership test requires request construction through `ProposalTurnContext.completion_request(...)`. |
+| Question recovery constructs its own completion factory. | AST ownership test keeps completion-callable construction in the processor. |
 | Question recovery calls `acompletion`. | AST ownership test bans provider calls. |
 | Question recovery ignores injected completion. | Unit test injects fake completion and asserts it was awaited. |
 | `counts_as_repair=True` is dropped. | Telemetry test fails or fake completion inspects request. |
@@ -191,7 +169,17 @@ This is the shape to implement if we choose Option A:
 class StructuredQuestionRecoveryRequest:
     ctx: ProposalTurnContext
     tool_call: Any
-    repair_completion: ProposalCompletion
+
+
+async def stream_structured_question_tool_call(
+    *,
+    repo: AIBuilderRepository,
+    discovery_litellm_client: Any,
+    repair_completion: ProposalCompletionFn,
+    self_correction_temperature: float,
+    request: StructuredQuestionRecoveryRequest,
+) -> AsyncGenerator[QuestionRecoveryItem, None]:
+    ...
 ```
 
 Question recovery then reads `ctx.conversation`, `ctx.flow`, `ctx.litellm_model`, etc. It still passes `litellm_client` to `build_discovery_runtime_result`, because discovery runtime still needs it. The ownership claim must be honest:
@@ -210,7 +198,7 @@ That distinction matters.
 | Request carries `ProposalTurnContext` | Deletes repeated flat turn fields from `StructuredQuestionRecoveryRequest`. |
 | Inject tracked completion callable | Deletes direct `call_proposal_completion` import from question recovery. |
 | Use `ctx.completion_request(...)` | Deletes hand-built `ProposalCompletionRequest` duplication. |
-| Update tests to inject callable | Deletes module patching of question-recovery's direct completion import. |
+| Update tests to pass callable explicitly | Deletes module patching of question-recovery's direct completion import. |
 | Optional alias sweep | Deletes one-method fake Protocol. |
 
 ## What This Does Not Solve
@@ -232,7 +220,7 @@ When implementation resumes, choose one of these:
 Implement only question-recovery consolidation:
 
 ```text
-ctx + injected completion callable + ctx.completion_request(...)
+ctx request data + explicit injected completion callable + ctx.completion_request(...)
 ```
 
 Then validate:
@@ -253,4 +241,3 @@ After the first commit is green, decide whether to delete `ProposalCompletionFn`
 ## Final Opinion
 
 This is worth doing, but the first plan tried to combine one behavioral ownership cleanup with one mechanical type cleanup. The cleanest path is to land the behavioral cleanup first. It directly supports Phase 4 by removing one scattered completion caller and one duplicated request construction path. The Protocol deletion is probably correct, but it should not ride along unless its tests and ownership guards are updated in the same commit.
-
