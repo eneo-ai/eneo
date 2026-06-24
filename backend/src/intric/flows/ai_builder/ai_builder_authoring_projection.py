@@ -61,13 +61,8 @@ class ModifyExistingStep(BaseModel):
     mcp_policy: MCPPolicy | None = None
     input_source: InputSource | None = None
     input_type: InputType | None = None
-    output_mode: OutputMode | None = None
     output_type: OutputType | None = None
-    input_bindings: FlowPersistedJsonObject | None = None
-    input_contract: FlowPersistedJsonObject | None = None
     output_contract: FlowPersistedJsonObject | None = None
-    input_config: FlowPersistedJsonObject | None = None
-    output_config: FlowPersistedJsonObject | None = None
     review_mode: FlowStepReviewMode | None = None
     uses_form_fields: list[str] | None = None
     uses_previous_fields: list[PreviousFieldRef] | None = None
@@ -242,14 +237,9 @@ def apply_existing_step_patch(
     for field_name in (
         "input_source",
         "input_type",
-        "output_mode",
         "output_type",
         "mcp_policy",
-        "input_bindings",
-        "input_contract",
         "output_contract",
-        "input_config",
-        "output_config",
     ):
         if field_name in fields:
             updates[field_name] = getattr(patch, field_name)
@@ -317,13 +307,12 @@ def _compile_existing_step_modification(
         if input_config != step.input_config:
             step = step.model_copy(update={"input_config": input_config})
 
-    if "output_mode" not in fields:
-        output_mode = _derive_existing_step_output_mode(
-            step,
-            document_delivery_mode=patch.document_delivery_mode,
-        )
-        if output_mode != step.output_mode:
-            step = step.model_copy(update={"output_mode": output_mode})
+    output_mode = _derive_existing_step_output_mode(
+        step,
+        document_delivery_mode=patch.document_delivery_mode,
+    )
+    if output_mode != step.output_mode:
+        step = step.model_copy(update={"output_mode": output_mode})
 
     return strip_inapplicable_completion_model(step)
 

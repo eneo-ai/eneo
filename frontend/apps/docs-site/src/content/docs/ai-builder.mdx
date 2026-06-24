@@ -36,6 +36,8 @@ AI Builder separates semantic intent from Flow mechanics.
 
 This split keeps generated plans maintainable. The model describes what each step should accomplish; the backend owns deterministic details such as how previous outputs and form fields become material for later steps.
 
+In edit sessions, changes to a step's input source, input type, or selected form/previous fields are semantic changes. The backend re-derives the compiled input bindings, input contract, and runtime input configuration from those choices.
+
 ## Typical workflow
 
 1. Start an AI Builder session in a space.

@@ -379,7 +379,11 @@ class TestBuildEditFlowToolSchema:
 
         previous_fields = modify_step["properties"]["uses_previous_fields"]
         assert previous_fields["items"]["required"] == ["from_step", "field_path"]
-        assert "input_bindings" in modify_step["properties"]
+        assert "input_bindings" not in modify_step["properties"]
+        assert "input_contract" not in modify_step["properties"]
+        assert "input_config" not in modify_step["properties"]
+        assert "output_config" not in modify_step["properties"]
+        assert "output_contract" in modify_step["properties"]
         assert "uses_form_fields" in modify_step["properties"]
 
     def test_modify_step_schema_uses_generated_flow_schema_values(self):

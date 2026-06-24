@@ -68,9 +68,7 @@ def build_edit_flow_tool_schema(
                 "Every existing step must appear once in steps unless its ref appears "
                 "in removed_existing_step_refs. Omit flow fields and form_fields to "
                 "preserve them; set form_fields to the complete desired list or null "
-                "to clear all flow-level inmatningsfält/form fields. "
-                "When you change output_type or document_delivery_mode, clear or omit "
-                "incompatible output_config fields instead of rewriting unrelated step config."
+                "to clear all flow-level inmatningsfält/form fields."
             ),
             "parameters": {
                 "type": "object",
@@ -200,23 +198,7 @@ def _build_modify_step_schema(
                 "items": {"type": "string"},
             },
             "uses_previous_fields": build_previous_field_refs_schema(),
-            "input_bindings": {
-                "type": ["object", "null"],
-                "additionalProperties": True,
-            },
-            "input_contract": {
-                "type": ["object", "null"],
-                "additionalProperties": True,
-            },
             "output_contract": {
-                "type": ["object", "null"],
-                "additionalProperties": True,
-            },
-            "input_config": {
-                "type": ["object", "null"],
-                "additionalProperties": True,
-            },
-            "output_config": {
                 "type": ["object", "null"],
                 "additionalProperties": True,
             },
