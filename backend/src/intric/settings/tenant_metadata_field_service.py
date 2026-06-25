@@ -66,7 +66,9 @@ class TenantMetadataFieldService:
             else "visible_on_spaces"
         )
 
-        for entry in self._extract_eneo_entries(metadata_json):
+        for entry in self._extract_eneo_entries(
+            metadata_json, tenant_field_names=set(fields_by_name)
+        ):
             key = entry["key"]
             value = entry["value"]
             field_type = entry["type"]
@@ -91,7 +93,11 @@ class TenantMetadataFieldService:
                 )
 
     @staticmethod
-    def _extract_eneo_entries(metadata_json: dict[str, object]) -> list[MetadataEntry]:
+    def _extract_eneo_entries(
+        metadata_json: dict[str, object],
+        *,
+        tenant_field_names: set[str] | None = None,
+    ) -> list[MetadataEntry]:
         eneo = metadata_json.get("eneo")
         if not isinstance(eneo, list):
             return []
@@ -105,11 +111,20 @@ class TenantMetadataFieldService:
             entry_dict = cast(dict[str, object], entry)
             key = entry_dict.get("key")
             field_type = entry_dict.get("type")
+            has_known_tenant_key = (
+                isinstance(key, str)
+                and tenant_field_names is not None
+                and key in tenant_field_names
+            )
             if not isinstance(key, str) or field_type not in {
                 MetadataFieldType.STRING.value,
                 MetadataFieldType.INT.value,
                 MetadataFieldType.BOOLEAN.value,
             }:
+                if has_known_tenant_key:
+                    raise BadRequestException(
+                        f"Metadata field '{key}' must declare a valid type."
+                    )
                 continue
 
             entries.append(

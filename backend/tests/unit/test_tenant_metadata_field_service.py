@@ -94,3 +94,40 @@ async def test_validate_metadata_rejects_declared_type_mismatch():
             {"eneo": [{"key": "case_id", "value": 42, "type": "string"}]},
             resource_type="assistant",
         )
+
+
+@pytest.mark.asyncio
+async def test_validate_metadata_rejects_known_field_with_missing_type():
+    field = TenantMetadataFieldInDB(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name="case_id",
+        field_type=MetadataFieldType.INT,
+        visible_on_assistants=True,
+        visible_on_spaces=True,
+    )
+    service = _build_service([field])
+
+    with pytest.raises(BadRequestException, match="must declare a valid type"):
+        await service.validate_metadata_for_resource(
+            {"eneo": [{"key": "case_id", "value": "not-an-int"}]},
+            resource_type="assistant",
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_metadata_ignores_malformed_unknown_field():
+    field = TenantMetadataFieldInDB(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name="case_id",
+        field_type=MetadataFieldType.INT,
+        visible_on_assistants=True,
+        visible_on_spaces=True,
+    )
+    service = _build_service([field])
+
+    await service.validate_metadata_for_resource(
+        {"eneo": [{"key": "custom_key", "value": "anything"}]},
+        resource_type="assistant",
+    )

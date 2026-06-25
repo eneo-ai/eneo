@@ -43,6 +43,7 @@ _TABLE_MODULES = (
     "intric.database.tables.spaces_table",
     "intric.database.tables.sync_log_table",
     "intric.database.tables.tenant_sharepoint_app_table",
+    "intric.database.tables.tenant_metadata_field_table",
     "intric.database.tables.tenant_table",
     "intric.database.tables.user_groups_table",
     "intric.database.tables.users_table",
