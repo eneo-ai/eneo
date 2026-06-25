@@ -9,6 +9,19 @@ but with real security + data-integrity defects bolted onto an older v1.
 
 Status legend: ✅ done · 🟡 partial · ⬜ todo · ⏭️ deferred (large/low-value) · ❌ skip (not worth it)
 
+## Progress (branch `feat/sharepoint-hardening`)
+
+Landed with tests (324 integration unit tests green):
+- ✅ #1 OAuth token encryption at rest (`d6c799b43`)
+- ✅ #2 ChangeKey written only after DB commit (`4df97fa31`)
+- ✅ #3 out-of-scope folder subtree deletion — move-out case (`2622e5fdc`)
+- ✅ #5 webhook clientState fail-closed + constant-time compare (`72840fda2`)
+- ✅ #9 keep refresh token when refresh response omits it (`bd895d922`)
+- ✅ #7 do not index extraction-failure sentinels (`10c74613e`)
+- ✅ #12 subscription health fields plumbed end-to-end (WIP `bc329a9a6`) + frontend admin UI (parallel work)
+
+Remaining: #4 (needs coordinated frontend change), #6/#8/#10/#11 (optional, see below), #13/#14 + god-object splits (large).
+
 ---
 
 ## Per-dimension scores (review baseline → target)
@@ -26,7 +39,7 @@ Status legend: ✅ done · 🟡 partial · ⬜ todo · ⏭️ deferred (large/lo
 
 ## P0 — Security & data integrity (real bugs, fix now)
 
-### 1. Per-user OAuth tokens stored in plaintext ⬜ `[high / security]`
+### 1. Per-user OAuth tokens stored in plaintext ✅ `[high / security]`
 `access_token` + `refresh_token` written verbatim (Confluence **and** SharePoint).
 - `backend/src/intric/integration/infrastructure/mappers/oauth_token_mapper.py:18-24` (write)
 - `backend/src/intric/integration/domain/factories/oauth_token_factory.py:36-52` (read)
@@ -37,24 +50,37 @@ Status legend: ✅ done · 🟡 partial · ⬜ todo · ⏭️ deferred (large/lo
   write. No schema change. Works whether or not `ENCRYPTION_KEY` is set.
   Note: `decrypt()` hard-rejects un-prefixed plaintext when active → handle plaintext in the mapper, not via `decrypt()`.
 
-### 2. ChangeKey written to Redis before the DB transaction commits ⬜ `[high / data-integrity]`
+### 2. ChangeKey written to Redis before the DB transaction commits ✅ `[high / data-integrity]`
 On rollback (lease-loss cancel → `CancelledError` bypasses per-item `except`, or commit failure) the
 blob is gone but Redis says "processed" → file skipped up to 7 days (TTL) or until 410 full resync.
 - `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py:~811`
 - **Plan:** set ChangeKey only **after** commit, or invalidate the ChangeKey on rollback.
 
-### 3. Moving a folder out of scope orphans all child info_blobs 🟡 `[high / data-integrity]` — GH 189874542
-Graph delta sends the folder item, not the unchanged children. Out-of-scope branch deletes by the
-**folder's** id, which matches no file blob → whole subtree orphaned.
-- `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py:~730`
-- **Done (WIP):** out-of-scope *files* are now deleted; facet detection hardened (`_has_graph_facet`).
-- **Remaining:** delete the *subtree* when a folder goes out of scope / is deleted (by parent path prefix).
+### 3. Moving a folder out of scope orphans all child info_blobs ✅ `[high / data-integrity]` — GH 189874542
+Graph delta sends the folder item, not the unchanged children. Out-of-scope branch deleted by the
+**folder's** id, which matched no file blob → whole subtree orphaned.
+- `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py`
+- **Done (WIP):** out-of-scope *files* are deleted; facet detection hardened (`_has_graph_facet`).
+- **Done (`2622e5fdc`):** when an out-of-scope item is a folder, enumerate its current descendants
+  via Graph (`_collect_files_recursive`) and delete their blobs too. OneDrive folder integrations
+  (no site_id) degrade safely and reconcile on next full sync.
+- **Tail not covered:** a *deleted* folder whose children Graph does not cascade-notify, and drift
+  during a 410 token-invalid window — both need the full-sync reconciliation in #6.
 
-### 4. Per-user OAuth callback does not validate `state` (CSRF) ⬜ `[medium / security]`
+### 4. Per-user OAuth callback does not validate `state` (CSRF) ⬜ `[medium / security]` — NEEDS FRONTEND COORDINATION
 Callback never verifies `state`; default is the literal `"state"`. Admin flow does this correctly.
 - `backend/src/intric/integration/presentation/integration_auth_router.py:29-60`
 - `backend/src/intric/integration/infrastructure/auth_service/sharepoint_auth_service.py:~97`
-- **Plan:** reuse the admin flow's `_store_oauth_state` / `_pop_oauth_state` (random state, Redis TTL, atomic pop, tenant binding).
+- `backend/src/intric/integration/application/oauth2_service.py` (`start_auth` / `auth_integration`)
+- **Why not done here:** the fix is cross-cutting. `AuthCallbackParams` does not carry `state` today,
+  so enforcing it server-side requires the frontend to (a) read `state` from the provider redirect and
+  (b) POST it back to `/callback/token/`. Enforcing without that change would break the connect flow.
+- **Plan (backend):** `start_auth` generates a random state, stores `{user_id, tenant_integration_id}`
+  in Redis (reuse the admin `_store_oauth_state`/`_pop_oauth_state` pattern); `auth_integration` requires
+  `state`, atomically pops it, and verifies it matches the session user + tenant_integration.
+- **Plan (frontend):** include `state` in `AuthCallbackParams` and pass the redirect's state through.
+- Severity is medium: the callback is already authenticated (`with_user=True`) and binds to the session
+  user — login-CSRF / auth-code-injection (RAG content injection), not account takeover.
 
 ### 5. clientState is the only webhook auth, but the check fails open ⬜ `[medium+low / security]`
 Endpoint is `with_user=False`; the per-notification check is skipped entirely if the secret is falsy,
@@ -66,16 +92,22 @@ and uses `!=` instead of constant-time compare.
 
 ## P1 — Robustness & correctness (fix soon)
 
-### 6. Full sync never deletes orphans; reconciliation code is dead ⬜ `[medium]` — GH 189874542
-`_get_all_sharepoint_files` / `_collect_files_recursive` (~100 lines) have zero callers. Leak is limited
-to the 410-recovery tail (an expired delta token does not replay missed deletions).
-- `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py:~1599`
-- **Plan:** wire reconciliation into full sync, OR delete the dead code and document full sync as add-only.
+### 6. Full sync never deletes orphans; reconciliation 🟡 `[medium]` — GH 189874542
+`_collect_files_recursive` is now USED by #3's subtree deletion. Full sync (`_pull_content`) is still
+add-only, so the 410-recovery tail (expired delta token does not replay missed deletions) and
+deleted-folder-without-cascade drift remain.
+- `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py`
+- **Remaining plan:** make full sync authoritative — collect all in-scope item_ids during traversal,
+  then delete integration blobs whose `sharepoint_item_id` ∉ the enumerated set. MUST key off
+  *enumeration* (reliable directory listing), NOT the *processed* set, or transient content-fetch
+  failures would delete valid blobs. Scope-aware (folder vs site_root). Higher risk → do deliberately.
 
-### 7. Content extraction produces silent garbage instead of failing ⬜ `[medium]`
+### 7. Content extraction produces silent garbage instead of failing ✅ `[medium]`
 DOCX/PPTX via raw regex over XML bytes; PDF falls through to `binary_to_text`; sentinels embedded as content.
-- `backend/src/intric/integration/infrastructure/content_service/utils.py:117-163, 326-354`
-- **Plan:** treat sentinels / low printable-ratio as extraction failure; prefer `python-docx`.
+- `backend/src/intric/integration/infrastructure/content_service/utils.py`
+- **Done (`10c74613e`):** `is_unextractable_content()` treats sentinel strings + empty/whitespace as
+  unreadable; the file-content sites skip them (a transient failure keeps the existing good blob).
+- **Not done (optional):** switch DOCX/PPTX to `python-docx`/`python-pptx` for higher-fidelity extraction.
 
 ### 8. Unconditional re-embedding ignores `content_hash` ⬜ `[medium / perf]`
 `content_hash` column exists (crawler uses it) but SharePoint never sets/reads it → metadata edits and
@@ -83,9 +115,9 @@ co-author saves pay full embedding cost.
 - `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py` (`_process_info_blob`)
 - **Plan:** hash extracted text; skip re-embed when unchanged.
 
-### 9. Refresh assumes Entra always returns a new refresh_token ⬜ `[low]`
-- `backend/src/intric/integration/infrastructure/oauth_token_service.py:84-88`
-- **Plan:** keep the prior refresh_token when the response omits one (two sibling paths already guard this).
+### 9. Refresh assumes Entra always returns a new refresh_token ✅ `[low]`
+- `backend/src/intric/integration/infrastructure/oauth_token_service.py`
+- **Done (`bd895d922`):** keep the existing refresh_token when the refresh response omits it.
 
 ### 10. Tree-endpoint maps errors by matching exception message strings ⬜ `[low / robustness]`
 Rewording a message silently changes the HTTP status.
@@ -97,11 +129,11 @@ Hard crash mid-sync: arq does not retry, the Job row stays `IN_PROGRESS` forever
 OrphanWatchdog; sync does not.
 - **Plan:** sweeper mirroring the crawl OrphanWatchdog.
 
-### 12. Subscription health: record + act ✅ (data) / ⬜ (escalation) — GH 189874639
-- **Done (WIP):** `consecutive_renewal_failures`, `last_renewal_failed_at`, `last_renewal_error`,
-  `last_webhook_received_at` plumbed end-to-end; worker records failures; webhook records arrivals;
-  admin API exposes them.
-- **Remaining (optional):** a computed `needs_attention` flag / threshold escalation surface.
+### 12. Subscription health: record + act ✅ (data + UI) / ⬜ (alerting) — GH 189874639
+- **Done (WIP `bc329a9a6` + parallel frontend):** `consecutive_renewal_failures`, `last_renewal_failed_at`,
+  `last_renewal_error`, `last_webhook_received_at` plumbed end-to-end; worker records failures; webhook
+  records arrivals; admin API exposes them; admin UI surfaces them (`SharePointSubscriptions.svelte`).
+- **Remaining (optional):** active alerting (threshold → notify), not just operator-visible state.
 
 ---
 
