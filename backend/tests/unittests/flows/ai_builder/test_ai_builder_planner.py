@@ -590,7 +590,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -681,7 +681,7 @@ async def test_normal_prepared_followup_stays_gated_by_forced_followup_policy() 
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -873,7 +873,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -1039,7 +1039,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -1105,7 +1105,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -1177,7 +1177,7 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -1264,7 +1264,7 @@ async def test_prepare_planner_request_threads_unresolved_core_slots_into_system
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(
@@ -1359,7 +1359,7 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
             return_value=None,
         ),
         patch(

@@ -9,10 +9,6 @@ from intric.flows.ai_builder.ai_builder_accepted_action_rendering import (
     build_accepted_action_events,
     build_accepted_action_messages,
 )
-from intric.flows.ai_builder.ai_builder_action_policy import (
-    build_planner_action_policy,
-    compute_unresolved_core_slots,
-)
 from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
     persist_backend_question,
 )
@@ -42,12 +38,13 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_response_format import (
     PlannerResponseFormatSelection,
 )
-from intric.flows.ai_builder.ai_builder_server_actions import (
-    build_server_planner_output,
-)
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
+)
+from intric.flows.ai_builder.ai_builder_turn_controller import (
+    planner_output_for_turn_decision,
+    resolve_turn_control,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.main.logging import get_logger
@@ -200,18 +197,16 @@ async def _dispatch_chained_confirm_after_commit_if_needed(
         tenant_id=chained_turn.tenant_id,
     )
     session_state = persisted_state or PlanningState.empty()
-    unresolved_core_slots = compute_unresolved_core_slots(session_state)
-    action_policy = build_planner_action_policy(
+    turn_control = resolve_turn_control(
         session_state=session_state,
-        unresolved_architectural_choices=unresolved_core_slots,
         selected_discovery_question_ids=(),
         requirements_confirmed=request.requirements_confirmed,
-    )
-    server_output = build_server_planner_output(
-        action_policy=action_policy,
-        session_state=session_state,
-        base_planning_state_version=chained_turn.base_planning_state_version,
+        is_edit_mode=request.flow is not None,
         ui_language=request.ui_language,
+    )
+    server_output = planner_output_for_turn_decision(
+        decision=turn_control.decision,
+        base_planning_state_version=chained_turn.base_planning_state_version,
     )
     if server_output is None or not isinstance(
         server_output.planner_action, ConfirmRequirementsAction
@@ -223,8 +218,8 @@ async def _dispatch_chained_confirm_after_commit_if_needed(
         current_version=chained_turn.base_planning_state_version,
         session_state=session_state,
         asked_question_state=asked_question_state,
-        unresolved_architectural_choices=unresolved_core_slots,
-        action_policy=action_policy,
+        unresolved_architectural_choices=turn_control.unresolved_architectural_choices,
+        action_policy=turn_control.action_policy,
     )
     render_context = RequirementsSummaryRenderContext(
         conversation=request.conversation,

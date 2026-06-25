@@ -1,16 +1,21 @@
-"""Deterministic server-owned planner actions.
+"""Deterministic server-owned Builder turn control.
 
-This is the state-machine seam that removes phase-control decisions from
-the LLM. The model may still generate rich semantic content later, but
-basic discovery and architecture transitions are server decisions based
-on `PlanningState` and `PlannerActionPolicy`.
+The model may still generate rich semantic proposal content, but discovery,
+architecture commitment, requirements confirmation, and proposal phase
+selection are server decisions derived from typed `PlanningState`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import TypeAlias
 
-from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
+from intric.flows.ai_builder.ai_builder_action_policy import (
+    PlannerActionPolicy,
+    build_planner_action_policy,
+    compute_unresolved_core_slots,
+)
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
@@ -37,34 +42,103 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_USER_REVIEWS_PLAN_EN,
     DEFAULT_USER_REVIEWS_PLAN_SV,
 )
-from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.planning_state import (
+    ArchitectureCommitDraft,
+    PlanningState,
+)
 from intric.flows.ai_builder.question_catalog import Locale, render_question
 
 
-def build_server_planner_output(
+@dataclass(frozen=True, slots=True)
+class AskCanonicalQuestion:
+    slot_name: str
+    prompt: str
+
+
+@dataclass(frozen=True, slots=True)
+class CommitArchitecture:
+    architecture_commit: ArchitectureCommitDraft
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmRequirements:
+    payload: ConfirmRequirementsPayload
+
+
+@dataclass(frozen=True, slots=True)
+class GenerateProposal:
+    is_edit_mode: bool
+
+
+BuilderTurnDecision: TypeAlias = (
+    AskCanonicalQuestion | CommitArchitecture | ConfirmRequirements | GenerateProposal
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BuilderTurnControl:
+    decision: BuilderTurnDecision
+    action_policy: PlannerActionPolicy
+    unresolved_architectural_choices: frozenset[str]
+
+
+def determine_turn_decision(
+    *,
+    session_state: PlanningState,
+    selected_discovery_question_ids: tuple[str, ...],
+    requirements_confirmed: bool,
+    is_edit_mode: bool,
+    ui_language: str | None,
+) -> BuilderTurnDecision:
+    return resolve_turn_control(
+        session_state=session_state,
+        selected_discovery_question_ids=selected_discovery_question_ids,
+        requirements_confirmed=requirements_confirmed,
+        is_edit_mode=is_edit_mode,
+        ui_language=ui_language,
+    ).decision
+
+
+def resolve_turn_control(
+    *,
+    session_state: PlanningState,
+    selected_discovery_question_ids: tuple[str, ...],
+    requirements_confirmed: bool,
+    is_edit_mode: bool,
+    ui_language: str | None,
+) -> BuilderTurnControl:
+    unresolved_core_slots = compute_unresolved_core_slots(session_state)
+    action_policy = build_planner_action_policy(
+        session_state=session_state,
+        unresolved_architectural_choices=unresolved_core_slots,
+        selected_discovery_question_ids=selected_discovery_question_ids,
+        requirements_confirmed=requirements_confirmed,
+    )
+    return BuilderTurnControl(
+        decision=_decision_from_policy(
+            action_policy=action_policy,
+            session_state=session_state,
+            is_edit_mode=is_edit_mode,
+            ui_language=ui_language,
+        ),
+        action_policy=action_policy,
+        unresolved_architectural_choices=unresolved_core_slots,
+    )
+
+
+def _decision_from_policy(
     *,
     action_policy: PlannerActionPolicy,
     session_state: PlanningState,
-    base_planning_state_version: int,
+    is_edit_mode: bool,
     ui_language: str | None,
-) -> PlannerOutput | None:
-    """Return a deterministic planner output when the server can decide.
-
-    Ordering is deliberate: if there is an allowed question target, the
-    server asks it without making the LLM choose the identifier. If no
-    questions remain and commit is legal, the server commits the derived
-    architecture. Plan proposal uses a separate task-specific LLM
-    boundary because its content is semantic and much larger than the
-    phase transition.
-    """
-
+) -> BuilderTurnDecision:
     if "ask_question" in action_policy.allowed_action_kinds:
         target = _first(action_policy.allowed_ask_question_targets)
         if target is not None:
-            return _ask_question_output(
-                base_planning_state_version=base_planning_state_version,
-                target=target,
-                ui_language=ui_language,
+            return AskCanonicalQuestion(
+                slot_name=target,
+                prompt=_question_prompt(target, ui_language),
             )
 
     if (
@@ -73,48 +147,68 @@ def build_server_planner_output(
     ):
         draft = derive_architecture_commit_draft(session_state)
         if draft is not None:
-            return PlannerOutput(
-                planning_state_delta=PlanningStateDelta(
-                    base_planning_state_version=base_planning_state_version,
-                    architecture_commit=draft,
-                ),
-                planner_action=CommitArchitectureAction(
-                    kind="commit_architecture",
-                    payload=CommitArchitecturePayload(
-                        note="Architecture committed from resolved planning state."
-                    ),
-                ),
-            )
+            return CommitArchitecture(architecture_commit=draft)
 
     if "confirm_requirements" in action_policy.allowed_action_kinds:
-        return _confirm_requirements_output(
-            base_planning_state_version=base_planning_state_version,
-            session_state=session_state,
-            ui_language=ui_language,
+        return ConfirmRequirements(
+            payload=_confirm_requirements_payload(
+                session_state,
+                _locale(ui_language),
+            )
         )
 
-    return None
+    if action_policy.allowed_action_kinds == ("propose_plan",):
+        return GenerateProposal(is_edit_mode=is_edit_mode)
 
-
-def _ask_question_output(
-    *,
-    base_planning_state_version: int,
-    target: str,
-    ui_language: str | None,
-) -> PlannerOutput:
-    return PlannerOutput(
-        planning_state_delta=PlanningStateDelta(
-            base_planning_state_version=base_planning_state_version,
-        ),
-        planner_action=AskQuestionAction(
-            kind="ask_question",
-            payload=AskQuestionPayload(
-                question_id=target,
-                slot_name=target,
-                prompt=_question_prompt(target, ui_language),
-            ),
-        ),
+    raise ValueError(
+        "No Builder turn decision can be derived from action policy "
+        f"{action_policy.allowed_action_kinds!r}"
     )
+
+
+def planner_output_for_turn_decision(
+    *,
+    decision: BuilderTurnDecision,
+    base_planning_state_version: int,
+) -> PlannerOutput | None:
+    if isinstance(decision, AskCanonicalQuestion):
+        return PlannerOutput(
+            planning_state_delta=PlanningStateDelta(
+                base_planning_state_version=base_planning_state_version,
+            ),
+            planner_action=AskQuestionAction(
+                kind="ask_question",
+                payload=AskQuestionPayload(
+                    question_id=decision.slot_name,
+                    slot_name=decision.slot_name,
+                    prompt=decision.prompt,
+                ),
+            ),
+        )
+    if isinstance(decision, CommitArchitecture):
+        return PlannerOutput(
+            planning_state_delta=PlanningStateDelta(
+                base_planning_state_version=base_planning_state_version,
+                architecture_commit=decision.architecture_commit,
+            ),
+            planner_action=CommitArchitectureAction(
+                kind="commit_architecture",
+                payload=CommitArchitecturePayload(
+                    note="Architecture committed from resolved planning state."
+                ),
+            ),
+        )
+    if isinstance(decision, ConfirmRequirements):
+        return PlannerOutput(
+            planning_state_delta=PlanningStateDelta(
+                base_planning_state_version=base_planning_state_version,
+            ),
+            planner_action=ConfirmRequirementsAction(
+                kind="confirm_requirements",
+                payload=decision.payload,
+            ),
+        )
+    return None
 
 
 def _question_prompt(target: str, ui_language: str | None) -> str:
@@ -129,24 +223,6 @@ def _question_prompt(target: str, ui_language: str | None) -> str:
 
 def _locale(ui_language: str | None) -> Locale:
     return "sv" if ui_language == "sv" else "en"
-
-
-def _confirm_requirements_output(
-    *,
-    base_planning_state_version: int,
-    session_state: PlanningState,
-    ui_language: str | None,
-) -> PlannerOutput:
-    locale = _locale(ui_language)
-    return PlannerOutput(
-        planning_state_delta=PlanningStateDelta(
-            base_planning_state_version=base_planning_state_version,
-        ),
-        planner_action=ConfirmRequirementsAction(
-            kind="confirm_requirements",
-            payload=_confirm_requirements_payload(session_state, locale),
-        ),
-    )
 
 
 def _confirm_requirements_payload(
@@ -398,4 +474,14 @@ def _first(values: tuple[str, ...]) -> str | None:
     return values[0] if values else None
 
 
-__all__ = ["build_server_planner_output"]
+__all__ = [
+    "AskCanonicalQuestion",
+    "BuilderTurnControl",
+    "BuilderTurnDecision",
+    "CommitArchitecture",
+    "ConfirmRequirements",
+    "GenerateProposal",
+    "determine_turn_decision",
+    "planner_output_for_turn_decision",
+    "resolve_turn_control",
+]

@@ -234,7 +234,7 @@ async def test_dispatched_commit_chains_confirm_with_same_response_format_select
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_planner_action_dispatch."
-            "build_server_planner_output",
+            "planner_output_for_turn_decision",
             return_value=confirm_output,
         ),
         patch(

@@ -33,9 +33,6 @@ from intric.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputDecisionSource,
     StructuredOutputMode,
 )
-from intric.flows.ai_builder.ai_builder_action_policy import (
-    build_planner_action_policy,
-)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     slot_classification_metadata_from_result,
@@ -55,6 +52,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
+from intric.flows.ai_builder.ai_builder_litellm_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
     AskQuestionPayload,
@@ -68,7 +66,6 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
-from intric.flows.ai_builder.ai_builder_litellm_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     DiscoveryBlockPrepared,
     NormalPlannerPrepared,
@@ -87,9 +84,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.ai_builder_response_format import (
     build_planner_request_response_format,
 )
-from intric.flows.ai_builder.ai_builder_server_actions import (
-    build_server_planner_output,
-)
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -100,6 +94,10 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
 )
 from intric.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
+from intric.flows.ai_builder.ai_builder_turn_controller import (
+    planner_output_for_turn_decision,
+    resolve_turn_control,
+)
 from intric.flows.ai_builder.planning_state import PlanningState
 
 
@@ -1238,10 +1236,12 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
             "document_material_scope", "flexible_document_case"
         ),
     }
-    action_policy = build_planner_action_policy(
+    turn_control = resolve_turn_control(
         session_state=state,
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
+        requirements_confirmed=False,
+        is_edit_mode=False,
+        ui_language="en",
     )
     prepared = ServerOutputPrepared(
         requirements_state=_requirements_state_unconfirmed(),
@@ -1249,11 +1249,9 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
         slot_classification_metadata=None,
         discovery_analysis=DiscoveryAnalysis(issues=()),
         orchestration_context=_make_orchestration_context(state),
-        server_output=build_server_planner_output(
-            action_policy=action_policy,
-            session_state=state,
+        server_output=planner_output_for_turn_decision(
+            decision=turn_control.decision,
             base_planning_state_version=0,
-            ui_language="en",
         ),
     )
     action = CommitArchitectureAction(
@@ -1343,16 +1341,16 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
             "runtime_metadata_fields", "no_extra_metadata"
         ),
     }
-    action_policy = build_planner_action_policy(
+    turn_control = resolve_turn_control(
         session_state=state,
-        unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=(),
-    )
-    server_output = build_server_planner_output(
-        action_policy=action_policy,
-        session_state=state,
-        base_planning_state_version=0,
+        requirements_confirmed=False,
+        is_edit_mode=False,
         ui_language="en",
+    )
+    server_output = planner_output_for_turn_decision(
+        decision=turn_control.decision,
+        base_planning_state_version=0,
     )
     assert server_output is not None
     assert server_output.planner_action.kind == "commit_architecture"

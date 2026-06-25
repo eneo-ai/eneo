@@ -70,6 +70,7 @@ def build_planner_action_policy(
     """
 
     resolved_slot_names = frozenset(session_state.resolved_slots.keys())
+    unresolved_core_slots = compute_unresolved_core_slots(session_state)
     derived_commit = derive_architecture_commit_draft(session_state)
     unresolved_commit_slots = _unresolved_slots_for_derived_commit(
         session_state=session_state,
@@ -82,8 +83,7 @@ def build_planner_action_policy(
         ask_targets = _ordered_ask_targets(
             selected_discovery_question_ids=selected_discovery_question_ids,
             architecture_required_slots=(
-                unresolved_architectural_choices
-                | _missing_core_architecture_slots(resolved_slot_names)
+                unresolved_architectural_choices | unresolved_core_slots
             ),
             derived_commit_required_slots=unresolved_commit_slots,
             resolved_slot_names=resolved_slot_names,
@@ -199,19 +199,6 @@ def _order_slot_names(slot_names: frozenset[str]) -> tuple[str, ...]:
         slot for slot in sorted(slot_names) if slot not in CORE_ARCHITECTURAL_SLOTS
     )
     return core_slots + remaining
-
-
-def _missing_core_architecture_slots(
-    resolved_slot_names: frozenset[str],
-) -> frozenset[str]:
-    """Core architecture slots must be explicit before the server can commit.
-
-    Discovery heuristics may fail to infer input or output format from a
-    prompt. The action policy is the final deterministic gate: if a core slot
-    is missing, ask for it instead of falling through to an unsafe default.
-    """
-
-    return CORE_ARCHITECTURAL_SLOTS - resolved_slot_names
 
 
 def _unresolved_slots_for_derived_commit(

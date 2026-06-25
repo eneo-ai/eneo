@@ -8,8 +8,6 @@ from uuid import UUID
 from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
-    build_planner_action_policy,
-    compute_unresolved_core_slots,
 )
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
@@ -89,10 +87,12 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
 )
-from intric.flows.ai_builder.ai_builder_server_actions import (
-    build_server_planner_output,
-)
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from intric.flows.ai_builder.ai_builder_turn_controller import (
+    GenerateProposal,
+    planner_output_for_turn_decision,
+    resolve_turn_control,
+)
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.planning_state_builder import (
@@ -233,15 +233,15 @@ async def prepare_planner_request(
         rebuilt_planning_state,
         request.persisted_planning_state,
     )
-    unresolved_architectural_choices = compute_unresolved_core_slots(
-        rebuilt_planning_state
-    )
-    action_policy = build_planner_action_policy(
+    turn_control = resolve_turn_control(
         session_state=rebuilt_planning_state,
-        unresolved_architectural_choices=unresolved_architectural_choices,
         selected_discovery_question_ids=discovery_analysis.selected_question_ids,
         requirements_confirmed=requirements_state.confirmed,
+        is_edit_mode=request.flow is not None,
+        ui_language=ui_language,
     )
+    action_policy = turn_control.action_policy
+    unresolved_architectural_choices = turn_control.unresolved_architectural_choices
     orchestration_context = _build_orchestration_context(
         current_version=request.base_planning_state_version,
         conversation=request.conversation,
@@ -249,11 +249,9 @@ async def prepare_planner_request(
         action_policy=action_policy,
         unresolved_architectural_choices=unresolved_architectural_choices,
     )
-    server_output = build_server_planner_output(
-        action_policy=action_policy,
-        session_state=rebuilt_planning_state,
+    server_output = planner_output_for_turn_decision(
+        decision=turn_control.decision,
         base_planning_state_version=request.base_planning_state_version,
-        ui_language=ui_language,
     )
     if server_output is not None:
         return ServerOutputPrepared(
@@ -279,7 +277,7 @@ async def prepare_planner_request(
     attachment_context_result = build_ai_builder_attachment_context(
         request.attachment_files
     )
-    if action_policy.allowed_action_kinds == ("propose_plan",):
+    if isinstance(turn_control.decision, GenerateProposal):
         proposal_system_prompt = build_plan_proposal_system_prompt(
             planning_state=rebuilt_planning_state,
             confirmed_requirements=confirmed_requirements,
