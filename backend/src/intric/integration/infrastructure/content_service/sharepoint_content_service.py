@@ -679,23 +679,9 @@ class SharePointContentService:
                             drive_id=actual_drive_id,
                             item_id=integration_knowledge.folder_id,
                         )
-                        relative_parent_path = self._extract_relative_graph_path(
-                            folder_metadata.get("parentReference", {}).get("path", "")
+                        resolved_folder_path = self._folder_path_from_item(
+                            cast(SharePointItem, folder_metadata)
                         )
-                        folder_name = str(folder_metadata.get("name", "")).strip("/")
-
-                        if relative_parent_path == "/":
-                            resolved_folder_path = (
-                                f"/{folder_name}" if folder_name else "/"
-                            )
-                        elif relative_parent_path:
-                            resolved_folder_path = (
-                                f"{relative_parent_path.rstrip('/')}/{folder_name}"
-                                if folder_name
-                                else relative_parent_path
-                            )
-                        else:
-                            resolved_folder_path = None
 
                         if resolved_folder_path:
                             scope_folder_path = resolved_folder_path
@@ -812,6 +798,11 @@ class SharePointContentService:
                         and integration_knowledge.selected_item_type == "folder"
                     ):
                         known_subfolder_ids.add(item_id)
+                        if item_id == integration_knowledge.folder_id:
+                            updated_folder_path = self._folder_path_from_item(item)
+                            if updated_folder_path:
+                                scope_folder_path = updated_folder_path
+                                integration_knowledge.folder_path = updated_folder_path
 
                     if is_deleted:
                         # Delete the corresponding info_blob if it exists
@@ -1692,8 +1683,9 @@ class SharePointContentService:
             len(orphans),
             integration_knowledge.id,
         )
+        deleted_count = 0
         for _blob_id, item_id in orphans:
-            await self._delete_local_sharepoint_item(
+            deleted_count += await self._delete_local_sharepoint_item(
                 item_id=item_id,
                 item_name=item_id,
                 integration_knowledge=integration_knowledge,
@@ -1701,6 +1693,8 @@ class SharePointContentService:
                 stats=stats,
                 reason="reconcile-orphan",
             )
+        if deleted_count:
+            await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
     async def _fetch_and_process_content(
         self,
@@ -1903,15 +1897,17 @@ class SharePointContentService:
         - "site_root" or None: Include all items (no filtering)
 
         For folder scope, an item is in scope if:
+        - It is the selected folder itself, OR
         - Its parent is the scope folder itself, OR
         - Its parentReference.path contains the scope folder path (nested descendant)
         """
         if not scope_folder_id:
             return True
 
+        item_id = item.get("id")
+
         # If selected_item_type is "file", only include the exact file
         if selected_item_type == "file":
-            item_id = item.get("id")
             return item_id == scope_folder_id
 
         # If selected_item_type is "site_root", include everything
@@ -1919,6 +1915,9 @@ class SharePointContentService:
             return True
 
         # For "folder" type, check if item is in the folder hierarchy
+        if selected_item_type == "folder" and item_id == scope_folder_id:
+            return True
+
         parent_ref = item.get("parentReference", {})
         parent_id = parent_ref.get("id")
 
@@ -1952,6 +1951,22 @@ class SharePointContentService:
                 return True
 
         return False
+
+    def _folder_path_from_item(self, item: SharePointItem) -> Optional[str]:
+        relative_parent_path = self._extract_relative_graph_path(
+            item.get("parentReference", {}).get("path", "")
+        )
+        folder_name = str(item.get("name", "")).strip("/")
+
+        if relative_parent_path == "/":
+            return f"/{folder_name}" if folder_name else "/"
+        if relative_parent_path:
+            return (
+                f"{relative_parent_path.rstrip('/')}/{folder_name}"
+                if folder_name
+                else relative_parent_path
+            )
+        return None
 
     @staticmethod
     def _normalize_path(path: str) -> str:

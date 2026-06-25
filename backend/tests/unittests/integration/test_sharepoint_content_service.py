@@ -730,6 +730,21 @@ class TestIsItemInFolderScope:
 
         assert result is True
 
+    def test_returns_true_for_selected_folder_itself(self, service):
+        """Returns True when a folder delta is for the selected folder itself."""
+        item = {
+            "id": "folder-123",
+            "name": "Reports",
+            "folder": {},
+            "parentReference": {"id": "parent-folder"},
+        }
+
+        result = service._is_item_in_folder_scope(
+            item, scope_folder_id="folder-123", selected_item_type="folder"
+        )
+
+        assert result is True
+
     def test_returns_true_for_known_subfolder_child(self, service):
         """Returns True when item is child of known subfolder."""
         item = {"id": "grandchild-1", "parentReference": {"id": "subfolder-1"}}
@@ -1272,6 +1287,65 @@ class TestDeltaChangesProcessing:
         assert sync_log.metadata["out_of_scope_deleted"] == 1
         assert "1 deleted file" in result
 
+    async def test_selected_folder_delta_updates_folder_path_without_deleting_subtree(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """Rename/move deltas for the selected folder stay in scope."""
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_integration_knowledge.selected_item_type = "folder"
+        mock_integration_knowledge.folder_id = "folder-a"
+        mock_integration_knowledge.folder_path = "/Documents/A"
+
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_delta_changes.return_value = (
+                [
+                    {
+                        "id": "folder-a",
+                        "name": "A renamed",
+                        "folder": {},
+                        "parentReference": {
+                            "id": "documents-folder",
+                            "path": "/drives/drive-123/root:/Documents",
+                        },
+                    }
+                ],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+
+            with patch.object(
+                service, "_delete_out_of_scope_folder_subtree", AsyncMock()
+            ) as mock_delete_subtree:
+                result = await service.process_delta_changes(
+                    token_id=mock_oauth_token.id,
+                    integration_knowledge_id=mock_integration_knowledge.id,
+                    site_id="site-123",
+                    drive_id="drive-123",
+                )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        mock_delete_subtree.assert_not_called()
+        assert mock_integration_knowledge.folder_path == "/Documents/A renamed"
+        assert "1 folder scanned" in result
+
 
 class TestOneDriveFolderTraversal:
     """Tests for OneDrive-specific folder traversal."""
@@ -1763,6 +1837,40 @@ class TestFullSyncReconciliation:
 
         assert mock_delete.await_count == 1
         assert mock_delete.await_args.kwargs["item_id"] == "orphan-1"
+
+    async def test_orphan_deletion_persists_size_decrease(
+        self, service, mock_dependencies
+    ):
+        ik = self._ik()
+        ik.size = 100
+        indexed = [(uuid4(), "orphan-1")]
+        deleted_blob = MagicMock()
+        deleted_blob.size = 40
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=indexed
+        )
+        repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[deleted_blob]
+        )
+
+        with patch.object(
+            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+        ):
+            await service._reconcile_indexed_blobs(
+                client=AsyncMock(),
+                integration_knowledge=ik,
+                resource_type="site",
+                site_id="site-1",
+                drive_id="drive-1",
+                folder_id=None,
+                stats=service._initialize_stats(),
+            )
+
+        assert ik.size == 60
+        mock_dependencies["integration_knowledge_repo"].update.assert_called_once_with(
+            obj=ik
+        )
 
     async def test_skips_when_enumeration_fails(self, service, mock_dependencies):
         ik = self._ik()

@@ -98,9 +98,10 @@ class SharepointWebhookService:
                 continue
             resource_type, resource_id = resource_info
 
+            client_state = notification.get("clientState")
             # Constant-time compare to avoid leaking the secret via timing.
-            if not hmac.compare_digest(
-                notification.get("clientState") or "", self.expected_client_state
+            if not isinstance(client_state, str) or not hmac.compare_digest(
+                client_state, self.expected_client_state
             ):
                 logger.warning(
                     "Ignoring webhook notification with unexpected clientState. "

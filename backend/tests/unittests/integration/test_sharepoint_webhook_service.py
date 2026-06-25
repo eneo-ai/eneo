@@ -168,6 +168,19 @@ async def test_client_state_validation_rejects_invalid(setup: Setup, mock_notifi
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
 
 
+async def test_client_state_validation_rejects_malformed(
+    setup: Setup, mock_notification
+):
+    """Non-string clientState values are rejected without crashing."""
+    mock_notification["clientState"] = {"unexpected": "shape"}
+    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+
+    await setup.service.handle_notifications({"value": [mock_notification]})
+
+    setup.service._fetch_knowledge_by_site.assert_not_called()
+    setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
+
+
 async def test_rejects_all_when_client_state_not_configured(
     setup: Setup, mock_notification
 ):
