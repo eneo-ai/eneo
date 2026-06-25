@@ -212,12 +212,10 @@ async def test_create_config_auto_creates_tenant_integration_when_missing():
     owner_space_id = uuid4()
     integration_id = uuid4()
 
-    execute_result = AsyncMock()
-    execute_result.scalars.return_value.first.side_effect = [
+    service.session.scalar.side_effect = [
         None,
         SimpleNamespace(id=integration_id),
     ]
-    service.session.execute.return_value = execute_result
     service._resolve_owner = AsyncMock(return_value=(owner_space_id, service.user.id))  # type: ignore[method-assign]
 
     await service.create_config(

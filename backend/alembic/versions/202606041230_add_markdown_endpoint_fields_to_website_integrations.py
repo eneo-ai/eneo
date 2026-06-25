@@ -17,40 +17,60 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "website_integration_configs",
-        sa.Column(
-            "markdown_endpoint_method",
-            sa.Text(),
-            nullable=False,
-            server_default=sa.text("'get'"),
-        ),
-    )
-    op.add_column(
-        "website_integration_configs",
-        sa.Column(
-            "markdown_endpoint_url_location",
-            sa.Text(),
-            nullable=False,
-            server_default=sa.text("'query'"),
-        ),
-    )
-    op.add_column(
-        "website_integration_configs",
-        sa.Column(
-            "markdown_endpoint_url_param_name",
-            sa.Text(),
-            nullable=False,
-            server_default=sa.text("'url'"),
-        ),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {
+        column["name"]
+        for column in inspector.get_columns("website_integration_configs")
+    }
+
+    if "markdown_endpoint_method" not in existing_columns:
+        op.add_column(
+            "website_integration_configs",
+            sa.Column(
+                "markdown_endpoint_method",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'get'"),
+            ),
+        )
+    if "markdown_endpoint_url_location" not in existing_columns:
+        op.add_column(
+            "website_integration_configs",
+            sa.Column(
+                "markdown_endpoint_url_location",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'query'"),
+            ),
+        )
+    if "markdown_endpoint_url_param_name" not in existing_columns:
+        op.add_column(
+            "website_integration_configs",
+            sa.Column(
+                "markdown_endpoint_url_param_name",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'url'"),
+            ),
+        )
 
 
 def downgrade() -> None:
-    op.drop_column(
-        "website_integration_configs", "markdown_endpoint_url_param_name"
-    )
-    op.drop_column(
-        "website_integration_configs", "markdown_endpoint_url_location"
-    )
-    op.drop_column("website_integration_configs", "markdown_endpoint_method")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {
+        column["name"]
+        for column in inspector.get_columns("website_integration_configs")
+    }
+
+    if "markdown_endpoint_url_param_name" in existing_columns:
+        op.drop_column(
+            "website_integration_configs", "markdown_endpoint_url_param_name"
+        )
+    if "markdown_endpoint_url_location" in existing_columns:
+        op.drop_column(
+            "website_integration_configs", "markdown_endpoint_url_location"
+        )
+    if "markdown_endpoint_method" in existing_columns:
+        op.drop_column("website_integration_configs", "markdown_endpoint_method")
