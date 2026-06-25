@@ -69,6 +69,25 @@ class TestOauthTokenMapper(unittest.TestCase):
             self.active_encryption.decrypt(db_dict["refresh_token"]), self.refresh_token
         )
 
+    def test_encrypts_large_graph_token_above_api_key_limit(self):
+        """A >10KB Graph access token must encrypt, not hit the API-key length cap."""
+        mapper = OauthTokenMapper(encryption_service=self.active_encryption)
+        big_token = ConfluenceToken(
+            id=self.token_id,
+            access_token="A" * 20000,  # 20KB, well over EncryptionService default 10KB
+            refresh_token=self.refresh_token,
+            token_type=self.token_type,
+            user_integration=self.user_integration_mock,
+            resources=self.resources,
+        )
+
+        db_dict = mapper.to_db_dict(big_token)
+
+        self.assertTrue(db_dict["access_token"].startswith("enc:fernet:v1:"))
+        self.assertEqual(
+            self.active_encryption.decrypt(db_dict["access_token"]), "A" * 20000
+        )
+
     def test_encrypt_decrypt_round_trip(self):
         """A token written with encryption reads back as the original plaintext."""
         mapper = OauthTokenMapper(encryption_service=self.active_encryption)

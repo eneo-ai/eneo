@@ -72,11 +72,16 @@ class EncryptionService:
         """Safe representation for debugging (doesn't expose key material)."""
         return f"<EncryptionService active={self.is_active()}>"
 
-    def encrypt(self, plaintext: str) -> str:
+    def encrypt(self, plaintext: str, max_length: Optional[int] = None) -> str:
         """Encrypt plaintext and return versioned token.
 
         Args:
-            plaintext: API key to encrypt
+            plaintext: value to encrypt (API key, OAuth token, ...)
+            max_length: maximum allowed plaintext length in bytes. Defaults to
+                MAX_CREDENTIAL_LENGTH (sized for API keys). Callers storing larger
+                secrets (e.g. OAuth/JWT access tokens, which can exceed 10KB with
+                rich claims) must pass a higher limit so encryption does not reject
+                a legitimate value.
 
         Returns:
             Versioned encrypted string: enc:fernet:v1:<ciphertext>
@@ -90,10 +95,13 @@ class EncryptionService:
         if not plaintext:
             raise ValueError("Cannot encrypt empty string")
 
-        if len(plaintext) > self.MAX_CREDENTIAL_LENGTH:
+        effective_max = (
+            max_length if max_length is not None else self.MAX_CREDENTIAL_LENGTH
+        )
+        if len(plaintext) > effective_max:
             raise ValueError(
                 f"Credential too long ({len(plaintext)} bytes). "
-                f"Maximum allowed: {self.MAX_CREDENTIAL_LENGTH} bytes"
+                f"Maximum allowed: {effective_max} bytes"
             )
 
         encrypted_bytes = self._fernet.encrypt(plaintext.encode())

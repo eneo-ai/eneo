@@ -12,6 +12,11 @@ from intric.integration.domain.factories.oauth_token_factory import (
 )
 from intric.settings.encryption_service import EncryptionService
 
+# OAuth access tokens are JWTs that can far exceed the API-key-sized default
+# limit (e.g. Graph tokens with many group/role claims reach tens of KB), so use
+# a generous token-specific ceiling instead of EncryptionService's default.
+_TOKEN_MAX_LENGTH = 64 * 1024
+
 
 class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
     """Mapper for OAuth tokens with encryption at rest.
@@ -29,11 +34,15 @@ class OauthTokenMapper(EntityMapper[OauthToken, OauthTokenDBModel]):
 
     def _encrypt(self, value: str) -> str:
         if value and self.encryption_service.is_active():
-            return self.encryption_service.encrypt(value)
+            return self.encryption_service.encrypt(value, max_length=_TOKEN_MAX_LENGTH)
         return value
 
     def _decrypt(self, value: str) -> str:
-        if value and self.encryption_service.is_encrypted(value):
+        # Route every versioned value ("enc:" prefix, any algorithm/version) to
+        # decrypt() so an unsupported/garbled ciphertext fails loudly instead of
+        # being silently mistaken for legacy plaintext. Only un-prefixed legacy
+        # rows pass through.
+        if value and value.startswith("enc:"):
             return self.encryption_service.decrypt(value)
         return value
 
