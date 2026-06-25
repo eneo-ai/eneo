@@ -81,8 +81,8 @@ def test_source_modules_cover_every_flows_sibling() -> None:
 
 def test_flow_validators_is_not_coupled_to_ai_builder() -> None:
     """`flow_validators.py` is pure engine code and must not reach into
-    `intric.flows.ai_builder.*`. The FCM's mirror of
-    `is_citation_capable_step` is the engine-side primitive. This test
+    `intric.flows.ai_builder.*`. FCM's `is_citation_capable_step` is the
+    engine-side primitive. This test
     AST-scans the module so a regression fails at unit test time, not via
     the slower lint-imports subprocess.
     """
@@ -105,32 +105,6 @@ def test_flow_validators_is_not_coupled_to_ai_builder() -> None:
         "flow_validators.py must not import from intric.flows.ai_builder.*. "
         "Use FCM primitives instead (see flow_capability_manifest.py).\n"
         f"Offending imports: {offenders}"
-    )
-
-
-def test_flow_validators_ignore_line_removed_from_importlinter() -> None:
-    """The `.importlinter` ignore carve-out for
-    `flow_validators -> ai_builder.ai_builder_step_capabilities` must not
-    exist. If someone re-adds it to silence a regressed import, this test
-    fires before CI.
-    """
-    import configparser
-
-    parser = configparser.ConfigParser()
-    parser.read(_backend_root() / ".importlinter", encoding="utf-8")
-    raw = parser.get(
-        "importlinter:contract:flows-engine-no-ai-builder",
-        "ignore_imports",
-        fallback="",
-    )
-    lines = {line.strip() for line in raw.splitlines() if line.strip()}
-    forbidden = (
-        "intric.flows.flow_validators -> "
-        "intric.flows.ai_builder.ai_builder_step_capabilities"
-    )
-    assert forbidden not in lines, (
-        "`.importlinter` still carves out "
-        f"`{forbidden}`. Remove the line — this edge is no longer permitted."
     )
 
 

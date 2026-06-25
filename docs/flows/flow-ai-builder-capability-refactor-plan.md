@@ -2,21 +2,23 @@
 
 ## Five-line TL;DR
 
-1. Phase 4 Flow AI Builder runtime deletion is complete; Phase 5A Assistant update command ownership is now complete.
+1. Phase 4 Flow AI Builder runtime deletion and Phase 5A Assistant update command ownership are complete.
 2. Keep this document as the phase-order and merge-gate packet; do not duplicate detailed slice design here.
 3. Treat PR #480 and Dify as references, not architectures to copy.
 4. Every implementation slice must delete a named duplicate owner or remove a named wrong-layer dependency in the same migration.
-5. Stop after Phase 5A; do not implement shared descriptors, MCP adapters, or platform capability registries without a new explicit goal.
+5. The Flow capability mirror deletion slice is complete; do not implement shared descriptors, MCP adapters, or platform capability registries without a new explicit goal.
 
 ## Document Precedence
 
 This packet owns **implementation order, gates, and stop conditions**.
 
 Current status: Phase 5A implemented only the Assistant-owned update command
-boundary. It did not start shared descriptors, MCP adapters, internal
-Builder-to-MCP calls, PR #480 cherry-picks, or generated-client-visible API
-changes. The detailed evidence lives in
-[Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
+boundary. A later explicit capability-deduplication slice deleted the
+Builder-local step capability mirror and made the Flow Capability Manifest the
+single owner for those read-only Flow facts. Neither slice started shared
+descriptors, MCP adapters, internal Builder-to-MCP calls, PR #480 cherry-picks,
+or generated-client-visible API changes. The detailed Phase 5A evidence lives
+in [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
 
 Related docs keep their existing ownership:
 
@@ -26,7 +28,7 @@ Related docs keep their existing ownership:
   owns the detailed question-recovery completion slice and its failure-mode-to-test mapping.
 - [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md)
   owns final Phase 4 completion evidence, retry-loop disposition, and the Phase 5A go/no-go packet.
-- This document owns the active goal sequence: Phase 4 completion, Phase 5A command ownership, then stop.
+- This document owns the active goal sequence: Phase 4 completion, Phase 5A command ownership, Flow capability mirror deletion, then stop.
 
 If a later decision record supersedes any of these, it should explicitly say so and delete or shrink stale guidance in the same change.
 
@@ -48,8 +50,8 @@ MCP never becomes the owner.
 | The first Phase 4 slice was dependency inversion, not deletion of the executor. | `call_proposal_completion` survives at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94`; active submission still calls it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261`; the usage-tracked factory wraps it at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:143`. |
 | Question recovery still needs LiteLLM context for discovery runtime. | The boundary doc records that the completion import is the smell, not all `litellm_client` usage. |
 | `ProposalTurnContext.completion_request(...)` is the existing typed request builder. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144`. |
-| Flow Capability Manifest already owns engine feature truth. | `backend/src/intric/flows/flow_capability_manifest.py:454` defines `CAPABILITY_REGISTRY`. |
-| Builder/FCM duplication is explicit and test-held. | `backend/src/intric/flows/flow_capability_manifest.py:121`, `backend/src/intric/flows/flow_capability_manifest.py:470`, `backend/src/intric/flows/flow_capability_manifest.py:495`, `backend/src/intric/flows/flow_capability_manifest.py:526`, and `backend/src/intric/flows/flow_capability_manifest.py:572` describe mirrored Builder/runtime mappings. |
+| Flow Capability Manifest already owns engine feature truth. | `backend/src/intric/flows/flow_capability_manifest.py:121` defines the runtime-input mapping, `backend/src/intric/flows/flow_capability_manifest.py:496` defines final-output artifact mapping, and `backend/src/intric/flows/flow_capability_manifest.py:511` onward owns step I/O, document generation, and citation predicates. |
+| Builder now consumes FCM facts directly instead of a Builder-local mirror. | `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:17` imports FCM constants/functions, and `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:101` stores typed Flow enums in the discovery signature. |
 | Flow authoring already has the command shape we want to reuse, not generalize. | `backend/src/intric/flows/application/flow_authoring_command.py:127` owns preview/prepare/apply through `FlowAuthoringCommandService`. |
 | Flow-managed Assistant mutation is already blocked outside Flow. | `backend/src/intric/assistants/assistant_service.py:117` rejects direct Flow-managed assistant mutation. |
 | Standalone Assistant update is production-risky and broad. | `backend/src/intric/assistants/assistant_service.py:489` starts a large optional-argument update path with permission, governance, resource, prompt, and persistence behavior. |
@@ -76,11 +78,12 @@ Do not repeat those decisions in implementation slices. Each slice should name t
 flowchart LR
   P4["Phase 4"]
   P5A["Phase 5A command owner"]
+  Dedup["Flow capability mirror deletion"]
   Stop["STOP"]
   Future["Future goal selected separately"]
 
-  P4 --> P5A --> Stop
-  P5A -. recommendation only .-> Future
+  P4 --> P5A --> Dedup --> Stop
+  Dedup -. recommendation only .-> Future
 ```
 
 This document must not declare the order of future implementation phases.
@@ -115,7 +118,7 @@ These are candidates, not automatic work. Each requires preflight proof of a can
 | Proposal completion callable cleanup | Skipped for Phase 4. Reassess `ProposalCompletionFn` only if replacing it reduces total production code and ownership-guard complexity. |
 | Planner orchestration repair consolidation | Completed for retry execution. Do not fold planner prompt/message helpers further unless that deletes more than it moves. |
 | Streamed repair skeleton duplication | Deferred. Proposal repair, question recovery, and confirm requirements share repair-event skeletons, but each owns distinct product semantics. Only replace them with one typed streamed-repair contract if the same change deletes the current `tool_call: Any`, event-dict, and message-dict residuals. |
-| Builder step capability duplicates | Defer unless the whole change stays Builder-local and mechanically deletes a duplicate owner. Otherwise this belongs in a later Flow capability-deduplication slice. |
+| Builder step capability duplicates | Completed as a Flow capability-deduplication slice: `ai_builder_step_capabilities.py` was deleted, FCM owns the read-only capability facts, and Builder consumers translate only at their own boundary. |
 | Prompt hard-rule duplication | Defer unless every touched rule stays within Builder runtime/planner ownership. Future capability work should enforce: every model-visible capability claim must have canonical enforcement. |
 | Capability projection complexity | Shrink `ai_builder_capability_projection.py` only if Phase 4 typed-turn deletion or FCM projection makes state fields unnecessary. |
 
@@ -263,12 +266,27 @@ consolidation: removing a wrong-layer dependency can justify a narrow cleanup
 slice, but a new capability abstraction must delete or consolidate an existing
 duplicate owner in the same migration.
 
-## Next Step After Phase 5A
+### Completed Flow Capability Mirror Deletion
 
-Do not start Phase 5B, shared descriptors, MCP adapters, platform capability
-registries, or Builder-to-MCP execution without a new explicit goal.
+The capability mirror deletion slice satisfied the merge gate without creating
+a new capability abstraction:
+
+| Gate | Result |
+| --- | --- |
+| Duplicate owner deleted | Deleted `backend/src/intric/flows/ai_builder/ai_builder_step_capabilities.py`. |
+| No compatibility shim | No replacement re-export or permissive string helper remains. |
+| Canonical owner | `flow_capability_manifest.py` owns runtime input mode, final artifact, document generation, step I/O, and citation capability facts. |
+| Adapters translated only | Builder discovery and transition policy consume FCM constants/functions and keep enum conversion local to Builder boundaries. |
+| Behavior tests moved | FCM owner tests pin runtime input, final artifact, document generation, step I/O, and citation behavior; Builder tests pin discovery profile and citation normalization outcomes. |
+| Net production delta | 1 production file deleted; 98 net production lines removed (`53` added / `151` deleted before docs). |
+
+## Next Step After Capability Mirror Deletion
+
+Do not start shared descriptors, MCP adapters, platform capability registries,
+or Builder-to-MCP execution without a new explicit goal.
 
 The Phase 5A completion record is
 [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
 It records that the Assistant command owner now exists and that MCP/capability
-adapter work remains intentionally unstarted.
+adapter work remains intentionally unstarted. This document now additionally
+records that the Flow capability mirror deletion prerequisite is complete.

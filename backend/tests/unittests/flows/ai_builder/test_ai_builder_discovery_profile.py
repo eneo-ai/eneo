@@ -125,7 +125,10 @@ def test_build_flow_capability_profile_tracks_entry_points_and_step_capabilities
         3,
     )
     assert profile.runtime_input_mode == "text_and_documents"
+    assert profile.document_material_scope == "multiple_documents_case"
+    assert profile.upload_pattern == "multiple_pdfs"
     assert profile.final_output_type == "docx"
+    assert profile.final_output_mode == "docx_document"
     assert profile.final_output_generation_mode == "template_fill"
     assert profile.citation_step_orders == (1,)
     assert profile.contract_step_orders == (2,)

@@ -18,19 +18,6 @@ import pytest
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
 )
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE,
-    BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE,
-)
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    is_citation_capable_step as _legacy_is_citation_capable_step,
-)
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    resolve_document_generation_mode as _legacy_resolve_document_generation_mode,
-)
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    supports_step_io_mode_combo as _legacy_supports_step_io_mode_combo,
-)
 from intric.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
 from intric.flows.enums import (
     FlowInputSource,
@@ -46,6 +33,7 @@ from intric.flows.flow_capability_manifest import (
     CHAIN_COMPATIBILITY,
     FCM_VERSION,
     FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+    RUNTIME_INPUT_MODE_BY_TYPE,
     ConfigRequirement,
     CoverageReport,
     FlowCapability,
@@ -288,31 +276,47 @@ def test_input_text_has_no_absorbed_invariants() -> None:
     assert capability.channel == "text_only"
 
 
-@pytest.mark.parametrize("input_key", sorted(INPUT_TYPE_POLICIES.keys()))
-def test_capability_runtime_input_mode_mirrors_builder_map(input_key: str) -> None:
-    """Every seeded `input_*` capability carries `runtime_input_mode`
-    matching `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(key)`. The
-    legacy map covers 5 of 7 input types (image/any are absent) — the
-    capability field must be `None` for those so the typed mirror doesn't
-    invent behaviour the runtime doesn't support."""
-    capability = CAPABILITY_REGISTRY[f"input_{input_key}"]
-    expected = BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE.get(input_key)
+_EXPECTED_RUNTIME_INPUT_MODE_BY_TYPE = {
+    FlowInputType.DOCUMENT: "documents",
+    FlowInputType.FILE: "documents",
+    FlowInputType.AUDIO: "audio",
+    FlowInputType.TEXT: "text",
+    FlowInputType.JSON: "text",
+}
+
+
+def test_runtime_input_mode_by_type_is_fcm_owned_and_typed() -> None:
+    assert RUNTIME_INPUT_MODE_BY_TYPE == _EXPECTED_RUNTIME_INPUT_MODE_BY_TYPE
+    assert FlowInputType.IMAGE not in RUNTIME_INPUT_MODE_BY_TYPE
+    assert FlowInputType.ANY not in RUNTIME_INPUT_MODE_BY_TYPE
+    for input_type in RUNTIME_INPUT_MODE_BY_TYPE:
+        assert isinstance(input_type, FlowInputType), (
+            f"RUNTIME_INPUT_MODE_BY_TYPE key {input_type!r} must be a "
+            "FlowInputType enum, not a bare string."
+        )
+    with pytest.raises(TypeError):
+        RUNTIME_INPUT_MODE_BY_TYPE[FlowInputType.TEXT] = "mutated"  # type: ignore[index]
+
+
+@pytest.mark.parametrize("input_type", list(FlowInputType))
+def test_capability_runtime_input_mode_uses_fcm_mapping(
+    input_type: FlowInputType,
+) -> None:
+    """Seeded `input_*` capabilities carry the FCM-owned runtime-input
+    mode. `image` and `any` intentionally carry `None` because the runtime
+    has no input_mode for those input types."""
+    capability = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
+    expected = RUNTIME_INPUT_MODE_BY_TYPE.get(input_type)
     assert capability.runtime_input_mode == expected
 
 
-def test_final_output_artifact_by_type_mirrors_legacy() -> None:
-    """Parity: `FINAL_OUTPUT_ARTIFACT_BY_TYPE` (typed with `FlowOutputType`
-    keys + `OutputArtifact` literal values) must stay in lockstep with the
-    legacy `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` string-dict.
-    Drift is a bug."""
-    fcm_as_strings = {
-        out_type.value: artifact
-        for out_type, artifact in FINAL_OUTPUT_ARTIFACT_BY_TYPE.items()
+def test_final_output_artifact_by_type_is_fcm_owned() -> None:
+    assert FINAL_OUTPUT_ARTIFACT_BY_TYPE == {
+        FlowOutputType.TEXT: "structured_text",
+        FlowOutputType.JSON: "structured_json",
+        FlowOutputType.PDF: "pdf_document",
+        FlowOutputType.DOCX: "docx_document",
     }
-    assert fcm_as_strings == BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE, (
-        "FINAL_OUTPUT_ARTIFACT_BY_TYPE has drifted from "
-        "BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE."
-    )
 
 
 def test_final_output_artifact_by_type_is_frozen_and_typed_with_enums() -> None:
@@ -329,52 +333,41 @@ def test_final_output_artifact_by_type_is_frozen_and_typed_with_enums() -> None:
         FINAL_OUTPUT_ARTIFACT_BY_TYPE[FlowOutputType.TEXT] = "mutated"  # type: ignore[index]
 
 
-@pytest.mark.parametrize("input_type", [None, *list(FlowInputType)])
-@pytest.mark.parametrize("output_type", list(FlowOutputType))
-@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
-def test_supports_step_io_tuple_parity_with_legacy(
-    input_type: FlowInputType | None,
-    output_type: FlowOutputType,
-    output_mode: FlowOutputMode,
-) -> None:
-    """Parity: `supports_step_io_tuple` (enum-typed, engine-side) must
-    agree with legacy `supports_step_io_mode_combo` (string-typed,
-    ai_builder) on every (input_type, output_type, output_mode) triple.
-    Covers None for input_type — the legacy signature allows it, and the
-    FCM must too."""
-    fcm_result = supports_step_io_tuple(
-        input_type=input_type, output_type=output_type, output_mode=output_mode
+def test_resolve_document_generation_mode_maps_document_outputs() -> None:
+    assert (
+        resolve_document_generation_mode(
+            output_type=FlowOutputType.DOCX,
+            output_mode=FlowOutputMode.TEMPLATE_FILL,
+        )
+        == "template_fill"
     )
-    legacy_result = _legacy_supports_step_io_mode_combo(
-        input_type=input_type.value if input_type is not None else None,
-        output_type=output_type.value,
-        output_mode=output_mode.value,
+    assert (
+        resolve_document_generation_mode(
+            output_type=FlowOutputType.DOCX,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+        == "generated"
     )
-    assert fcm_result is legacy_result, (
-        f"supports_step_io_tuple drift: "
-        f"input={input_type} output={output_type} mode={output_mode} "
-        f"fcm={fcm_result} legacy={legacy_result}"
+    assert (
+        resolve_document_generation_mode(
+            output_type=FlowOutputType.PDF,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+        == "generated"
     )
-
-
-@pytest.mark.parametrize("output_type", list(FlowOutputType))
-@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
-def test_resolve_document_generation_mode_parity_with_legacy(
-    output_type: FlowOutputType, output_mode: FlowOutputMode
-) -> None:
-    """Parity: FCM `resolve_document_generation_mode` returns the same
-    `DocumentGenerationMode | None` as the legacy ai_builder version for
-    every (output_type, output_mode) pair."""
-    fcm_result = resolve_document_generation_mode(
-        output_type=output_type, output_mode=output_mode
+    assert (
+        resolve_document_generation_mode(
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+        is None
     )
-    legacy_result = _legacy_resolve_document_generation_mode(
-        output_type=output_type.value, output_mode=output_mode.value
-    )
-    assert fcm_result == legacy_result, (
-        f"resolve_document_generation_mode drift: "
-        f"output={output_type} mode={output_mode} "
-        f"fcm={fcm_result} legacy={legacy_result}"
+    assert (
+        resolve_document_generation_mode(
+            output_type=FlowOutputType.JSON,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+        is None
     )
 
 
@@ -407,62 +400,19 @@ def test_supports_step_io_tuple_rejects_transcribe_only_for_non_audio_text() -> 
             assert legal is expected
 
 
-_CITATION_CONFIG_CASES: tuple[tuple[str, object], ...] = (
-    ("enabled_sidecar", {"citation_mode": CITATION_MODE_INLINE_INREF_SIDECAR}),
-    # Whitespace-padded value covers `resolve_citation_mode`'s `.strip()`
-    # branch — the FCM predicate relies on that normalisation and must not
-    # regress if someone later inlines a raw equality check.
-    ("enabled_whitespace_padded", {"citation_mode": "  inline_inref_sidecar  "}),
-    ("disabled_off", {"citation_mode": "off"}),
-    # Non-string value covers `resolve_citation_mode`'s `isinstance(..., str)`
-    # guard; must resolve to OFF regardless of the rest of the step.
-    ("non_string_value", {"citation_mode": 1}),
-    ("empty_dict", {}),
-    ("non_dict_none", None),
-)
-
-
-@pytest.mark.parametrize(
-    "config_label,output_config",
-    _CITATION_CONFIG_CASES,
-    ids=[c[0] for c in _CITATION_CONFIG_CASES],
-)
-@pytest.mark.parametrize("output_type", list(FlowOutputType))
-@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
-def test_is_citation_capable_step_parity_with_legacy(
-    output_type: FlowOutputType,
-    output_mode: FlowOutputMode,
-    config_label: str,
-    output_config: object,
-) -> None:
-    """Parity: FCM `is_citation_capable_step` (enum-typed, engine-side) must
-    agree with the legacy `ai_builder` version (string-typed) on every
-    (output_type, output_mode, citation-config) combination. Covers the four
-    representative citation configs: enabled sidecar, explicit off, empty
-    dict, and a non-dict sentinel — matching the branch structure of
-    `resolve_citation_mode`."""
-    fcm_result = is_citation_capable_step(
-        output_type=output_type,
-        output_mode=output_mode,
-        output_config=output_config,
-    )
-    legacy_result = _legacy_is_citation_capable_step(
-        output_type=output_type.value,
-        output_mode=output_mode.value,
-        output_config=output_config,
-    )
-    assert fcm_result is legacy_result, (
-        f"is_citation_capable_step drift: output={output_type} "
-        f"mode={output_mode} config={config_label} "
-        f"fcm={fcm_result} legacy={legacy_result}"
-    )
-
-
 def test_is_citation_capable_step_requires_inline_inref_sidecar_mode() -> None:
     """Explicit rule guardrail: only `inline_inref_sidecar` citation mode
     unlocks citation capability. Any other recognisable mode (including the
     explicit 'off' sentinel and an unknown mode string) must return False
     even when the rest of the step is citation-friendly."""
+    assert (
+        is_citation_capable_step(
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+            output_config={"citation_mode": "  inline_inref_sidecar  "},
+        )
+        is True
+    )
     for bad_mode in ("off", "unknown_mode", "", "inline", "sidecar"):
         assert (
             is_citation_capable_step(
@@ -472,6 +422,14 @@ def test_is_citation_capable_step_requires_inline_inref_sidecar_mode() -> None:
             )
             is False
         ), f"non-sidecar citation_mode={bad_mode!r} must not unlock capability"
+    assert (
+        is_citation_capable_step(
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+            output_config={"citation_mode": 1},
+        )
+        is False
+    )
 
 
 def test_is_citation_capable_step_requires_text_output() -> None:

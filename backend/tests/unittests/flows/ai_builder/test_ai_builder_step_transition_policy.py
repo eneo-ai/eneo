@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
+    supports_inline_inref_citation,
 )
 from intric.flows.ai_builder.ai_builder_underlag_policy import is_source_surfacing_text
 from intric.flows.flow_authoring_spec import (
@@ -292,6 +293,58 @@ def test_normalize_ai_builder_spec_clears_explicit_question_input_contract() -> 
     assert any(
         change.code == "explicit_question_input_contract_cleared"
         for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_clears_invalid_citation_sidecar_config() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Template report",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Fill template",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+                output_config={
+                    "citation_mode": "inline_inref_sidecar",
+                    "template_asset_id": "template-1",
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[0].output_config == {"template_asset_id": "template-1"}
+    assert [
+        change.code
+        for _step_spec, change in changes
+        if change.code == "output_config_citation_mode_cleared"
+    ] == ["output_config_citation_mode_cleared"]
+
+
+def test_supports_inline_inref_citation_uses_flow_output_capability_rules() -> None:
+    assert (
+        supports_inline_inref_citation(
+            output_type=OutputType.TEXT,
+            output_mode=OutputMode.PASS_THROUGH,
+        )
+        is True
+    )
+    assert (
+        supports_inline_inref_citation(
+            output_type=OutputType.TEXT,
+            output_mode=OutputMode.TRANSCRIBE_ONLY,
+        )
+        is False
+    )
+    assert (
+        supports_inline_inref_citation(
+            output_type=OutputType.DOCX,
+            output_mode=OutputMode.TEMPLATE_FILL,
+        )
+        is False
     )
 
 

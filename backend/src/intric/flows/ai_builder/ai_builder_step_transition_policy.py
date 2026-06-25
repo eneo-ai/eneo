@@ -15,10 +15,8 @@ from intric.flows.ai_builder.ai_builder_source_material import (
     source_material_binding_status,
     source_material_question_for_boundary,
 )
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    is_citation_capable_step,
-)
 from intric.flows.citation_sidecar import resolve_citation_mode
+from intric.flows.enums import FlowOutputMode
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -28,6 +26,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.flows.flow_capability_manifest import is_citation_capable_step
 from intric.flows.input_binding_contract_rules import question_binding
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
@@ -851,8 +850,8 @@ def normalize_ai_builder_step(
 
         citation_mode = resolve_citation_mode(next_output_config)
         if citation_mode == "inline_inref_sidecar" and not is_citation_capable_step(
-            output_type=str(output_type),
-            output_mode=str(output_mode),
+            output_type=output_type,
+            output_mode=FlowOutputMode(output_mode.value),
             output_config=next_output_config,
         ):
             del next_output_config["citation_mode"]
@@ -913,8 +912,8 @@ def supports_inline_inref_citation(
     output_mode: OutputMode,
 ) -> bool:
     return is_citation_capable_step(
-        output_type=str(output_type),
-        output_mode=str(output_mode),
+        output_type=output_type,
+        output_mode=FlowOutputMode(output_mode.value),
         output_config={"citation_mode": "inline_inref_sidecar"},
     )
 

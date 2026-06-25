@@ -118,19 +118,20 @@ _UNSUPPORTED_REASONS: dict[str, str] = {
 }
 
 
-# Mirrors `BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE` in
-# `ai_builder/ai_builder_step_capabilities.py`. Engine-truth cannot import
-# from `ai_builder`, so the mapping is duplicated here and held in lockstep
-# by a parity test. `image` and `any` are intentionally absent — the runtime
-# has no input_mode for those keys, and a capability without a
-# runtime_input_mode simply carries `None`.
-_RUNTIME_INPUT_MODE_BY_KEY: dict[str, RuntimeInputMode] = {
-    "document": "documents",
-    "file": "documents",
-    "audio": "audio",
-    "text": "text",
-    "json": "text",
-}
+# Engine-truth mapping from input type to the runtime input mode used by
+# published flow execution. `IMAGE` and `ANY` are intentionally absent because
+# the runtime has no input_mode for those input types.
+RUNTIME_INPUT_MODE_BY_TYPE: Mapping[FlowInputType, RuntimeInputMode] = (
+    MappingProxyType(
+        {
+            FlowInputType.DOCUMENT: "documents",
+            FlowInputType.FILE: "documents",
+            FlowInputType.AUDIO: "audio",
+            FlowInputType.TEXT: "text",
+            FlowInputType.JSON: "text",
+        }
+    )
+)
 
 
 def _narrow_channel(key: str, raw: str) -> Channel:
@@ -232,7 +233,7 @@ def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapabi
         exposure=exposure,
         not_exposed_reason=reason,
         channel=_narrow_channel(key, policy.channel),
-        runtime_input_mode=_RUNTIME_INPUT_MODE_BY_KEY.get(key),
+        runtime_input_mode=RUNTIME_INPUT_MODE_BY_TYPE.get(FlowInputType(key)),
     )
 
 
@@ -493,10 +494,8 @@ CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset
 
 
 # Engine-truth mapping from output type to the artifact the runtime produces.
-# Mirrors `BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE` in
-# `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a parity
-# test. Covers every `FlowOutputType` — there is no runtime output type
-# without an artifact.
+# Covers every `FlowOutputType` — there is no runtime output type without an
+# artifact.
 FINAL_OUTPUT_ARTIFACT_BY_TYPE: Mapping[FlowOutputType, OutputArtifact] = (
     MappingProxyType(
         {
@@ -523,9 +522,7 @@ def supports_step_io_tuple(
     wrong answer. Callers that hold stringly-typed data must coerce at
     their boundary (typically `FlowOutputType(raw_string)`).
 
-    Mirrors `supports_step_io_mode_combo` in
-    `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
-    parity test. Rules:
+    Rules:
 
     - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
     - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
@@ -574,10 +571,7 @@ def resolve_document_generation_mode(
     output_mode)` pair triggers at runtime, if any.
 
     Strict enum-only contract: non-enum inputs raise `TypeError` rather
-    than silently returning `None` via failed identity checks. Mirrors
-    `resolve_document_generation_mode` in
-    `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by a
-    parity test.
+    than silently returning `None` via failed identity checks.
     """
     if not isinstance(output_type, FlowOutputType):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(
@@ -608,9 +602,7 @@ def is_citation_capable_step(
 
     Strict enum-only contract for `output_type` and `output_mode`:
     non-enum inputs raise `TypeError` rather than silently returning
-    `False` via a failed identity check. Mirrors `is_citation_capable_step`
-    in `ai_builder/ai_builder_step_capabilities.py`; held in lockstep by
-    a parity test.
+    `False` via a failed identity check.
 
     Capability holds iff:
     - `output_config` is a dict that requests the

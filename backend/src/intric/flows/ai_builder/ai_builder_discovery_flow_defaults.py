@@ -7,21 +7,27 @@ from typing import cast
 from intric.flows.ai_builder.ai_builder_discovery_families import (
     DiscoveryFamily,
 )
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
+from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from intric.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+)
+from intric.flows.flow_capability_manifest import (
+    FINAL_OUTPUT_ARTIFACT_BY_TYPE,
+    RUNTIME_INPUT_MODE_BY_TYPE,
     is_citation_capable_step,
     resolve_document_generation_mode,
-    resolve_final_output_artifact,
-    resolve_runtime_input_mode,
 )
-from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 
 
 @dataclass(frozen=True, slots=True)
 class FlowInputStepSignature:
     step_order: int
-    input_type: str
-    output_mode: str
-    output_type: str
+    input_type: FlowInputType
+    output_mode: FlowOutputMode
+    output_type: FlowOutputType
     max_files: int | None = None
 
 
@@ -95,33 +101,31 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
     flow_input_steps = tuple(
         FlowInputStepSignature(
             step_order=step.step_order,
-            input_type=_enum_value(step.input_type),
-            output_mode=_enum_value(step.output_mode),
-            output_type=_enum_value(step.output_type),
+            input_type=step.input_type,
+            output_mode=step.output_mode,
+            output_type=step.output_type,
             max_files=_runtime_input_max_files(step.input_config),
         )
         for step in steps
-        if _enum_value(step.input_source) == "flow_input"
+        if step.input_source is FlowInputSource.FLOW_INPUT
     )
 
     runtime_input_mode, runtime_input_settled = _derive_runtime_input_mode(
         flow_input_steps
     )
     document_material_scope, upload_pattern = _derive_document_scope(flow_input_steps)
-    final_output_mode = resolve_final_output_artifact(
-        _enum_value(last_step.output_type)
-    )
+    final_output_mode = FINAL_OUTPUT_ARTIFACT_BY_TYPE[last_step.output_type]
     final_output_generation_mode = resolve_document_generation_mode(
-        output_type=_enum_value(last_step.output_type),
-        output_mode=_enum_value(last_step.output_mode),
+        output_type=last_step.output_type,
+        output_mode=last_step.output_mode,
     )
     runtime_metadata_state = _derive_runtime_metadata_state(flow)
     citation_step_orders = tuple(
         step.step_order
         for step in steps
         if is_citation_capable_step(
-            output_type=_enum_value(step.output_type),
-            output_mode=_enum_value(step.output_mode),
+            output_type=step.output_type,
+            output_mode=step.output_mode,
             output_config=step.output_config,
         )
     )
@@ -137,14 +141,13 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
     all_previous_steps_orders = tuple(
         step.step_order
         for step in steps
-        if _enum_value(step.input_source) == "all_previous_steps"
+        if step.input_source is FlowInputSource.ALL_PREVIOUS_STEPS
     )
 
     settled_families: set[DiscoveryFamily] = set()
     if runtime_input_settled:
         settled_families.add("input_shape")
-    if final_output_mode is not None:
-        settled_families.add("output_artifact")
+    settled_families.add("output_artifact")
     if runtime_metadata_state is not None:
         settled_families.add("runtime_metadata")
 
@@ -154,7 +157,7 @@ def build_flow_capability_profile(flow: Flow | None) -> FlowCapabilityProfile:
         runtime_input_settled=runtime_input_settled,
         document_material_scope=document_material_scope,
         upload_pattern=upload_pattern,
-        final_output_type=_enum_value(last_step.output_type),
+        final_output_type=last_step.output_type.value,
         final_output_mode=final_output_mode,
         final_output_generation_mode=final_output_generation_mode,
         runtime_metadata_state=runtime_metadata_state,
@@ -185,7 +188,7 @@ def _derive_runtime_input_mode(
         return None, False
 
     modes = {
-        resolve_runtime_input_mode(signature.input_type)
+        RUNTIME_INPUT_MODE_BY_TYPE.get(signature.input_type)
         for signature in flow_input_steps
     }
     modes.discard(None)
@@ -204,7 +207,7 @@ def _derive_document_scope(
     document_steps = tuple(
         signature
         for signature in flow_input_steps
-        if resolve_runtime_input_mode(signature.input_type) == "documents"
+        if RUNTIME_INPUT_MODE_BY_TYPE.get(signature.input_type) == "documents"
     )
     if len(document_steps) != 1:
         return None, None
@@ -233,11 +236,6 @@ def _has_variable_bindings(step: FlowStep) -> bool:
         step.output_config["bindings"] if "bindings" in step.output_config else None
     )
     return isinstance(bindings, dict) and bool(cast(FlowPersistedJsonObject, bindings))
-
-
-def _enum_value(value: object) -> str:
-    raw_value = getattr(value, "value", value)
-    return str(raw_value)
 
 
 def _has_form_fields(flow: Flow) -> bool:

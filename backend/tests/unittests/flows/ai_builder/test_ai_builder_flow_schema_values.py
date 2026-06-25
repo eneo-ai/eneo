@@ -7,9 +7,6 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from intric.flows.ai_builder.ai_builder_step_capabilities import (
-    BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE,
-)
 from intric.flows.enums import (
     AIBuilderInputSource,
     AIBuilderInputType,
@@ -19,6 +16,7 @@ from intric.flows.enums import (
 )
 from intric.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
+    RUNTIME_INPUT_MODE_BY_TYPE,
     resolve_document_generation_mode,
 )
 
@@ -42,7 +40,7 @@ def test_builder_schema_values_follow_builder_exposed_flow_capabilities() -> Non
 
 
 def test_builder_runtime_input_modes_are_covered_by_schema_input_types() -> None:
-    assert set(BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE) <= set(
+    assert {input_type.value for input_type in RUNTIME_INPUT_MODE_BY_TYPE} <= set(
         builder_input_type_values()
     )
 
