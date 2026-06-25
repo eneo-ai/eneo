@@ -13,8 +13,7 @@ from intric.main.exceptions import BadRequestException
 def redis_client():
     client = AsyncMock()
     client.set = AsyncMock()
-    client.get = AsyncMock(return_value=None)
-    client.delete = AsyncMock()
+    client.getdel = AsyncMock(return_value=None)
     return client
 
 
@@ -67,7 +66,7 @@ class TestStartAuth:
 
 class TestAuthIntegrationCsrf:
     async def test_rejects_missing_or_expired_state(self, service, redis_client):
-        redis_client.get.return_value = None
+        redis_client.getdel.return_value = None
 
         with pytest.raises(BadRequestException):
             await service.auth_integration(
@@ -80,7 +79,7 @@ class TestAuthIntegrationCsrf:
     async def test_rejects_state_bound_to_other_user(self, service, redis_client):
         attacker_state_owner = uuid4()
         ti_id = uuid4()
-        redis_client.get.return_value = json.dumps(
+        redis_client.getdel.return_value = json.dumps(
             {
                 "user_id": str(attacker_state_owner),
                 "tenant_integration_id": str(ti_id),
@@ -95,12 +94,12 @@ class TestAuthIntegrationCsrf:
                 state="some-state",
             )
         # state is single-use even on rejection
-        redis_client.delete.assert_awaited_once()
+        redis_client.getdel.assert_awaited_once()
 
     async def test_accepts_matching_state_and_proceeds(self, service, redis_client):
         user_id = uuid4()
         ti_id = uuid4()
-        redis_client.get.return_value = json.dumps(
+        redis_client.getdel.return_value = json.dumps(
             {"user_id": str(user_id), "tenant_integration_id": str(ti_id)}
         )
         service.tenant_integration_repo.one.return_value = _tenant_integration(ti_id)

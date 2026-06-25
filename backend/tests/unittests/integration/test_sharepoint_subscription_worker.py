@@ -63,9 +63,10 @@ def mock_container():
     container.service_account_auth_service = MagicMock(return_value=AsyncMock())
     container.sharepoint_subscription_service = MagicMock(return_value=AsyncMock())
 
-    # Mock session
+    # Mock session — begin/begin_nested return async context managers
     mock_session = AsyncMock()
     mock_session.begin = MagicMock(return_value=AsyncMock())
+    mock_session.begin_nested = MagicMock(return_value=AsyncMock())
     container.session = MagicMock(return_value=mock_session)
 
     return container

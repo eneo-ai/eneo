@@ -6,7 +6,7 @@ This worker handles:
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from intric.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
@@ -18,6 +18,9 @@ from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.worker.worker import Worker
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 logger = get_logger(__name__)
 
 worker = Worker()
@@ -28,10 +31,16 @@ async def record_renewal_failure(
     container: Container,
     error_message: str,
 ) -> None:
-    """Persist renewal failure state without failing the maintenance job."""
+    """Persist renewal failure state without failing the maintenance job.
+
+    Runs in its own SAVEPOINT so a single failure can never poison the shared
+    cron transaction and silently drop later subscriptions' health writes.
+    """
     try:
         subscription.mark_renewal_failure(error_message)
-        await container.sharepoint_subscription_repo().update(subscription)
+        session = cast("AsyncSession", container.session())
+        async with session.begin_nested():
+            await container.sharepoint_subscription_repo().update(subscription)
     except Exception as exc:
         logger.error(
             "Failed to record renewal failure for subscription %s: %s",
@@ -169,39 +178,34 @@ async def renew_expiring_subscriptions(container: Container):
 
     renewed_count = 0
     failed_count = 0
+    session = cast("AsyncSession", container.session())
 
     for subscription in expiring:
         try:
-            # Get token using unified helper (supports both OAuth and tenant app)
-            token = await get_token_for_subscription(subscription, container)
-
-            if not token:
-                error_message = f"Could not get token for subscription {subscription.subscription_id}"
-                logger.warning(error_message)
-                await record_renewal_failure(subscription, container, error_message)
-                failed_count += 1
-                continue
-
-            # Renew subscription
-            success = await sharepoint_subscription_service.renew_subscription(
-                subscription=subscription, token=token
-            )
-
-            if success:
-                renewed_count += 1
-            else:
-                await record_renewal_failure(
-                    subscription,
-                    container,
-                    f"Renewal returned false for subscription {subscription.subscription_id}",
+            # Isolate each renewal in a SAVEPOINT so one subscription's DB error
+            # cannot poison the shared cron transaction and drop the rest.
+            async with session.begin_nested():
+                token = await get_token_for_subscription(subscription, container)
+                if not token:
+                    raise RuntimeError(
+                        f"Could not get token for subscription {subscription.subscription_id}"
+                    )
+                success = await sharepoint_subscription_service.renew_subscription(
+                    subscription=subscription, token=token
                 )
-                failed_count += 1
+                if not success:
+                    raise RuntimeError(
+                        f"Renewal returned false for subscription {subscription.subscription_id}"
+                    )
+            renewed_count += 1
 
         except Exception as exc:
             logger.error(
                 f"Error renewing subscription {subscription.subscription_id}: {exc}",
                 exc_info=True,
             )
+            # The savepoint above has rolled back, so the transaction is clean for
+            # this failure write (which uses its own savepoint).
             await record_renewal_failure(subscription, container, str(exc))
             failed_count += 1
 

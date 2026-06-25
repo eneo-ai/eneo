@@ -38850,9 +38850,7 @@ export interface operations {
   };
   gen_url_api_v1_integrations_auth__tenant_integration_id__url__get: {
     parameters: {
-      query?: {
-        state?: string | null;
-      };
+      query?: never;
       header?: never;
       path: {
         tenant_integration_id: string;

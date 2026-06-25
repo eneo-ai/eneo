@@ -1508,8 +1508,14 @@ class SharePointContentService:
         ``CancelledError`` that bypasses the per-item ``except``) would then skip
         the item until the 7-day TTL or a 410 resync. Deferring to ``after_commit``
         means a failed/rolled-back sync simply re-processes the item next time —
-        the safe direction. A flush that never runs (process killed mid-window)
-        also fails in that same safe direction.
+        the safe direction.
+
+        The flush is a deliberate fire-and-forget task (a sync ``after_commit`` event
+        cannot await). If the worker is killed in the tiny window between commit and
+        flush the ChangeKey is lost, but that fails in the same safe direction: the
+        next sync re-downloads the item and the content_hash check skips the (costly)
+        re-embed, so the only cost is a redundant download. Not worth blocking the
+        event loop with a synchronous Redis write to close it.
         """
         if not pending or not self.change_key_service:
             return

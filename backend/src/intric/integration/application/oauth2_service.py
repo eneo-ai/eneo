@@ -76,14 +76,20 @@ class Oauth2Service:
         )
 
     async def _pop_oauth_state(self, state: str) -> dict[str, str] | None:
-        key = f"{_OAUTH_STATE_PREFIX}{state}"
-        raw = await self.redis_client.get(key)
+        # GETDEL is atomic — a single round-trip that returns and deletes the value
+        # — so the state is genuinely single-use even under concurrent callbacks.
+        raw = await self.redis_client.getdel(f"{_OAUTH_STATE_PREFIX}{state}")
         if raw is None:
             return None
-        await self.redis_client.delete(key)
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            # Corrupt payload: treat as an invalid state (caller raises a 400)
+            # instead of letting a JSON error surface as a 500.
+            logger.warning("Discarding corrupt OAuth state payload")
+            return None
 
     async def start_auth(
         self,
