@@ -1,9 +1,9 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, Literal, Optional, TypeVar, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
 
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
@@ -13,7 +13,7 @@ from intric.integration.infrastructure.content_service.types import (
     SyncMetadata,
 )
 from intric.jobs.task_models import ResourceTaskParams
-from intric.main.models import ResourcePermission
+from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -33,6 +33,7 @@ class BaseListModel(BaseModel, Generic[T]):
 class IntegrationType(str, Enum):
     Confluence = "confluence"
     Sharepoint = "sharepoint"
+    Website = "website"
 
     @property
     def is_confluence(self) -> bool:
@@ -41,6 +42,10 @@ class IntegrationType(str, Enum):
     @property
     def is_sharepoint(self) -> bool:
         return self == IntegrationType.Sharepoint
+
+    @property
+    def is_website(self) -> bool:
+        return self == IntegrationType.Website
 
 
 class Integration(BaseModel):
@@ -88,7 +93,7 @@ class UserIntegrationList(BaseListModel[UserIntegration]):
 class IntegrationCreate(BaseModel):
     name: str
     description: str
-    integration_type: Literal["confluence", "sharepoint"]
+    integration_type: Literal["confluence", "sharepoint", "website"]
 
 
 class AuthUrlPublic(BaseModel):
@@ -115,6 +120,167 @@ class SharepointContentTaskParam(ResourceTaskParams):
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     resource_type: str = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+
+
+class WebsiteIntegrationSyncTaskParam(ResourceTaskParams):
+    website_integration_config_id: UUID
+
+
+class WebsiteIntegrationHeader(BaseModel):
+    key: str
+    value: str
+
+
+class WebsiteIntegrationMarkdownMethod(str, Enum):
+    GET = "get"
+    POST = "post"
+
+
+class WebsiteIntegrationMarkdownUrlLocation(str, Enum):
+    QUERY = "query"
+    BODY = "body"
+
+
+class WebsiteIntegrationConfigBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    sitemap_url: str
+    page_content_webhook_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url", "markdown_endpoint_url"
+        ),
+        serialization_alias="page_content_webhook_url",
+    )
+    page_content_webhook_method: WebsiteIntegrationMarkdownMethod = Field(
+        default=WebsiteIntegrationMarkdownMethod.GET,
+        validation_alias=AliasChoices(
+            "page_content_webhook_method", "markdown_endpoint_method"
+        ),
+        serialization_alias="page_content_webhook_method",
+    )
+    page_content_webhook_url_location: WebsiteIntegrationMarkdownUrlLocation = Field(
+        default=WebsiteIntegrationMarkdownUrlLocation.QUERY,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_location", "markdown_endpoint_url_location"
+        ),
+        serialization_alias="page_content_webhook_url_location",
+    )
+    page_content_webhook_url_param_name: str = Field(
+        default="url",
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_param_name",
+            "markdown_endpoint_url_param_name",
+        ),
+        serialization_alias="page_content_webhook_url_param_name",
+    )
+    headers: list[WebsiteIntegrationHeader] = Field(
+        default_factory=lambda: cast(list[WebsiteIntegrationHeader], [])
+    )
+
+
+class WebsiteIntegrationConfigCreate(WebsiteIntegrationConfigBase):
+    pass
+
+
+class WebsiteIntegrationConfigUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | NotProvided = NOT_PROVIDED
+    sitemap_url: str | NotProvided = NOT_PROVIDED
+    page_content_webhook_url: Optional[str] | NotProvided = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url", "markdown_endpoint_url"
+        ),
+        serialization_alias="page_content_webhook_url",
+    )
+    page_content_webhook_method: WebsiteIntegrationMarkdownMethod | NotProvided = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_method", "markdown_endpoint_method"
+        ),
+        serialization_alias="page_content_webhook_method",
+    )
+    page_content_webhook_url_location: (
+        WebsiteIntegrationMarkdownUrlLocation | NotProvided
+    ) = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_location", "markdown_endpoint_url_location"
+        ),
+        serialization_alias="page_content_webhook_url_location",
+    )
+    page_content_webhook_url_param_name: str | NotProvided = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_param_name",
+            "markdown_endpoint_url_param_name",
+        ),
+        serialization_alias="page_content_webhook_url_param_name",
+    )
+    headers: list[WebsiteIntegrationHeader] | NotProvided = NOT_PROVIDED
+
+
+class WebsiteIntegrationConfigPublic(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    tenant_integration_id: UUID
+    webhook_url: str = Field(
+        validation_alias=AliasChoices("webhook_url", "sync_url"),
+        serialization_alias="webhook_url",
+    )
+    owner_type: Literal["tenant", "user", "space"]
+    owner_user_id: Optional[UUID] = None
+    owner_space_id: UUID
+    created_by_user_id: UUID
+    name: str
+    sitemap_url: str
+    page_content_webhook_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url", "markdown_endpoint_url"
+        ),
+        serialization_alias="page_content_webhook_url",
+    )
+    page_content_webhook_method: WebsiteIntegrationMarkdownMethod = Field(
+        validation_alias=AliasChoices(
+            "page_content_webhook_method", "markdown_endpoint_method"
+        ),
+        serialization_alias="page_content_webhook_method",
+    )
+    page_content_webhook_url_location: WebsiteIntegrationMarkdownUrlLocation = Field(
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_location", "markdown_endpoint_url_location"
+        ),
+        serialization_alias="page_content_webhook_url_location",
+    )
+    page_content_webhook_url_param_name: str = Field(
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_param_name",
+            "markdown_endpoint_url_param_name",
+        ),
+        serialization_alias="page_content_webhook_url_param_name",
+    )
+    headers: list[WebsiteIntegrationHeader] = Field(
+        default_factory=lambda: cast(list[WebsiteIntegrationHeader], [])
+    )
+    webhook_status: str = Field(
+        validation_alias=AliasChoices("webhook_status", "sync_status"),
+        serialization_alias="webhook_status",
+    )
+    last_sitemap_fetched_at: Optional[datetime] = None
+    last_successful_sync_at: Optional[datetime] = None
+    last_sync_error: Optional[str] = None
+    last_sync_queued_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class WebsiteIntegrationConfigList(BaseListModel[WebsiteIntegrationConfigPublic]):
+    pass
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):

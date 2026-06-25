@@ -4111,8 +4111,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Create a website crawler
-     * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+     * Create a website source
+     * @description Create a new website source that either crawls a site directly or sets up a sitemap webhook integration.
      *
      *         **Update Intervals:**
      *         - `never` (default): Manual crawls only
@@ -4131,7 +4131,7 @@ export interface paths {
      *         }
      *         ```
      *
-     *         The crawl will start immediately upon creation.
+     *         Direct crawls start immediately upon creation. Sitemap webhook integrations queue an initial webhook sync.
      */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
     delete?: never;
@@ -5774,6 +5774,30 @@ export interface paths {
      * @description Handle SharePoint change notifications; echo the Graph validation token (plain text) during the subscription handshake.
      */
     post: operations["sharepoint_webhook_api_v1_integrations_sharepoint_webhook__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/websites/{config_id}/sync/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Queue sitemap webhook integration sync
+     * @description Queue a sitemap webhook integration sync using the integration-specific webhook token.
+     *
+     *         This endpoint is the primary webhook URL exposed in the UI. It validates the
+     *         webhook token, fetches the integration config, and queues a background job that
+     *         checks the sitemap for new or updated pages.
+     */
+    post: operations["trigger_sitemap_webhook_integration_endpoint_api_v1_integrations_websites__config_id__sync__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -11980,7 +12004,7 @@ export interface components {
      * IntegrationType
      * @enum {string}
      */
-    IntegrationType: "confluence" | "sharepoint";
+    IntegrationType: "confluence" | "sharepoint" | "website";
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -15710,6 +15734,7 @@ export interface components {
       | "pull_confluence_content"
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
+      | "sync_website_integration"
       | "update_model_usage_stats"
       | "analyze_conversation_insights"
       | "export_audit_logs"
@@ -17712,7 +17737,7 @@ export interface components {
       /** Name */
       name?: string | null;
       /** Url */
-      url: string;
+      url?: string | null;
       /**
        * Download Files
        * @default false
@@ -17733,6 +17758,21 @@ export interface components {
        * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
        */
       http_auth_password?: string | null;
+      /** Sitemap Url */
+      sitemap_url?: string | null;
+      /** Page Content Webhook Url */
+      page_content_webhook_url?: string | null;
+      /** @default get */
+      page_content_webhook_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      /** @default query */
+      page_content_webhook_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /**
+       * Page Content Webhook Url Param Name
+       * @default url
+       */
+      page_content_webhook_url_param_name?: string;
+      /** Headers */
+      headers?: components["schemas"]["WebsiteIntegrationHeader"][];
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -17791,6 +17831,53 @@ export interface components {
       /** Crawl Status */
       crawl_status?: string | null;
     };
+    /** WebsiteIntegrationConfigPublic */
+    WebsiteIntegrationConfigPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Webhook Url */
+      webhook_url: string;
+      /** Sitemap Url */
+      sitemap_url: string;
+      /** Page Content Webhook Url */
+      page_content_webhook_url?: string | null;
+      page_content_webhook_method: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      page_content_webhook_url_location: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /** Page Content Webhook Url Param Name */
+      page_content_webhook_url_param_name: string;
+      /** Headers */
+      headers?: components["schemas"]["WebsiteIntegrationHeader"][];
+      /** Webhook Status */
+      webhook_status: string;
+      /** Last Sitemap Fetched At */
+      last_sitemap_fetched_at?: string | null;
+      /** Last Successful Sync At */
+      last_successful_sync_at?: string | null;
+      /** Last Sync Error */
+      last_sync_error?: string | null;
+      /** Last Sync Queued At */
+      last_sync_queued_at?: string | null;
+    };
+    /** WebsiteIntegrationHeader */
+    WebsiteIntegrationHeader: {
+      /** Key */
+      key: string;
+      /** Value */
+      value: string;
+    };
+    /**
+     * WebsiteIntegrationMarkdownMethod
+     * @enum {string}
+     */
+    WebsiteIntegrationMarkdownMethod: "get" | "post";
+    /**
+     * WebsiteIntegrationMarkdownUrlLocation
+     * @enum {string}
+     */
+    WebsiteIntegrationMarkdownUrlLocation: "query" | "body";
     /** WebsiteMetadata */
     WebsiteMetadata: {
       /** Size */
@@ -17851,6 +17938,12 @@ export interface components {
        * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
        */
       is_auto_disabled: boolean;
+      integration?: components["schemas"]["WebsiteIntegrationConfigPublic"] | null;
+      /**
+       * Reused Existing
+       * @default false
+       */
+      reused_existing?: boolean;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -17874,6 +17967,18 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+      /** Sitemap Url */
+      sitemap_url?: string | null;
+      /** Page Content Webhook Url */
+      page_content_webhook_url?: string | null;
+      /** Page Content Webhook Method */
+      page_content_webhook_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      /** Page Content Webhook Url Location */
+      page_content_webhook_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /** Page Content Webhook Url Param Name */
+      page_content_webhook_url_param_name?: string;
+      /** Headers */
+      headers?: components["schemas"]["WebsiteIntegrationHeader"][];
     };
     /**
      * WizardType
@@ -37634,6 +37739,67 @@ export interface operations {
           "application/json": {
             status: string;
           };
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  trigger_sitemap_webhook_integration_endpoint_api_v1_integrations_websites__config_id__sync__post: {
+    parameters: {
+      query?: {
+        webhook_token?: string | null;
+        token?: string | null;
+      };
+      header?: never;
+      path: {
+        config_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JobPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

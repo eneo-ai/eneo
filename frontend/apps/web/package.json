@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "test:browsers": "node scripts/ensure-browsers.mjs",
     "pretest:unit": "bun run test:browsers",
-    "test:unit": "vitest run",
+    "test:unit": "npx vitest run --maxWorkers=1",
     "pretest:unit:watch": "bun run test:browsers",
     "test:unit:watch": "vitest",
     "pretest:e2e": "bun run test:browsers",
@@ -27,7 +27,7 @@
     "test:all": "bun run test:unit && bun run test:e2e",
     "pretest:coverage": "bun run test:browsers",
     "test:coverage": "vitest run --coverage",
-    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
+    "i18n:compile": "node --experimental-global-webcrypto ./node_modules/.bin/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",

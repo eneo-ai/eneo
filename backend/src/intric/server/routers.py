@@ -66,6 +66,9 @@ from intric.integration.presentation.integration_router import (
 from intric.integration.presentation.sharepoint_webhook_router import (
     router as sharepoint_webhook_router,
 )
+from intric.integration.presentation.website_integration_router import (
+    router as website_integration_router,
+)
 from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
@@ -505,6 +508,9 @@ router.include_router(
 )
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]
+)
+router.include_router(
+    website_integration_router, prefix="/integrations", tags=["integrations"]
 )
 router.include_router(
     admin_sharepoint_router,

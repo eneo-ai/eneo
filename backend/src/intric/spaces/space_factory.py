@@ -272,13 +272,18 @@ class SpaceFactory:
                 None,
             )
             assert embedding_model is not None
-            space_websites.append(
-                Website.to_domain(
-                    record=website,
-                    embedding_model=embedding_model,
-                    http_auth=getattr(website, "_decrypted_http_auth", None),
-                )
+            website_domain = Website.to_domain(
+                record=website,
+                embedding_model=embedding_model,
+                http_auth=getattr(website, "_decrypted_http_auth", None),
             )
+            setattr(
+                website_domain,
+                "website_integration_config",
+                getattr(website, "website_integration_config", None),
+            )
+            setattr(website_domain, "reused_existing", False)
+            space_websites.append(website_domain)
 
         ik_source: list["IntegrationKnowledgeDBModel"] = (
             list(integration_knowledge_in_db)

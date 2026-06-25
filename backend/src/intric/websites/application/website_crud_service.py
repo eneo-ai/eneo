@@ -60,6 +60,7 @@ class WebsiteCRUDService:
         embedding_model_id: Optional["UUID"] = None,
         http_auth_username: Optional[str] = None,
         http_auth_password: Optional[str] = None,
+        run_initial_crawl: bool = True,
     ) -> Website:
         space = await self.space_service.get_space(space_id)
         assert space.id is not None
@@ -92,7 +93,8 @@ class WebsiteCRUDService:
         updated_space = await self.space_repo.update(space=space)
         new_website = updated_space.get_website(website_id=website.id)
 
-        await self.crawl_service.crawl(website=new_website)
+        if run_initial_crawl:
+            await self.crawl_service.crawl(website=new_website)
 
         return new_website
 

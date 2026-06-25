@@ -31,3 +31,7 @@ export const integrationData: Record<IntegrationType, IntegrationData> = {
   confluence: ConfluenceIntegrationData,
   sharepoint: SharepointIntegrationData
 };
+
+export function isSupportedIntegrationType(type: string): type is IntegrationType {
+  return type === "confluence" || type === "sharepoint";
+}

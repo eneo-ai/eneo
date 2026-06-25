@@ -12,7 +12,7 @@ from tests.fixtures import TEST_USER
 JWT_ALGORITHM = get_settings().jwt_algorithm
 JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
-JWT_SECRET = get_settings().jwt_secret
+JWT_SECRET = "unit-test-secret-padded-to-the-hs256-minimum"
 
 
 @pytest.fixture

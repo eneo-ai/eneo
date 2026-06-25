@@ -243,6 +243,8 @@ class UserIntegrationService:
         if space.is_personal():
             available: list[UserIntegration] = []
             for integration in all_integrations:
+                if integration.integration_type == "website":
+                    continue
                 if integration.auth_type != "user_oauth" and integration.authenticated:
                     continue
 
@@ -264,5 +266,6 @@ class UserIntegrationService:
             return [
                 integration
                 for integration in all_integrations
+                if integration.integration_type != "website"
                 if integration.authenticated and integration.auth_type == "tenant_app"
             ]

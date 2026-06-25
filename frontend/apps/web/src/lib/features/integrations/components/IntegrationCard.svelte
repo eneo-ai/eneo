@@ -2,7 +2,7 @@
   import type { Integration, UserIntegration } from "@intric/intric-js";
   import type { Snippet } from "svelte";
   import IntegrationVendorIcon from "./IntegrationVendorIcon.svelte";
-  import { integrationData } from "../IntegrationData";
+  import { integrationData, isSupportedIntegrationType } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -12,12 +12,17 @@
 
   let { integration, action }: Props = $props();
 
-  const descriptionKey = $derived(integrationData[integration.integration_type].descriptionKey);
+  const integrationMeta = $derived.by(() =>
+    isSupportedIntegrationType(integration.integration_type)
+      ? integrationData[integration.integration_type]
+      : null
+  );
+  const descriptionKey = $derived(integrationMeta?.descriptionKey ?? "");
   const description = $derived(
     (m as Record<string, ((...args: unknown[]) => string) | undefined>)[descriptionKey]?.() ??
       descriptionKey
   );
-  const name = $derived(integrationData[integration.integration_type].displayName);
+  const name = $derived(integrationMeta?.displayName ?? integration.name);
 
   // Check if integration has auth_type property (UserIntegration)
   const authType = $derived("auth_type" in integration ? integration.auth_type : undefined);

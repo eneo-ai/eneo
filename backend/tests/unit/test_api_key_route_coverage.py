@@ -445,7 +445,11 @@ class TestTenantAdminApiKeyGuards:
 
     # Routes under /integrations that are external callbacks/auth flows
     # (sharepoint webhooks, OAuth flows) — intentionally unguarded
-    INTEGRATION_CALLBACK_PREFIXES = ("/integrations/sharepoint/", "/integrations/auth/")
+    INTEGRATION_CALLBACK_PREFIXES = (
+        "/integrations/sharepoint/",
+        "/integrations/auth/",
+        "/integrations/websites/",
+    )
 
     def test_admin_surfaces_have_scope_and_admin_key_guards(self):
         prefixes = [
@@ -830,6 +834,7 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+    "/integrations/websites/": "External sitemap webhook — verified by per-integration webhook token, not API key",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission

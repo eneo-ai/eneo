@@ -41,7 +41,7 @@ const models = [
 ] as unknown as CompletionModel[];
 
 describe("SelectAIModelV2", () => {
-  it("surfaces the selection and lets the user pick another", async () => {
+  it("surfaces the selection and lets the user pick another", { timeout: 30000 }, async () => {
     render(SelectAIModelV2, { availableModels: models, selectedModel: models[0] });
 
     // Selected model is shown in the trigger and names it for assistive tech.

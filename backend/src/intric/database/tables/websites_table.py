@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, String, and_, select
@@ -14,6 +14,11 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 from intric.websites.domain.crawl_run import CrawlType
+
+if TYPE_CHECKING:
+    from intric.database.tables.website_integration_table import (
+        WebsiteIntegrationConfig,
+    )
 
 
 class CrawlRuns(BasePublic):
@@ -88,6 +93,14 @@ class Websites(BasePublic):
     # Relationships
     group: Mapped[CollectionsTable] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
+    website_integration_config: Mapped[Optional["WebsiteIntegrationConfig"]] = (
+        relationship(
+            "WebsiteIntegrationConfig",
+            primaryjoin="Websites.id == foreign(WebsiteIntegrationConfig.website_id)",
+            uselist=False,
+            viewonly=True,
+        )
+    )
 
     @declared_attr  # pyright: ignore[reportArgumentType]  # dict return is valid for __mapper_args__ declared_attr
     def __mapper_args__(cls):  # type: ignore[override]

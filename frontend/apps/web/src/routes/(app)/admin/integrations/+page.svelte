@@ -27,7 +27,6 @@
   let showDeleteAppDialog = writable(false);
   let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured">("loading");
   let showWebhookManagement = $state(false);
-
   // Load SharePoint config status
   const loadSharePointStatus = createAsyncState(async () => {
     try {
@@ -136,16 +135,6 @@
                           {m.configure_azure_ad_app()}
                         </p>
                       {/if}
-                    {:else}
-                      <!-- Other integrations: Coming soon -->
-                      <span
-                        class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                      >
-                        {m.coming_soon()}
-                      </span>
-                      <p class="text-secondary mt-1 text-xs">
-                        {m.configuration_options_available_soon()}
-                      </p>
                     {/if}
                   </div>
                 {/snippet}
