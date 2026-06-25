@@ -22,7 +22,7 @@
   } = getAppContext();
   const intric = getIntric();
 
-  let savingPreferredTextFormat = false;
+  let savingPreferredTextFormat = $state(false);
   let preferRichText = $state(getPreferredAssistantCopyFormat(settings) === "richtext");
 
   async function savePreferredTextFormat(next: boolean) {

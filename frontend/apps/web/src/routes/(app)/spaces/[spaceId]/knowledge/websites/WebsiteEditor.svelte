@@ -56,32 +56,22 @@
     showDialog = $bindable(undefined)
   }: WebsiteEditorProps = $props();
 
-  let editableWebsite = makeEditable(website);
-  let websiteName = website.name ?? "";
+  let editableWebsite = makeEditable(emptyWebsite());
+  let websiteName = "";
   let isProcessing = false;
   let validUrl = false;
 
   // HTTP Basic Authentication state
-  let httpAuthEnabled = website?.requires_http_auth ?? false;
+  let httpAuthEnabled = false;
   let httpAuthUsername = "";
   let httpAuthPassword = "";
   let showPassword = false;
-  let integrationSitemapUrl = $state(website?.integration?.sitemap_url ?? "");
-  let integrationMarkdownEndpointUrl = $state(website?.integration?.page_content_webhook_url ?? "");
-  let integrationMarkdownEndpointMethod = $state<"get" | "post">(
-    website?.integration?.page_content_webhook_method ?? "get"
-  );
-  let integrationMarkdownEndpointLocation = $state<"query" | "body">(
-    website?.integration?.page_content_webhook_url_location ?? "query"
-  );
-  let integrationMarkdownEndpointParamName = $state(
-    website?.integration?.page_content_webhook_url_param_name ?? "url"
-  );
-  let integrationHeaders = $state<Array<{ key: string; value: string }>>(
-    website?.integration?.headers?.length
-      ? website.integration.headers.map((header) => ({ ...header }))
-      : [{ key: "", value: "" }]
-  );
+  let integrationSitemapUrl = $state("");
+  let integrationMarkdownEndpointUrl = $state("");
+  let integrationMarkdownEndpointMethod = $state<"get" | "post">("get");
+  let integrationMarkdownEndpointLocation = $state<"query" | "body">("query");
+  let integrationMarkdownEndpointParamName = $state("url");
+  let integrationHeaders = $state<Array<{ key: string; value: string }>>([{ key: "", value: "" }]);
   let isWebsiteIntegration = $derived(Boolean(website?.integration));
   let createSourceType = $state<"crawl" | "integration">("crawl");
   let isCreatingIntegration = $derived(mode === "create" && createSourceType === "integration");

@@ -100,9 +100,11 @@
           </span>
         {/if}
       </div>
-      <span class="text-dynamic-stronger line-clamp-2"
-        >{integrationData[integration.integration_type].importHint}</span
-      >
+      <span class="text-dynamic-stronger line-clamp-2">
+        {#if isSupportedIntegrationType(integration.integration_type)}
+          {integrationData[integration.integration_type].importHint}
+        {/if}
+      </span>
     </div>
   </div>
 {/snippet}

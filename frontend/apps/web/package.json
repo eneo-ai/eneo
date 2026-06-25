@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "test:browsers": "node scripts/ensure-browsers.mjs",
     "pretest:unit": "bun run test:browsers",
-    "test:unit": "vitest run",
+    "test:unit": "npx vitest run --maxWorkers=1",
     "pretest:unit:watch": "bun run test:browsers",
     "test:unit:watch": "vitest",
     "pretest:e2e": "bun run test:browsers",

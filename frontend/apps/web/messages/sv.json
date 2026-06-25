@@ -360,6 +360,7 @@
   "updates_on_changes": "Uppdateras vid ändringar",
   "integration_auto_updates_tooltip": "Den här källan uppdateras automatiskt när den anslutna webbplatsen skickar en webhook.",
   "integration_auto_updates_tooltip_with_date": "Den här källan uppdateras automatiskt när den anslutna webbplatsen skickar en webhook. Senaste lyckade uppdatering: {date}",
+  "import_knowledge_connected_providers_website_tab": "Anslutna leverantörer hanteras från",
   "warning_no_embedding_models": "Varning: Denna yta har för närvarande inga inbäddningsmodeller aktiverade. Aktivera minst en inbäddningsmodell för att kunna ansluta till en webbplats.",
   "url_required": "URL",
   "full_url_sitemap": "Full URL till din sitemap.xml-fil",

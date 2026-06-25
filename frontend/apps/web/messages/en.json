@@ -295,6 +295,7 @@
   "updates_on_changes": "Updates on changes",
   "integration_auto_updates_tooltip": "This source updates automatically when the connected website sends a webhook.",
   "integration_auto_updates_tooltip_with_date": "This source updates automatically when the connected website sends a webhook. Last successful update: {date}",
+  "import_knowledge_connected_providers_website_tab": "Connected providers are managed from",
   "warning_no_embedding_models": "Warning: This space does currently not have any embedding models enabled. Enable at least one embedding model to be able to connect to a website.",
   "url_required": "URL (required)",
   "full_url_sitemap": "Full URL to your sitemap.xml file",
