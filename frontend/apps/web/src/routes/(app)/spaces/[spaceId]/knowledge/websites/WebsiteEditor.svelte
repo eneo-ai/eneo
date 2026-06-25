@@ -3,16 +3,14 @@
   import { getIntric } from "$lib/core/Intric";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { type Website, type JSONRequestBody } from "@intric/intric-js";
+  import { type Website } from "@intric/intric-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
   import { writable, type Writable } from "svelte/store";
 
-  type WebsiteCreatePayload = Omit<JSONRequestBody<"post", "/api/v1/websites/">, "space_id"> & {
-    spaceId?: string;
-  };
+  type WebsiteCreatePayload = Parameters<ReturnType<typeof getIntric>["websites"]["create"]>[0];
 
   const emptyWebsite = () => {
     return {
@@ -32,18 +30,39 @@
     state: { currentSpace }
   } = getSpacesManager();
 
+  const sitemapUrlLabel = "Sitemap URL";
+  const exampleSitemapUrl = "https://example.com/sitemap.xml";
+  const exampleWebsiteUrl = "https://example.com";
+  const markdownMethodOptions: Array<{ label: string; value: "get" | "post" }> = [
+    { label: "GET", value: "get" },
+    { label: "POST", value: "post" }
+  ];
+  const markdownLocationOptions: Array<{ label: string; value: "query" | "body" }> = [
+    { label: "Query parameter", value: "query" },
+    { label: "Request body", value: "body" }
+  ];
+
+  function syncFailedWithStatus(status: number) {
+    return `Sync failed with status ${status}`;
+  }
+
+  function syncStatusValue(status: string) {
+    return `Status: ${status}`;
+  }
+
   type WebsiteEditorProps = {
     mode?: "update" | "create";
     website?: Omit<Website, "embedding_model"> & {
       embedding_model?: { id: string } | null;
       integration?: {
+        id?: string;
         webhook_url: string;
         sitemap_url: string;
         page_content_webhook_url?: string | null;
         page_content_webhook_method: "get" | "post";
         page_content_webhook_url_location: "query" | "body";
         page_content_webhook_url_param_name: string;
-        headers: Array<{ key: string; value: string }>;
+        headers?: Array<{ key: string; value: string }>;
         webhook_status: string;
       } | null;
     };
@@ -56,16 +75,16 @@
     showDialog = $bindable(undefined)
   }: WebsiteEditorProps = $props();
 
-  let editableWebsite = makeEditable(emptyWebsite());
-  let websiteName = "";
-  let isProcessing = false;
-  let validUrl = false;
+  let editableWebsite = $state(makeEditable(emptyWebsite()));
+  let websiteName = $state("");
+  let isProcessing = $state(false);
+  let validUrl = $state(false);
 
   // HTTP Basic Authentication state
-  let httpAuthEnabled = false;
-  let httpAuthUsername = "";
-  let httpAuthPassword = "";
-  let showPassword = false;
+  let httpAuthEnabled = $state(false);
+  let httpAuthUsername = $state("");
+  let httpAuthPassword = $state("");
+  let showPassword = $state(false);
   let integrationSitemapUrl = $state("");
   let integrationMarkdownEndpointUrl = $state("");
   let integrationMarkdownEndpointMethod = $state<"get" | "post">("get");
@@ -91,9 +110,9 @@
     files_failed: number | null;
     crawl_status: string | null;
   };
-  let existingOnOrg: ExistingWebsite | null = null;
+  let existingOnOrg = $state<ExistingWebsite | null>(null);
   let showDuplicateWarning: Writable<boolean> = writable(false);
-  let duplicateCheckPending = false;
+  let duplicateCheckPending = $state(false);
 
   function syncIntegrationEditorState() {
     integrationSitemapUrl = website?.integration?.sitemap_url ?? "";
@@ -251,7 +270,7 @@
         credentials: "include"
       });
       if (!response.ok) {
-        throw new Error(m.sync_failed_with_status({ status: response.status.toString() }));
+        throw new Error(syncFailedWithStatus(response.status));
       }
       refreshCurrentSpace();
     } catch (e) {
@@ -419,16 +438,6 @@
     { label: m.every_week(), value: "weekly" }
   ] as { label: string; value: Website["update_interval"] }[];
 
-  const markdownMethodOptions = [
-    { label: m.get_method(), value: "get" },
-    { label: m.post_method(), value: "post" }
-  ] as const;
-
-  const markdownLocationOptions = [
-    { label: m.query_parameter(), value: "query" },
-    { label: m.request_body(), value: "body" }
-  ] as const;
-
   $effect(() => {
     if (
       integrationMarkdownEndpointMethod === "get" &&
@@ -448,9 +457,9 @@
 
   <Dialog.Content width="medium" form>
     {#if mode === "create"}
-      <Dialog.Title>{m.create_website_source()}</Dialog.Title>
+      <Dialog.Title>{m.create_website()}</Dialog.Title>
     {:else}
-      <Dialog.Title>{m.edit_website_source()}</Dialog.Title>
+      <Dialog.Title>{m.edit_website()}</Dialog.Title>
     {/if}
 
     <Dialog.Section>
@@ -469,11 +478,11 @@
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
           bind:value={createSourceType}
           options={[
-            { label: m.crawl_website(), value: "crawl" },
+            { label: m.websites(), value: "crawl" },
             { label: m.sitemap_webhook_integration(), value: "integration" }
           ]}
         >
-          {m.source_type()}
+          {m.type()}
         </Select.Simple>
       {/if}
 
@@ -483,17 +492,17 @@
         description={m.display_name_optional()}
         bind:value={websiteName}
         placeholder={isCreatingIntegration
-          ? m.marketing_website()
+          ? "Marketing website"
           : (editableWebsite.url.split("//")[1] ?? editableWebsite.url)}
       ></Input.Text>
 
       {#if isCreatingIntegration}
         <Input.Text
           bind:value={integrationSitemapUrl}
-          label={m.sitemap_url()}
+          label={sitemapUrlLabel}
           type="url"
           required
-          placeholder={m.example_sitemap_url()}
+          placeholder={exampleSitemapUrl}
           class="border-default hover:bg-hover-dimmer border-b p-4"
         />
         <Input.Text
@@ -510,20 +519,19 @@
               options={markdownMethodOptions}
               bind:value={integrationMarkdownEndpointMethod}
             >
-              {m.method()}
+              {m.website_integration_method()}
             </Select.Simple>
             <Select.Simple
               class="border-default hover:bg-hover-dimmer w-1/2 border-b px-4 py-4"
               options={markdownLocationOptions}
               bind:value={integrationMarkdownEndpointLocation}
-              disabled={integrationMarkdownEndpointMethod === "get"}
             >
-              {m.send_url_in()}
+              {m.website_integration_send_url_in()}
             </Select.Simple>
           </div>
           <Input.Text
             bind:value={integrationMarkdownEndpointParamName}
-            label={m.url_parameter_name()}
+            label={m.website_integration_url_parameter_name()}
             class="border-default hover:bg-hover-dimmer border-b p-4"
           />
         {/if}
@@ -531,13 +539,13 @@
         <div class="p-4">
           <div class="mb-3 flex items-center justify-between">
             <div>
-              <div class="text-sm font-semibold">{m.headers()}</div>
+              <div class="text-sm font-semibold">{m.website_integration_headers()}</div>
               <div class="text-secondary text-xs">
-                {m.headers_description()}
+                {m.website_integration_headers_description()}
               </div>
             </div>
             <Button variant="outlined" type="button" onclick={addIntegrationHeaderRow}>
-              {m.add_header()}
+              {m.website_integration_add_header()}
             </Button>
           </div>
           <div class="space-y-2">
@@ -545,15 +553,23 @@
               <div class="grid grid-cols-[1fr_1fr_auto] gap-2">
                 <Input.Text
                   value={header.key}
-                  placeholder={m.header_key()}
-                  oninput={(event) =>
-                    updateIntegrationHeader(index, "key", event.currentTarget.value)}
+                  placeholder={m.website_integration_header_key()}
+                  oninput={(event: Event) =>
+                    updateIntegrationHeader(
+                      index,
+                      "key",
+                      (event.currentTarget as HTMLInputElement).value
+                    )}
                 />
                 <Input.Text
                   value={header.value}
-                  placeholder={m.header_value()}
-                  oninput={(event) =>
-                    updateIntegrationHeader(index, "value", event.currentTarget.value)}
+                  placeholder={m.website_integration_header_value()}
+                  oninput={(event: Event) =>
+                    updateIntegrationHeader(
+                      index,
+                      "value",
+                      (event.currentTarget as HTMLInputElement).value
+                    )}
                 />
                 <Button
                   variant="outlined"
@@ -576,8 +592,8 @@
           type="url"
           required
           placeholder={editableWebsite.crawl_type === "sitemap"
-            ? m.example_sitemap_url()
-            : m.example_website_url()}
+            ? exampleSitemapUrl
+            : exampleWebsiteUrl}
           class="border-default hover:bg-hover-dimmer border-b p-4"
           bind:isValid={validUrl}
         ></Input.Text>
@@ -685,34 +701,34 @@
             <div>
               <div class="text-sm font-semibold">{m.sitemap_webhook_integration()}</div>
               <div class="text-secondary text-xs">
-                {m.sync_status_value({ status: website.integration.webhook_status })}
+                {syncStatusValue(website.integration?.webhook_status ?? "unknown")}
               </div>
             </div>
             <div class="flex gap-2">
               <Button
                 variant="outlined"
                 type="button"
-                onclick={() => copyWebhookUrl(website.integration.webhook_url)}
+                onclick={() => copyWebhookUrl(website.integration!.webhook_url)}
               >
                 {m.copy_webhook_url()}
               </Button>
               <Button
                 variant="outlined"
                 type="button"
-                onclick={() => triggerWebhookSync(website.integration.webhook_url)}
+                onclick={() => triggerWebhookSync(website.integration!.webhook_url)}
               >
                 {m.sync_now()}
               </Button>
             </div>
           </div>
           <div class="text-secondary text-xs break-all">
-            {absoluteWebhookUrl(website.integration.webhook_url)}
+            {absoluteWebhookUrl(website.integration!.webhook_url)}
           </div>
         </div>
 
         <Input.Text
           bind:value={integrationSitemapUrl}
-          label={m.sitemap_url()}
+          label={sitemapUrlLabel}
           type="url"
           required
           class="border-default hover:bg-hover-dimmer border-b p-4"
@@ -731,29 +747,28 @@
               options={markdownMethodOptions}
               bind:value={integrationMarkdownEndpointMethod}
             >
-              {m.method()}
+              {m.website_integration_method()}
             </Select.Simple>
             <Select.Simple
               class="border-default hover:bg-hover-dimmer w-1/2 border-b px-4 py-4"
               options={markdownLocationOptions}
               bind:value={integrationMarkdownEndpointLocation}
-              disabled={integrationMarkdownEndpointMethod === "get"}
             >
-              {m.send_url_in()}
+              {m.website_integration_send_url_in()}
             </Select.Simple>
           </div>
           <Input.Text
             bind:value={integrationMarkdownEndpointParamName}
-            label={m.url_parameter_name()}
+            label={m.website_integration_url_parameter_name()}
             class="border-default hover:bg-hover-dimmer border-b p-4"
           />
         {/if}
 
         <div class="p-4">
           <div class="mb-3 flex items-center justify-between">
-            <div class="text-sm font-semibold">{m.headers()}</div>
+            <div class="text-sm font-semibold">{m.website_integration_headers()}</div>
             <Button variant="outlined" type="button" onclick={addIntegrationHeaderRow}>
-              {m.add_header()}
+              {m.website_integration_add_header()}
             </Button>
           </div>
           <div class="space-y-2">
@@ -761,15 +776,23 @@
               <div class="grid grid-cols-[1fr_1fr_auto] gap-2">
                 <Input.Text
                   value={header.key}
-                  placeholder={m.header_key()}
-                  oninput={(event) =>
-                    updateIntegrationHeader(index, "key", event.currentTarget.value)}
+                  placeholder={m.website_integration_header_key()}
+                  oninput={(event: Event) =>
+                    updateIntegrationHeader(
+                      index,
+                      "key",
+                      (event.currentTarget as HTMLInputElement).value
+                    )}
                 />
                 <Input.Text
                   value={header.value}
-                  placeholder={m.header_value()}
-                  oninput={(event) =>
-                    updateIntegrationHeader(index, "value", event.currentTarget.value)}
+                  placeholder={m.website_integration_header_value()}
+                  oninput={(event: Event) =>
+                    updateIntegrationHeader(
+                      index,
+                      "value",
+                      (event.currentTarget as HTMLInputElement).value
+                    )}
                 />
                 <Button
                   variant="outlined"

@@ -70,7 +70,23 @@
   let selectedWebsiteIds = $state.raw(writable<Set<string>>(new Set()));
   let isBulkRecrawling = $state(false);
   let isBulkDeleting = $state(false);
-  let showBulkDeleteDialog = $state(false);
+  let showBulkDeleteDialog = writable(false);
+
+  function bulkSyncResultMessage(queued: number, failed: number, detail: string) {
+    return `${queued} queued, ${failed} failed${detail ? `: ${detail}` : ""}`;
+  }
+
+  function bulkDeleteResultMessage(deleted: number, failed: number) {
+    return `${deleted} deleted, ${failed} failed`;
+  }
+
+  function deleteSelectedLabel(count: number) {
+    return `${m.delete_website()} (${count})`;
+  }
+
+  function deleteSelectedWebsitesDescription(count: number) {
+    return `Delete ${count} selected website${count === 1 ? "" : "s"}?`;
+  }
 
   // Bulk recrawl handler
   async function bulkRecrawl() {
@@ -90,11 +106,7 @@
           .map((e: { error?: string }) => e.error)
           .filter(Boolean);
         toast.error(
-          m.bulk_sync_result({
-            queued: response.queued,
-            failed: response.failed,
-            detail: errorMessages.join(", ")
-          })
+          bulkSyncResultMessage(response.queued, response.failed, errorMessages.join(", "))
         );
       }
 
@@ -120,17 +132,12 @@
 
       const failed = results.filter((result) => result.status === "rejected");
       if (failed.length > 0) {
-        toast.error(
-          m.bulk_delete_result({
-            deleted: websiteIds.length - failed.length,
-            failed: failed.length
-          })
-        );
+        toast.error(bulkDeleteResultMessage(websiteIds.length - failed.length, failed.length));
       }
 
       $selectedWebsiteIds = new Set();
       refreshCurrentSpace();
-      showBulkDeleteDialog = false;
+      showBulkDeleteDialog.set(false);
     } catch (e) {
       toastError(e);
       console.error(e);
@@ -213,13 +220,11 @@
             </Button>
             <Button
               variant="destructive"
-              on:click={() => (showBulkDeleteDialog = true)}
+              on:click={() => showBulkDeleteDialog.set(true)}
               disabled={isBulkRecrawling || isBulkDeleting}
             >
               <IconTrash size="sm" />
-              {isBulkDeleting
-                ? m.deleting()
-                : m.delete_selected({ count: $selectedWebsiteIds.size })}
+              {isBulkDeleting ? m.deleting() : deleteSelectedLabel($selectedWebsiteIds.size)}
             </Button>
           </div>
         {:else}
@@ -313,16 +318,16 @@
   </Page.Main>
 </Page.Root>
 
-<Dialog.Root alert bind:isOpen={showBulkDeleteDialog}>
+<Dialog.Root alert openController={showBulkDeleteDialog}>
   <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_selected_websites()}</Dialog.Title>
+    <Dialog.Title>{deleteSelectedLabel($selectedWebsiteIds.size)}</Dialog.Title>
     <Dialog.Description>
-      {m.delete_selected_websites_description({ count: $selectedWebsiteIds.size })}
+      {deleteSelectedWebsitesDescription($selectedWebsiteIds.size)}
     </Dialog.Description>
     <Dialog.Controls let:close>
       <Button is={close}>{m.cancel()}</Button>
       <Button variant="destructive" on:click={bulkDeleteWebsites} disabled={isBulkDeleting}>
-        {isBulkDeleting ? m.deleting() : m.delete_selected_websites()}
+        {isBulkDeleting ? m.deleting() : deleteSelectedLabel($selectedWebsiteIds.size)}
       </Button>
     </Dialog.Controls>
   </Dialog.Content>

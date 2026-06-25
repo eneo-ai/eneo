@@ -27,7 +27,7 @@
     "test:all": "bun run test:unit && bun run test:e2e",
     "pretest:coverage": "bun run test:browsers",
     "test:coverage": "vitest run --coverage",
-    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
+    "i18n:compile": "node --experimental-global-webcrypto ./node_modules/.bin/paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
   },
   "devDependencies": {
     "@eslint/js": "^9.24.0",
