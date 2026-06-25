@@ -123,6 +123,18 @@ class SharePointSubscriptionPublic(BaseModel):
     expires_in_hours: int = Field(
         ..., description="Hours until expiration (0 if already expired)"
     )
+    consecutive_renewal_failures: int = Field(
+        ..., description="Consecutive failed renewal attempts"
+    )
+    last_renewal_failed_at: Optional[datetime] = Field(
+        None, description="Most recent failed renewal attempt timestamp"
+    )
+    last_renewal_error: Optional[str] = Field(
+        None, description="Most recent renewal failure message"
+    )
+    last_webhook_received_at: Optional[datetime] = Field(
+        None, description="Most recent valid webhook received for this subscription"
+    )
     owner_email: Optional[str] = Field(
         None,
         description="Email of subscription owner (None for organization integrations)",

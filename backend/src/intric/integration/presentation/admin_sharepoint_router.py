@@ -668,6 +668,10 @@ async def list_sharepoint_subscriptions(
                     ),
                     is_expired=sub.is_expired(),
                     expires_in_hours=expires_in_hours,
+                    consecutive_renewal_failures=sub.consecutive_renewal_failures,
+                    last_renewal_failed_at=sub.last_renewal_failed_at,
+                    last_renewal_error=sub.last_renewal_error,
+                    last_webhook_received_at=sub.last_webhook_received_at,
                     owner_email=owner_email,
                     owner_type=owner_type,
                 )
@@ -928,6 +932,10 @@ async def recreate_subscription(
             ),
             is_expired=subscription.is_expired(),
             expires_in_hours=expires_in_hours,
+            consecutive_renewal_failures=subscription.consecutive_renewal_failures,
+            last_renewal_failed_at=subscription.last_renewal_failed_at,
+            last_renewal_error=subscription.last_renewal_error,
+            last_webhook_received_at=subscription.last_webhook_received_at,
             owner_email=owner_email,
             owner_type=owner_type,
         )

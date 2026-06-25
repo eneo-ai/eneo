@@ -26,6 +26,7 @@ class Setup:
     job_repo: AsyncMock
     user_repo: AsyncMock
     change_key_service: AsyncMock
+    sharepoint_subscription_repo: AsyncMock
 
 
 @pytest.fixture
@@ -36,6 +37,8 @@ def setup():
     job_repo = AsyncMock()
     user_repo = AsyncMock()
     change_key_service = AsyncMock()
+    sharepoint_subscription_repo = AsyncMock()
+    sharepoint_subscription_repo.get_by_subscription_id.return_value = None
 
     service = SharepointWebhookService(
         session=session,
@@ -43,6 +46,7 @@ def setup():
         job_repo=job_repo,
         user_repo=user_repo,
         change_key_service=change_key_service,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
     )
 
     # Set expected client state for testing
@@ -55,6 +59,7 @@ def setup():
         job_repo=job_repo,
         user_repo=user_repo,
         change_key_service=change_key_service,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
     )
 
 
@@ -160,6 +165,26 @@ async def test_client_state_validation_rejects_invalid(setup: Setup, mock_notifi
 
     # Verify _fetch_knowledge_by_site was NOT called (notification was rejected)
     setup.service._fetch_knowledge_by_site.assert_not_called()
+    setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
+
+
+async def test_valid_webhook_records_subscription_received(
+    setup: Setup, mock_notification
+):
+    """Valid notifications update subscription webhook health."""
+    subscription = MagicMock()
+    setup.sharepoint_subscription_repo.get_by_subscription_id.return_value = (
+        subscription
+    )
+    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+
+    await setup.service.handle_notifications({"value": [mock_notification]})
+
+    setup.sharepoint_subscription_repo.get_by_subscription_id.assert_called_once_with(
+        "sub-123"
+    )
+    subscription.mark_webhook_received.assert_called_once()
+    setup.sharepoint_subscription_repo.update.assert_called_once_with(subscription)
 
 
 async def test_empty_notifications_handled_gracefully(setup: Setup):

@@ -22,6 +22,24 @@ logger = get_logger(__name__)
 worker = Worker()
 
 
+async def record_renewal_failure(
+    subscription: SharePointSubscription,
+    container: Container,
+    error_message: str,
+) -> None:
+    """Persist renewal failure state without failing the maintenance job."""
+    try:
+        subscription.mark_renewal_failure(error_message)
+        await container.sharepoint_subscription_repo().update(subscription)
+    except Exception as exc:
+        logger.error(
+            "Failed to record renewal failure for subscription %s: %s",
+            subscription.subscription_id,
+            exc,
+            exc_info=True,
+        )
+
+
 async def get_token_for_subscription(
     subscription: SharePointSubscription,
     container: Container,
@@ -157,9 +175,9 @@ async def renew_expiring_subscriptions(container: Container):
             token = await get_token_for_subscription(subscription, container)
 
             if not token:
-                logger.warning(
-                    f"Could not get token for subscription {subscription.subscription_id}"
-                )
+                error_message = f"Could not get token for subscription {subscription.subscription_id}"
+                logger.warning(error_message)
+                await record_renewal_failure(subscription, container, error_message)
                 failed_count += 1
                 continue
 
@@ -171,6 +189,11 @@ async def renew_expiring_subscriptions(container: Container):
             if success:
                 renewed_count += 1
             else:
+                await record_renewal_failure(
+                    subscription,
+                    container,
+                    f"Renewal returned false for subscription {subscription.subscription_id}",
+                )
                 failed_count += 1
 
         except Exception as exc:
@@ -178,6 +201,7 @@ async def renew_expiring_subscriptions(container: Container):
                 f"Error renewing subscription {subscription.subscription_id}: {exc}",
                 exc_info=True,
             )
+            await record_renewal_failure(subscription, container, str(exc))
             failed_count += 1
 
     logger.info(

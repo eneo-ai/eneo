@@ -417,3 +417,107 @@ class TestRenewExpiringSubscriptions:
 
         assert result["renewed"] == 0
         assert result["failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_records_failure_when_token_cannot_be_resolved(self, mock_container):
+        """Token resolution failures are persisted on the subscription."""
+        subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="site-123,web-123,list-123",
+            subscription_id="sub-123",
+            drive_id="drive-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
+        )
+
+        user_integration = MagicMock()
+        user_integration.auth_type = "tenant_app"
+        user_integration.tenant_app_id = None
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+        mock_container.sharepoint_subscription_repo().update = AsyncMock(
+            return_value=subscription
+        )
+
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "intric.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await renew_expiring_subscriptions({})
+
+        assert result["renewed"] == 0
+        assert result["failed"] == 1
+        assert subscription.consecutive_renewal_failures == 1
+        assert subscription.last_renewal_failed_at is not None
+        assert "Could not get token" in (subscription.last_renewal_error or "")
+        mock_container.sharepoint_subscription_repo().update.assert_called_once_with(
+            subscription
+        )
+
+    @pytest.mark.asyncio
+    async def test_records_failure_when_renewal_returns_false(self, mock_container):
+        """Graph renewal failures are persisted on the subscription."""
+        subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="site-123,web-123,list-123",
+            subscription_id="sub-123",
+            drive_id="drive-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
+        )
+
+        user_integration = MagicMock()
+        user_integration.auth_type = "tenant_app"
+        user_integration.tenant_app_id = uuid4()
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+
+        tenant_app = MagicMock()
+        tenant_app.is_service_account = MagicMock(return_value=False)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
+        mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
+            return_value="access-token"
+        )
+        mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
+            return_value=False
+        )
+        mock_container.sharepoint_subscription_repo().update = AsyncMock(
+            return_value=subscription
+        )
+
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "intric.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await renew_expiring_subscriptions({})
+
+        assert result["renewed"] == 0
+        assert result["failed"] == 1
+        assert subscription.consecutive_renewal_failures == 1
+        assert subscription.last_renewal_failed_at is not None
+        assert "Renewal returned false" in (subscription.last_renewal_error or "")
+        mock_container.sharepoint_subscription_repo().update.assert_called_once_with(
+            subscription
+        )

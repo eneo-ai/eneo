@@ -231,6 +231,9 @@ class TestRecreateExpiredSubscription:
         updated_sub = mock_subscription_repo.update.call_args[0][0]
         assert updated_sub.subscription_id == "new-subscription-id"
         assert updated_sub.expires_at > datetime.now(timezone.utc)
+        assert updated_sub.consecutive_renewal_failures == 0
+        assert updated_sub.last_renewal_failed_at is None
+        assert updated_sub.last_renewal_error is None
 
     async def test_recreate_deletes_old_subscription_first(
         self, service, mock_subscription_repo, expired_subscription, mock_token
@@ -292,6 +295,10 @@ class TestRenewSubscription:
         self, service, mock_subscription_repo, mock_subscription, mock_token
     ):
         """Successfully renews a subscription."""
+        mock_subscription.consecutive_renewal_failures = 2
+        mock_subscription.last_renewal_failed_at = datetime.now(timezone.utc)
+        mock_subscription.last_renewal_error = "previous failure"
+
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.__aenter__ = AsyncMock(return_value=mock_response)
@@ -311,6 +318,10 @@ class TestRenewSubscription:
 
         assert result is True
         mock_subscription_repo.update.assert_called_once()
+        updated_sub = mock_subscription_repo.update.call_args[0][0]
+        assert updated_sub.consecutive_renewal_failures == 0
+        assert updated_sub.last_renewal_failed_at is None
+        assert updated_sub.last_renewal_error is None
 
     async def test_renew_recreates_on_404(
         self, service, mock_subscription_repo, mock_subscription, mock_token
