@@ -2,12 +2,11 @@ import asyncio
 import hashlib
 import unicodedata
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID
 
 import sqlalchemy as sa
-from html2text import html2text
 
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
 from intric.embedding_models.infrastructure.datastore import Datastore
@@ -20,6 +19,14 @@ from intric.integration.domain.entities.tenant_sharepoint_app import (
 from intric.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
     SharePointContentClient,
+)
+from intric.integration.infrastructure.content_service.parsing import (
+    extract_text_from_canvas_layout,
+    has_graph_facet,
+    require_text,
+    safe_int,
+    sanitize_text_for_db,
+    unsupported_file_reason,
 )
 from intric.integration.infrastructure.content_service.types import (
     SharePointItem,
@@ -35,80 +42,6 @@ from intric.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
 from intric.main.logging import get_logger
-
-
-def _extract_text_from_canvas_layout(content: dict[str, Any]) -> str:
-    """Extract plain text from a SharePoint page's canvasLayout structure.
-
-    Parses horizontalSections and verticalSection to find textWebPart
-    elements and converts their innerHtml to plain text.
-    """
-    texts: list[str] = []
-    canvas: dict[str, Any] = content.get("canvasLayout", {})
-    if not canvas:
-        return ""
-
-    def _extract_from_webparts(webparts: list[dict[str, Any]]) -> None:
-        for wp in webparts:
-            if wp.get("@odata.type") == "#microsoft.graph.textWebPart":
-                inner_html = cast(str, wp.get("innerHtml", ""))
-                if inner_html:
-                    texts.append(html2text(inner_html).strip())
-
-    for section in canvas.get("horizontalSections", []):
-        for column in section.get("columns", []):
-            _extract_from_webparts(column.get("webparts", []))
-
-    vertical = canvas.get("verticalSection")
-    if vertical:
-        _extract_from_webparts(vertical.get("webparts", []))
-
-    return "\n\n".join(texts)
-
-
-def sanitize_text_for_db(text: str) -> str:
-    """Remove null bytes and other invalid characters that PostgreSQL doesn't accept.
-
-    PostgreSQL TEXT columns cannot contain null bytes (0x00) in UTF-8 encoding.
-    This commonly happens when PDF extraction fails or returns binary data.
-    """
-    if not text:
-        return text
-    # Remove null bytes which cause "invalid byte sequence for encoding UTF8: 0x00"
-    return text.replace("\x00", "")
-
-
-def _safe_int(value: Any) -> int:
-    """Best-effort int conversion for defensive size accounting."""
-    if value is None:
-        return 0
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if not isinstance(value, str):
-        return 0
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _has_graph_facet(item: SharePointItem, facet: str) -> bool:
-    """Return True for Microsoft Graph facets represented as true or an object."""
-    value = cast(dict[str, object], item).get(facet)
-    if isinstance(value, bool):
-        return value
-    return isinstance(value, dict)
-
-
-def _require_text(value: Optional[str], field_name: str) -> str:
-    if not value:
-        raise ValueError(f"{field_name} is required")
-    return value
-
 
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
@@ -153,100 +86,6 @@ logger = get_logger(__name__)
 # always means a stale/incomplete enumeration, so we skip rather than mass-delete.
 _RECONCILE_MAX_DELETE_FRACTION = 0.5
 _RECONCILE_MIN_DELETE_FLOOR = 10
-
-# File extensions that cannot produce useful text content.
-# These are skipped before download to save bandwidth and avoid database pollution.
-_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
-    {
-        # Images
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".svg",
-        ".ico",
-        ".webp",
-        ".tiff",
-        ".tif",
-        ".heic",
-        ".heif",
-        ".raw",
-        ".cr2",
-        ".nef",
-        ".arw",
-        ".psd",
-        # Video
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".wmv",
-        ".mkv",
-        ".webm",
-        ".flv",
-        ".m4v",
-        # Audio
-        ".mp3",
-        ".wav",
-        ".ogg",
-        ".flac",
-        ".aac",
-        ".wma",
-        ".m4a",
-        # Archives
-        ".zip",
-        ".rar",
-        ".7z",
-        ".tar",
-        ".gz",
-        ".bz2",
-        # Executables / binaries
-        ".exe",
-        ".dll",
-        ".msi",
-        ".bin",
-        ".iso",
-        # Other non-text
-        ".ttf",
-        ".otf",
-        ".woff",
-        ".woff2",
-    }
-)
-
-
-def _unsupported_file_reason(filename: str) -> Optional[str]:
-    """Return a skip reason if the file type is unsupported, or None if OK."""
-    name = filename.lower()
-    for ext in _UNSUPPORTED_EXTENSIONS:
-        if name.endswith(ext):
-            # Determine a human-readable category
-            if ext in {
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".gif",
-                ".bmp",
-                ".svg",
-                ".ico",
-                ".webp",
-                ".tiff",
-                ".tif",
-                ".heic",
-                ".heif",
-                ".raw",
-                ".cr2",
-                ".nef",
-                ".arw",
-                ".psd",
-            }:
-                return "Unsupported file type (image)"
-            if ext in {".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v"}:
-                return "Unsupported file type (video)"
-            if ext in {".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a"}:
-                return "Unsupported file type (audio)"
-            return f"Unsupported file type ({ext})"
-    return None
 
 
 class SimpleSharePointToken:
@@ -748,8 +587,8 @@ class SharePointContentService:
                 for item in changes:
                     item_name = item.get("name", "")
                     item_id = item.get("id")
-                    is_deleted = _has_graph_facet(item, "deleted")
-                    is_folder = _has_graph_facet(item, "folder")
+                    is_deleted = has_graph_facet(item, "deleted")
+                    is_folder = has_graph_facet(item, "folder")
                     change_key = item.get("cTag")
 
                     logger.debug(
@@ -847,7 +686,7 @@ class SharePointContentService:
                         )
                         continue
 
-                    unsupported_reason = _unsupported_file_reason(item_name)
+                    unsupported_reason = unsupported_file_reason(item_name)
                     if unsupported_reason:
                         stats["skipped_items"] += 1
                         stats["skipped_details"].append(
@@ -1001,7 +840,7 @@ class SharePointContentService:
         try:
             site_id_value = site_id
             if resource_type != "onedrive":
-                site_id_value = _require_text(site_id_value, "site_id")
+                site_id_value = require_text(site_id_value, "site_id")
 
             base_url = token.base_url
             async with SharePointContentClient(
@@ -1024,7 +863,7 @@ class SharePointContentService:
                     )
 
                 if integration_knowledge.folder_id:
-                    folder_id_value = _require_text(
+                    folder_id_value = require_text(
                         integration_knowledge.folder_id, "folder_id"
                     )
                     item_info = await content_client.get_file_metadata(
@@ -1071,7 +910,7 @@ class SharePointContentService:
                         )
                         integration_knowledge.selected_item_type = "file"
 
-                        unsupported_reason = _unsupported_file_reason(item_name)
+                        unsupported_reason = unsupported_file_reason(item_name)
                         if unsupported_reason:
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
@@ -1122,7 +961,7 @@ class SharePointContentService:
                         )
                     else:
                         data = await content_client.get_documents_in_drive(
-                            site_id=_require_text(site_id_value, "site_id")
+                            site_id=require_text(site_id_value, "site_id")
                         )
 
                     if data:
@@ -1137,7 +976,7 @@ class SharePointContentService:
 
                     if resource_type != "onedrive" and site_id_value:
                         pages = await content_client.get_site_pages(
-                            site_id=_require_text(site_id_value, "site_id")
+                            site_id=require_text(site_id_value, "site_id")
                         )
                         if data := pages.get("value", []):
                             await self._process_pages(
@@ -1199,7 +1038,7 @@ class SharePointContentService:
                 if not drive_id or not item_id:
                     continue
                 doc_name = document.get("name", "")
-                unsupported_reason = _unsupported_file_reason(doc_name)
+                unsupported_reason = unsupported_file_reason(doc_name)
                 if unsupported_reason:
                     stats["skipped_items"] += 1
                     stats["skipped_details"].append(
@@ -1247,7 +1086,7 @@ class SharePointContentService:
                 continue
             content = await client.get_page_content(site_id=site_id, page_id=page_id)
             if content:
-                page_text = _extract_text_from_canvas_layout(content)
+                page_text = extract_text_from_canvas_layout(content)
                 if not page_text:
                     page_text = content.get("description", "")
                 await self._process_info_blob(
@@ -1289,7 +1128,7 @@ class SharePointContentService:
                 integration_knowledge_id=integration_knowledge.id,
             )
 
-        previous_blob_size = _safe_int(existing_blob.size) if existing_blob else 0
+        previous_blob_size = safe_int(existing_blob.size) if existing_blob else 0
 
         sanitized_text = sanitize_text_for_db(text)
         content_hash = hashlib.sha256(sanitized_text.encode("utf-8")).digest()
@@ -1365,8 +1204,8 @@ class SharePointContentService:
         except Exception as e:
             logger.debug(f"Could not add embedding for {title}: {e}")
 
-        current_size = _safe_int(getattr(integration_knowledge, "size", 0))
-        new_blob_size = _safe_int(getattr(info_blob, "size", 0))
+        current_size = safe_int(getattr(integration_knowledge, "size", 0))
+        new_blob_size = safe_int(getattr(info_blob, "size", 0))
         size_delta = new_blob_size - previous_blob_size
         if size_delta:
             integration_knowledge.size = max(0, current_size + size_delta)
@@ -1395,9 +1234,9 @@ class SharePointContentService:
                 if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
             ]
             if valid_deleted_blobs:
-                current_size = _safe_int(getattr(integration_knowledge, "size", 0))
+                current_size = safe_int(getattr(integration_knowledge, "size", 0))
                 deleted_size = sum(
-                    _safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
+                    safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
                 )
                 integration_knowledge.size = max(0, current_size - deleted_size)
 
@@ -1592,7 +1431,7 @@ class SharePointContentService:
 
             for item in results or []:
                 item_id = item.get("id")
-                if _has_graph_facet(item, "folder"):
+                if has_graph_facet(item, "folder"):
                     if item_id:
                         await _walk(item_id)
                 elif item_id:
@@ -2103,7 +1942,7 @@ class SharePointContentService:
         if not item_id or item_type == "folder" or not drive_id:
             return None, None
 
-        skip_reason = _unsupported_file_reason(item_name)
+        skip_reason = unsupported_file_reason(item_name)
         if skip_reason:
             return None, skip_reason
 
