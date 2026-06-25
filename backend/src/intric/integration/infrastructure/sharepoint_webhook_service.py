@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from typing import Optional, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -75,6 +76,17 @@ class SharepointWebhookService:
             logger.debug("SharePoint webhook called without notifications")
             return
 
+        # clientState is the only authentication for this endpoint (it is
+        # unauthenticated at the HTTP layer). Fail closed: without a configured
+        # secret we cannot tell genuine Graph notifications from forged ones, so
+        # reject everything rather than silently accepting unverified payloads.
+        if not self.expected_client_state:
+            logger.error(
+                "Rejecting SharePoint webhook: SHAREPOINT_WEBHOOK_CLIENT_STATE is "
+                "not configured, so notifications cannot be authenticated."
+            )
+            return
+
         # Group notifications by resource (SharePoint site or OneDrive drive)
         notifications_by_resource: dict[
             tuple[str, str], list[SharePointWebhookNotification]
@@ -86,9 +98,9 @@ class SharepointWebhookService:
                 continue
             resource_type, resource_id = resource_info
 
-            if (
-                self.expected_client_state
-                and notification.get("clientState") != self.expected_client_state
+            # Constant-time compare to avoid leaking the secret via timing.
+            if not hmac.compare_digest(
+                notification.get("clientState") or "", self.expected_client_state
             ):
                 logger.warning(
                     "Ignoring webhook notification with unexpected clientState. "

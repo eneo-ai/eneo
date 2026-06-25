@@ -168,6 +168,21 @@ async def test_client_state_validation_rejects_invalid(setup: Setup, mock_notifi
     setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
 
 
+async def test_rejects_all_when_client_state_not_configured(
+    setup: Setup, mock_notification
+):
+    """Fail closed: with no configured secret, every notification is rejected."""
+    setup.service.expected_client_state = ""
+    setup.service._fetch_knowledge_by_site = AsyncMock(return_value=[])
+
+    notifications = {"value": [mock_notification]}
+
+    await setup.service.handle_notifications(notifications)
+
+    setup.service._fetch_knowledge_by_site.assert_not_called()
+    setup.sharepoint_subscription_repo.get_by_subscription_id.assert_not_called()
+
+
 async def test_valid_webhook_records_subscription_received(
     setup: Setup, mock_notification
 ):
