@@ -23,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
 )
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.question_catalog import slot_name_for_legacy_question_id
 
 CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
     "primary_runtime_input",
@@ -157,14 +158,6 @@ def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKi
     return []
 
 
-_LEGACY_QUESTION_TO_SLOT_TARGET: dict[str, str] = {
-    "input_material_mode": "primary_runtime_input",
-    "flow_input_architecture": "primary_runtime_input",
-    "final_output_mode": "terminal_output",
-    "final_pdf_type": "terminal_output",
-}
-
-
 def _ordered_ask_targets(
     *,
     selected_discovery_question_ids: Sequence[str],
@@ -178,7 +171,7 @@ def _ordered_ask_targets(
     seen: set[str] = set()
 
     def append_target(raw_target: str) -> None:
-        target = _LEGACY_QUESTION_TO_SLOT_TARGET.get(raw_target, raw_target)
+        target = slot_name_for_legacy_question_id(raw_target)
         if (
             target not in KNOWN_REQUIREMENT_SLOT_NAMES
             or target in resolved_slot_names
@@ -199,11 +192,11 @@ def _ordered_ask_targets(
 
 
 def _order_slot_names(slot_names: frozenset[str]) -> tuple[str, ...]:
-    core_slots = tuple(slot for slot in CORE_ARCHITECTURAL_SLOT_ORDER if slot in slot_names)
+    core_slots = tuple(
+        slot for slot in CORE_ARCHITECTURAL_SLOT_ORDER if slot in slot_names
+    )
     remaining = tuple(
-        slot
-        for slot in sorted(slot_names)
-        if slot not in CORE_ARCHITECTURAL_SLOTS
+        slot for slot in sorted(slot_names) if slot not in CORE_ARCHITECTURAL_SLOTS
     )
     return core_slots + remaining
 

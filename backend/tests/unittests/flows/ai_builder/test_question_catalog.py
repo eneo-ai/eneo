@@ -453,6 +453,10 @@ class TestCatalogInvariants:
         assert slot_name_for_legacy_question_id("final_output_mode") == (
             "terminal_output"
         )
+        assert slot_name_for_legacy_question_id("flow_input_architecture") == (
+            "primary_runtime_input"
+        )
+        assert slot_name_for_legacy_question_id("final_pdf_type") == ("terminal_output")
 
 
 class TestCatalogStaticDiscoveryMetadata:

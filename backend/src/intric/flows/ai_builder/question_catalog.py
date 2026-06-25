@@ -25,9 +25,9 @@ Copy is transcribed verbatim from the canonical factory functions in
 preserved so downstream answer-matching code is untouched, but two
 templates (`primary_runtime_input`, `terminal_output`) keep slot-name
 keys that differ from their legacy `DiscoveryQuestionSuggestion.question_id`
-values (`input_material_mode`, `final_output_mode`); the downstream rewire
-therefore needs a slot-key → legacy-question-id bridge for those two
-rows; the remaining five migrate cleanly.
+values (`input_material_mode`, `final_output_mode`). This module owns that
+bridge, plus the few non-slot discovery issue ids that intentionally resolve
+to a canonical slot target.
 
 This module is a pure leaf: its only non-stdlib import is the
 slot-name frozenset from the dedicated leaf module
@@ -794,10 +794,20 @@ _LEGACY_QUESTION_ID_BY_SLOT_NAME: Mapping[str, str] = MappingProxyType(
         "terminal_output": "final_output_mode",
     }
 )
+_EXTRA_SLOT_NAME_BY_LEGACY_QUESTION_ID: Mapping[str, str] = MappingProxyType(
+    {
+        "flow_input_architecture": "primary_runtime_input",
+        "final_pdf_type": "terminal_output",
+    }
+)
 _SLOT_NAME_BY_LEGACY_QUESTION_ID: Mapping[str, str] = MappingProxyType(
     {
         legacy_question_id: slot_name
         for slot_name, legacy_question_id in _LEGACY_QUESTION_ID_BY_SLOT_NAME.items()
+    }
+    | {
+        legacy_question_id: slot_name
+        for legacy_question_id, slot_name in _EXTRA_SLOT_NAME_BY_LEGACY_QUESTION_ID.items()
     }
 )
 
