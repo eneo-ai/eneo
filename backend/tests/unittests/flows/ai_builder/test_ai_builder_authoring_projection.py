@@ -12,12 +12,14 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     ModifyExistingStep,
     OrderedEditProposal,
     compile_ordered_edit_proposal,
-    current_flow_authoring_spec,
-    flow_step_to_authoring_spec,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
+)
+from intric.flows.application.flow_authoring_snapshot import (
+    current_flow_authoring_spec,
+    flow_step_to_authoring_spec,
 )
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from intric.flows.domain.flow import FlowStep
@@ -694,7 +696,6 @@ def test_current_flow_authoring_spec_preserves_signature_vocabulary() -> None:
         flow_name="Signature flow",
         flow_description="Existing description",
         assistant_snapshots=None,
-        resource_catalog=None,
     )
 
     assert [step.plan_step_ref for step in result.steps] == [

@@ -26,6 +26,7 @@ from intric.flows.flow_authoring_spec import (
     StepSpec,
 )
 from intric.flows.flow_resource_bindings import FlowResourceBindingSource
+from intric.main.exceptions import BadRequestException
 
 
 def test_flow_authoring_command_discriminates_create_and_edit() -> None:
@@ -90,6 +91,25 @@ async def test_apply_uses_origin_binding_source() -> None:
 
     assert result.flow_id == flow_id
     assert materializer.binding_source is FlowResourceBindingSource.PACKAGE_IMPORT
+
+
+@pytest.mark.anyio
+async def test_prepare_rejects_create_command_with_existing_step_ref() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        await FlowAuthoringCommandService().prepare(
+            command=CreateFlowAuthoringCommand(
+                space_id=uuid4(),
+                spec=_spec(existing_step_ref="existing_step_1"),
+                origin=FlowPackageAuthoringOrigin(
+                    package_id="se.demo.flow",
+                    package_version="1.0.0",
+                    content_checksum="sha256:abc",
+                ),
+            ),
+            flow_service=SimpleNamespace(),
+        )
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
 
 
 @pytest.mark.anyio

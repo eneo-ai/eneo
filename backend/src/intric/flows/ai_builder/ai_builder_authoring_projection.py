@@ -18,13 +18,10 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
-from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from intric.flows.domain.flow import FlowPersistedJsonObject, FlowStep
-from intric.flows.flow_authoring_name import normalize_flow_name
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -107,61 +104,6 @@ class OrderedEditProposal(BaseModel):
             if assumption:
                 normalized.append(assumption)
         return normalized
-
-
-def flow_step_to_authoring_spec(
-    step: FlowStep,
-    plan_ref: str,
-    *,
-    assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
-) -> StepSpec:
-    return StepSpec(
-        plan_step_ref=plan_ref,
-        existing_step_ref=f"existing_step_{step.step_order}",
-        name=step.user_description or f"Step {step.step_order}",
-        assistant_spec=_resolve_existing_assistant_spec(
-            step=step,
-            assistant_snapshots=assistant_snapshots,
-            resource_catalog=resource_catalog,
-        ),
-        input_source=InputSource(step.input_source),
-        input_type=InputType(step.input_type),
-        output_mode=OutputMode(step.output_mode),
-        output_type=OutputType(step.output_type),
-        mcp_policy=MCPPolicy(step.mcp_policy),
-        input_bindings=step.input_bindings,
-        input_contract=step.input_contract,
-        output_contract=step.output_contract,
-        input_config=step.input_config,
-        output_config=step.output_config,
-        review_policy=step.review_policy,
-    )
-
-
-def current_flow_authoring_spec(
-    *,
-    current_steps: list[FlowStep],
-    flow_name: str | None,
-    flow_description: str | None,
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    resource_catalog: AIBuilderResourceCatalog | None,
-    form_fields: list[FormFieldSpec] | None = None,
-) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name=normalize_flow_name(flow_name or "Unnamed Flow"),
-        flow_description=flow_description or "",
-        steps=[
-            flow_step_to_authoring_spec(
-                step,
-                plan_ref=f"existing_step_{step.step_order}",
-                assistant_snapshots=assistant_snapshots,
-                resource_catalog=resource_catalog,
-            )
-            for step in current_steps
-        ],
-        form_fields=form_fields,
-    )
 
 
 def compile_ordered_edit_proposal(
@@ -395,33 +337,6 @@ def merge_assistant_spec_patch(
     )
 
 
-def _resolve_existing_assistant_spec(
-    *,
-    step: FlowStep,
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    resource_catalog: AIBuilderResourceCatalog | None,
-) -> AssistantSpec:
-    if not assistant_snapshots:
-        return AssistantSpec(instructions="")
-
-    snapshot = assistant_snapshots.get(step.assistant_id)
-    if snapshot is None:
-        return AssistantSpec(instructions="")
-
-    if resource_catalog is None:
-        if (
-            snapshot.model is None
-            and not snapshot.knowledge_refs
-            and not snapshot.mcp_server_refs
-            and not snapshot.mcp_tool_refs
-        ):
-            return AssistantSpec(instructions=snapshot.instructions)
-        raise ValueError(
-            "Resource catalog is required to translate assistant snapshots."
-        )
-    return resource_catalog.assistant_spec_from_snapshot(snapshot)
-
-
 def _document_body_writer_step_refs(
     *,
     base_spec: FlowDraftSpecCore,
@@ -476,7 +391,5 @@ __all__ = [
     "ModifyExistingStep",
     "OrderedEditProposal",
     "compile_ordered_edit_proposal",
-    "current_flow_authoring_spec",
-    "flow_step_to_authoring_spec",
     "merge_assistant_spec_patch",
 ]

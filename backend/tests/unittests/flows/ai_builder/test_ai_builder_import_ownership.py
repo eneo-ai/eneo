@@ -253,6 +253,9 @@ EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES = frozenset[int]()
 AUTHORING_PROJECTION_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_authoring_projection")
 )
+FLOW_AUTHORING_SNAPSHOT_MODULE = ".".join(
+    ("intric", "flows", "application", "flow_authoring_snapshot")
+)
 NEW_STEP_COMPILER_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_new_step_compiler")
 )
@@ -1093,10 +1096,19 @@ def test_edit_compiler_consumes_ordered_proposals_without_operation_ir() -> None
         )
     if "OrderedEditProposal" not in authoring_imports:
         violations.append(f"{edit_compiler_path}: missing OrderedEditProposal import")
+    snapshot_imports = imported_names_by_module.get(
+        FLOW_AUTHORING_SNAPSHOT_MODULE, set()
+    )
+    if "current_flow_authoring_spec" not in snapshot_imports:
+        violations.append(
+            f"{edit_compiler_path}: missing Flow authoring snapshot import"
+        )
 
     banned_authoring_imports = {
         "_compile_existing_step_modification",
         "compile_existing_step_modification",
+        "current_flow_authoring_spec",
+        "flow_step_to_authoring_spec",
     }
     banned_new_step_imports = {
         "compile_new_step_draft",

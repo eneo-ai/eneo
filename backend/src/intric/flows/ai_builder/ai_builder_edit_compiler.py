@@ -17,7 +17,6 @@ from intric.flows.ai_builder.ai_builder_authoring_projection import (
     OrderedEditProposal,
     OrderedEditStep,
     compile_ordered_edit_proposal,
-    current_flow_authoring_spec,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderEditApproval
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
@@ -46,6 +45,7 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
 from intric.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
+from intric.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_name import normalize_flow_name
@@ -99,7 +99,11 @@ def compile_edit_proposal(
         flow_name=flow_name,
         flow_description=flow_description,
         assistant_snapshots=assistant_snapshots,
-        resource_catalog=resource_catalog,
+        assistant_snapshot_projector=(
+            resource_catalog.assistant_spec_from_snapshot
+            if resource_catalog is not None
+            else None
+        ),
         form_fields=base_form_fields,
     )
     compiled_spec = compile_ordered_edit_proposal(
