@@ -606,7 +606,9 @@ class Container(containers.DeclarativeContainer):
     tenant_integration_mapper = providers.Factory(TenantIntegrationMapper)
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
-    confluence_token_mapper = providers.Factory(OauthTokenMapper)
+    confluence_token_mapper = providers.Factory(
+        OauthTokenMapper, encryption_service=encryption_service
+    )
     sync_log_mapper = providers.Factory(SyncLogMapper)
     sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
 
