@@ -15,7 +15,10 @@ from intric.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from intric.integration.infrastructure.sharepoint_subscription_worker import (
+    SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES,
+    SHAREPOINT_SYNC_TASKS,
     cleanup_orphaned_subscriptions,
+    fail_stale_sharepoint_sync_jobs,
     get_token_for_subscription,
     renew_expiring_subscriptions,
 )
@@ -521,3 +524,56 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_repo().update.assert_called_once_with(
             subscription
         )
+
+
+class TestFailStaleSharePointSyncJobs:
+    """Tests for the stuck-job sweeper cron."""
+
+    @pytest.mark.asyncio
+    async def test_marks_stale_jobs_failed(self, mock_container):
+        failed_ids = [uuid4(), uuid4()]
+        job_repo = AsyncMock()
+        job_repo.mark_stale_jobs_failed = AsyncMock(return_value=failed_ids)
+        mock_container.job_repo = MagicMock(return_value=job_repo)
+
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "intric.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await fail_stale_sharepoint_sync_jobs({})
+
+        assert result["failed_stale_jobs"] == 2
+        call = job_repo.mark_stale_jobs_failed.await_args
+        assert call.kwargs["tasks"] == SHAREPOINT_SYNC_TASKS
+        # stale_before must be in the past by roughly the configured timeout
+        stale_before = call.kwargs["stale_before"]
+        delta_minutes = (datetime.now(timezone.utc) - stale_before).total_seconds() / 60
+        assert (
+            SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES - 5
+            <= delta_minutes
+            <= SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES + 5
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_no_stale_jobs(self, mock_container):
+        job_repo = AsyncMock()
+        job_repo.mark_stale_jobs_failed = AsyncMock(return_value=[])
+        mock_container.job_repo = MagicMock(return_value=job_repo)
+
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "intric.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await fail_stale_sharepoint_sync_jobs({})
+
+        assert result["failed_stale_jobs"] == 0

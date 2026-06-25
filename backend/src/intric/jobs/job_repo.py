@@ -108,6 +108,36 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         return result.rowcount
 
+    async def mark_stale_jobs_failed(
+        self,
+        tasks: list[str],
+        stale_before: datetime,
+    ) -> list[UUID]:
+        """Mark long-stuck IN_PROGRESS jobs as FAILED.
+
+        A hard crash mid-task (the worker dies without running its except/finally)
+        leaves the Job row stuck in IN_PROGRESS forever. This reaps such rows for
+        the given task types once they have been untouched past ``stale_before``.
+
+        Returns the ids of the jobs that were failed.
+        """
+        from intric.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.task.in_(tasks))
+            .where(Jobs.status == Status.IN_PROGRESS.value)
+            .where(Jobs.updated_at < stale_before)
+            .values(
+                status=Status.FAILED.value,
+                finished_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+            .returning(Jobs.id)
+        )
+        result = await self.delegate.session.execute(stmt)
+        return [row[0] for row in result.all()]
+
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
         twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)

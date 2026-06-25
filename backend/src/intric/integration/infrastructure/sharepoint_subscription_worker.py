@@ -5,6 +5,7 @@ This worker handles:
 2. Orphaned subscription cleanup - runs daily to remove unused subscriptions
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from intric.integration.domain.entities.sharepoint_subscription import (
@@ -296,3 +297,38 @@ async def cleanup_orphaned_subscriptions(container: Container):
     )
 
     return {"deleted": deleted_count, "skipped": skipped_count, "failed": failed_count}
+
+
+# SharePoint sync tasks that can leave a Job stuck IN_PROGRESS if the worker dies
+# mid-run (arq does not retry these and there is no per-task finally that fails the
+# Job). The sync lease watchdog refreshes every <5 min while a sync is alive, so a
+# Job untouched for this long is almost certainly dead, not slow.
+SHAREPOINT_SYNC_TASKS = ["pull_sharepoint_content", "sync_sharepoint_delta"]
+SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES = 120
+
+
+@worker.cron_job(minute={15, 45})  # Every 30 minutes, offset from renewal
+async def fail_stale_sharepoint_sync_jobs(container: Container):
+    """Mark SharePoint sync jobs stuck in IN_PROGRESS as FAILED.
+
+    A hard crash mid-sync (worker killed, OOM) leaves the Job row in IN_PROGRESS
+    forever because arq does not retry and no finally fails it. This reaper mirrors
+    the crawl OrphanWatchdog so stuck syncs surface as failures instead of hanging.
+    """
+    stale_before = datetime.now(timezone.utc) - timedelta(
+        minutes=SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES
+    )
+    job_repo = container.job_repo()
+    failed_ids = await job_repo.mark_stale_jobs_failed(
+        tasks=SHAREPOINT_SYNC_TASKS,
+        stale_before=stale_before,
+    )
+
+    if failed_ids:
+        logger.warning(
+            "Failed %d stale SharePoint sync job(s) stuck in IN_PROGRESS: %s",
+            len(failed_ids),
+            [str(job_id) for job_id in failed_ids],
+        )
+
+    return {"failed_stale_jobs": len(failed_ids)}
