@@ -1649,3 +1649,129 @@ class TestIsUnextractableContent:
         )
 
         assert is_unextractable_content("Real document content here.") is False
+
+
+class TestFullSyncReconciliation:
+    """Full-sync reconciliation must remove orphans but never mass-delete."""
+
+    def _ik(self):
+        ik = MagicMock()
+        ik.id = uuid4()
+        return ik
+
+    async def test_deletes_only_orphaned_blobs(self, service, mock_dependencies):
+        ik = self._ik()
+        indexed = [(uuid4(), "keep-1"), (uuid4(), "orphan-1"), (uuid4(), "keep-2")]
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=indexed
+        )
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_item_ids",
+            AsyncMock(return_value={"keep-1", "keep-2"}),
+        ):
+            with patch.object(
+                service, "_delete_local_sharepoint_item", AsyncMock(return_value=1)
+            ) as mock_delete:
+                await service._reconcile_indexed_blobs(
+                    client=AsyncMock(),
+                    integration_knowledge=ik,
+                    resource_type="site",
+                    site_id="site-1",
+                    drive_id="drive-1",
+                    folder_id=None,
+                    stats=service._initialize_stats(),
+                )
+
+        assert mock_delete.await_count == 1
+        assert mock_delete.await_args.kwargs["item_id"] == "orphan-1"
+
+    async def test_skips_when_enumeration_fails(self, service, mock_dependencies):
+        ik = self._ik()
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "anything")]
+        )
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_item_ids",
+            AsyncMock(side_effect=Exception("throttled mid-listing")),
+        ):
+            with patch.object(
+                service, "_delete_local_sharepoint_item", AsyncMock()
+            ) as mock_delete:
+                await service._reconcile_indexed_blobs(
+                    client=AsyncMock(),
+                    integration_knowledge=ik,
+                    resource_type="site",
+                    site_id="site-1",
+                    drive_id="drive-1",
+                    folder_id=None,
+                    stats=service._initialize_stats(),
+                )
+
+        mock_delete.assert_not_called()
+
+    async def test_skips_when_orphans_exceed_safety_cap(
+        self, service, mock_dependencies
+    ):
+        ik = self._ik()
+        # 200 indexed, all orphaned -> over the 50%/floor cap -> refuse to delete.
+        indexed = [(uuid4(), f"item-{i}") for i in range(200)]
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=indexed
+        )
+
+        with patch.object(
+            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+        ):
+            with patch.object(
+                service, "_delete_local_sharepoint_item", AsyncMock()
+            ) as mock_delete:
+                await service._reconcile_indexed_blobs(
+                    client=AsyncMock(),
+                    integration_knowledge=ik,
+                    resource_type="site",
+                    site_id="site-1",
+                    drive_id="drive-1",
+                    folder_id=None,
+                    stats=service._initialize_stats(),
+                )
+
+        mock_delete.assert_not_called()
+
+    async def test_noop_when_no_orphans(self, service, mock_dependencies):
+        ik = self._ik()
+        indexed = [(uuid4(), "a"), (uuid4(), "b")]
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=indexed
+        )
+
+        with patch.object(
+            service,
+            "_enumerate_authoritative_item_ids",
+            AsyncMock(return_value={"a", "b", "c"}),
+        ):
+            with patch.object(
+                service, "_delete_local_sharepoint_item", AsyncMock()
+            ) as mock_delete:
+                await service._reconcile_indexed_blobs(
+                    client=AsyncMock(),
+                    integration_knowledge=ik,
+                    resource_type="site",
+                    site_id="site-1",
+                    drive_id="drive-1",
+                    folder_id=None,
+                    stats=service._initialize_stats(),
+                )
+
+        mock_delete.assert_not_called()

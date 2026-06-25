@@ -512,6 +512,23 @@ class InfoBlobRepository:
         records = await self.delegate.get_models_from_query(query)
         return [InfoBlobInDB.model_validate(record) for record in records]
 
+    async def get_sharepoint_item_ids_for_integration_knowledge(
+        self, integration_knowledge_id: UUID
+    ) -> list[tuple[UUID, str]]:
+        """Return (blob_id, sharepoint_item_id) for SharePoint-backed blobs.
+
+        Lightweight (two columns, no text) — used by full-sync reconciliation to
+        diff the indexed set against what still exists in SharePoint.
+        """
+        stmt = sa.select(InfoBlobs.id, InfoBlobs.sharepoint_item_id).where(
+            sa.and_(
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                InfoBlobs.sharepoint_item_id.is_not(None),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return [(row[0], row[1]) for row in result.all()]
+
     def _sum_stmt(self):
         return sa.select(sa.func.sum(InfoBlobs.size)).select_from(InfoBlobs)
 

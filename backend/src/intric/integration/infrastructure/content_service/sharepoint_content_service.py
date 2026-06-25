@@ -146,6 +146,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Full-sync reconciliation safety guard: never delete more than this fraction of a
+# folder's indexed blobs in one pass (unless the total is tiny). A larger diff
+# almost always means an incomplete enumeration, not that many files really vanished.
+_RECONCILE_MAX_DELETE_FRACTION = 0.5
+_RECONCILE_MIN_DELETE_FLOOR = 50
+
 # File extensions that cannot produce useful text content.
 # These are skipped before download to save bandwidth and avoid database pollution.
 _UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
@@ -1044,6 +1050,15 @@ class SharePointContentService:
                             stats=stats,
                             is_root_call=True,
                         )
+                        await self._reconcile_indexed_blobs(
+                            client=content_client,
+                            integration_knowledge=integration_knowledge,
+                            resource_type=resource_type,
+                            site_id=site_id_value,
+                            drive_id=actual_drive_id,
+                            folder_id=folder_id_value,
+                            stats=stats,
+                        )
                         return stats
                     else:
                         logger.info(
@@ -1127,6 +1142,16 @@ class SharePointContentService:
                                 integration_knowledge=integration_knowledge,
                                 stats=stats,
                             )
+
+                    await self._reconcile_indexed_blobs(
+                        client=content_client,
+                        integration_knowledge=integration_knowledge,
+                        resource_type=resource_type,
+                        site_id=site_id_value,
+                        drive_id=actual_drive_id,
+                        folder_id=None,
+                        stats=stats,
+                    )
 
         except Exception as e:
             logger.error(f"Error processing document {site_id}: {e}")
@@ -1513,6 +1538,144 @@ class SharePointContentService:
                 logger.warning(
                     "Deferred ChangeKey write failed for item %s: %s", item_id, exc
                 )
+
+    async def _enumerate_authoritative_item_ids(
+        self,
+        *,
+        client: SharePointContentClient,
+        resource_type: str,
+        site_id: Optional[str],
+        drive_id: str,
+        folder_id: Optional[str],
+    ) -> set[str]:
+        """Strictly enumerate every in-scope file (and page) item id.
+
+        Unlike _collect_files_recursive, this propagates listing errors instead of
+        swallowing them: an incomplete enumeration must NOT be treated as the
+        authoritative set during reconciliation, or it would delete valid blobs.
+        """
+        item_ids: set[str] = set()
+
+        async def _walk(current_folder_id: Optional[str]) -> None:
+            if resource_type == "onedrive":
+                results = (
+                    await client.get_drive_root_children(drive_id)
+                    if not current_folder_id
+                    else await client.get_drive_folder_items(
+                        drive_id=drive_id, folder_id=current_folder_id
+                    )
+                )
+            elif not site_id:
+                raise ValueError("site_id required to enumerate SharePoint drive items")
+            elif not current_folder_id:
+                results = await client.get_documents_in_drive(site_id=site_id)
+            else:
+                results = await client.get_folder_items(
+                    site_id=site_id, drive_id=drive_id, folder_id=current_folder_id
+                )
+
+            for item in results or []:
+                item_id = item.get("id")
+                if _has_graph_facet(item, "folder"):
+                    if item_id:
+                        await _walk(item_id)
+                elif item_id:
+                    item_ids.add(item_id)
+
+        await _walk(folder_id)
+
+        # Site pages live alongside drive documents for site-root SharePoint scopes.
+        if resource_type != "onedrive" and site_id and folder_id is None:
+            pages = await client.get_site_pages(site_id=site_id)
+            for page in pages.get("value", []):
+                page_id = page.get("id")
+                if page_id:
+                    item_ids.add(page_id)
+
+        return item_ids
+
+    async def _reconcile_indexed_blobs(
+        self,
+        *,
+        client: SharePointContentClient,
+        integration_knowledge: "IntegrationKnowledge",
+        resource_type: str,
+        site_id: Optional[str],
+        drive_id: Optional[str],
+        folder_id: Optional[str],
+        stats: SyncStats,
+    ) -> None:
+        """Delete indexed blobs whose SharePoint item no longer exists in scope.
+
+        Full sync is otherwise add-only, so deletions missed during a delta
+        token-invalid window (410 recovery) or a folder deleted without child
+        cascade notifications leave permanent orphans. Reconcile against a strict
+        authoritative enumeration, guarded so a partial enumeration can never
+        mass-delete valid content.
+        """
+        if not drive_id:
+            return
+
+        # Reconciliation is best-effort cleanup; any failure (incomplete/aborted
+        # enumeration, query error) must skip deletion rather than break the sync or
+        # delete valid blobs from a partial picture.
+        try:
+            authoritative_ids = await self._enumerate_authoritative_item_ids(
+                client=client,
+                resource_type=resource_type,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id,
+            )
+            indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
+                integration_knowledge_id=integration_knowledge.id
+            )
+            orphans = [
+                (blob_id, item_id)
+                for blob_id, item_id in indexed
+                if item_id not in authoritative_ids
+            ]
+        except Exception as exc:
+            logger.warning(
+                "Skipping reconciliation for integration_knowledge %s: could not build "
+                "an authoritative picture (not deleting from a partial list): %s",
+                integration_knowledge.id,
+                exc,
+            )
+            return
+
+        if not orphans:
+            return
+
+        cap = max(
+            _RECONCILE_MIN_DELETE_FLOOR,
+            int(len(indexed) * _RECONCILE_MAX_DELETE_FRACTION),
+        )
+        if len(orphans) > cap:
+            logger.error(
+                "Skipping reconciliation for integration_knowledge %s: would delete "
+                "%d of %d blobs (> safety cap %d) — likely an incomplete enumeration.",
+                integration_knowledge.id,
+                len(orphans),
+                len(indexed),
+                cap,
+            )
+            return
+
+        logger.info(
+            "Reconciliation removing %d orphaned blob(s) for integration_knowledge %s",
+            len(orphans),
+            integration_knowledge.id,
+        )
+        for _blob_id, item_id in orphans:
+            await self._delete_local_sharepoint_item(
+                item_id=item_id,
+                item_name=item_id,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=integration_knowledge.id,
+                stats=stats,
+                reason="reconcile-orphan",
+            )
 
     async def _fetch_and_process_content(
         self,
