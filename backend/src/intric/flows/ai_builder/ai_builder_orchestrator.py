@@ -569,8 +569,8 @@ def _check_commit_architecture(
                 detail=(
                     f"chosen pattern {pattern_id!r} has polarity "
                     f"{pattern.polarity!r}; only positive patterns are "
-                    "committable. Negative patterns are anti-patterns the "
-                    "knowledge pack teaches the planner to avoid, not commit"
+                    "committable. Negative patterns are anti-patterns, "
+                    "not committable architecture choices"
                 ),
             )
 

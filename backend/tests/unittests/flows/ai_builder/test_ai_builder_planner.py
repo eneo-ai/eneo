@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from dataclasses import fields
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
@@ -35,8 +34,6 @@ from intric.flows.ai_builder.ai_builder_planner import (
     PlannerMetadataResolution,
 )
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
-    DiscoveryBlockPrepared,
-    NormalPlannerPrepared,
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
@@ -251,97 +248,6 @@ def _requirements_state_confirmed(
         latest_version=version,
         confirmed_version=version,
     )
-
-
-def test_prepared_turn_outcomes_keep_branch_specific_fields() -> None:
-    shared = {
-        "requirements_state": _requirements_state_unconfirmed(),
-        "ui_language": "en",
-        "slot_classification_metadata": None,
-    }
-    orchestration_context = OrchestrationContext(
-        current_version=0,
-        session_state=PlanningState.empty(),
-    )
-
-    outcomes = {
-        "discovery": DiscoveryBlockPrepared(
-            **shared,
-            discovery_block_message="Need more detail.",
-            followup=None,
-        ),
-        "normal": NormalPlannerPrepared(
-            **shared,
-            llm_messages=[],
-            system_prompt_hash="normal-hash",
-            followup=None,
-            orchestration_context=orchestration_context,
-        ),
-        "proposal": ProposalPrepared(
-            **shared,
-            llm_messages=[],
-            system_prompt_hash="proposal-hash",
-            plan_edit_context=None,
-            prior_plan_for_revision=None,
-            resource_catalog=build_ai_builder_resource_catalog(
-                available_models=[],
-                available_kbs=[],
-            ),
-            orchestration_context=orchestration_context,
-            discovery_runtime=_runtime_result(
-                None,
-                DiscoveryAnalysis(issues=()),
-                PlanningState.empty(),
-            ),
-        ),
-        "server": ServerOutputPrepared(
-            **shared,
-            server_output=cast(Any, object()),
-            discovery_analysis=DiscoveryAnalysis(issues=()),
-            orchestration_context=orchestration_context,
-        ),
-    }
-
-    field_names = {
-        name: {field.name for field in fields(outcome)}
-        for name, outcome in outcomes.items()
-    }
-    assert field_names["discovery"] == {
-        "requirements_state",
-        "ui_language",
-        "slot_classification_metadata",
-        "discovery_block_message",
-        "followup",
-    }
-    assert field_names["normal"] == {
-        "requirements_state",
-        "ui_language",
-        "slot_classification_metadata",
-        "llm_messages",
-        "system_prompt_hash",
-        "followup",
-        "orchestration_context",
-    }
-    assert field_names["proposal"] == {
-        "requirements_state",
-        "ui_language",
-        "slot_classification_metadata",
-        "llm_messages",
-        "system_prompt_hash",
-        "plan_edit_context",
-        "prior_plan_for_revision",
-        "resource_catalog",
-        "orchestration_context",
-        "discovery_runtime",
-    }
-    assert field_names["server"] == {
-        "requirements_state",
-        "ui_language",
-        "slot_classification_metadata",
-        "server_output",
-        "discovery_analysis",
-        "orchestration_context",
-    }
 
 
 @pytest.mark.asyncio
@@ -565,166 +471,6 @@ def test_should_emit_forced_followup_arms_after_two_free_discovery_turns_with_ca
 
 
 @pytest.mark.asyncio
-async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_header() -> (
-    None
-):
-    planner = _make_planner()
-    conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
-            return_value=requirements_state,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-            new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
-            return_value=256,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a flow"}],
-        ),
-    ):
-        prepared = await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_models=[
-                _model_resource(
-                    "11111111-1111-4111-8111-111111111111",
-                    "Model A",
-                    provider="openai",
-                )
-            ],
-            available_kbs=[
-                _kb_resource(
-                    "22222222-2222-4222-8222-222222222222",
-                    "KB A",
-                )
-            ],
-            flow=None,
-            assistant_snapshots=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
-            ),
-            is_requirements_confirmation=False,
-            base_planning_state_version=0,
-        )
-
-    assert isinstance(prepared, NormalPlannerPrepared)
-    assert prepared.requirements_state is requirements_state
-    assert prepared.followup is None
-    assert prepared.llm_messages[0] == {"role": "system", "content": "system prompt"}
-    resource_material = build_system_prompt.call_args.kwargs["available_resources"]
-    assert [entry.ref for entry in resource_material.models] == ["model.model-a"]
-    assert resource_material.models[0].display_name == "Model A"
-    assert [entry.ref for entry in resource_material.knowledge_bases] == [
-        "knowledge.kb-a"
-    ]
-    assert resource_material.knowledge_bases[0].display_name == "KB A"
-
-
-@pytest.mark.asyncio
-async def test_normal_prepared_followup_stays_gated_by_forced_followup_policy() -> None:
-    planner = _make_planner()
-    conversation = [
-        ConversationMessage(role="assistant", content="What input will the flow use?"),
-    ]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=(), mvs_met=False)
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
-            return_value=requirements_state,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-            new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None,
-                discovery_analysis,
-                PlanningState.empty(),
-                followup=_backend_question(),
-                should_emit_forced_followup=False,
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
-            return_value=256,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[
-                {"role": "assistant", "content": "What input will the flow use?"}
-            ],
-        ),
-    ):
-        prepared = await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            message="Still deciding",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
-            ),
-            is_requirements_confirmation=False,
-            base_planning_state_version=0,
-        )
-
-    assert isinstance(prepared, NormalPlannerPrepared)
-    assert prepared.followup is None
-
-
-@pytest.mark.asyncio
 async def test_prepare_planner_request_skips_prompt_for_server_owned_action() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
@@ -743,10 +489,6 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
                 None, discovery_analysis, PlanningState.empty()
             ),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
@@ -777,7 +519,6 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
     assert prepared.server_output is not None
     assert prepared.server_output.planner_action.kind == "ask_question"
     assert not hasattr(prepared, "llm_messages")
-    build_system_prompt.assert_not_called()
     compute_budget.assert_not_called()
 
 
@@ -814,10 +555,6 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
                 planning_state,
             ),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
     ):
         prepared = await _prepare_planner_request_for_test(
             planner,
@@ -844,17 +581,38 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
     assert prepared.server_output is not None
     assert prepared.server_output.planner_action.kind == "commit_architecture"
     assert not hasattr(prepared, "llm_messages")
-    build_system_prompt.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_prepare_planner_request_passes_attachment_context_into_system_prompt() -> (
+async def test_prepare_planner_request_passes_attachment_context_into_proposal_prompt() -> (
     None
 ):
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
+    requirements_state = _requirements_state_confirmed()
+    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_document"],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    requirements = RequirementsSummaryPayload(
+        summary="Build from this file.",
+        key_decisions=[],
+        input_description="Attachment",
+        output_description="Summary",
+        assumptions=[],
+        manual_setup_notes=[],
+    )
 
     with (
         patch(
@@ -864,17 +622,11 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
+            return_value=_runtime_result(None, discovery_analysis, state),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
+            return_value=requirements,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_ai_builder_attachment_context",
@@ -886,9 +638,9 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
             ),
         ) as build_attachment_context,
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_plan_proposal_system_prompt",
+            return_value="proposal prompt",
+        ) as build_plan_proposal_system_prompt,
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
@@ -922,7 +674,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
 
     build_attachment_context.assert_called_once()
     assert (
-        build_system_prompt.call_args.kwargs["attachment_context"]
+        build_plan_proposal_system_prompt.call_args.kwargs["attachment_context"]
         == "attachment context"
     )
 
@@ -973,10 +725,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             return_value=requirements,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="planner union prompt",
-        ) as build_system_prompt,
-        patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
         ),
@@ -1010,7 +758,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     assert isinstance(prepared, ProposalPrepared)
     assert prepared.llm_messages[0]["role"] == "system"
     assert "Call exactly one `propose_flow` tool" in prepared.llm_messages[0]["content"]
-    build_system_prompt.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1034,26 +781,6 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
                 None, discovery_analysis, PlanningState.empty()
             ),
         ) as discovery_runtime,
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
-            return_value=256,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a flow"}],
-        ),
     ):
         await _prepare_planner_request_for_test(
             planner,
@@ -1084,9 +811,31 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
 @pytest.mark.asyncio
 async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
-    conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
+    conversation = [ConversationMessage(role="user", content="Build a report flow")]
+    requirements_state = _requirements_state_confirmed()
+    discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="document",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=["summarize_text"],
+        required_capabilities=["input_document"],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="a" * 64,
+    )
+    requirements = RequirementsSummaryPayload(
+        summary="Build a report flow.",
+        key_decisions=[],
+        input_description="Documents",
+        output_description="Report",
+        assumptions=[],
+        manual_setup_notes=[],
+    )
 
     with (
         patch(
@@ -1096,21 +845,11 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
+            return_value=_runtime_result(None, discovery_analysis, state),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
+            return_value=requirements,
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
@@ -1127,7 +866,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         await _prepare_planner_request_for_test(
             planner,
             conversation=conversation,
-            message="Build a flow",
+            message="Build a report flow",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             available_models=None,
@@ -1147,263 +886,8 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         )
 
     assert any(
-        call.args and call.args[0] == "AI Builder planner prompt metrics"
+        call.args and call.args[0] == "AI Builder plan proposal prompt metrics"
         for call in logger_info.call_args_list
-    )
-
-
-@pytest.mark.asyncio
-async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() -> None:
-    """Pre-commit projection reaches the system prompt as a rendered block."""
-    planner = _make_planner()
-    conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
-            return_value=requirements_state,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-            new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
-            return_value=256,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a flow"}],
-        ),
-    ):
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
-            ),
-            is_requirements_confirmation=False,
-            base_planning_state_version=0,
-            persisted_planning_state=None,
-        )
-
-    planning_state_block = build_system_prompt.call_args.kwargs["planning_state_block"]
-    assert isinstance(planning_state_block, str)
-    assert "pre_commit" in planning_state_block, (
-        "pre-commit projection must label its stage so the planner can "
-        "distinguish unconstrained exploration from post-commit narrowing"
-    )
-    # Every builder-exposed capability must appear in the rendered block
-    # pre-commit — that is the projection contract.
-    assert "input_text" in planning_state_block
-    assert "output_mode_pass_through" in planning_state_block
-
-
-@pytest.mark.asyncio
-async def test_prepare_planner_request_threads_unresolved_core_slots_into_system_prompt() -> (
-    None
-):
-    """Server-side phase lock: `_prepare_planner_request` must compute
-    the core-slot commit gate from the rebuilt planning state and pass
-    it into `build_system_prompt` so the prompt can restrict allowed
-    actions BEFORE the LLM is called.
-
-    This is the anti-regression rail for the
-    `architecture_commit_premature_unresolved_choices` failure class
-    (fingerprint `560a95ddd270`): a post-hoc orchestrator rejection is
-    wasted work; the prompt must refuse the attempt in the first place.
-    """
-    planner = _make_planner()
-    conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
-            return_value=requirements_state,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-            new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
-            return_value=256,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Build a flow"}],
-        ),
-    ):
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            message="Build a flow",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
-            ),
-            is_requirements_confirmation=False,
-            base_planning_state_version=0,
-            persisted_planning_state=None,
-        )
-
-    unresolved = build_system_prompt.call_args.kwargs[
-        "unresolved_architectural_choices"
-    ]
-    # A fresh conversation with one generic user message resolves no
-    # core slots, so both core slots must block commit at this turn.
-    assert unresolved == frozenset({"primary_runtime_input", "terminal_output"})
-
-
-@pytest.mark.asyncio
-async def test_prepare_planner_request_carries_forward_persisted_commit_into_prompt() -> (
-    None
-):
-    """When a prior turn persisted an `architecture_commit`, the next
-    turn's rendered prompt MUST surface that commit's fingerprint.
-
-    This is the integration proof that `carry_forward_persisted_planner_state`
-    runs before the projection and that the projection's post-commit
-    narrowing actually reaches the planner LLM.
-    """
-    planner = _make_planner()
-    conversation = [ConversationMessage(role="user", content="Refine step 1")]
-    requirements_state = _requirements_state_unconfirmed()
-    discovery_analysis = DiscoveryAnalysis(issues=())
-    committed_hash = "b" * 64
-    persisted = PlanningState.empty()
-    persisted.architecture_commit = ArchitectureCommit(
-        tuples_chain=[
-            StepTriple(
-                input_type="text",
-                output_type="text",
-                output_mode="pass_through",
-            )
-        ],
-        chosen_patterns=["summarize_text"],
-        required_capabilities=["input_text", "output_mode_pass_through"],
-        committed_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
-        architecture_hash=committed_hash,
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
-            return_value=requirements_state,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
-            new_callable=AsyncMock,
-            return_value=_runtime_result(
-                None, discovery_analysis, PlanningState.empty()
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.planner_output_for_turn_decision",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
-            return_value="system prompt",
-        ) as build_system_prompt,
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
-            return_value=256,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
-            return_value=[{"role": "user", "content": "Refine step 1"}],
-        ),
-    ):
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            message="Refine step 1",
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-                unknown_model_context_window_tokens=8192,
-            ),
-            is_requirements_confirmation=False,
-            base_planning_state_version=0,
-            persisted_planning_state=persisted,
-        )
-
-    planning_state_block = build_system_prompt.call_args.kwargs["planning_state_block"]
-    assert isinstance(planning_state_block, str)
-    assert "post_commit" in planning_state_block
-    assert committed_hash in planning_state_block, (
-        "post-commit projection must fingerprint the architecture_hash "
-        "so the planner can verify it did not drift across turns"
     )
 
 

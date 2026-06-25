@@ -2,8 +2,8 @@
 
 The LLM may choose wording and semantic intent, but it should not infer
 which planner actions are legal for the current turn. This module is the
-single source for the action menu shown in the prompt and enforced by the
-orchestrator.
+single source for the action menu consumed by the deterministic turn
+controller and enforced by the orchestrator.
 """
 
 from __future__ import annotations
@@ -14,9 +14,6 @@ from typing import Literal
 
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
-)
-from intric.flows.ai_builder.ai_builder_ask_question_contract import (
-    format_ask_question_targets,
 )
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
@@ -218,40 +215,10 @@ def _unresolved_slots_for_derived_commit(
     return required_slots - resolved_slot_names
 
 
-def render_action_policy_prompt_block(policy: PlannerActionPolicy) -> str:
-    """Render the policy as one compact LLM-facing contract."""
-
-    visible_allowed_kinds = tuple(
-        kind for kind in policy.allowed_action_kinds if kind != "propose_plan"
-    )
-    allowed = ", ".join(f"`{kind}`" for kind in visible_allowed_kinds)
-    ask_targets = format_ask_question_targets(policy.allowed_ask_question_targets)
-    lines = [
-        "## Allowed Planner Actions This Turn",
-        "",
-        f"Allowed actions: {allowed}.",
-        f"Allowed `ask_question` targets this turn: {ask_targets}.",
-        (
-            "Do not ask about resolved slots. Use the values already present "
-            "in PlanningState instead."
-        ),
-    ]
-
-    if policy.blocked_action_reasons:
-        lines.extend(["", "Blocked actions:"])
-        for action, reason in sorted(policy.blocked_action_reasons.items()):
-            if action == "propose_plan":
-                continue
-            lines.append(f"- `{action}` is not allowed: {reason}.")
-
-    return "\n".join(lines)
-
-
 __all__ = [
     "CORE_ARCHITECTURAL_SLOTS",
     "PlannerActionKind",
     "PlannerActionPolicy",
     "build_planner_action_policy",
     "compute_unresolved_core_slots",
-    "render_action_policy_prompt_block",
 ]

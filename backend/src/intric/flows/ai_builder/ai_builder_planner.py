@@ -16,9 +16,6 @@ from intric.flows.ai_builder.ai_builder_accepted_action_rendering import (
     RequirementsSummaryRenderContext,
     build_accepted_action_messages,
 )
-from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
-    persist_backend_question,
-)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
@@ -65,8 +62,6 @@ from intric.flows.ai_builder.ai_builder_planner_failure_events import (
     record_planner_turn_result,
 )
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
-    DiscoveryBlockPrepared,
-    NormalPlannerPrepared,
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
@@ -458,41 +453,6 @@ class AIBuilderPlanner:
             planner_turn_context: OrchestrationContext
             planner_prompt_hash: str | None
             match prepared_request:
-                case DiscoveryBlockPrepared(followup=followup):
-                    if followup is not None:
-                        followup_result = await persist_backend_question(
-                            repo=self.repo,
-                            turn=turn,
-                            conversation=conversation,
-                            new_messages_start=new_messages_start,
-                            question=followup,
-                            flow=flow,
-                            assistant_metadata=build_assistant_message_metadata(
-                                conversation,
-                                tool_calls=[{"name": "ask_structured_question"}],
-                            ),
-                        )
-                        for event in followup_result.events:
-                            yield event
-                    yield {"event": SSE_EVENT_DONE, "data": ""}
-                    return
-                case NormalPlannerPrepared(followup=followup) if followup is not None:
-                    followup_result = await persist_backend_question(
-                        repo=self.repo,
-                        turn=turn,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        question=followup,
-                        flow=flow,
-                        assistant_metadata=build_assistant_message_metadata(
-                            conversation,
-                            tool_calls=[{"name": "ask_structured_question"}],
-                        ),
-                    )
-                    for event in followup_result.events:
-                        yield event
-                    yield {"event": SSE_EVENT_DONE, "data": ""}
-                    return
                 case ProposalPrepared() as proposal_request:
                     async for event in self.proposal_processor.propose_plan(
                         turn=turn,
@@ -553,11 +513,6 @@ class AIBuilderPlanner:
                     planner_turn_messages = []
                     planner_turn_context = planner_turn_request.orchestration_context
                     planner_prompt_hash = None
-                case NormalPlannerPrepared() as planner_turn_request:
-                    precomputed_output = None
-                    planner_turn_messages = planner_turn_request.llm_messages
-                    planner_turn_context = planner_turn_request.orchestration_context
-                    planner_prompt_hash = planner_turn_request.system_prompt_hash
                 case _:
                     assert_never(prepared_request)
 

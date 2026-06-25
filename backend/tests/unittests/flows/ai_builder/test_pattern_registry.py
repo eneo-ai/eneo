@@ -33,7 +33,6 @@ from intric.flows.ai_builder.pattern_registry import (
     Pattern,
     find_pattern_candidates,
     question_template_ids_for_slot,
-    render_knowledge_pack,
 )
 from intric.flows.enums import (
     FlowInputType,
@@ -102,35 +101,6 @@ def _assert_template_fill_requires_docx() -> None:
             f"output_mode=template_fill with output_type={output_type.value!r} "
             f"(should require DOCX)"
         )
-
-
-def _extract_pattern_block(rendered: str, pattern_id: str) -> str:
-    """Return the lines of `rendered` that belong to `pattern_id`'s
-    per-pattern block.
-
-    `render_knowledge_pack` emits one block per pattern: a `- <id>`
-    header followed by indented `  <field>: ...` lines. The block ends
-    at the next unindented line (either another pattern header or a
-    section header). This helper lets a test assert content is
-    *inside* a specific pattern's block rather than merely present
-    somewhere in the pack.
-    """
-    header = f"- {pattern_id}"
-    lines = rendered.splitlines()
-    block_lines: list[str] = []
-    in_block = False
-    for line in lines:
-        if line == header:
-            in_block = True
-            block_lines.append(line)
-            continue
-        if not in_block:
-            continue
-        if line.startswith("  ") or line == "":
-            block_lines.append(line)
-            continue
-        break
-    return "\n".join(block_lines)
 
 
 # Map negative pattern id → live-FCM assertion the test must satisfy.
@@ -358,8 +328,8 @@ class TestPositivePatternContract:
 
     def test_multi_step_patterns_declare_chain_steps(self) -> None:
         """Patterns whose canonical realisation is a multi-step pipeline
-        must declare their step sequence in `chain_steps` so the
-        knowledge pack can render the shape. Single-step patterns like
+        must declare their step sequence in `chain_steps` so the compiler and
+        controller can reason about the shape. Single-step patterns like
         `summarize_text`, `extract_structured_fields`, `audio_transcription`
         leave it empty; the seed below is the canonical set and any
         addition must be a deliberate one-line diff against both registry
@@ -468,9 +438,7 @@ class TestQuestionTemplateIdReferences:
 
 
 class TestPatternRegistryPublicApi:
-    """Public planner-strategy entry points: scoring, slot → qid lookup, and
-    the LLM-facing knowledge pack renderer.
-    """
+    """Public planner-strategy entry points: scoring and slot-to-question lookup."""
 
     def test_find_pattern_candidates_returns_empty_tuple_for_blank_text(
         self,
@@ -702,104 +670,10 @@ class TestPatternRegistryPublicApi:
         with pytest.raises(KeyError):
             question_template_ids_for_slot("no_such_pattern", "primary_runtime_input")
 
-    def test_render_knowledge_pack_mentions_every_positive_pattern(self) -> None:
-        """Silent-drop guard: the knowledge pack must mention every
-        positive archetype at least once, so the LLM planner can never
-        silently miss a pattern because the renderer's loop was
-        short-circuited."""
-        rendered = render_knowledge_pack()
-        for pattern in PATTERN_REGISTRY.values():
-            if pattern.polarity != "positive":
-                continue
-            assert pattern.id in rendered, (
-                f"positive pattern {pattern.id!r} missing from knowledge pack"
-            )
-
-    def test_render_knowledge_pack_mentions_every_negative_pattern(self) -> None:
-        """Negative archetypes are the 'don't do this' section — omitting
-        one would silently drop an anti-pattern warning."""
-        rendered = render_knowledge_pack()
-        for pattern in PATTERN_REGISTRY.values():
-            if pattern.polarity != "negative":
-                continue
-            assert pattern.id in rendered, (
-                f"negative pattern {pattern.id!r} missing from knowledge pack"
-            )
-
-    def test_render_knowledge_pack_mentions_every_builder_exposed_capability(
-        self,
-    ) -> None:
-        """Engine-truth capabilities that the builder exposes must all
-        land in the pack. `not_exposed` / `engine_only` capabilities are
-        filtered out — they are not planner-eligible."""
-        rendered = render_knowledge_pack()
-        for cap in CAPABILITY_REGISTRY.values():
-            if cap.exposure != "builder":
-                continue
-            assert cap.id in rendered, (
-                f"builder-exposed capability {cap.id!r} missing from knowledge pack"
-            )
-
-    def test_render_knowledge_pack_is_deterministic(self) -> None:
-        """Two invocations must return the exact same bytes. A
-        non-deterministic pack would poison LLM prompt caching and
-        make planning-state snapshots unreproducible."""
-        assert render_knowledge_pack() == render_knowledge_pack()
-
-    def test_render_knowledge_pack_emits_chain_shape_when_present(self) -> None:
-        """Patterns with compiler chain metadata should show a readable shape.
-
-        Raw `chain_steps` tokens are backend/compiler vocabulary, not prompt
-        instructions. The knowledge pack exposes the sequence as semantic
-        guidance so the planner understands the shape without learning
-        backend token names.
-        """
-        rendered = render_knowledge_pack()
-        chain_pattern = PATTERN_REGISTRY["multi_step_quality_chain"]
-        assert chain_pattern.chain_steps, (
-            "multi_step_quality_chain must carry chain_steps for this "
-            "test to be meaningful"
-        )
-        block = _extract_pattern_block(rendered, chain_pattern.id)
-        expected_line = (
-            "  chain_shape: receive uploaded document material -> "
-            "extract structured foundation -> analyze and review quality -> "
-            "create final output"
-        )
-        assert expected_line in block, (
-            f"rendered block for {chain_pattern.id} must contain the exact "
-            f"chain_shape line {expected_line!r}; block was:\n{block}"
-        )
-        assert "chain_steps:" not in block
-
-    def test_render_knowledge_pack_omits_chain_shape_when_absent(self) -> None:
-        """Single-step patterns with empty `chain_steps` must not emit
-        a bare `chain_shape:` header — that would make the pack's
-        per-pattern block inconsistent and leak scaffolding prose to
-        the planner. `summarize_text` is the canonical single-step
-        pattern; its rendered block must not contain the label."""
-        rendered = render_knowledge_pack()
-        summarize = PATTERN_REGISTRY["summarize_text"]
-        assert summarize.chain_steps == (), (
-            "summarize_text must carry empty chain_steps for this test to be meaningful"
-        )
-        summarize_block = _extract_pattern_block(rendered, summarize.id)
-        assert "chain_shape:" not in summarize_block, (
-            f"single-step pattern {summarize.id} leaked `chain_shape:` "
-            f"label; block was:\n{summarize_block}"
-        )
-
     def test_form_field_runtime_inputs_declares_runtime_metadata_slot(
         self,
     ) -> None:
-        """The `form_field_runtime_inputs` archetype is the canonical
-        home for runtime-input metadata questions. Dropping
-        `runtime_metadata_fields` from either its architectural slots
-        or its `question_template_ids` silently strips the one
-        dedicated runtime-metadata question from the pack — the planner
-        would then never see it for the exact pattern where it matters.
-        Pin both tuples so a future edit that drops the slot fails here.
-        """
+        """The form-field archetype owns runtime-input metadata discovery."""
         pattern = PATTERN_REGISTRY["form_field_runtime_inputs"]
         assert "runtime_metadata_fields" in pattern.required_architectural_slots, (
             "form_field_runtime_inputs lost `runtime_metadata_fields` from "
@@ -833,18 +707,3 @@ class TestPatternRegistryPublicApi:
         )
 
         assert owners == ("form_field_runtime_inputs",)
-
-    def test_render_knowledge_pack_exposes_runtime_metadata_for_form_field_pattern(
-        self,
-    ) -> None:
-        """The rendered pack must reference `runtime_metadata_fields`
-        inside the `form_field_runtime_inputs` block — otherwise the
-        planner reads the archetype without seeing the only dedicated
-        runtime-metadata question, undercutting the form-fields
-        first-class contract."""
-        rendered = render_knowledge_pack()
-        block = _extract_pattern_block(rendered, "form_field_runtime_inputs")
-        assert "runtime_metadata_fields" in block, (
-            "form_field_runtime_inputs block must reference "
-            "runtime_metadata_fields; block was:\n" + block
-        )

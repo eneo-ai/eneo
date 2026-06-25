@@ -7,9 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from intric.flows.ai_builder.ai_builder_action_policy import (
-    PlannerActionPolicy,
     build_planner_action_policy,
-    render_action_policy_prompt_block,
 )
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
@@ -310,23 +308,3 @@ def test_policy_allows_plan_after_architecture_and_requirements_confirmation() -
         "requirements are already confirmed"
     )
     assert "propose_plan" not in policy.blocked_action_reasons
-
-
-def test_policy_prompt_block_is_a_single_contract_surface() -> None:
-    policy = PlannerActionPolicy(
-        allowed_action_kinds=("ask_question", "confirm_requirements"),
-        allowed_ask_question_targets=("terminal_output",),
-        blocked_action_reasons={
-            "commit_architecture": "unresolved architecture choices: terminal_output",
-            "propose_plan": "architecture has not been committed",
-        },
-    )
-
-    block = render_action_policy_prompt_block(policy)
-
-    assert "Allowed Planner Actions This Turn" in block
-    assert "`ask_question`" in block
-    assert "`confirm_requirements`" in block
-    assert "`terminal_output`" in block
-    assert "`commit_architecture` is not allowed" in block
-    assert "`propose_plan` is not allowed" not in block

@@ -317,8 +317,6 @@ PLANNER_ACTION_DISPATCH_PUBLIC_NAMES = frozenset(
 )
 PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
     {
-        "DiscoveryBlockPrepared",
-        "NormalPlannerPrepared",
         "PlannerRequestPreparationInput",
         "PreparedPromptMessages",
         "ProposalPrepared",

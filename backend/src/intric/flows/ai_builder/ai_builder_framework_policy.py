@@ -66,7 +66,6 @@ from intric.flows.flow_authoring_spec import (
 __all__ = [
     "aggregate_freeform_user_text",
     "aggregate_user_text",
-    "build_framework_guardrails_block",
     "canonical_option_id",
     "canonical_question_id",
     "extract_freeform_user_messages",
@@ -1378,14 +1377,3 @@ def needs_structured_extraction(
         return False
 
     return any(phrase in text for phrase in STRUCTURED_EXTRACTION_KEYWORDS)
-
-
-def build_framework_guardrails_block() -> str:
-    return """\
-## Eneo Flow-ramverket
-
-- Du får endast bygga giltiga Eneo-flöden med de tillåtna byggblocken i Flow-specen.
-- Föreslå aldrig Python-kod, shell-script, egna mikrotjänster, egna integrationer eller annan specialexekvering utanför Eneos Flow-ramverk.
-- Om användarens behov kräver något som inte kan uttryckas som ett Eneo-flöde ska du hålla dig inom Flow-specen, beskriva begränsningen kort och använda `manual_setup_notes` för sådant som måste kopplas manuellt.
-- Alla planer måste uttryckas som steg, formulärfält, kontrakt, runtime-inputs, mallstrategier och andra stödda Flow-primitiver — inte som fri kod eller egen orkestreringslogik.
-"""

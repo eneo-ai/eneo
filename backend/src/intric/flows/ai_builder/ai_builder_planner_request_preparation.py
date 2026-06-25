@@ -6,15 +6,9 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
 from intric.files.file_models import File
-from intric.flows.ai_builder.ai_builder_action_policy import (
-    PlannerActionPolicy,
-)
+from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
-)
-from intric.flows.ai_builder.ai_builder_capability_projection import (
-    build_llm_prompt_context,
-    render_llm_prompt_context,
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
@@ -24,7 +18,6 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_metadata,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
-    BackendQuestion,
     DiscoveryAnalysis,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
@@ -40,9 +33,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
-)
-from intric.flows.ai_builder.ai_builder_interaction_utils import (
-    looks_like_information_request,
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_resource_selection_values,
@@ -66,9 +56,7 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
-    build_clarification_hints,
     build_flow_context,
-    build_system_prompt,
     compute_conversation_token_budget,
     trim_conversation_for_context,
 )
@@ -85,7 +73,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
-    build_ai_builder_resource_reference_material,
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.ai_builder_turn_controller import (
@@ -93,13 +80,11 @@ from intric.flows.ai_builder.ai_builder_turn_controller import (
     planner_output_for_turn_decision,
     resolve_turn_control,
 )
-from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
 )
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 from intric.main.logging import get_logger
 from intric.observability.failure_events import stable_hash
 
@@ -159,12 +144,6 @@ class ServerOutputPrepared(_PreparedBase):
 
 
 @dataclass(frozen=True, slots=True)
-class DiscoveryBlockPrepared(_PreparedBase):
-    discovery_block_message: str
-    followup: BackendQuestion | None
-
-
-@dataclass(frozen=True, slots=True)
 class ProposalPrepared(_PreparedBase):
     llm_messages: list[LLMMessage]
     system_prompt_hash: str
@@ -175,19 +154,9 @@ class ProposalPrepared(_PreparedBase):
     discovery_runtime: DiscoveryRuntimeResult
 
 
-@dataclass(frozen=True, slots=True)
-class NormalPlannerPrepared(_PreparedBase):
-    llm_messages: list[LLMMessage]
-    system_prompt_hash: str
-    followup: BackendQuestion | None
-    orchestration_context: OrchestrationContext
-
-
 PreparedTurnOutcome: TypeAlias = (
     ServerOutputPrepared
-    | DiscoveryBlockPrepared
     | ProposalPrepared
-    | NormalPlannerPrepared
 )
 
 
@@ -195,7 +164,6 @@ async def prepare_planner_request(
     request: PlannerRequestPreparationInput,
 ) -> PreparedTurnOutcome:
     requirements_state = resolve_requirements_state(request.conversation)
-    has_requirements_summary = requirements_state.latest_summary is not None
     ui_language = _resolve_ui_language(request.conversation)
     discovery_runtime = await build_discovery_runtime_result(
         request.conversation,
@@ -209,7 +177,6 @@ async def prepare_planner_request(
         requirements_confirmed=requirements_state.confirmed,
         is_requirements_confirmation=request.is_requirements_confirmation,
     )
-    discovery_block_message = discovery_runtime.discovery_block_message
     discovery_analysis = discovery_runtime.discovery_analysis
     rebuilt_planning_state = discovery_runtime.planning_state
 
@@ -277,161 +244,63 @@ async def prepare_planner_request(
     attachment_context_result = build_ai_builder_attachment_context(
         request.attachment_files
     )
-    if isinstance(turn_control.decision, GenerateProposal):
-        proposal_system_prompt = build_plan_proposal_system_prompt(
-            planning_state=rebuilt_planning_state,
-            confirmed_requirements=confirmed_requirements,
-            attachment_context=(
-                attachment_context_result.context
-                if attachment_context_result is not None
-                else None
-            ),
-            flow_context=flow_context,
-            is_edit_mode=request.flow is not None,
-            resource_catalog=resource_catalog,
-            mcp_selection_values=mcp_resource_selection_values(request.conversation),
-            requested_output_sections=extract_requested_output_sections(
-                section_signal_text
-            ),
-            plan_revision_context=build_plan_revision_prompt_block(
-                context=request.plan_edit_context,
-                prior_plan=request.prior_plan_for_revision,
-            ),
-        )
-        prepared_prompt = _prepare_prompt_messages(
-            conversation=request.conversation,
-            system_prompt=proposal_system_prompt,
-            litellm_model=request.litellm_model,
-            max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.max_output_tokens,
-            budget_policy=request.budget_policy,
-        )
-        logger.info(
-            "AI Builder plan proposal prompt metrics",
-            extra={
-                "system_prompt_chars": prepared_prompt.system_prompt_chars,
-                "attachment_context_chars": len(
-                    attachment_context_result.context
-                    if attachment_context_result is not None
-                    else ""
-                ),
-                "conversation_budget_tokens": (
-                    prepared_prompt.conversation_budget_tokens
-                ),
-                "conversation_message_count": len(request.conversation),
-                "trimmed_message_count": prepared_prompt.trimmed_message_count,
-                "attachment_file_count": len(request.attachment_files),
-                "confirmed_requirements_present": confirmed_requirements is not None,
-            },
-        )
-        return ProposalPrepared(
-            requirements_state=requirements_state,
-            ui_language=ui_language,
-            slot_classification_metadata=(
-                discovery_runtime.slot_classification_metadata
-            ),
-            llm_messages=prepared_prompt.llm_messages,
-            system_prompt_hash=prepared_prompt.system_prompt_hash,
-            plan_edit_context=request.plan_edit_context,
-            prior_plan_for_revision=request.prior_plan_for_revision,
-            resource_catalog=resource_catalog,
-            orchestration_context=orchestration_context,
-            discovery_runtime=discovery_runtime,
-        )
-
-    resource_material = build_ai_builder_resource_reference_material(
-        catalog=resource_catalog,
-    )
-    clarification_hints = build_clarification_hints(
-        conversation=request.conversation,
-        latest_user_message=request.message,
-        flow=request.flow,
-    )
-    planning_state_block = render_llm_prompt_context(
-        build_llm_prompt_context(
-            rebuilt_planning_state,
-            CAPABILITY_REGISTRY,
-            PATTERN_REGISTRY,
-        )
-    )
-    system_prompt = build_system_prompt(
-        flow_context=flow_context,
-        available_resources=resource_material,
+    assert isinstance(turn_control.decision, GenerateProposal)
+    proposal_system_prompt = build_plan_proposal_system_prompt(
+        planning_state=rebuilt_planning_state,
+        confirmed_requirements=confirmed_requirements,
         attachment_context=(
             attachment_context_result.context
             if attachment_context_result is not None
             else None
         ),
-        planner_hints=clarification_hints,
-        planning_state_block=planning_state_block,
-        base_planning_state_version=request.base_planning_state_version,
-        ui_language=ui_language,
-        confirmed_requirements=confirmed_requirements,
+        flow_context=flow_context,
         is_edit_mode=request.flow is not None,
-        unresolved_architectural_choices=unresolved_architectural_choices,
-        action_policy=action_policy,
+        resource_catalog=resource_catalog,
+        mcp_selection_values=mcp_resource_selection_values(request.conversation),
+        requested_output_sections=extract_requested_output_sections(
+            section_signal_text
+        ),
+        plan_revision_context=build_plan_revision_prompt_block(
+            context=request.plan_edit_context,
+            prior_plan=request.prior_plan_for_revision,
+        ),
     )
     prepared_prompt = _prepare_prompt_messages(
         conversation=request.conversation,
-        system_prompt=system_prompt,
+        system_prompt=proposal_system_prompt,
         litellm_model=request.litellm_model,
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
         budget_policy=request.budget_policy,
     )
     logger.info(
-        "AI Builder planner prompt metrics",
+        "AI Builder plan proposal prompt metrics",
         extra={
             "system_prompt_chars": prepared_prompt.system_prompt_chars,
-            "flow_context_chars": len(flow_context or ""),
             "attachment_context_chars": len(
                 attachment_context_result.context
                 if attachment_context_result is not None
                 else ""
             ),
-            "available_models_count": len(resource_material.models),
-            "available_kbs_count": len(resource_material.knowledge_bases),
-            "available_mcps_count": len(resource_material.mcp_servers),
             "conversation_budget_tokens": prepared_prompt.conversation_budget_tokens,
             "conversation_message_count": len(request.conversation),
             "trimmed_message_count": prepared_prompt.trimmed_message_count,
             "attachment_file_count": len(request.attachment_files),
-            "discovery_semantic_enabled": (
-                request.allow_discovery_semantic_adjudication
-            ),
             "confirmed_requirements_present": confirmed_requirements is not None,
         },
     )
 
-    if (
-        not has_requirements_summary
-        and not requirements_state.confirmed
-        and not request.is_requirements_confirmation
-        and not looks_like_information_request(request.message)
-        and discovery_block_message is not None
-    ):
-        return DiscoveryBlockPrepared(
-            requirements_state=requirements_state,
-            ui_language=ui_language,
-            slot_classification_metadata=(
-                discovery_runtime.slot_classification_metadata
-            ),
-            discovery_block_message=discovery_block_message,
-            followup=discovery_runtime.followup,
-        )
-
-    return NormalPlannerPrepared(
+    return ProposalPrepared(
         requirements_state=requirements_state,
         ui_language=ui_language,
         slot_classification_metadata=discovery_runtime.slot_classification_metadata,
         llm_messages=prepared_prompt.llm_messages,
         system_prompt_hash=prepared_prompt.system_prompt_hash,
-        followup=(
-            discovery_runtime.followup
-            if discovery_runtime.should_emit_forced_followup
-            else None
-        ),
+        plan_edit_context=request.plan_edit_context,
+        prior_plan_for_revision=request.prior_plan_for_revision,
+        resource_catalog=resource_catalog,
         orchestration_context=orchestration_context,
+        discovery_runtime=discovery_runtime,
     )
 
 

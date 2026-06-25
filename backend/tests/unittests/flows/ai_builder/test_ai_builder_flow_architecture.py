@@ -1,11 +1,7 @@
 """Outline-flow architecture rules registry tests.
 
-Pins the structured-data contract that replaces the hand-prose
-low-level Flow mechanics in legacy create-mode prompts.
-The renderer must preserve the top-level header the existing
-prompt-level tests assert against
-(`test_ai_builder_prompts.py::test_prompt_contains_knowledge_pack_sections`
-and `test_ai_builder_knowledge_pack.py` substring guards).
+Pins the structured-data contract the proposal prompt uses to keep
+low-level Flow mechanics server-owned.
 """
 
 from __future__ import annotations
@@ -60,10 +56,6 @@ class TestFlowArchitectureRegistryContract:
 
 class TestRenderFlowArchitecture:
     def test_render_emits_top_level_header(self) -> None:
-        """`# Outline-flow-kompilering` is the top-level header asserted
-        as a substring by
-        `test_build_prompt_knowledge_sections_for_create_proposal_includes_full_create_guidance`
-        and `test_prompt_contains_knowledge_pack_sections`."""
         rendered = render_flow_architecture()
         assert "# Outline-flow-kompilering" in rendered
 
@@ -114,8 +106,8 @@ class TestRenderFlowArchitecture:
         """Golden guard on the full rendered block. Any change to the
         header text, lead paragraph, section heading prose, bullet
         wording, or blank-line structure must flip this test. The
-        prompt-level tests only check substrings, so structural drift
-        could otherwise slip past CI.
+        proposal-prompt tests only check selected substrings, so structural
+        drift could otherwise slip past CI.
 
         Intentional delta from the deleted constant: a three-space
         artifact inside the `Filuppladdning ...` bullet (caused by the

@@ -78,7 +78,7 @@ The branch already has a Flow-specific capability owner. That is why a new green
 | Critic invariants are rendered deterministically from the capability registry. | `backend/src/intric/flows/flow_capability_manifest.py:816` |
 | Coverage diagnostics walk the enum product and surface capability drift. | `backend/src/intric/flows/flow_capability_manifest.py:838` |
 | Builder prompt reference is generated from schema values plus the Flow Capability Manifest. | `backend/src/intric/flows/ai_builder/ai_builder_flow_capability_reference.py:19` |
-| Planner prompt context is a typed stage-compressed projection of PlanningState plus FCM plus pattern registry. | `backend/src/intric/flows/ai_builder/ai_builder_capability_projection.py:61` |
+| Builder proposal context is generated at the proposal boundary from server-owned state plus FCM/pattern facts; the old Builder-local capability projection module has been deleted. | `backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py` |
 | Flow authoring has one typed command union for create/edit. | `backend/src/intric/flows/application/flow_authoring_command.py:58` |
 | `FlowAuthoringCommandService` owns preview, prepare, apply, and transaction assertion through the existing Flow services. | `backend/src/intric/flows/application/flow_authoring_command.py:127` |
 
@@ -237,7 +237,7 @@ Future goals should evaluate these candidates separately:
 
 | Candidate | Required proof before implementation |
 | --- | --- |
-| Read-only capability descriptor unification | Existing FCM can adapt to shared descriptors without weakening FCM invariants, and the migration deletes duplicate Builder capability projection logic. |
+| Read-only capability descriptor unification | Existing FCM can adapt to shared descriptors without weakening FCM invariants. The migration must not reintroduce a Builder-local prompt projection mirror. |
 | Assistant capability parity | Assistant update commands have a clear canonical service owner independent of MCP, with confirmation, identity, authorization, audit, and Flow-managed boundaries server-owned. |
 | MCP adapter | Descriptors and command/query contracts already exist; MCP handlers can remain translation-only and contain no domain authoring logic. |
 | Builder consumption | Builder prompt/tool surfaces can derive from descriptor sets without introducing internal Builder-to-MCP calls or a second validation owner. |

@@ -33,36 +33,15 @@ def allowed_ask_question_targets(
 
 
 def format_ask_question_targets(targets: Iterable[str]) -> str:
-    """Render target IDs for prompts and diagnostics."""
+    """Render target IDs for diagnostics."""
     ordered = tuple(dict.fromkeys(targets))
     if not ordered:
         return "(none)"
     return ", ".join(f"`{target}`" for target in ordered)
 
 
-def render_ask_question_vocabulary_block() -> str:
-    """Render the LLM-facing identifier contract for `ask_question`."""
-    return (
-        "## Ask-question vocabulary\n\n"
-        "When `planner_action.kind` is `ask_question`, "
-        "`payload.question_id` and `payload.slot_name` are server-owned "
-        "identifiers. Emit both as one of these canonical slot IDs:\n\n"
-        f"{_canonical_target_bullets()}\n\n"
-        "Do not invent narrower domain-specific IDs. If the user needs a "
-        "specific case type, department, role, language, date, reference "
-        "number, or similar runtime value, keep that specificity in "
-        "`payload.prompt` and use `runtime_metadata_fields` as the "
-        "identifier target."
-    )
-
-
-def _canonical_target_bullets() -> str:
-    return "\n".join(f"- `{target}`" for target in canonical_ask_question_targets())
-
-
 __all__ = [
     "allowed_ask_question_targets",
     "canonical_ask_question_targets",
     "format_ask_question_targets",
-    "render_ask_question_vocabulary_block",
 ]

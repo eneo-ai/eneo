@@ -14,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
-    build_framework_guardrails_block,
     extract_answer_signals,
     infer_question_answer_from_freeform,
     is_supported_structured_question_id,
@@ -744,14 +743,6 @@ def test_does_not_need_structured_extraction_for_single_step_plain_summary() -> 
         step_count=1,
         terminal_output_type=OutputType.TEXT,
     )
-
-
-def test_framework_guardrails_block_forbids_custom_code_paths() -> None:
-    guardrails = build_framework_guardrails_block()
-
-    assert "Eneo Flow-ramverket" in guardrails
-    assert "Python" in guardrails
-    assert "egna integrationer" in guardrails
 
 
 def test_normalizes_output_question_aliases_to_canonical_mode() -> None:

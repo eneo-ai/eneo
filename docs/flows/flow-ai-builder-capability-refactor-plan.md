@@ -123,7 +123,7 @@ These are candidates, not automatic work. Each requires preflight proof of a can
 | Streamed repair skeleton duplication | Deferred. Proposal repair, question recovery, and confirm requirements share repair-event skeletons, but each owns distinct product semantics. Only replace them with one typed streamed-repair contract if the same change deletes the remaining event-dict and message-dict residuals while reusing `RuntimeToolCall`. |
 | Builder step capability duplicates | Completed as a Flow capability-deduplication slice: `ai_builder_step_capabilities.py` was deleted, FCM owns the read-only capability facts, and Builder consumers translate only at their own boundary. |
 | Prompt hard-rule duplication | Defer unless every touched rule stays within Builder runtime/planner ownership. Future capability work should enforce: every model-visible capability claim must have canonical enforcement. |
-| Capability projection complexity | Shrink `ai_builder_capability_projection.py` only if Phase 4 typed-turn deletion or FCM projection makes state fields unnecessary. |
+| Capability projection complexity | Completed for the old planner prompt path: `ai_builder_capability_projection.py` was deleted, and surviving Builder turn/proposal paths consume server-owned state and FCM facts at their own boundary. |
 
 ## Phase 4 Completion Criteria
 

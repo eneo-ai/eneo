@@ -38,7 +38,6 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     slot_classification_metadata_from_result,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
-    BackendQuestion,
     DiscoveryAnalysis,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -50,7 +49,6 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
-    StructuredQuestionPayload,
 )
 from intric.flows.ai_builder.ai_builder_litellm_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_orchestrator import (
@@ -67,8 +65,6 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
-    DiscoveryBlockPrepared,
-    NormalPlannerPrepared,
     ProposalPrepared,
     ServerOutputPrepared,
 )
@@ -130,40 +126,23 @@ def _make_planner() -> AIBuilderPlanner:
 
 def _make_prepared_request(
     *,
-    followup: BackendQuestion | None = None,
     slot_classification_metadata: SlotClassificationMetadata | None = None,
     orchestration_context: OrchestrationContext | None = None,
-) -> NormalPlannerPrepared:
-    return NormalPlannerPrepared(
+    server_output: PlannerOutput | None = None,
+) -> ServerOutputPrepared:
+    return ServerOutputPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        llm_messages=[{"role": "system", "content": "system"}],
-        system_prompt_hash="system-hash",
-        followup=followup,
         slot_classification_metadata=slot_classification_metadata,
-        orchestration_context=orchestration_context or _make_orchestration_context(),
-    )
-
-
-def _backend_question() -> BackendQuestion:
-    return BackendQuestion(
-        question_data=StructuredQuestionPayload.model_validate(
-            {
-                "question_id": "terminal_output",
-                "question": "Vilket slutresultat vill du ha?",
-                "options": [
-                    {
-                        "id": "text",
-                        "label": "Text",
-                        "description": "Svara med text.",
-                        "value": "text",
-                    }
-                ],
-                "selection_mode": "single",
-                "allow_custom": True,
-            }
+        server_output=server_output
+        or _planner_output(
+            ConfirmRequirementsAction(
+                kind="confirm_requirements",
+                payload=ConfirmRequirementsPayload(summary="Summary."),
+            )
         ),
-        assistant_text="Vilket slutresultat vill du ha?",
+        discovery_analysis=DiscoveryAnalysis(issues=()),
+        orchestration_context=orchestration_context or _make_orchestration_context(),
     )
 
 
@@ -943,25 +922,19 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
             "terminal_output": _slot("terminal_output", "text"),
         },
     )
-    prepared = NormalPlannerPrepared(
-        requirements_state=_requirements_state_unconfirmed(),
-        ui_language="en",
-        llm_messages=[{"role": "system", "content": "system"}],
-        system_prompt_hash="system-hash",
-        slot_classification_metadata=None,
-        followup=None,
+    action = ConfirmRequirementsAction(
+        kind="confirm_requirements",
+        payload=ConfirmRequirementsPayload(summary="Summary."),
+    )
+    output = _planner_output(action)
+    prepared = _make_prepared_request(
+        server_output=output,
         orchestration_context=OrchestrationContext(
             current_version=0,
             session_state=rebuilt_both_resolved,
             unresolved_architectural_choices=frozenset(),
         ),
     )
-
-    action = ConfirmRequirementsAction(
-        kind="confirm_requirements",
-        payload=ConfirmRequirementsPayload(summary="Summary."),
-    )
-    output = _planner_output(action)
     turn_result = _dispatched_result(
         action_kind="confirm_requirements", planner_output=output
     )
@@ -1042,21 +1015,20 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
             ),
         },
     )
-    prepared = NormalPlannerPrepared(
-        requirements_state=_requirements_state_unconfirmed(),
-        ui_language="en",
-        llm_messages=[{"role": "system", "content": "system"}],
-        system_prompt_hash="system-hash",
-        slot_classification_metadata=None,
-        followup=None,
+    action = ConfirmRequirementsAction(
+        kind="confirm_requirements",
+        payload=ConfirmRequirementsPayload(summary="Summary."),
+    )
+    output = _planner_output(action)
+    prepared = _make_prepared_request(
+        server_output=output,
         orchestration_context=OrchestrationContext(
             current_version=0,
             session_state=partial,
             unresolved_architectural_choices=frozenset({"terminal_output"}),
         ),
     )
-
-    action = AskQuestionAction(
+    planner_action = AskQuestionAction(
         kind="ask_question",
         payload=AskQuestionPayload(
             question_id="terminal_output",
@@ -1064,8 +1036,10 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
             prompt="?",
         ),
     )
-    output = _planner_output(action)
-    turn_result = _dispatched_result(action_kind="ask_question", planner_output=output)
+    turn_result = _dispatched_result(
+        action_kind="ask_question",
+        planner_output=_planner_output(planner_action),
+    )
 
     captured: dict[str, Any] = {}
 
@@ -1107,13 +1081,14 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
     None
 ):
     planner = _make_planner()
-    prepared = NormalPlannerPrepared(
-        requirements_state=_requirements_state_unconfirmed(),
-        ui_language="en",
-        llm_messages=[{"role": "system", "content": "system"}],
-        system_prompt_hash="system-hash",
-        slot_classification_metadata=None,
-        followup=None,
+    output = _planner_output(
+        ConfirmRequirementsAction(
+            kind="confirm_requirements",
+            payload=ConfirmRequirementsPayload(summary="Summary."),
+        )
+    )
+    prepared = _make_prepared_request(
+        server_output=output,
         orchestration_context=OrchestrationContext(
             current_version=0,
             session_state=PlanningState.empty(),
@@ -1170,48 +1145,6 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
     assert ctx.required_slot_names == frozenset(
         {"document_material_scope", "runtime_metadata_fields"}
     )
-
-
-@pytest.mark.asyncio
-async def test_send_message_discovery_block_ends_cleanly_without_followup() -> None:
-    planner = _make_planner()
-    prepared = DiscoveryBlockPrepared(
-        requirements_state=_requirements_state_unconfirmed(),
-        ui_language="en",
-        slot_classification_metadata=None,
-        discovery_block_message="Need more information.",
-        followup=None,
-    )
-
-    with (
-        patch.object(
-            planner,
-            "_resolve_message_metadata",
-            new=AsyncMock(
-                return_value=SimpleNamespace(
-                    metadata=None,
-                    is_requirements_confirmation=False,
-                    used_auxiliary_llm=False,
-                )
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
-            new=AsyncMock(return_value=prepared),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner.persist_backend_question",
-            new=AsyncMock(side_effect=AssertionError("no followup should persist")),
-        ) as persist_question,
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
-            new=AsyncMock(side_effect=AssertionError("planner turn should not run")),
-        ),
-    ):
-        events = await _collect_events(planner, **_send_kwargs())
-
-    assert [event["event"] for event in events] == ["done"]
-    persist_question.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -41,8 +41,6 @@ from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_dict,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
-    build_clarification_hints,
-    build_system_prompt,
     has_confirmed_requirements,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
@@ -581,29 +579,8 @@ class TestHasConfirmedRequirements:
         assert has_confirmed_requirements(conversation) is False
 
 
-class TestPinnedRequirementsPrompt:
-    def test_build_system_prompt_can_render_confirmed_requirements_summary(
-        self,
-    ) -> None:
-        prompt = build_system_prompt(
-            confirmed_requirements=RequirementsSummaryPayload.model_validate(
-                {
-                    "summary": "Analysera en PDF och skapa DOCX-rapport.",
-                    "key_decisions": [{"topic": "DOCX", "decision": "Utan mall"}],
-                    "input_description": "En PDF per körning",
-                    "output_description": "DOCX-rapport",
-                    "manual_setup_notes": ["Ingen mall används."],
-                }
-            )
-        )
-
-        assert "Bekräftade krav" in prompt
-        assert "Analysera en PDF" in prompt
-        assert "DOCX" in prompt
-
-
 # ---------------------------------------------------------------------------
-# Extended clarification hints
+# Extended discovery
 # ---------------------------------------------------------------------------
 
 
@@ -620,13 +597,6 @@ class TestExtendedClarificationHints:
         assert analysis.ready_for_confirmation is False
         assert analysis.next_issue is not None
         assert analysis.next_issue.suggestion is not None
-
-        hints = build_clarification_hints(
-            conversation=conversation,
-            latest_user_message=conversation[0].content or "",
-        )
-        assert hints is not None
-        assert "Ask exactly ONE structured question now" in hints
 
     def test_ultra_vague_summary_prompt_blocks_on_final_output_mode(self) -> None:
         conversation = [
@@ -3089,25 +3059,6 @@ class TestExtendedClarificationHints:
 
         assert "final_pdf_type" not in question_ids
         assert "pdf_generation_mode" not in question_ids
-
-    def test_audio_hint(self) -> None:
-        hints = build_clarification_hints(
-            conversation=[],
-            latest_user_message="Jag vill transkribera ljud och sedan sammanfatta.",
-        )
-        assert hints is not None
-        assert 'input_type="audio"' in hints
-        assert 'output_type="text"' in hints
-        assert "Backend härleder" in hints
-
-    def test_template_hint(self) -> None:
-        hints = build_clarification_hints(
-            conversation=[],
-            latest_user_message="Jag vill fylla i en mall med data från analysen.",
-        )
-        assert hints is not None
-        assert "template_fill" in hints
-
 
 class TestPlannerConversationEncoding:
     def test_structured_answer_metadata_is_included_for_llm_context(self) -> None:

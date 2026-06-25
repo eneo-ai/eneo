@@ -840,9 +840,9 @@ class TestDomainNeutrality:
 class TestQuestionCopyParity:
     """The `QUESTION_CATALOG` and `ai_builder_discovery_questions` each
     render the same user-facing question surface. Both are live — the
-    catalog feeds the create-mode knowledge pack, the builders feed the
-    discovery runtime. Any drift between them means the planner and the
-    runtime disagree on what to call the same slot. Pin exact parity
+    catalog feeds Builder question selection, and the builders feed the
+    discovery runtime. Any drift between them means the controller and runtime
+    disagree on what to call the same slot. Pin exact parity
     per (template_id, locale) across question text, help text, options,
     and worked examples so a future edit to one source blows up here
     before shipping.
