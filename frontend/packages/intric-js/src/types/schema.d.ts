@@ -4111,8 +4111,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Create a website crawler
-     * @description Create a new website crawler that will extract content and make it available to assistants in this space.
+     * Create a website source
+     * @description Create a new website source that either crawls a site directly or sets up a sitemap webhook integration.
      *
      *         **Update Intervals:**
      *         - `never` (default): Manual crawls only
@@ -4131,7 +4131,7 @@ export interface paths {
      *         }
      *         ```
      *
-     *         The crawl will start immediately upon creation.
+     *         Direct crawls start immediately upon creation. Sitemap webhook integrations queue an initial webhook sync.
      */
     post: operations["create_space_websites_api_v1_spaces__id__knowledge_websites__post"];
     delete?: never;
@@ -5790,14 +5790,14 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Queue website integration sync
-     * @description Queue a sitemap-based website integration sync using the integration-specific token.
+     * Queue sitemap webhook integration sync
+     * @description Queue a sitemap webhook integration sync using the integration-specific webhook token.
      *
-     *         This endpoint is the primary sync webhook URL exposed in the UI. It validates the
-     *         token, fetches the integration config, and queues a background job that checks the
-     *         sitemap for new or updated pages.
+     *         This endpoint is the primary webhook URL exposed in the UI. It validates the
+     *         webhook token, fetches the integration config, and queues a background job that
+     *         checks the sitemap for new or updated pages.
      */
-    post: operations["sync_website_integration_endpoint_api_v1_integrations_websites__config_id__sync__post"];
+    post: operations["trigger_sitemap_webhook_integration_endpoint_api_v1_integrations_websites__config_id__sync__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -37752,10 +37752,11 @@ export interface operations {
       };
     };
   };
-  sync_website_integration_endpoint_api_v1_integrations_websites__config_id__sync__post: {
+  trigger_sitemap_webhook_integration_endpoint_api_v1_integrations_websites__config_id__sync__post: {
     parameters: {
-      query: {
-        token: string;
+      query?: {
+        webhook_token?: string | null;
+        token?: string | null;
       };
       header?: never;
       path: {
