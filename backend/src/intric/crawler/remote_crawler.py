@@ -32,6 +32,7 @@ import aiohttp
 from typing_extensions import TypedDict
 
 from intric.crawler.models import Crawl, CrawledPage
+from intric.crawler.url_scope import host_of, same_host
 from intric.main.exceptions import CrawlerException, CrawlTimeoutError
 from intric.tenants.crawler_settings_helper import get_crawler_setting
 from intric.websites.domain.crawl_run import CrawlType
@@ -117,25 +118,26 @@ class RemoteCrawler:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    async def validate_sitemap_source(
+    async def _preview(
         self,
         url: str,
         *,
-        http_user: Optional[str] = None,
-        http_pass: Optional[str] = None,
-    ) -> SitemapValidation:
-        """Ask the service whether a sitemap crawl of ``url`` could yield pages.
+        http_user: Optional[str],
+        http_pass: Optional[str],
+    ) -> dict[str, Any] | None:
+        """POST /v1/preview and return the parsed body, or None when the
+        preview could not be obtained (non-200, network error, bad JSON).
 
-        Sitemap crawls treat the URL as a site seed: the service discovers
-        the sitemap itself, via robots.txt ``Sitemap:`` directives first and
-        de-facto locations (/sitemap.xml and friends) second. The /v1/preview
-        dry-run reports that discovery without running a crawl.
+        Sitemap crawls treat ``url`` as a site seed: the service discovers the
+        sitemap itself, via robots.txt ``Sitemap:`` directives first and de-facto
+        locations (/sitemap.xml and friends) second, and reports that discovery
+        in the response without running a real crawl.
         """
         request_body: dict[str, Any] = {
             "url": url,
             "crawl_type": "sitemap",
             # The preview runs a capped sample crawl alongside the sitemap
-            # probe; only the sitemap verdict is consumed here
+            # probe; only the sitemap discovery is consumed here
             "max_sample_fetches": 1,
             "http_auth": (
                 {"user": http_user, "password": http_pass}
@@ -156,16 +158,33 @@ class RemoteCrawler:
                 ) as response:
                     if response.status != 200:
                         logger.warning(
-                            "Sitemap preview returned non-200; allowing configuration",
+                            "Sitemap preview returned non-200",
                             extra={"url": url, "status": response.status},
                         )
-                        return SitemapValidation(valid=True)
-                    data: dict[str, Any] = await response.json()
+                        return None
+                    return cast("dict[str, Any]", await response.json())
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             logger.warning(
-                "Sitemap preview unavailable; allowing configuration",
+                "Sitemap preview unavailable",
                 extra={"url": url, "error": str(exc)},
             )
+            return None
+
+    async def validate_sitemap_source(
+        self,
+        url: str,
+        *,
+        http_user: Optional[str] = None,
+        http_pass: Optional[str] = None,
+    ) -> SitemapValidation:
+        """Ask the service whether a sitemap crawl of ``url`` could yield pages.
+
+        The /v1/preview dry-run reports the service's sitemap discovery without
+        running a crawl. An unavailable preview is fail-open: the configuration
+        is allowed rather than blocked on a transient service hiccup.
+        """
+        data = await self._preview(url, http_user=http_user, http_pass=http_pass)
+        if data is None:
             return SitemapValidation(valid=True)
 
         sitemap: dict[str, Any] = data.get("sitemap") or {}
@@ -199,6 +218,30 @@ class RemoteCrawler:
                 '"crawl" type instead'
             ),
         )
+
+    async def discover_sitemap_locations(
+        self,
+        url: str,
+        *,
+        http_user: Optional[str] = None,
+        http_pass: Optional[str] = None,
+    ) -> list[str]:
+        """The top-level sitemap document URLs the service discovers for the
+        site seed ``url`` (robots.txt ``Sitemap:`` directives and verified
+        default locations), via /v1/preview.
+
+        These are the URLs the scheduled-skip fingerprint must be computed
+        over: a sitemap crawl is configured with the site seed, not the sitemap
+        document, so Eneo cannot otherwise know which document to fingerprint.
+        Returns an empty list when none are found or the preview is unavailable,
+        which keeps the caller on a full crawl.
+        """
+        data = await self._preview(url, http_user=http_user, http_pass=http_pass)
+        sitemap: dict[str, Any] = (data or {}).get("sitemap") or {}
+        if not sitemap.get("found"):
+            return []
+        locations: list[Any] = sitemap.get("locations") or []
+        return [loc for loc in locations if isinstance(loc, str) and loc]
 
     async def _stream_crawl(
         self,
@@ -370,6 +413,7 @@ class RemoteCrawler:
         file_links: list[str],
         files_dir: str,
         *,
+        crawl_host: str | None,
         http_user: str | None,
         http_pass: str | None,
         tenant_crawler_settings: dict[str, Any] | None,
@@ -378,6 +422,12 @@ class RemoteCrawler:
 
         The crawler service never transfers binaries; the worker fetches them
         directly so the existing hash-skip + TextExtractor loop applies.
+
+        ``file_links`` come from the service and may name any host. Credentials
+        are domain-locked, so only links on ``crawl_host`` (the seed host the
+        Basic Auth was registered for) are fetched, and only those carry auth;
+        off-host or non-http(s) links are skipped rather than fetched with the
+        site's credentials.
         """
         max_size = get_crawler_setting("download_max_size", tenant_crawler_settings)
         timeout_seconds = get_crawler_setting(
@@ -389,6 +439,14 @@ class RemoteCrawler:
         taken: set[str] = set()
 
         for index, link_url in enumerate(file_links):
+            if not same_host(link_url, crawl_host):
+                # Domain-locked credentials must not follow a link off the
+                # crawl host; skip rather than fetch (and never with auth)
+                logger.warning(
+                    "Skipping linked file outside crawl host",
+                    extra={"file_url": link_url, "crawl_host": crawl_host},
+                )
+                continue
             target = Path(files_dir) / _filename_for_link(link_url, taken, index)
             try:
                 async with session.get(
@@ -590,6 +648,7 @@ class RemoteCrawler:
                         session,
                         file_links,
                         tmp_dir_obj.name,
+                        crawl_host=host_of(url),
                         http_user=http_user,
                         http_pass=http_pass,
                         tenant_crawler_settings=tenant_crawler_settings,

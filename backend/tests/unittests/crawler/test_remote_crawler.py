@@ -39,6 +39,8 @@ class ServiceStub:
         self.preview_response: dict = {}
         self.preview_status: int = 200
         self.preview_received_json: dict | None = None
+        # (path, Authorization header) for every linked-file fetch served
+        self.file_requests: list[tuple[str, str | None]] = []
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
         self.received_json = await request.json()
@@ -72,6 +74,7 @@ async def service():
     app.router.add_post("/v1/preview", stub.handle_preview)
 
     async def serve_file(request: web.Request) -> web.Response:
+        stub.file_requests.append((request.path, request.headers.get("Authorization")))
         size = int(request.match_info["size"])
         return web.Response(body=b"x" * size, content_type="application/pdf")
 
@@ -351,19 +354,22 @@ class TestConditionalGets:
 
 
 class TestFileDownloads:
+    # The local test server is both the (mock) crawler service and the file
+    # host, so the crawl seed is its base_url: linked files then live on the
+    # crawl host, the realistic shape the worker downloads directly.
     @pytest.mark.asyncio
     async def test_file_links_downloaded_into_files_dir(self, service):
         file_url = f"{service.base_url}/files/64/rapport.pdf"
         service.body = ndjson(
             page(
-                "https://k.se/a",
+                f"{service.base_url}/a",
                 file_links=[{"url": file_url, "mime": "application/pdf"}],
             ),
             DONE,
         )
         crawler = RemoteCrawler(base_url=service.base_url)
 
-        async with crawler.crawl(url="https://k.se", download_files=True) as crawl:
+        async with crawler.crawl(url=service.base_url, download_files=True) as crawl:
             list(crawl.pages)
             files = list(crawl.files)
             # Files live in the crawl's temp dir: read inside the context,
@@ -376,13 +382,13 @@ class TestFileDownloads:
         # download_max_size floor is 1 MiB; serve a file just above it
         file_url = f"{service.base_url}/files/{1048576 + 1024}/stor.pdf"
         service.body = ndjson(
-            page("https://k.se/a", file_links=[file_url]),
+            page(f"{service.base_url}/a", file_links=[file_url]),
             DONE,
         )
         crawler = RemoteCrawler(base_url=service.base_url)
 
         async with crawler.crawl(
-            url="https://k.se",
+            url=service.base_url,
             download_files=True,
             tenant_crawler_settings={"download_max_size": 1048576},
         ) as crawl:
@@ -394,14 +400,82 @@ class TestFileDownloads:
     @pytest.mark.asyncio
     async def test_files_not_fetched_when_download_files_false(self, service):
         file_url = f"{service.base_url}/files/64/rapport.pdf"
-        service.body = ndjson(page("https://k.se/a", file_links=[file_url]), DONE)
+        service.body = ndjson(
+            page(f"{service.base_url}/a", file_links=[file_url]), DONE
+        )
         crawler = RemoteCrawler(base_url=service.base_url)
 
-        async with crawler.crawl(url="https://k.se", download_files=False) as crawl:
+        async with crawler.crawl(url=service.base_url, download_files=False) as crawl:
             list(crawl.pages)
             files = list(crawl.files)
 
         assert files == []
+
+    @pytest.mark.asyncio
+    async def test_same_host_download_carries_basic_auth(self, service):
+        # Credentials are domain-locked: an on-host file fetch gets the auth
+        file_url = f"{service.base_url}/files/64/rapport.pdf"
+        service.body = ndjson(
+            page(f"{service.base_url}/a", file_links=[file_url]), DONE
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(
+            url=service.base_url,
+            download_files=True,
+            http_user="intern",
+            http_pass="hemligt",
+        ) as crawl:
+            list(crawl.pages)
+            assert [f.name for f in crawl.files] == ["rapport.pdf"]
+
+        assert len(service.file_requests) == 1
+        _, auth_header = service.file_requests[0]
+        assert auth_header is not None and auth_header.startswith("Basic ")
+
+    @pytest.mark.asyncio
+    async def test_off_host_file_link_is_skipped_and_uncredentialed(self, service):
+        # A page on the crawl host links a file on another host. The
+        # domain-locked credentials must not follow it, and the off-host URL
+        # must not be fetched at all.
+        on_host = f"{service.base_url}/files/64/local.pdf"
+        off_host = "http://other.host.invalid/files/64/leak.pdf"
+        service.body = ndjson(
+            page(f"{service.base_url}/a", file_links=[off_host, on_host]),
+            DONE,
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(
+            url=service.base_url,
+            download_files=True,
+            http_user="intern",
+            http_pass="hemligt",
+        ) as crawl:
+            list(crawl.pages)
+            # Only the on-host file is downloaded; the off-host link is skipped
+            assert [f.name for f in crawl.files] == ["local.pdf"]
+
+        # The off-host host was never contacted (it is unresolvable on purpose);
+        # only the single on-host request was served
+        assert [req[0] for req in service.file_requests] == ["/files/64/local.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_non_http_file_link_is_skipped(self, service):
+        service.body = ndjson(
+            page(
+                f"{service.base_url}/a",
+                file_links=["file:///etc/passwd", "ftp://k.se/secret"],
+            ),
+            DONE,
+        )
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        async with crawler.crawl(url=service.base_url, download_files=True) as crawl:
+            list(crawl.pages)
+            assert list(crawl.files) == []
+
+        assert service.file_requests == []
 
 
 class TestFilenameForLink:
@@ -518,6 +592,75 @@ class TestValidateSitemapSource:
             "user": "u",
             "password": "p",
         }
+
+
+class TestDiscoverSitemapLocations:
+    """discover_sitemap_locations surfaces the service's sitemap discovery so
+    Eneo can fingerprint the real sitemap; any failure degrades to [] so the
+    caller full-crawls instead of skipping on bad data."""
+
+    FOUND = {
+        "seed": {"reachable": True},
+        "sitemap": {
+            "found": True,
+            "locations": ["https://k.se/sitemap.xml", "https://k.se/news.xml"],
+            "url_count": 12,
+        },
+    }
+
+    @pytest.mark.asyncio
+    async def test_returns_locations_when_found(self, service):
+        service.preview_response = self.FOUND
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        locations = await crawler.discover_sitemap_locations("https://k.se")
+
+        assert locations == ["https://k.se/sitemap.xml", "https://k.se/news.xml"]
+        assert service.preview_received_json["crawl_type"] == "sitemap"
+
+    @pytest.mark.asyncio
+    async def test_not_found_returns_empty(self, service):
+        service.preview_response = {
+            "seed": {"reachable": True},
+            "sitemap": {"found": False, "locations": []},
+        }
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        assert await crawler.discover_sitemap_locations("https://k.se") == []
+
+    @pytest.mark.asyncio
+    async def test_found_but_no_locations_field_returns_empty(self, service):
+        service.preview_response = {"sitemap": {"found": True}}
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        assert await crawler.discover_sitemap_locations("https://k.se") == []
+
+    @pytest.mark.asyncio
+    async def test_non_200_returns_empty(self, service):
+        service.preview_status = 500
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        assert await crawler.discover_sitemap_locations("https://k.se") == []
+
+    @pytest.mark.asyncio
+    async def test_unreachable_service_returns_empty(self):
+        crawler = RemoteCrawler(base_url="http://127.0.0.1:1")
+
+        assert await crawler.discover_sitemap_locations("https://k.se") == []
+
+    @pytest.mark.asyncio
+    async def test_non_string_locations_filtered_out(self, service):
+        service.preview_response = {
+            "sitemap": {
+                "found": True,
+                "locations": ["https://k.se/sitemap.xml", None, 42, ""],
+            }
+        }
+        crawler = RemoteCrawler(base_url=service.base_url)
+
+        locations = await crawler.discover_sitemap_locations("https://k.se")
+
+        assert locations == ["https://k.se/sitemap.xml"]
 
 
 class TestCreateCrawler:

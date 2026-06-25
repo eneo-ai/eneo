@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.crawler.remote_crawler import ConditionalGetHint
 from intric.crawler.sitemap_check import probe_sitemap, state_is_fresh
+from intric.crawler.url_scope import host_of
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -993,13 +994,26 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # fingerprint matches the last completed crawl is skipped before
             # any page is fetched. Manual recrawls always run, and a
             # fingerprint older than the forced-recrawl window never skips.
+            # A failed probe leaves this None; the persist step then never
+            # overwrites a still-valid stored fingerprint (only a fresh probe
+            # is written), so a transient blip can't defeat the optimization.
             new_sitemap_state: dict[str, Any] | None = None
             if (
                 params.crawl_type == CrawlType.SITEMAP
                 and settings.crawl_sitemap_skip_enabled
             ):
-                sitemap_probe = await probe_sitemap(
+                # A sitemap crawl is configured with the site seed, not the
+                # sitemap document; the service discovers the actual sitemap
+                # location(s), and Eneo fingerprints those. Auth stays anchored
+                # to the seed host even when a location is on another host.
+                sitemap_locations = await crawler.discover_sitemap_locations(
                     params.url,
+                    http_user=crawl_context.http_auth_user,
+                    http_pass=crawl_context.http_auth_pass,
+                )
+                sitemap_probe = await probe_sitemap(
+                    sitemap_locations,
+                    auth_host=host_of(params.url),
                     http_user=crawl_context.http_auth_user,
                     http_pass=crawl_context.http_auth_pass,
                 )
@@ -1706,15 +1720,19 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 operation=_do_circuit_breaker_update,
             )
 
-            # Persist the sitemap fingerprint only for complete, successful
-            # crawls: a partial crawl must not be fingerprinted as done.
-            # A failed probe (new_sitemap_state None) clears stale state so
-            # it can never match a future probe.
+            # Persist only a fresh fingerprint, and only for complete, successful
+            # crawls: a partial crawl must not be fingerprinted as done, and a
+            # failed probe (new_sitemap_state None) leaves the prior fingerprint
+            # intact rather than wiping it. This is safe: a skip only fires when
+            # a later successful probe matches the stored fingerprint and is
+            # within the forced-recrawl window, so a preserved-but-stale
+            # fingerprint can never cause a wrong skip.
             if (
                 params.crawl_type == CrawlType.SITEMAP
                 and settings.crawl_sitemap_skip_enabled
                 and crawl_successful
                 and not crawl_is_partial
+                and new_sitemap_state is not None
             ):
 
                 async def _do_sitemap_state_update(sess: AsyncSession) -> None:
