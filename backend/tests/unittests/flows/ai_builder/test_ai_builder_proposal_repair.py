@@ -15,12 +15,12 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    parse_outline_flow_arguments,
-)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    parse_create_flow_intent_arguments,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     MAX_SELF_CORRECTION_RETRIES,
@@ -47,10 +47,10 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
 )
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads import (
+from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
     expected_root_assumption_strings,
     expected_step_assumption_strings,
-    self_correction_outline_with_step_assumptions_payload,
+    self_correction_intent_with_step_assumptions_payload,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
 
@@ -365,13 +365,13 @@ async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_wit
 ):
     observed_assumptions: list[str] = []
     call_proposal_completion = AsyncMock()
-    payload = self_correction_outline_with_step_assumptions_payload()
+    payload = self_correction_intent_with_step_assumptions_payload()
     assistant_text = f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```"
 
     async def process_invocation(
         invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
-        outline = parse_outline_flow_arguments(invocation.arguments)
+        outline = parse_create_flow_intent_arguments(invocation.arguments)
         observed_assumptions.extend(outline.assumptions)
         return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
@@ -414,7 +414,7 @@ async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_
                 {
                     "flow_name": "Text JSON outline",
                     "plan_rationale": "The model returned JSON as prose.",
-                    "steps": [{"name": "Analyze", "task": "Analyze the input."}],
+                    "steps": [{"name": "Analyze", "instructions": "Analyze the input."}],
                 }
             ),
             turn=turn,
@@ -578,11 +578,11 @@ def test_build_retry_feedback_keeps_create_outline_rules_out_of_edit_mode() -> N
     )
 
     assert (
-        "Every steps[] item must be one complete semantic outline step"
+        "Every steps[] item must be one complete semantic intent step"
         in create_feedback
     )
     assert "Every steps[] name must be unique case-insensitively" in create_feedback
-    assert "semantic outline step" not in edit_feedback
+    assert "semantic intent step" not in edit_feedback
     assert "unique case-insensitively" not in edit_feedback
     assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call" in edit_feedback
 
@@ -783,7 +783,7 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
         arguments={
             "flow_name": "Invalid",
             "plan_rationale": "Invalid step reference.",
-            "steps": [{"name": "Step", "task": "Do work."}],
+            "steps": [{"name": "Step", "instructions": "Do work."}],
         },
     )
     responses = [text_response, tool_response]
@@ -920,7 +920,7 @@ async def test_run_tool_self_correction_retries_forced_retry_validation_feedback
         arguments={
             "flow_name": "Invalid repaired flow",
             "plan_rationale": "Repair duplicate names.",
-            "steps": [{"name": "Duplicate", "task": "Do the work."}],
+            "steps": [{"name": "Duplicate", "instructions": "Do the work."}],
         },
     )
     valid_tool_response = _tool_response(
@@ -928,7 +928,7 @@ async def test_run_tool_self_correction_retries_forced_retry_validation_feedback
         arguments={
             "flow_name": "Valid repaired flow",
             "plan_rationale": "Repair duplicate names.",
-            "steps": [{"name": "Unique", "task": "Do the work."}],
+            "steps": [{"name": "Unique", "instructions": "Do the work."}],
         },
     )
     responses = [text_response, invalid_tool_response, valid_tool_response]
@@ -997,7 +997,7 @@ async def test_run_tool_self_correction_limits_text_feedback_retry_budget() -> N
         arguments={
             "flow_name": "Invalid repaired flow",
             "plan_rationale": "Still duplicate.",
-            "steps": [{"name": "Duplicate", "task": "Do work."}],
+            "steps": [{"name": "Duplicate", "instructions": "Do work."}],
         },
     )
     responses = [

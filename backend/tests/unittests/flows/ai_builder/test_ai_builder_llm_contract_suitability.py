@@ -7,12 +7,12 @@ from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from intric.flows.ai_builder.ai_builder_authoring_projection import ModifyExistingStep
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionPayload,
     PlannerOutput,
     PlanningStateDelta,
 )
+from intric.flows.ai_builder.ai_builder_proposal_intent import ModifyExistingStep
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningSignal,

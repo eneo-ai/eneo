@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 
 from intric.flows.ai_builder.ai_builder_create_compiler import (
-    OutlineCompileContext,
-    compile_outline_to_create_spec,
+    CreateCompileContext,
+    compile_create_intent_to_spec,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    parse_outline_flow_arguments,
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    parse_create_flow_intent_arguments,
 )
 from intric.flows.ai_builder.ai_builder_step_skeleton import (
     _LEGAL_STEP_SKELETON_POLICIES,
@@ -62,7 +62,7 @@ def test_step_skeleton_rejects_runtime_fields_after_first_slot() -> None:
             slot_id="semantic",
             role="semantic_required",
             mechanics_policy="fill_missing",
-            semantic_policy="required_from_outline",
+            semantic_policy="required_from_intent",
             chain_token=None,
             default_name="Analyze",
             default_instructions="Analyze the previous output.",
@@ -80,8 +80,8 @@ def test_step_skeleton_policy_combinations_are_closed() -> None:
     assert _LEGAL_STEP_SKELETON_POLICIES == frozenset(
         {
             ("backend_fixed", "locked", "backend_default"),
-            ("semantic_required", "fill_missing", "required_from_outline"),
-            ("semantic_optional", "reject_if_conflicting", "optional_from_outline"),
+            ("semantic_required", "fill_missing", "required_from_intent"),
+            ("semantic_optional", "reject_if_conflicting", "optional_from_intent"),
         }
     )
 
@@ -549,20 +549,20 @@ def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics()
 def test_audio_artifact_skeleton_matches_current_compiler_mechanics(
     semantic_step_count: int,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio report",
             "plan_rationale": "Transcribe, summarize, and create a PDF.",
             "steps": [
                 {
                     "name": f"Audio analysis step {index}",
-                    "task": f"Analyze audio detail {index}.",
+                    "instructions": f"Analyze audio detail {index}.",
                 }
                 for index in range(1, semantic_step_count + 1)
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_type=InputType.AUDIO,
         final_output_type=OutputType.PDF,
         final_output_mode=OutputMode.PASS_THROUGH,
@@ -570,7 +570,7 @@ def test_audio_artifact_skeleton_matches_current_compiler_mechanics(
         pattern_chain_steps=_chain_steps("audio_to_artifact_report"),
     )
 
-    spec = compile_outline_to_create_spec(outline, context=context)
+    spec = compile_create_intent_to_spec(outline, context=context)
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.AUDIO,
         final_output_type=OutputType.PDF,
@@ -587,23 +587,23 @@ def test_audio_artifact_skeleton_matches_current_compiler_mechanics(
 def test_linear_skeleton_matches_current_compiler_mechanics(
     semantic_step_count: int,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured text",
             "plan_rationale": "Analyze document material and return JSON.",
             "steps": [
                 {
                     "name": f"Text step {index}",
-                    "task": f"Analyze text part {index}.",
+                    "instructions": f"Analyze text part {index}.",
                 }
                 for index in range(1, semantic_step_count + 1)
             ],
         }
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(
+        context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.JSON,
         ),
@@ -621,19 +621,19 @@ def test_linear_skeleton_matches_current_compiler_mechanics(
 
 
 def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "plan_rationale": "Fill a DOCX template from uploaded material.",
             "steps": [
                 {
                     "name": "Prepare report content",
-                    "task": "Prepare the content for the template.",
+                    "instructions": "Prepare the content for the template.",
                 }
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.DOCX,
         final_output_mode=OutputMode.TEMPLATE_FILL,
@@ -641,7 +641,7 @@ def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
         pattern_chain_steps=_chain_steps("document_to_docx_template"),
     )
 
-    spec = compile_outline_to_create_spec(outline, context=context)
+    spec = compile_create_intent_to_spec(outline, context=context)
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.DOCX,
@@ -658,20 +658,20 @@ def test_docx_template_skeleton_matches_current_compiler_mechanics() -> None:
 def test_comparison_skeleton_matches_current_compiler_mechanics(
     semantic_step_count: int,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Comparison",
             "plan_rationale": "Analyze branches, then compare.",
             "steps": [
                 {
                     "name": f"Comparison step {index}",
-                    "task": f"Analyze comparison step {index}.",
+                    "instructions": f"Analyze comparison step {index}.",
                 }
                 for index in range(1, semantic_step_count + 1)
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.TEXT,
         final_output_mode=OutputMode.PASS_THROUGH,
@@ -679,7 +679,7 @@ def test_comparison_skeleton_matches_current_compiler_mechanics(
         aggregation_intent="compare",
     )
 
-    spec = compile_outline_to_create_spec(outline, context=context)
+    spec = compile_create_intent_to_spec(outline, context=context)
     plan = materialize_step_skeleton(
         runtime_input_type=InputType.DOCUMENT,
         final_output_type=OutputType.TEXT,

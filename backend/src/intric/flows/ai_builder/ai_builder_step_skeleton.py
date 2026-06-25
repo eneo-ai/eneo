@@ -38,8 +38,8 @@ StepSkeletonRole = Literal[
 MechanicsPolicy = Literal["locked", "fill_missing", "reject_if_conflicting"]
 SemanticPolicy = Literal[
     "backend_default",
-    "required_from_outline",
-    "optional_from_outline",
+    "required_from_intent",
+    "optional_from_intent",
 ]
 SemanticOutputPolicy = Literal["final_output_on_last_semantic", "text_for_all_semantic"]
 SemanticFanInPolicy = Literal["none", "last_semantic"]
@@ -61,8 +61,8 @@ _MIN_DOCUMENT_BODY_FAN_IN_PHASES = 3
 _LEGAL_STEP_SKELETON_POLICIES = frozenset(
     {
         ("backend_fixed", "locked", "backend_default"),
-        ("semantic_required", "fill_missing", "required_from_outline"),
-        ("semantic_optional", "reject_if_conflicting", "optional_from_outline"),
+        ("semantic_required", "fill_missing", "required_from_intent"),
+        ("semantic_optional", "reject_if_conflicting", "optional_from_intent"),
     }
 )
 
@@ -72,7 +72,7 @@ class CompiledChainStepTemplate:
     """Default step text for backend-added skeleton and chain steps."""
 
     name: str
-    task: str
+    instructions: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,28 +118,28 @@ _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
     {
         FLOW_INPUT_AUDIO_TRANSCRIPTION: CompiledChainStepTemplate(
             name="Transcribe audio",
-            task=(
+            instructions=(
                 "Transcribe the uploaded audio into text before downstream "
                 "analysis or artifact generation."
             ),
         ),
         EXTRACT_TEMPLATE_VARIABLES_STEP: CompiledChainStepTemplate(
             name="Extract template variables",
-            task=(
+            instructions=(
                 "Extract the stable fields and source facts needed before "
                 "filling the DOCX template."
             ),
         ),
         STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
             name="Extract structured foundation",
-            task=(
+            instructions=(
                 "Extract source facts, key points, and uncertainties needed "
                 "for the downstream analysis."
             ),
         ),
         ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
             name="Review and finalize",
-            task=(
+            instructions=(
                 "Review the analysis for missing information, uncertainty, "
                 "and quality issues, then write the revised final version "
                 "for the final output."
@@ -147,14 +147,14 @@ _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
         ),
         TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
             name="Fill DOCX template",
-            task=(
+            instructions=(
                 "Fill the DOCX template from the prepared content. Preserve "
                 "the user's requested scope and terminology."
             ),
         ),
         TERMINAL_ARTIFACT_STEP: CompiledChainStepTemplate(
             name="Create final output",
-            task=(
+            instructions=(
                 "Create the final output from the reviewed analysis. Preserve "
                 "the user's requested scope, ordering, and constraints."
             ),
@@ -166,28 +166,28 @@ _SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
     {
         FLOW_INPUT_AUDIO_TRANSCRIPTION: CompiledChainStepTemplate(
             name="Transkribera ljud",
-            task=(
+            instructions=(
                 "Transkribera det uppladdade ljudet till text innan analys "
                 "eller artefaktgenerering."
             ),
         ),
         EXTRACT_TEMPLATE_VARIABLES_STEP: CompiledChainStepTemplate(
             name="Extrahera mallvariabler",
-            task=(
+            instructions=(
                 "Extrahera stabila fält och källfakta som behövs innan "
                 "DOCX-mallen fylls."
             ),
         ),
         STRUCTURED_EXTRACTION_STEP: CompiledChainStepTemplate(
             name="Extrahera strukturerad grund",
-            task=(
+            instructions=(
                 "Extrahera källfakta, huvudpunkter och osäkerheter som behövs "
                 "för den fortsatta analysen."
             ),
         ),
         ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
             name="Granska och färdigställ",
-            task=(
+            instructions=(
                 "Granska analysen för saknad information, osäkerhet och "
                 "kvalitetsproblem och skriv sedan en reviderad slutversion "
                 "för slutresultatet."
@@ -195,14 +195,14 @@ _SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
         ),
         TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
             name="Fyll DOCX-mall",
-            task=(
+            instructions=(
                 "Fyll DOCX-mallen med det förberedda innehållet. Bevara "
                 "användarens önskade omfattning och terminologi."
             ),
         ),
         TERMINAL_ARTIFACT_STEP: CompiledChainStepTemplate(
             name="Skapa slutresultat",
-            task=(
+            instructions=(
                 "Skapa slutresultatet från den granskade analysen. Bevara "
                 "användarens önskade omfattning, ordning och begränsningar."
             ),
@@ -213,13 +213,13 @@ _SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
 
 @dataclass(frozen=True, slots=True)
 class StepSkeleton:
-    """Backend mechanics contract that leaves semantic content to the outline.
+    """Backend mechanics contract that leaves semantic content to the intent.
 
     Mechanics and semantic policies stay separate because create mode fills
     empty slots, while edit mode must preserve valid user-authored mechanics
     and reject conflicting mechanics instead of overwriting them silently.
     Expanded semantic slots share a template `slot_id`; use `slot_ordinal`
-    when matching a concrete outline step to a concrete skeleton slot.
+    when matching a concrete intent step to a concrete skeleton slot.
     """
 
     slot_ordinal: int
@@ -1443,7 +1443,7 @@ def _backend_fixed_slot(
         semantic_policy="backend_default",
         chain_token=chain_token,
         default_name=default_name or template.name,
-        default_instructions=default_instructions or template.task,
+        default_instructions=default_instructions or template.instructions,
         input_source=input_source,
         input_type=input_type,
         output_type=output_type,
@@ -1479,7 +1479,7 @@ def _semantic_required_slot(
         slot_id=slot_id,
         role="semantic_required",
         mechanics_policy="fill_missing",
-        semantic_policy="required_from_outline",
+        semantic_policy="required_from_intent",
         chain_token=None,
         default_name=default_name
         or default_final_step_name(output_type, ui_language=ui_language),

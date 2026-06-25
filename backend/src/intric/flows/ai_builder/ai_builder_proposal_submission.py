@@ -20,7 +20,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
-    process_outline_arguments,
+    process_create_intent_arguments,
     process_scoped_step_revision_if_requested,
     scoped_step_revision_assistant_text,
 )
@@ -440,7 +440,7 @@ class ProposalSubmissionOwner:
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
         if target_kind == TargetKind.CREATE:
-            result = await process_outline_arguments(
+            result = await process_create_intent_arguments(
                 turn=invocation.turn,
                 conversation=invocation.conversation,
                 arguments=invocation.arguments,

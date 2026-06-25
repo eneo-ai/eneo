@@ -12,11 +12,11 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
-    AddStep,
-    ModifyExistingStep,
-    OrderedEditProposal,
-    OrderedEditStep,
+    MaterializedAddStep,
+    MaterializedOrderedEditProposal,
+    MaterializedOrderedEditStep,
     compile_ordered_edit_proposal,
+    materialize_ordered_edit_proposal,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import FlowBuilderEditApproval
 from intric.flows.ai_builder.ai_builder_edit_preview_models import (
@@ -36,6 +36,10 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
     split_primary_runtime_input_shadow_names,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    ModifyExistingStep,
+    OrderedEditProposal,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
@@ -63,7 +67,7 @@ _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
 @dataclass(frozen=True, slots=True)
 class _PreparedOrderedEditProposal:
-    proposal: OrderedEditProposal
+    proposal: MaterializedOrderedEditProposal
     warnings: list[str]
     shadowed_primary_input_fields: list[str]
 
@@ -87,8 +91,12 @@ def compile_edit_proposal(
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = _primary_runtime_input_type_from_steps(current_steps)
+    materialized_proposal = materialize_ordered_edit_proposal(
+        proposal,
+        primary_runtime_input_type=primary_runtime_input_type,
+    )
     prepared = _prepare_ordered_edit_proposal(
-        proposal=proposal,
+        proposal=materialized_proposal,
         current_steps=current_steps,
         current_metadata_json=current_metadata_json,
         primary_runtime_input_type=primary_runtime_input_type,
@@ -206,7 +214,7 @@ def compile_edit_proposal(
 
 def _prepare_ordered_edit_proposal(
     *,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
     current_steps: list[FlowStep],
     current_metadata_json: dict[str, Any] | None,
     primary_runtime_input_type: InputType | None,
@@ -238,15 +246,15 @@ def _prepare_ordered_edit_proposal(
 
 def _sanitize_shadowed_primary_inputs(
     *,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
     primary_runtime_input_type: InputType | None,
-) -> tuple[OrderedEditProposal, list[str]]:
-    steps: list[OrderedEditStep] = []
+) -> tuple[MaterializedOrderedEditProposal, list[str]]:
+    steps: list[MaterializedOrderedEditStep] = []
     dropped_field_names: list[str] = []
     changed = False
 
     for item in proposal.steps:
-        if isinstance(item, AddStep):
+        if isinstance(item, MaterializedAddStep):
             step, dropped = _without_primary_runtime_shadow_fields(
                 item.step,
                 primary_runtime_input_type=primary_runtime_input_type,
@@ -280,10 +288,10 @@ def _sanitize_shadowed_primary_inputs(
 
 def _sanitize_shadowed_form_fields(
     *,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
     base_form_fields: list[FormFieldSpec] | None,
     primary_runtime_input_type: InputType | None,
-) -> tuple[OrderedEditProposal, list[str]]:
+) -> tuple[MaterializedOrderedEditProposal, list[str]]:
     if "form_fields" not in proposal.model_fields_set or proposal.form_fields is None:
         return proposal, []
 
@@ -310,10 +318,10 @@ def _sanitize_shadowed_form_fields(
 
 def _repair_leading_audio_shape(
     *,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
     current_steps: list[FlowStep],
     warnings: list[str],
-) -> OrderedEditProposal:
+) -> MaterializedOrderedEditProposal:
     if len(proposal.steps) < 2 or not current_steps:
         return proposal
     if _starts_with_transcription_step(proposal.steps):
@@ -334,7 +342,7 @@ def _repair_leading_audio_shape(
     ):
         return proposal
 
-    transcript_step = AddStep(
+    transcript_step = MaterializedAddStep(
         step=NewStepDraft(
             name="Transkribera ljud",
             instructions="Transkribera uppladdat ljud till text.",
@@ -361,10 +369,12 @@ def _repair_leading_audio_shape(
     )
 
 
-def _starts_with_transcription_step(steps: list[OrderedEditStep]) -> bool:
+def _starts_with_transcription_step(
+    steps: list[MaterializedOrderedEditStep],
+) -> bool:
     first = steps[0]
     return (
-        isinstance(first, AddStep)
+        isinstance(first, MaterializedAddStep)
         and first.step.input_source == InputSource.FLOW_INPUT
         and first.step.input_type == InputType.AUDIO
         and first.step.output_type == OutputType.TEXT
@@ -372,11 +382,11 @@ def _starts_with_transcription_step(steps: list[OrderedEditStep]) -> bool:
 
 
 def _terminal_output_type(
-    steps: list[OrderedEditStep],
+    steps: list[MaterializedOrderedEditStep],
     current_by_ref: dict[str, FlowStep],
 ) -> OutputType | None:
     terminal = steps[-1]
-    if isinstance(terminal, AddStep):
+    if isinstance(terminal, MaterializedAddStep):
         return terminal.step.output_type
     if "output_type" in terminal.model_fields_set and terminal.output_type is not None:
         return terminal.output_type
@@ -630,7 +640,7 @@ def _compute_confidence(
 
 def _build_description_advisories(
     *,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
     base_spec: FlowDraftSpecCore,
     compiled_steps: list[StepSpec],
     current_description: str | None,

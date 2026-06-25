@@ -13,7 +13,7 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_proposal_intent import SemanticStepIntent
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
@@ -128,7 +128,7 @@ class TestBuildEditFlowToolSchema:
         assert "flow_description" in properties
         assert "metadata_patch" not in properties
 
-    def test_add_step_payload_exposes_runtime_input_constraints(self):
+    def test_add_step_payload_hides_runtime_input_constraints(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=_empty_catalog(),
@@ -137,8 +137,8 @@ class TestBuildEditFlowToolSchema:
 
         add_payload = _add_step_payload_schema(schema)
         properties = add_payload["properties"]
-        assert "runtime_required" in properties
-        assert "runtime_max_files" in properties
+        assert "runtime_required" not in properties
+        assert "runtime_max_files" not in properties
 
     def test_existing_step_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
@@ -273,7 +273,7 @@ class TestBuildEditFlowToolSchema:
         assert "Omit to preserve" in description
         assert "set null to clear all" in description
 
-    def test_add_payload_exposes_edit_new_step_authoring_shape(self):
+    def test_add_payload_exposes_shared_semantic_step_shape(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=_empty_catalog(),
@@ -283,24 +283,25 @@ class TestBuildEditFlowToolSchema:
         add_payload = _add_step_payload_schema(schema)
 
         assert "assistant_spec" not in add_payload["properties"]
-        assert "input_source" in add_payload["properties"]
+        assert "input_source" not in add_payload["properties"]
         assert "output_mode" not in add_payload["properties"]
         assert "input_bindings" not in add_payload["properties"]
         assert "output_contract" not in add_payload["properties"]
         assert "output_config" not in add_payload["properties"]
-        assert "input_source" not in add_payload["required"]
+        assert "input_type" not in add_payload["properties"]
+        assert "runtime_required" not in add_payload["properties"]
+        assert "runtime_max_files" not in add_payload["properties"]
+        assert "document_delivery_mode" not in add_payload["properties"]
         assert "instructions" in add_payload["properties"]
-        assert "document_delivery_mode" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
-        previous_fields = add_payload["properties"]["uses_previous_fields"]
-        assert previous_fields["items"]["required"] == ["from_step", "field_path"]
+        assert "uses_previous_fields" not in add_payload["properties"]
         assert add_payload["properties"]["review_mode"]["enum"] == [
             "view",
             "edit",
             None,
         ]
 
-    def test_add_payload_schema_tracks_new_step_draft_authorable_fields(self):
+    def test_add_payload_schema_tracks_shared_semantic_step_intent_fields(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=_empty_catalog(),
@@ -308,11 +309,8 @@ class TestBuildEditFlowToolSchema:
         )
 
         add_payload = _add_step_payload_schema(schema)
-        backend_owned_fields = {"uses_previous_outputs"}
 
-        assert set(add_payload["properties"]) == (
-            set(NewStepDraft.model_fields) - backend_owned_fields
-        )
+        assert set(add_payload["properties"]) == set(SemanticStepIntent.model_fields)
 
     def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
         self,

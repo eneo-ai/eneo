@@ -321,7 +321,7 @@ class TestProposalGating:
                 "steps": [
                     {
                         "name": "Extract",
-                        "task": "Extract the text.",
+                        "instructions": "Extract the text.",
                         "output_type": "text",
                     }
                 ],

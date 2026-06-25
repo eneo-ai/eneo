@@ -12,17 +12,11 @@ from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     RuntimeInputFieldHintSource,
-    compile_outline_to_create_spec,
-    outline_compile_context_from_planning_state,
+    compile_create_intent_to_spec,
+    create_compile_context_from_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
-    format_create_outline_quality_feedback,
-)
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    FlowCreateOutline,
-    OutlineFlowArgumentError,
-    attach_selected_mcp_refs_to_explicit_outline_steps,
-    safe_validation_issues,
+    format_create_intent_quality_feedback,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -43,6 +37,12 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     resolve_scoped_step_revision_if_requested,
     validate_scoped_plan_revision,
 )
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    CreateFlowIntent,
+    ProposalIntentArgumentError,
+    attach_selected_mcp_refs_to_explicit_intent_steps,
+    safe_validation_issues,
+)
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
     resolve_ui_language,
     terminal_output_type_for_conversation,
@@ -56,7 +56,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from intric.flows.ai_builder.ai_builder_tools import parse_outline_flow_arguments
+from intric.flows.ai_builder.ai_builder_tools import parse_create_flow_intent_arguments
 from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from intric.flows.flow_authoring_spec import FlowDraftSpecCore
 from intric.main.logging import get_logger
@@ -64,7 +64,7 @@ from intric.main.logging import get_logger
 logger = get_logger(__name__)
 PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Your previous reply was prose only. "
-    "Now call propose_flow with one complete semantic outline. "
+    "Now call propose_flow with one complete semantic flow intent. "
     "Do not answer with prose."
 )
 
@@ -145,7 +145,7 @@ def process_scoped_step_revision_if_requested(
     )
     if scoped_revision_feedback is not None:
         return ToolProcessingResult(
-            feedback=format_create_outline_quality_feedback(scoped_revision_feedback),
+            feedback=format_create_intent_quality_feedback(scoped_revision_feedback),
             failure_kind="quality",
         )
 
@@ -203,7 +203,7 @@ def _scoped_step_revision_uses_swedish(
     return any(token in latest for token in ("modell", "ändra", "fil", "istället"))
 
 
-async def process_outline_arguments(
+async def process_create_intent_arguments(
     *,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
@@ -217,17 +217,17 @@ async def process_outline_arguments(
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
     try:
-        outline = parse_outline_flow_arguments(arguments)
+        intent = parse_create_flow_intent_arguments(arguments)
         if resource_catalog is not None:
-            outline = attach_selected_mcp_refs_to_explicit_outline_steps(
-                outline,
+            intent = attach_selected_mcp_refs_to_explicit_intent_steps(
+                intent,
                 selected_server_refs=mcp_selected_server_refs_from_values(
                     mcp_resource_selection_values(conversation)
                 ),
                 catalog=resource_catalog,
             )
         aggregate_text = aggregate_freeform_user_text(conversation)
-        compile_context = outline_compile_context_from_planning_state(
+        compile_context = create_compile_context_from_planning_state(
             planning_state,
             ui_language=resolve_ui_language(conversation),
             runtime_input_hint_source=(
@@ -236,13 +236,13 @@ async def process_outline_arguments(
                 else None
             ),
         )
-        spec = compile_outline_to_create_spec(
-            outline,
+        spec = compile_create_intent_to_spec(
+            intent,
             context=compile_context,
         )
-    except OutlineFlowArgumentError as error:
+    except ProposalIntentArgumentError as error:
         logger.info(
-            "ai_builder_outline_parse_failed session_id=%s tool_call_id=%s issues=%s",
+            "ai_builder_create_intent_parse_failed session_id=%s tool_call_id=%s issues=%s",
             turn.session_id,
             tool_call_id,
             list(error.issues),
@@ -260,7 +260,7 @@ async def process_outline_arguments(
             else None
         )
         logger.info(
-            "ai_builder_outline_compile_failed session_id=%s tool_call_id=%s error_type=%s issues=%s",
+            "ai_builder_create_intent_compile_failed session_id=%s tool_call_id=%s error_type=%s issues=%s",
             turn.session_id,
             tool_call_id,
             type(error).__name__,
@@ -275,7 +275,7 @@ async def process_outline_arguments(
     return await _process_create_spec(
         turn=turn,
         conversation=conversation,
-        outline=outline,
+        intent=intent,
         spec=spec,
         tool_call_id=tool_call_id,
         available_model_refs=available_model_refs,
@@ -295,7 +295,7 @@ async def _process_create_spec(
     *,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
-    outline: FlowCreateOutline,
+    intent: CreateFlowIntent,
     spec: FlowDraftSpecCore,
     tool_call_id: str,
     available_model_refs: set[str] | None,
@@ -360,7 +360,7 @@ async def _process_create_spec(
             target_step_ref,
         )
         return ToolProcessingResult(
-            feedback=format_create_outline_quality_feedback(scoped_revision_feedback),
+            feedback=format_create_intent_quality_feedback(scoped_revision_feedback),
             failure_kind="quality",
         )
 
@@ -368,8 +368,8 @@ async def _process_create_spec(
         compiled_proposal=CompiledProposal(
             content=FlowBuilderProposalContent(
                 spec=spec,
-                assumptions=outline.assumptions,
-                plan_rationale=outline.plan_rationale,
+                assumptions=intent.assumptions,
+                plan_rationale=intent.plan_rationale,
             ),
             validation=validation,
             resource_bindings=(

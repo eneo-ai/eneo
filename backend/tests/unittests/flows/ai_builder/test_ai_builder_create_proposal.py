@@ -15,7 +15,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     slot_classification_metadata_from_result,
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
-    process_outline_arguments,
+    process_create_intent_arguments,
     process_scoped_step_revision_if_requested,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -239,7 +239,7 @@ async def test_outline_processing_returns_compiled_proposal_for_processor_finali
         ),
     ]
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=conversation,
         arguments={
@@ -248,7 +248,7 @@ async def test_outline_processing_returns_compiled_proposal_for_processor_finali
             "steps": [
                 {
                     "name": "Hämta tid",
-                    "task": "Hämta aktuell tid via Time MCP.",
+                    "instructions": "Hämta aktuell tid via Time MCP.",
                     "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
                 }
             ],
@@ -280,7 +280,7 @@ async def test_outline_processing_leaves_mcp_question_persistence_to_processor()
         ],
     )
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[
             ConversationMessage(
@@ -295,7 +295,7 @@ async def test_outline_processing_leaves_mcp_question_persistence_to_processor()
             "steps": [
                 {
                     "name": "Hämta tid",
-                    "task": "Hämta aktuell tid via Time MCP.",
+                    "instructions": "Hämta aktuell tid via Time MCP.",
                     "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
                 }
             ],
@@ -329,7 +329,7 @@ async def test_outline_processing_expands_mcp_server_name_through_compiled_spec(
         ],
     )
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[
             ConversationMessage(
@@ -343,7 +343,7 @@ async def test_outline_processing_expands_mcp_server_name_through_compiled_spec(
             "steps": [
                 {
                     "name": "Hämta tid",
-                    "task": "Använd Time MCP för tidshämtning.",
+                    "instructions": "Använd Time MCP för tidshämtning.",
                     "mcp_server_refs": ["Time MCP"],
                 }
             ],
@@ -380,7 +380,7 @@ async def test_outline_processing_keeps_named_mcp_tool_to_one_tool() -> None:
         ],
     )
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[
             ConversationMessage(
@@ -394,7 +394,7 @@ async def test_outline_processing_keeps_named_mcp_tool_to_one_tool() -> None:
             "steps": [
                 {
                     "name": "Hämta aktuell tid",
-                    "task": "Använd get_current_time för angiven tidszon.",
+                    "instructions": "Använd get_current_time för angiven tidszon.",
                     "mcp_tool_refs": ["get_current_time"],
                 }
             ],
@@ -419,7 +419,7 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
         available_mcps=[],
     )
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
         arguments={
@@ -428,7 +428,7 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
             "steps": [
                 {
                     "name": "Analysera",
-                    "task": "Analysera texten.",
+                    "instructions": "Analysera texten.",
                     "model_ref": "missing-fast-model",
                 }
             ],
@@ -449,15 +449,15 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
 
 @pytest.mark.asyncio
 async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
         arguments={
             "flow_name": "Duplicate names",
             "plan_rationale": "Two semantic steps accidentally share a name.",
             "steps": [
-                {"name": "Förbered PDF-innehåll", "task": "Sammanfatta texten."},
-                {"name": "Förbered PDF-innehåll", "task": "Skriv slutrapport."},
+                {"name": "Förbered PDF-innehåll", "instructions": "Sammanfatta texten."},
+                {"name": "Förbered PDF-innehåll", "instructions": "Skriv slutrapport."},
             ],
         },
         tool_call_id="call-duplicate-name",
@@ -489,7 +489,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
         )
     )
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[
             ConversationMessage(
@@ -503,7 +503,7 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
             "steps": [
                 {
                     "name": "Sammanfatta inspelningen",
-                    "task": "Sammanfatta den transkriberade inspelningen.",
+                    "instructions": "Sammanfatta den transkriberade inspelningen.",
                 }
             ],
         },
@@ -532,7 +532,7 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
         ),
     }
 
-    result = await process_outline_arguments(
+    result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[
             ConversationMessage(
@@ -549,8 +549,8 @@ async def test_outline_processing_uses_runtime_hint_source_from_conversation() -
             "steps": [
                 {
                     "name": "Skriv rapport",
-                    "task": "Skriv rapporten för vald målgrupp.",
-                    "uses_input_fields": ["malgrupp"],
+                    "instructions": "Skriv rapporten för vald målgrupp.",
+                    "uses_form_fields": ["malgrupp"],
                 }
             ],
         },

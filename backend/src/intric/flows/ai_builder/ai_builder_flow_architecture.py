@@ -1,8 +1,8 @@
-"""Structured create-outline rules surfaced to the planner.
+"""Structured create-intent rules surfaced to the planner.
 
 Each `FlowArchitectureSection` groups one heading plus an ordered tuple
 of bullet-rule strings. The renderer turns the registry (plus a short
-lead paragraph describing the create-mode outline contract) into the
+lead paragraph describing the create-mode intent contract) into the
 markdown block that lands in the create-proposal system prompt.
 
 The registry replaces older hand-prose full-mechanics guidance.
@@ -36,20 +36,16 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
         rules=(
             "`flow_name`, `flow_description` och `plan_rationale` som vanlig text",
             (
-                "`runtime_input` beskriver bara huvudingången vid körning "
-                "(`text`, `json`, `document`, `file` eller `audio`)"
-            ),
-            (
                 "`input_fields` modellerar sekundära inmatningsfält/input variables "
                 "som användaren fyller i vid sidan av huvudunderlaget"
             ),
-            "`steps[].name` och `steps[].task` beskriver semantiska arbetssteg",
+            "`steps[].name` och `steps[].instructions` beskriver semantiska arbetssteg",
             (
                 "`steps[].output_fields` används när ett steg ska producera "
                 "strukturerade datapunkter för senare arbete"
             ),
-            "`steps[].uses_input_fields` refererar till namn i `input_fields`",
-            "`final_output_type` anger slutartefakten (`text`, `json`, `pdf` eller `docx`)",
+            "`steps[].uses_form_fields` refererar till namn i `input_fields`",
+            "`steps[].output_type` anger bara semantisk önskan för ett steg",
         ),
     ),
     FlowArchitectureSection(
@@ -67,7 +63,7 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
     FlowArchitectureSection(
         heading="Praktiska regler",
         rules=(
-            "Skriv inga template-variabler som `{{ ... }}` i outline-fält",
+            "Skriv inga template-variabler som `{{ ... }}` i intent-fält",
             "Skriv inga ID:n, hashvärden, tidsstämplar, råa bindings eller rå JSON Schema",
             "Använd flera tydliga steg för komplexa flöden i stället för ett överlastat steg",
             (
@@ -87,8 +83,8 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
                 "tidigare steg ska kopplas in som källa"
             ),
             (
-                "För DOCX/PDF räcker `final_output_type`; backend skapar leveranssteget "
-                "eller dokumentläget"
+                "För DOCX/PDF, ange önskad artefakt som semantisk output på sista "
+                "steget; backend skapar leveranssteget eller dokumentläget"
             ),
             (
                 "Citations kan begäras bara som semantisk önskan på textsteg; "
@@ -99,10 +95,10 @@ FLOW_ARCHITECTURE_SECTIONS: tuple[FlowArchitectureSection, ...] = (
 )
 
 
-_HEADER = "# Outline-flow-kompilering"
+_HEADER = "# Create-intent-kompilering"
 _LEAD = (
     "I create-läge beskriver modellen bara avsikten i `propose_flow`. "
-    "Backend kompilerar outline till kanonisk flödesspecifikation."
+    "Backend kompilerar intentionen till kanonisk flödesspecifikation."
 )
 
 

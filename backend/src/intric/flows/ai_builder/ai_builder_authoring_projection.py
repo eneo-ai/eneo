@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_input_reference_instruction_hint,
@@ -16,100 +16,126 @@ from intric.flows.ai_builder.ai_builder_new_step_compiler import (
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
-    PreviousFieldRef,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    AddStep as IntentAddStep,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    AssistantSpecPatch,
+    ModifyExistingStep,
+    OrderedEditProposal,
+    SemanticStepIntent,
 )
 from intric.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
-from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
-    InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
     strip_inapplicable_completion_model,
 )
-from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
-class AssistantSpecPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    instructions: str | None = None
-    model_ref: str | None = None
-    knowledge_refs: list[str] = Field(default_factory=list)
-    mcp_server_refs: list[str] = Field(default_factory=list)
-    mcp_tool_refs: list[str] = Field(default_factory=list)
-
-
-class ModifyExistingStep(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["modify"] = "modify"
-    existing_step_ref: str
-    name: str | None = None
-    assistant_spec: AssistantSpecPatch | None = None
-    mcp_policy: MCPPolicy | None = None
-    input_source: InputSource | None = None
-    input_type: InputType | None = None
-    output_type: OutputType | None = None
-    output_contract: FlowPersistedJsonObject | None = None
-    review_mode: FlowStepReviewMode | None = None
-    uses_form_fields: list[str] | None = None
-    uses_previous_fields: list[PreviousFieldRef] | None = None
-    document_delivery_mode: DocumentDeliveryMode | None = None
-
-
-class AddStep(BaseModel):
+class MaterializedAddStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["add"] = "add"
     step: NewStepDraft
 
 
-OrderedEditStep = Annotated[ModifyExistingStep | AddStep, Field(discriminator="kind")]
+MaterializedOrderedEditStep = Annotated[
+    ModifyExistingStep | MaterializedAddStep,
+    Field(discriminator="kind"),
+]
 
 
-class OrderedEditProposal(BaseModel):
+class MaterializedOrderedEditProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plan_rationale: str
     assumptions: list[str] = Field(default_factory=list)
     flow_name: str | None = None
     flow_description: str | None = None
-    steps: list[OrderedEditStep]
+    steps: list[MaterializedOrderedEditStep]
     removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
     form_fields: list[FormFieldSpec] | None = None
 
-    @field_validator("plan_rationale")
-    @classmethod
-    def _normalize_plan_rationale(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("plan_rationale must not be empty.")
-        return normalized
 
-    @field_validator("assumptions")
-    @classmethod
-    def _normalize_assumptions(cls, values: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for value in values:
-            assumption = value.strip()
-            if assumption:
-                normalized.append(assumption)
-        return normalized
+def materialize_ordered_edit_proposal(
+    proposal: OrderedEditProposal,
+    *,
+    primary_runtime_input_type: InputType | None = None,
+) -> MaterializedOrderedEditProposal:
+    payload = proposal.model_dump(
+        mode="python",
+        exclude={"steps"},
+        exclude_unset=True,
+    )
+    payload["steps"] = [
+        _materialize_ordered_edit_step(
+            item,
+            step_index=index,
+            primary_runtime_input_type=primary_runtime_input_type,
+        )
+        for index, item in enumerate(proposal.steps)
+    ]
+    return MaterializedOrderedEditProposal.model_validate(payload)
+
+
+def _materialize_ordered_edit_step(
+    item: object,
+    *,
+    step_index: int,
+    primary_runtime_input_type: InputType | None,
+) -> object:
+    if not isinstance(item, IntentAddStep):
+        return item
+    return MaterializedAddStep(
+        step=_new_step_draft_from_semantic_intent(
+            item.step,
+            step_index=step_index,
+            primary_runtime_input_type=primary_runtime_input_type,
+        )
+    )
+
+
+def _new_step_draft_from_semantic_intent(
+    step: SemanticStepIntent,
+    *,
+    step_index: int,
+    primary_runtime_input_type: InputType | None,
+) -> NewStepDraft:
+    input_type = (
+        primary_runtime_input_type
+        if step_index == 0 and primary_runtime_input_type is not None
+        else InputType.TEXT
+    )
+    return NewStepDraft(
+        name=step.name,
+        instructions=step.instructions,
+        input_type=input_type,
+        output_type=step.output_type or OutputType.TEXT,
+        model_ref=step.model_ref,
+        knowledge_refs=list(step.knowledge_refs),
+        mcp_server_refs=list(step.mcp_server_refs),
+        mcp_tool_refs=list(step.mcp_tool_refs),
+        uses_form_fields=list(step.uses_form_fields),
+        citations_requested=step.citations_requested,
+        review_mode=step.review_mode,
+        output_fields=step.output_fields,
+    )
 
 
 def compile_ordered_edit_proposal(
     *,
     base_spec: FlowDraftSpecCore,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
 ) -> FlowDraftSpecCore:
     base_by_ref = {
         step.existing_step_ref: step
@@ -121,7 +147,7 @@ def compile_ordered_edit_proposal(
 
     for index, item in enumerate(proposal.steps):
         plan_ref = make_plan_step_ref(index)
-        if item.kind == "add":
+        if isinstance(item, MaterializedAddStep):
             compiled_steps.append(
                 compile_new_step_draft(
                     step_draft=item.step,
@@ -365,7 +391,7 @@ def _document_body_writer_step_refs(
 
 def _resolve_flow_name(
     base_spec: FlowDraftSpecCore,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
 ) -> str:
     if "flow_name" not in proposal.model_fields_set:
         return base_spec.flow_name
@@ -376,7 +402,7 @@ def _resolve_flow_name(
 
 def _resolve_flow_description(
     base_spec: FlowDraftSpecCore,
-    proposal: OrderedEditProposal,
+    proposal: MaterializedOrderedEditProposal,
 ) -> str:
     if "flow_description" not in proposal.model_fields_set:
         return base_spec.flow_description
@@ -386,10 +412,10 @@ def _resolve_flow_description(
 
 
 __all__ = [
-    "AddStep",
-    "AssistantSpecPatch",
-    "ModifyExistingStep",
-    "OrderedEditProposal",
+    "MaterializedAddStep",
+    "MaterializedOrderedEditProposal",
+    "MaterializedOrderedEditStep",
     "compile_ordered_edit_proposal",
+    "materialize_ordered_edit_proposal",
     "merge_assistant_spec_patch",
 ]

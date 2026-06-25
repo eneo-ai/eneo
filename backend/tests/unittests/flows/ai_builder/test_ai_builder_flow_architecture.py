@@ -1,4 +1,4 @@
-"""Outline-flow architecture rules registry tests.
+"""Create-intent architecture rules registry tests.
 
 Pins the structured-data contract the proposal prompt uses to keep
 low-level Flow mechanics server-owned.
@@ -57,7 +57,7 @@ class TestFlowArchitectureRegistryContract:
 class TestRenderFlowArchitecture:
     def test_render_emits_top_level_header(self) -> None:
         rendered = render_flow_architecture()
-        assert "# Outline-flow-kompilering" in rendered
+        assert "# Create-intent-kompilering" in rendered
 
     def test_render_emits_lead_paragraph(self) -> None:
         """The lead paragraph explains the create-mode contract (planner
@@ -67,7 +67,7 @@ class TestRenderFlowArchitecture:
         rendered = render_flow_architecture()
         assert (
             "I create-läge beskriver modellen bara avsikten i `propose_flow`. "
-            "Backend kompilerar outline till kanonisk flödesspecifikation."
+            "Backend kompilerar intentionen till kanonisk flödesspecifikation."
         ) in rendered
 
     def test_render_emits_every_section_heading(self) -> None:
@@ -116,11 +116,11 @@ class TestRenderFlowArchitecture:
         planner; documented in the slice commit body."""
         expected = "\n".join(
             [
-                "# Outline-flow-kompilering",
+                "# Create-intent-kompilering",
                 "",
                 (
                     "I create-läge beskriver modellen bara avsikten i `propose_flow`. "
-                    "Backend kompilerar outline till kanonisk flödesspecifikation."
+                    "Backend kompilerar intentionen till kanonisk flödesspecifikation."
                 ),
                 "",
                 "## Vad modellen anger",
@@ -129,23 +129,16 @@ class TestRenderFlowArchitecture:
                     "som vanlig text"
                 ),
                 (
-                    "- `runtime_input` beskriver bara huvudingången vid körning "
-                    "(`text`, `json`, `document`, `file` eller `audio`)"
-                ),
-                (
                     "- `input_fields` modellerar sekundära inmatningsfält/input variables "
                     "som användaren fyller i vid sidan av huvudunderlaget"
                 ),
-                "- `steps[].name` och `steps[].task` beskriver semantiska arbetssteg",
+                "- `steps[].name` och `steps[].instructions` beskriver semantiska arbetssteg",
                 (
                     "- `steps[].output_fields` används när ett steg ska producera "
                     "strukturerade datapunkter för senare arbete"
                 ),
-                "- `steps[].uses_input_fields` refererar till namn i `input_fields`",
-                (
-                    "- `final_output_type` anger slutartefakten (`text`, `json`, "
-                    "`pdf` eller `docx`)"
-                ),
+                "- `steps[].uses_form_fields` refererar till namn i `input_fields`",
+                "- `steps[].output_type` anger bara semantisk önskan för ett steg",
                 "",
                 "## Vad backend äger",
                 "- input source/type och upload/runtime config",
@@ -157,7 +150,7 @@ class TestRenderFlowArchitecture:
                 "- kontrakt / JSON Schema från `output_fields`",
                 "",
                 "## Praktiska regler",
-                "- Skriv inga template-variabler som `{{ ... }}` i outline-fält",
+                "- Skriv inga template-variabler som `{{ ... }}` i intent-fält",
                 "- Skriv inga ID:n, hashvärden, tidsstämplar, råa bindings eller rå JSON Schema",
                 "- Använd flera tydliga steg för komplexa flöden i stället för ett överlastat steg",
                 (
@@ -177,8 +170,8 @@ class TestRenderFlowArchitecture:
                     "tidigare steg ska kopplas in som källa"
                 ),
                 (
-                    "- För DOCX/PDF räcker `final_output_type`; backend skapar "
-                    "leveranssteget eller dokumentläget"
+                    "- För DOCX/PDF, ange önskad artefakt som semantisk output på sista "
+                    "steget; backend skapar leveranssteget eller dokumentläget"
                 ),
                 (
                     "- Citations kan begäras bara som semantisk önskan på textsteg; "

@@ -293,7 +293,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
             "flow_name": "Document analysis",
             "plan_rationale": "Analyze the document and produce a summary.",
             "final_output_type": "text",
-            "steps": [{"name": "Analyze", "task": "Analyze the document."}],
+            "steps": [{"name": "Analyze", "instructions": "Analyze the document."}],
         },
     )
 
@@ -306,7 +306,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
@@ -710,7 +710,7 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
         {
             "flow_name": "Time fallback",
             "plan_rationale": "Respond without external tools.",
-            "steps": [{"name": "Answer", "task": "Build a response without MCP."}],
+            "steps": [{"name": "Answer", "instructions": "Build a response without MCP."}],
         },
     )
     processor.litellm_client.acompletion.return_value = _make_response_with_tool_calls(
@@ -752,7 +752,7 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
@@ -864,7 +864,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         {
             "flow_name": "Simple flow",
             "plan_rationale": "Classify incoming text.",
-            "steps": [{"name": "Classify", "task": "Classify the request."}],
+            "steps": [{"name": "Classify", "instructions": "Classify the request."}],
         },
         tool_call_id="call-outline",
     )
@@ -889,11 +889,11 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
@@ -956,7 +956,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
         {
             "flow_name": "Repaired flow",
             "plan_rationale": "Classify incoming text.",
-            "steps": [{"name": "Classify", "task": "Classify the request."}],
+            "steps": [{"name": "Classify", "instructions": "Classify the request."}],
         },
         tool_call_id="call-outline-repaired",
     )
@@ -997,11 +997,11 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
@@ -1062,7 +1062,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         {
             "flow_name": "Recovered flow",
             "plan_rationale": "Classify incoming text.",
-            "steps": [{"name": "Classify", "task": "Classify the request."}],
+            "steps": [{"name": "Classify", "instructions": "Classify the request."}],
         },
         tool_call_id="call-outline-recovered",
     )
@@ -1073,7 +1073,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
                 {
                     "flow_name": "Unexpected first flow",
                     "plan_rationale": "This should be retried because tool calls were parallel.",
-                    "steps": [{"name": "Classify", "task": "Classify the request."}],
+                    "steps": [{"name": "Classify", "instructions": "Classify the request."}],
                 },
                 tool_call_id="call-outline-unexpected-parallel",
             ),
@@ -1104,11 +1104,11 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_create_proposal.process_create_intent_arguments",
             new=process_outline,
         ),
         patch(
@@ -1233,7 +1233,6 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
                 "step": {
                     "name": "Granska rubriker",
                     "instructions": "Kontrollera rubrikernas underlag.",
-                    "input_source": "previous_step",
                     "output_type": "json",
                     "output_fields": [
                         {

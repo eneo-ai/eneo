@@ -1,4 +1,4 @@
-"""Create-mode compile pipeline. Owns outline -> spec."""
+"""Create-mode compile pipeline. Owns semantic intent -> spec."""
 
 from __future__ import annotations
 
@@ -14,11 +14,6 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    FlowCreateOutline,
-    OutlineInputField,
-    OutlineStep,
-)
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
@@ -30,6 +25,11 @@ from intric.flows.ai_builder.ai_builder_new_step_compiler import (
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    CreateFlowIntent,
+    FlowInputFieldIntent,
+    SemanticStepIntent,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     NO_EXTRA_RUNTIME_METADATA,
@@ -82,10 +82,10 @@ ArchitectureEnvelope = ArchitectureCommit | ArchitectureCommitDraft
 
 
 @dataclass(frozen=True, slots=True)
-class OutlineCompileContext:
+class CreateCompileContext:
     """Server-owned create-mode architecture envelope.
 
-    The LLM-facing outline is semantic. Core architecture facts already
+    The LLM-facing intent is semantic. Core architecture facts already
     resolved by discovery must not be re-decided by the model when it
     proposes a plan.
     """
@@ -104,7 +104,7 @@ class OutlineCompileContext:
 
     def __post_init__(self) -> None:
         if self.runtime_input_type is InputType.ANY:
-            raise ValueError("OutlineCompileContext.runtime_input_type cannot be ANY")
+            raise ValueError("CreateCompileContext.runtime_input_type cannot be ANY")
         if self.runtime_max_files is not None and self.runtime_max_files < 1:
             raise ValueError("runtime_max_files must be at least 1 when provided")
 
@@ -114,10 +114,10 @@ class RuntimeInputFieldHintSource:
     aggregated_conversation_text: str
 
 
-def compile_outline_to_create_spec(
-    outline: FlowCreateOutline,
+def compile_create_intent_to_spec(
+    intent: CreateFlowIntent,
     *,
-    context: OutlineCompileContext | None = None,
+    context: CreateCompileContext | None = None,
 ) -> FlowDraftSpecCore:
     runtime_input_type = (
         context.runtime_input_type
@@ -131,11 +131,11 @@ def compile_outline_to_create_spec(
     )
     referenced_hint_names = {
         field_name
-        for outline_step in outline.steps
-        for field_name in outline_step.uses_input_fields
+        for semantic_step in intent.steps
+        for field_name in semantic_step.uses_form_fields
     }
     form_fields, dropped_primary_input_field_names = _compile_form_fields(
-        outline_fields=outline.input_fields,
+        intent_fields=intent.input_fields,
         context=context,
         runtime_input_type=runtime_input_type,
         referenced_hint_names=referenced_hint_names,
@@ -157,35 +157,35 @@ def compile_outline_to_create_spec(
         pattern_ids=pattern_resolution.pattern_ids,
         chain_steps=pattern_resolution.chain_steps,
     )
-    outline_steps = _normalize_leading_audio_transcription_step(
-        steps=list(outline.steps),
+    semantic_steps_input = _normalize_leading_audio_transcription_step(
+        steps=list(intent.steps),
         runtime_input_type=runtime_input_type,
         backend_audio_transcription_inserted=backend_audio_transcription_inserted,
     )
     backend_audio_transcription_review_mode = (
         _redundant_leading_audio_transcription_review_mode(
-            steps=list(outline.steps),
+            steps=list(intent.steps),
             runtime_input_type=runtime_input_type,
             backend_audio_transcription_inserted=backend_audio_transcription_inserted,
         )
     )
-    outline_steps = _fold_leading_zero_contract_text_steps(
-        steps=outline_steps,
+    semantic_steps_input = _fold_leading_zero_contract_text_steps(
+        steps=semantic_steps_input,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
     )
 
     semantic_steps: list[StepSkeletonSemanticContent] = []
-    for outline_step in outline_steps:
+    for semantic_step in semantic_steps_input:
         uses_form_fields = [
             field_name
-            for field_name in outline_step.uses_input_fields
+            for field_name in semantic_step.uses_form_fields
             if field_name in known_field_names
         ]
         dropped_primary_input_field_names.extend(
             [
                 field_name
-                for field_name in outline_step.uses_input_fields
+                for field_name in semantic_step.uses_form_fields
                 if field_name not in known_field_names
                 and is_primary_runtime_input_shadow_field(
                     variable_name=field_name,
@@ -195,8 +195,8 @@ def compile_outline_to_create_spec(
             ]
         )
         semantic_steps.append(
-            _semantic_content_from_outline_step(
-                outline_step,
+            _semantic_content_from_intent_step(
+                semantic_step,
                 uses_form_fields=uses_form_fields,
             )
         )
@@ -249,8 +249,8 @@ def compile_outline_to_create_spec(
         runtime_input_type=runtime_input_type,
     )
     return compile_create_steps_to_spec(
-        flow_name=outline.flow_name,
-        flow_description=outline.flow_description,
+        flow_name=intent.flow_name,
+        flow_description=intent.flow_description,
         form_fields=form_fields,
         steps=steps,
         document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
@@ -258,14 +258,14 @@ def compile_outline_to_create_spec(
     )
 
 
-def _semantic_content_from_outline_step(
-    step: OutlineStep,
+def _semantic_content_from_intent_step(
+    step: SemanticStepIntent,
     *,
     uses_form_fields: list[str],
 ) -> StepSkeletonSemanticContent:
     return StepSkeletonSemanticContent(
         name=step.name,
-        instructions=step.task,
+        instructions=step.instructions,
         requested_output_type=(
             OutputType(step.output_type) if step.output_type is not None else None
         ),
@@ -347,12 +347,12 @@ def _document_body_writer_step_refs(
     )
 
 
-def outline_compile_context_from_planning_state(
+def create_compile_context_from_planning_state(
     planning_state: PlanningState | None,
     *,
     ui_language: str | None = None,
     runtime_input_hint_source: RuntimeInputFieldHintSource | None = None,
-) -> OutlineCompileContext | None:
+) -> CreateCompileContext | None:
     runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
     runtime_input_field_hints = _runtime_input_field_hints_from_source(
         runtime_metadata_state=runtime_metadata_state,
@@ -361,13 +361,13 @@ def outline_compile_context_from_planning_state(
     if planning_state is None:
         if ui_language is None and not runtime_input_field_hints:
             return None
-        return OutlineCompileContext(
+        return CreateCompileContext(
             ui_language=ui_language,
             runtime_metadata_state=runtime_metadata_state,
             runtime_input_field_hints=runtime_input_field_hints,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
-    return OutlineCompileContext(
+    return CreateCompileContext(
         runtime_input_type=(
             _runtime_input_type_from_architecture(architecture)
             or _runtime_input_type_from_planning_state(planning_state)
@@ -558,8 +558,8 @@ def _resolved_slot_value(state: PlanningState, slot_name: str) -> str | None:
 
 def _compile_form_fields(
     *,
-    outline_fields: list[OutlineInputField],
-    context: OutlineCompileContext | None,
+    intent_fields: list[FlowInputFieldIntent],
+    context: CreateCompileContext | None,
     runtime_input_type: InputType | None,
     referenced_hint_names: set[str],
 ) -> tuple[list[FormFieldSpec], list[str]]:
@@ -572,7 +572,7 @@ def _compile_form_fields(
     if runtime_metadata_state == NO_EXTRA_RUNTIME_METADATA:
         _log_dropped_runtime_metadata_input_fields(
             field_names=[
-                *(field.variable_name for field in outline_fields),
+                *(field.variable_name for field in intent_fields),
                 *(hint.variable_name for hint in runtime_input_field_hints),
             ],
             runtime_metadata_state=NO_EXTRA_RUNTIME_METADATA,
@@ -581,7 +581,7 @@ def _compile_form_fields(
 
     fields: list[FormFieldSpec] = []
     dropped_primary_input_field_names: list[str] = []
-    for field in outline_fields:
+    for field in intent_fields:
         if is_primary_runtime_input_shadow_field(
             variable_name=field.variable_name,
             field_type=field.field_type,
@@ -653,10 +653,10 @@ def _log_dropped_primary_input_shadow_fields(
 
 def _fold_leading_zero_contract_text_steps(
     *,
-    steps: list["OutlineStep"],
+    steps: list["SemanticStepIntent"],
     runtime_input_type: InputType,
     final_output_type: OutputType,
-) -> list["OutlineStep"]:
+) -> list["SemanticStepIntent"]:
     """Fold low-value leading text hops without interpreting their wording.
 
     Small models sometimes emit a first step whose only job is "receive/use the
@@ -678,11 +678,11 @@ def _fold_leading_zero_contract_text_steps(
 
     folded_steps = steps[:target_index]
     target_step = steps[target_index]
-    merged_task = "\n\n".join([*(step.task for step in folded_steps), target_step.task])
-    merged = target_step.model_copy(update={"task": merged_task})
+    merged_instructions = "\n\n".join([*(step.instructions for step in folded_steps), target_step.instructions])
+    merged = target_step.model_copy(update={"instructions": merged_instructions})
 
     logger.info(
-        "ai_builder_outline_zero_contract_steps_folded",
+        "ai_builder_create_intent_zero_contract_steps_folded",
         extra={
             "folded_count": len(folded_steps),
             "folded_step_names": [step.name for step in folded_steps],
@@ -696,10 +696,10 @@ def _fold_leading_zero_contract_text_steps(
 
 def _normalize_leading_audio_transcription_step(
     *,
-    steps: list["OutlineStep"],
+    steps: list["SemanticStepIntent"],
     runtime_input_type: InputType,
     backend_audio_transcription_inserted: bool,
-) -> list["OutlineStep"]:
+) -> list["SemanticStepIntent"]:
     if (
         runtime_input_type != InputType.AUDIO
         or not backend_audio_transcription_inserted
@@ -715,17 +715,17 @@ def _normalize_leading_audio_transcription_step(
         rewritten = first_step.model_copy(
             update={
                 "name": _structured_transcript_step_name(first_step),
-                "task": _structured_transcript_step_task(first_step),
+                "instructions": _structured_transcript_step_instructions(first_step),
             }
         )
         logger.info(
-            "ai_builder_redundant_audio_transcription_outline_step_rewritten",
+            "ai_builder_redundant_audio_transcription_semantic_step_rewritten",
             extra={"step_name": first_step.name},
         )
         return [rewritten, *steps[1:]]
 
     logger.info(
-        "ai_builder_redundant_audio_transcription_outline_step_dropped",
+        "ai_builder_redundant_audio_transcription_semantic_step_dropped",
         extra={"step_name": first_step.name},
     )
     return steps[1:]
@@ -733,7 +733,7 @@ def _normalize_leading_audio_transcription_step(
 
 def _redundant_leading_audio_transcription_review_mode(
     *,
-    steps: list["OutlineStep"],
+    steps: list["SemanticStepIntent"],
     runtime_input_type: InputType,
     backend_audio_transcription_inserted: bool,
 ) -> FlowStepReviewMode | None:
@@ -786,12 +786,12 @@ def _backend_audio_transcription_inserted(
     )
 
 
-def _is_redundant_audio_transcription_step(step: "OutlineStep") -> bool:
+def _is_redundant_audio_transcription_step(step: "SemanticStepIntent") -> bool:
     normalized_name = normalize_discovery_text(step.name)
     if contains_any_token_prefix(normalized_name, ("transkrib", "transcrib")):
         return True
 
-    normalized = normalize_discovery_text(f"{step.name} {step.task}")
+    normalized = normalize_discovery_text(f"{step.name} {step.instructions}")
     if contains_any_token_prefix(normalized, ("transkrib", "transcrib")) and any(
         phrase in normalized
         for phrase in (
@@ -816,15 +816,15 @@ def _is_redundant_audio_transcription_step(step: "OutlineStep") -> bool:
     )
 
 
-def _structured_transcript_step_name(step: "OutlineStep") -> str:
-    normalized = normalize_discovery_text(f"{step.name} {step.task}")
+def _structured_transcript_step_name(step: "SemanticStepIntent") -> str:
+    normalized = normalize_discovery_text(f"{step.name} {step.instructions}")
     if contains_any_token_prefix(normalized, ("transkrib", "ljud", "möte")):
         return "Strukturera transkription"
     return "Structure transcript"
 
 
-def _structured_transcript_step_task(step: "OutlineStep") -> str:
-    normalized = normalize_discovery_text(f"{step.name} {step.task}")
+def _structured_transcript_step_instructions(step: "SemanticStepIntent") -> str:
+    normalized = normalize_discovery_text(f"{step.name} {step.instructions}")
     if contains_any_token_prefix(normalized, ("transkrib", "ljud", "möte")):
         prefix = (
             "Strukturera den redan transkriberade texten från föregående steg. "
@@ -837,19 +837,19 @@ def _structured_transcript_step_task(step: "OutlineStep") -> str:
             "Do not request a new audio transcription; preserve timestamps and "
             "speaker turns only when they are present in the text."
         )
-    return f"{prefix}\n\n{step.task}"
+    return f"{prefix}\n\n{step.instructions}"
 
 
-def _is_plain_text_semantic_step(step: "OutlineStep") -> bool:
+def _is_plain_text_semantic_step(step: "SemanticStepIntent") -> bool:
     return (
         _declared_output_type(step) == OutputType.TEXT
         and not step.output_fields
-        and not step.uses_input_fields
+        and not step.uses_form_fields
         and _has_no_external_step_refs(step)
     )
 
 
-def _has_no_external_step_refs(step: "OutlineStep") -> bool:
+def _has_no_external_step_refs(step: "SemanticStepIntent") -> bool:
     return (
         not step.knowledge_refs
         and not step.mcp_server_refs
@@ -860,7 +860,7 @@ def _has_no_external_step_refs(step: "OutlineStep") -> bool:
 
 def _leading_fold_target_index(
     *,
-    steps: list["OutlineStep"],
+    steps: list["SemanticStepIntent"],
     final_output_type: OutputType,
 ) -> int | None:
     folded_count = 0
@@ -883,14 +883,14 @@ def _leading_fold_target_index(
 
 def _can_absorb_leading_zero_contract_step(
     *,
-    candidate: "OutlineStep",
+    candidate: "SemanticStepIntent",
     candidate_index: int,
     step_count: int,
     final_output_type: OutputType,
 ) -> bool:
     if (
         candidate.output_fields
-        or candidate.uses_input_fields
+        or candidate.uses_form_fields
         or candidate.mcp_server_refs
         or candidate.mcp_tool_refs
     ):
@@ -902,11 +902,11 @@ def _can_absorb_leading_zero_contract_step(
     return candidate_index == step_count - 1 and final_output_type != OutputType.TEXT
 
 
-def _is_zero_contract_text_step(step: "OutlineStep") -> bool:
+def _is_zero_contract_text_step(step: "SemanticStepIntent") -> bool:
     return (
         _declared_output_type(step) == OutputType.TEXT
         and not step.output_fields
-        and not step.uses_input_fields
+        and not step.uses_form_fields
         and not step.model_ref
         and not step.knowledge_refs
         and not step.mcp_server_refs
@@ -916,14 +916,14 @@ def _is_zero_contract_text_step(step: "OutlineStep") -> bool:
     )
 
 
-def _declared_output_type(step: "OutlineStep") -> OutputType:
+def _declared_output_type(step: "SemanticStepIntent") -> OutputType:
     try:
         return OutputType(step.output_type) if step.output_type else OutputType.TEXT
     except ValueError:
         return OutputType.TEXT
 
 
-def _compile_input_field(field: OutlineInputField) -> FormFieldSpec:
+def _compile_input_field(field: FlowInputFieldIntent) -> FormFieldSpec:
     return FormFieldSpec(
         name=field.variable_name,
         label=field.label,

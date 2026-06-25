@@ -230,11 +230,11 @@ class NewStepDraft(BaseModel):
                 "A step cannot use knowledge_refs and MCP refs at the same time."
             )
         if self.output_fields:
-            _ensure_field_depth(self.output_fields)
+            ensure_structured_field_depth(self.output_fields)
         return self
 
 
-def _ensure_field_depth(
+def ensure_structured_field_depth(
     fields: list[StructuredFieldDraft],
     *,
     depth: int = 1,
@@ -242,9 +242,9 @@ def _ensure_field_depth(
     if depth > MAX_STRUCTURED_FIELD_DEPTH:
         raise ValueError(
             f"Structured field nesting depth cannot exceed {MAX_STRUCTURED_FIELD_DEPTH}."
-        )
+    )
     for field in fields:
         if field.fields:
-            _ensure_field_depth(field.fields, depth=depth + 1)
+            ensure_structured_field_depth(field.fields, depth=depth + 1)
         if field.item_fields:
-            _ensure_field_depth(field.item_fields, depth=depth + 1)
+            ensure_structured_field_depth(field.item_fields, depth=depth + 1)

@@ -14,25 +14,17 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import (
-    OutlineCompileContext,
+    CreateCompileContext,
     RuntimeInputFieldHintSource,
+    compile_create_intent_to_spec,
     compile_create_steps_to_spec,
-    compile_outline_to_create_spec,
-    outline_compile_context_from_planning_state,
+    create_compile_context_from_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     auto_bind_targeted_underlag_for_text_composer as _auto_bind_targeted_underlag_for_text_composer,
 )
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_step_mechanics,
-)
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    _OUTLINE_STEP_BACKEND_OWNED_KEYS,
-    MAX_OUTLINE_STEPS,
-    OutlineFlowArgumentError,
-    attach_selected_mcp_refs_to_explicit_outline_steps,
-    build_outline_flow_tool_schema,
-    parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_form_field_type_values,
@@ -44,6 +36,14 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 )
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS,
+    MAX_PROPOSAL_STEPS,
+    ProposalIntentArgumentError,
+    attach_selected_mcp_refs_to_explicit_intent_steps,
+    build_create_flow_tool_schema,
+    parse_create_flow_intent_arguments,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -85,16 +85,16 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
-from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads import (
+from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads import (
     expected_root_assumption_strings,
     expected_step_assumption_strings,
-    self_correction_outline_with_step_assumptions_payload,
+    self_correction_intent_with_step_assumptions_payload,
 )
 from tests.unittests.flows.ai_builder.authoring_command_assertions import (
     assert_create_spec_prepares_through_authoring_command,
 )
 
-CREATE_OUTLINE_LOGGER = "intric.flows.ai_builder.ai_builder_create_outline"
+PROPOSAL_INTENT_LOGGER = "intric.flows.ai_builder.ai_builder_proposal_intent"
 CREATE_COMPILER_LOGGER = "intric.flows.ai_builder.ai_builder_create_compiler"
 
 
@@ -1202,7 +1202,7 @@ def test_compile_create_steps_to_spec_sets_review_policy_from_review_mode() -> N
 
 
 def test_outline_flow_schema_exposes_review_mode_on_steps() -> None:
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
     )
     parameters = cast(dict[str, object], schema["function"])["parameters"]
@@ -1215,15 +1215,15 @@ def test_outline_flow_schema_exposes_review_mode_on_steps() -> None:
     assert review_mode["enum"] == ["view", "edit", None]
 
 
-def test_parse_outline_flow_arguments_accepts_review_mode() -> None:
-    outline = parse_outline_flow_arguments(
+def test_parse_create_flow_intent_arguments_accepts_review_mode() -> None:
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Granska text",
             "plan_rationale": "Användaren ska granska resultatet innan nästa steg.",
             "steps": [
                 {
                     "name": "Bearbeta text",
-                    "task": "Bearbeta texten.",
+                    "instructions": "Bearbeta texten.",
                     "review_mode": "edit",
                 }
             ],
@@ -1233,10 +1233,10 @@ def test_parse_outline_flow_arguments_accepts_review_mode() -> None:
     assert outline.steps[0].review_mode is FlowStepReviewMode.EDIT
 
 
-def test_parse_outline_flow_arguments_strips_input_field_type_before_validation() -> (
+def test_parse_create_flow_intent_arguments_strips_input_field_type_before_validation() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Fältflöde",
             "plan_rationale": "Behöver ett runtime-fält.",
@@ -1248,16 +1248,16 @@ def test_parse_outline_flow_arguments_strips_input_field_type_before_validation(
                     "required": True,
                 }
             ],
-            "steps": [{"name": "Skriv", "task": "Skriv med fältet."}],
+            "steps": [{"name": "Skriv", "instructions": "Skriv med fältet."}],
         }
     )
 
     assert outline.input_fields[0].field_type == "text"
 
 
-def test_parse_outline_flow_arguments_rejects_flow_layer_field_type_coercion() -> None:
-    with pytest.raises(OutlineFlowArgumentError, match="field_type"):
-        parse_outline_flow_arguments(
+def test_parse_create_flow_intent_arguments_rejects_flow_layer_field_type_coercion() -> None:
+    with pytest.raises(ProposalIntentArgumentError, match="field_type"):
+        parse_create_flow_intent_arguments(
             {
                 "flow_name": "Fältflöde",
                 "plan_rationale": "AI Builder ska vara strikt här.",
@@ -1269,21 +1269,21 @@ def test_parse_outline_flow_arguments_rejects_flow_layer_field_type_coercion() -
                         "required": True,
                     }
                 ],
-                "steps": [{"name": "Skriv", "task": "Skriv med fältet."}],
+                "steps": [{"name": "Skriv", "instructions": "Skriv med fältet."}],
             }
         )
 
 
-def test_parse_outline_flow_arguments_rejects_invalid_review_mode() -> None:
-    with pytest.raises(OutlineFlowArgumentError, match="review_mode"):
-        parse_outline_flow_arguments(
+def test_parse_create_flow_intent_arguments_rejects_invalid_review_mode() -> None:
+    with pytest.raises(ProposalIntentArgumentError, match="review_mode"):
+        parse_create_flow_intent_arguments(
             {
                 "flow_name": "Felaktig granskning",
                 "plan_rationale": "Ogiltigt granskningsläge ska stoppas.",
                 "steps": [
                     {
                         "name": "Bearbeta text",
-                        "task": "Bearbeta texten.",
+                        "instructions": "Bearbeta texten.",
                         "review_mode": "approve",
                     }
                 ],
@@ -1292,41 +1292,41 @@ def test_parse_outline_flow_arguments_rejects_invalid_review_mode() -> None:
 
 
 def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Granska text",
             "plan_rationale": "Användaren ska kunna ändra resultatet.",
             "steps": [
                 {
                     "name": "Bearbeta text",
-                    "task": "Bearbeta texten.",
+                    "instructions": "Bearbeta texten.",
                     "review_mode": "edit",
                 }
             ],
         }
     )
 
-    compiled = compile_outline_to_create_spec(outline)
+    compiled = compile_create_intent_to_spec(outline)
 
     assert compiled.steps[0].review_policy is not None
     assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
 
 
 def test_compile_outline_parity_plain_text_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Text summary",
             "plan_rationale": "Summarize supplied text.",
             "steps": [
                 {
                     "name": "Summarize text",
-                    "task": "Write a concise summary.",
+                    "instructions": "Write a concise summary.",
                 }
             ],
         }
     )
 
-    spec = compile_outline_to_create_spec(outline)
+    spec = compile_create_intent_to_spec(outline)
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Text summary",
@@ -1343,19 +1343,19 @@ def test_compile_outline_parity_plain_text_snapshot() -> None:
 
 
 def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Meeting minutes",
             "plan_rationale": "Transcribe meeting audio and produce a PDF report.",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "task": "Transkribera ljud till text.",
+                    "instructions": "Transkribera ljud till text.",
                     "review_mode": "edit",
                 },
                 {
                     "name": "Skapa rapport",
-                    "task": "Skriv en rapport från transkriptionen.",
+                    "instructions": "Skriv en rapport från transkriptionen.",
                     "output_type": "pdf",
                 },
             ],
@@ -1369,9 +1369,9 @@ def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
         required_capabilities=["input_audio", "output_mode_pass_through"],
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
@@ -1412,14 +1412,14 @@ def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
 
 
 def test_compile_outline_parity_docx_template_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "plan_rationale": "Fill a DOCX template from source material.",
             "steps": [
                 {
                     "name": "Prepare report content",
-                    "task": "Prepare content for the template.",
+                    "instructions": "Prepare content for the template.",
                 }
             ],
         }
@@ -1432,9 +1432,9 @@ def test_compile_outline_parity_docx_template_snapshot() -> None:
         required_capabilities=["input_document", "output_mode_template_fill"],
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
@@ -1475,14 +1475,14 @@ def test_compile_outline_parity_docx_template_snapshot() -> None:
 
 
 def test_compile_outline_parity_json_intermediate_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Customer report",
             "plan_rationale": "Extract structured facts and write a report.",
             "steps": [
                 {
                     "name": "Extract facts",
-                    "task": "Extract customer facts.",
+                    "instructions": "Extract customer facts.",
                     "output_type": "json",
                     "output_fields": [
                         {
@@ -1494,7 +1494,7 @@ def test_compile_outline_parity_json_intermediate_snapshot() -> None:
                 },
                 {
                     "name": "Write report",
-                    "task": "Write a short customer report.",
+                    "instructions": "Write a short customer report.",
                     "output_type": "text",
                 },
             ],
@@ -1508,9 +1508,9 @@ def test_compile_outline_parity_json_intermediate_snapshot() -> None:
         required_capabilities=["input_text", "output_mode_pass_through"],
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
@@ -1542,7 +1542,7 @@ def test_compile_outline_parity_json_intermediate_snapshot() -> None:
 
 
 def test_compile_outline_parity_form_field_chain_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audience report",
             "plan_rationale": "Use requested form fields.",
@@ -1563,13 +1563,13 @@ def test_compile_outline_parity_form_field_chain_snapshot() -> None:
             "steps": [
                 {
                     "name": "Draft section",
-                    "task": "Draft for audience.",
-                    "uses_input_fields": ["audience"],
+                    "instructions": "Draft for audience.",
+                    "uses_form_fields": ["audience"],
                 },
                 {
                     "name": "Finalize",
-                    "task": "Finalize the text.",
-                    "uses_input_fields": ["tone"],
+                    "instructions": "Finalize the text.",
+                    "uses_form_fields": ["tone"],
                 },
             ],
         }
@@ -1582,9 +1582,9 @@ def test_compile_outline_parity_form_field_chain_snapshot() -> None:
         required_capabilities=["input_text", "output_mode_pass_through"],
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
@@ -1615,7 +1615,7 @@ def test_compile_outline_parity_form_field_chain_snapshot() -> None:
 
 
 def test_compile_outline_parity_single_step_field_attachment_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Single field report",
             "plan_rationale": "One step uses all fields implicitly.",
@@ -1636,13 +1636,13 @@ def test_compile_outline_parity_single_step_field_attachment_snapshot() -> None:
             "steps": [
                 {
                     "name": "Write report",
-                    "task": "Write report using the provided fields.",
+                    "instructions": "Write report using the provided fields.",
                 }
             ],
         }
     )
 
-    spec = compile_outline_to_create_spec(outline)
+    spec = compile_create_intent_to_spec(outline)
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
         flow_name="Single field report",
@@ -1664,18 +1664,18 @@ def test_compile_outline_parity_single_step_field_attachment_snapshot() -> None:
 
 
 def test_compile_outline_parity_aggregate_context_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Aggregate documents",
             "plan_rationale": "Aggregate multiple documents into a PDF.",
             "steps": [
                 {
                     "name": "Extract themes",
-                    "task": "Extract themes from the material.",
+                    "instructions": "Extract themes from the material.",
                 },
                 {
                     "name": "Synthesize",
-                    "task": "Synthesize all themes.",
+                    "instructions": "Synthesize all themes.",
                     "output_type": "text",
                 },
             ],
@@ -1690,9 +1690,9 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
         aggregation_intent="aggregate",
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
@@ -1752,27 +1752,27 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
 
 
 def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Fold text hop",
             "plan_rationale": "Avoid zero-contract first step.",
             "steps": [
                 {
                     "name": "Receive text",
-                    "task": "Read the user text.",
+                    "instructions": "Read the user text.",
                 },
                 {
                     "name": "Create PDF",
-                    "task": "Create a PDF report.",
+                    "instructions": "Create a PDF report.",
                     "output_type": "pdf",
                 },
             ],
         }
     )
 
-    spec = compile_outline_to_create_spec(
+    spec = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(final_output_type=OutputType.PDF),
+        context=CreateCompileContext(final_output_type=OutputType.PDF),
     )
 
     assert spec.model_dump(mode="json") == _create_spec_snapshot(
@@ -1968,21 +1968,21 @@ def test_structured_field_depth_above_three_is_rejected() -> None:
 
 
 def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
     )
     assert schema["function"]["name"] == PROPOSE_FLOW_TOOL_NAME
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
     ]
-    leaked_backend_keys = sorted(set(step_props) & _OUTLINE_STEP_BACKEND_OWNED_KEYS)
+    leaked_backend_keys = sorted(set(step_props) & _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS)
 
     assert leaked_backend_keys == []
-    assert "uses_input_fields" in step_props
+    assert "uses_form_fields" in step_props
 
 
 def test_outline_flow_schema_uses_flow_derived_enums() -> None:
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
     )
     parameters = schema["function"]["parameters"]
@@ -1992,7 +1992,7 @@ def test_outline_flow_schema_uses_flow_derived_enums() -> None:
     assert parameters["required"] == ["flow_name", "plan_rationale", "steps"]
     assert "runtime_input" not in properties
     assert "final_output_type" not in properties
-    assert properties["steps"]["maxItems"] == MAX_OUTLINE_STEPS
+    assert properties["steps"]["maxItems"] == MAX_PROPOSAL_STEPS
     assert step_props["output_type"]["enum"] == [
         *builder_output_type_values(),
         None,
@@ -2009,7 +2009,7 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_for_small_catalog() -> Non
             }
         ]
     )
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
@@ -2026,7 +2026,7 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
 ) -> None:
     caplog.set_level(
         logging.INFO,
-        logger=CREATE_OUTLINE_LOGGER,
+        logger=PROPOSAL_INTENT_LOGGER,
     )
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
@@ -2039,32 +2039,32 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
             }
         ],
     )
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Separera MCP-hämtning från slutlig strukturering.",
             "steps": [
                 {
                     "name": "Hämta aktuell tid med Time MCP",
-                    "task": "Använd Time MCP för att hämta aktuell tid.",
+                    "instructions": "Använd Time MCP för att hämta aktuell tid.",
                     "output_type": "json",
                 },
                 {
                     "name": "Skapa strukturerat svar",
-                    "task": "Formatera resultatet som JSON.",
+                    "instructions": "Formatera resultatet som JSON.",
                     "output_type": "json",
                 },
             ],
         }
     )
 
-    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+    updated = attach_selected_mcp_refs_to_explicit_intent_steps(
         outline,
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
     spec = _canonicalize_create_spec(
-        compile_outline_to_create_spec(updated),
+        compile_create_intent_to_spec(updated),
         catalog=catalog,
     )
 
@@ -2079,7 +2079,7 @@ def test_selected_mcp_server_is_attached_to_explicit_outline_step_only(
             record
             for record in caplog.records
             if record.message
-            == "ai_builder_selected_mcp_refs_attached_to_outline_steps"
+            == "ai_builder_selected_mcp_refs_attached_to_semantic_steps"
         ),
         None,
     )
@@ -2110,27 +2110,27 @@ def test_selected_mcp_attachment_prefers_explicit_tool_aliases() -> None:
             }
         ],
     )
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Använd bara relevant MCP-verktyg.",
             "steps": [
                 {
                     "name": "Hämta tid med Time MCP",
-                    "task": "Använd get_current_time för angiven tidszon.",
+                    "instructions": "Använd get_current_time för angiven tidszon.",
                     "output_type": "json",
                 },
             ],
         }
     )
 
-    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+    updated = attach_selected_mcp_refs_to_explicit_intent_steps(
         outline,
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
     spec = _canonicalize_create_spec(
-        compile_outline_to_create_spec(updated),
+        compile_create_intent_to_spec(updated),
         catalog=catalog,
     )
 
@@ -2155,32 +2155,32 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
             }
         ],
     )
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Verktygsnamnet räcker när användaren redan valt servern.",
             "steps": [
                 {
                     "name": "Hämta aktuell tid",
-                    "task": "Använd get_current_time för angiven tidszon.",
+                    "instructions": "Använd get_current_time för angiven tidszon.",
                     "output_type": "json",
                 },
                 {
                     "name": "Konvertera tiden",
-                    "task": "Använd convert_time till Europe/Stockholm.",
+                    "instructions": "Använd convert_time till Europe/Stockholm.",
                     "output_type": "json",
                 },
             ],
         }
     )
 
-    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+    updated = attach_selected_mcp_refs_to_explicit_intent_steps(
         outline,
         selected_server_refs={"mcp_server.time-mcp"},
         catalog=catalog,
     )
     spec = _canonicalize_create_spec(
-        compile_outline_to_create_spec(updated),
+        compile_create_intent_to_spec(updated),
         catalog=catalog,
     )
 
@@ -2206,14 +2206,14 @@ def test_selected_mcp_attachment_skips_knowledge_steps() -> None:
             }
         ],
     )
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Policy och tid",
             "plan_rationale": "Knowledge och MCP får inte blandas på samma steg.",
             "steps": [
                 {
                     "name": "Grounda i policy",
-                    "task": "Använd get_current_time endast som exempeltext här.",
+                    "instructions": "Använd get_current_time endast som exempeltext här.",
                     "output_type": "text",
                     "knowledge_refs": ["kb-1"],
                 },
@@ -2221,7 +2221,7 @@ def test_selected_mcp_attachment_skips_knowledge_steps() -> None:
         }
     )
 
-    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+    updated = attach_selected_mcp_refs_to_explicit_intent_steps(
         outline,
         selected_server_refs={"time-server"},
         catalog=catalog,
@@ -2244,21 +2244,21 @@ def test_selected_mcp_attachment_does_not_infer_from_domain_words() -> None:
             }
         ],
     )
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Tid till JSON",
             "plan_rationale": "Domänord räcker inte för MCP-koppling.",
             "steps": [
                 {
                     "name": "Hämta aktuell tid",
-                    "task": "Hämta aktuell tid för användarens tidszon.",
+                    "instructions": "Hämta aktuell tid för användarens tidszon.",
                     "output_type": "json",
                 },
             ],
         }
     )
 
-    updated = attach_selected_mcp_refs_to_explicit_outline_steps(
+    updated = attach_selected_mcp_refs_to_explicit_intent_steps(
         outline,
         selected_server_refs={"time-server"},
         catalog=catalog,
@@ -2275,7 +2275,7 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
         available_models=[_model_resource("model-1", "gpt-5.4-nano")],
         available_kbs=[_kb_resource("kb-1", "Risk KB")],
     )
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
@@ -2288,7 +2288,7 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
 
 
 def test_outline_flow_schema_form_field_enum_matches_builder_values() -> None:
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME, resource_catalog=_empty_catalog()
     )
     parameters = cast(dict[str, object], schema["function"])["parameters"]
@@ -2311,7 +2311,7 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() ->
             },
         ]
     )
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
@@ -2333,7 +2333,7 @@ def test_outline_flow_schema_omits_mcp_ref_enums_for_large_catalog() -> None:
             for index in range(16)
         ]
     )
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
@@ -2358,7 +2358,7 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_when_tool_catalog_is_large
             }
         ]
     )
-    schema = build_outline_flow_tool_schema(
+    schema = build_create_flow_tool_schema(
         tool_name=PROPOSE_FLOW_TOOL_NAME,
         resource_catalog=catalog,
     )
@@ -2371,28 +2371,28 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_when_tool_catalog_is_large
 
 
 def test_parse_outline_flow_allows_server_owned_core_shape_defaults() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Minimal outline",
             "plan_rationale": "Let the backend apply the committed architecture.",
             "steps": [
                 {
                     "name": "Do the work",
-                    "task": "Follow the user's confirmed requirements.",
+                    "instructions": "Follow the user's confirmed requirements.",
                 }
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     assert draft.steps[0].input_type is InputType.TEXT
     assert draft.steps[0].input_config is None
 
 
 def test_parse_outline_flow_rejects_model_supplied_runtime_input() -> None:
-    with pytest.raises(OutlineFlowArgumentError, match="runtime_input"):
-        parse_outline_flow_arguments(
+    with pytest.raises(ProposalIntentArgumentError, match="runtime_input"):
+        parse_create_flow_intent_arguments(
             {
                 "flow_name": "Minimal outline",
                 "plan_rationale": "Runtime input is server-owned.",
@@ -2400,7 +2400,7 @@ def test_parse_outline_flow_rejects_model_supplied_runtime_input() -> None:
                 "steps": [
                     {
                         "name": "Do the work",
-                        "task": "Follow the user's confirmed requirements.",
+                        "instructions": "Follow the user's confirmed requirements.",
                     }
                 ],
             }
@@ -2409,17 +2409,17 @@ def test_parse_outline_flow_rejects_model_supplied_runtime_input() -> None:
 
 def test_outline_compile_context_rejects_invalid_runtime_input_constraints() -> None:
     with pytest.raises(ValueError, match="runtime_max_files"):
-        OutlineCompileContext(
+        CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             runtime_max_files=0,
         )
 
     with pytest.raises(ValueError, match="runtime_input_type"):
-        OutlineCompileContext(runtime_input_type=InputType.ANY)
+        CreateCompileContext(runtime_input_type=InputType.ANY)
 
 
 def test_parse_outline_flow_ignores_model_supplied_final_output_type() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Minimal outline",
             "plan_rationale": "Let the backend apply the committed architecture.",
@@ -2427,17 +2427,17 @@ def test_parse_outline_flow_ignores_model_supplied_final_output_type() -> None:
             "steps": [
                 {
                     "name": "Do the work",
-                    "task": "Follow the user's confirmed requirements.",
+                    "instructions": "Follow the user's confirmed requirements.",
                 }
             ],
         }
     )
 
     assert not hasattr(outline, "final_output_type")
-    default_draft = compile_outline_to_create_spec(outline)
-    context_draft = compile_outline_to_create_spec(
+    default_draft = compile_create_intent_to_spec(outline)
+    context_draft = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(final_output_type=OutputType.PDF),
+        context=CreateCompileContext(final_output_type=OutputType.PDF),
     )
 
     assert default_draft.steps[-1].output_type == OutputType.TEXT
@@ -2445,14 +2445,14 @@ def test_parse_outline_flow_ignores_model_supplied_final_output_type() -> None:
 
 
 def test_parse_outline_flow_accepts_create_resource_refs() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Kunskapsflöde",
             "plan_rationale": "Använder rätt modell och kunskapsbas.",
             "steps": [
                 {
                     "name": "Analysera policy",
-                    "task": "Svara med stöd av policyunderlaget.",
+                    "instructions": "Svara med stöd av policyunderlaget.",
                     "model_ref": " model-1 ",
                     "knowledge_refs": [" kb-1 ", "kb-1", ""],
                 }
@@ -2460,22 +2460,22 @@ def test_parse_outline_flow_accepts_create_resource_refs() -> None:
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     assert draft.steps[0].assistant_spec.model_ref == "model-1"
     assert draft.steps[0].assistant_spec.knowledge_refs == ["kb-1"]
 
 
 def test_parse_outline_flow_rejects_knowledge_and_mcp_on_same_step() -> None:
-    with pytest.raises(OutlineFlowArgumentError, match="knowledge_refs with MCP refs"):
-        parse_outline_flow_arguments(
+    with pytest.raises(ProposalIntentArgumentError, match="knowledge_refs with MCP refs"):
+        parse_create_flow_intent_arguments(
             {
                 "flow_name": "Ogiltigt",
                 "plan_rationale": "Blandar två externa resurslägen.",
                 "steps": [
                     {
                         "name": "Analysera",
-                        "task": "Analysera med allt.",
+                        "instructions": "Analysera med allt.",
                         "knowledge_refs": ["kb-1"],
                         "mcp_tool_refs": ["tool-1"],
                     }
@@ -2485,15 +2485,15 @@ def test_parse_outline_flow_rejects_knowledge_and_mcp_on_same_step() -> None:
 
 
 def test_parse_outline_flow_errors_are_safe_and_field_level() -> None:
-    with pytest.raises(OutlineFlowArgumentError) as exc_info:
-        parse_outline_flow_arguments(
+    with pytest.raises(ProposalIntentArgumentError) as exc_info:
+        parse_create_flow_intent_arguments(
             {
                 "flow_name": "Broken outline",
                 "plan_rationale": "Contains a malformed step.",
                 "steps": [
                     {
                         "name": "Extract",
-                        "task": "Secret case note that should not appear in logs.",
+                        "instructions": "Secret case note that should not appear in logs.",
                         "unexpected_mechanic": "Secret low-level binding detail.",
                     }
                 ],
@@ -2508,14 +2508,14 @@ def test_parse_outline_flow_errors_are_safe_and_field_level() -> None:
 
 
 def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Stale mechanics outline",
             "plan_rationale": "Stale models may emit low-level mechanics.",
             "steps": [
                 {
                     "name": "Do the work",
-                    "task": "Follow the user's confirmed requirements.",
+                    "instructions": "Follow the user's confirmed requirements.",
                     "input_strategy": "all_prior_work",
                     "input_source": "all_previous_steps",
                     "input_type": "json",
@@ -2526,7 +2526,7 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     assert draft.steps[0].input_source.value == "flow_input"
     assert draft.steps[0].input_type.value == "text"
@@ -2535,8 +2535,8 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
 def test_parse_outline_flow_merges_step_local_assumptions_from_diagnostic_payload() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
-        self_correction_outline_with_step_assumptions_payload()
+    outline = parse_create_flow_intent_arguments(
+        self_correction_intent_with_step_assumptions_payload()
     )
 
     assert outline.assumptions == [
@@ -2547,15 +2547,15 @@ def test_parse_outline_flow_merges_step_local_assumptions_from_diagnostic_payloa
 
 
 def test_parse_outline_flow_rejects_step_local_input_fields() -> None:
-    with pytest.raises(OutlineFlowArgumentError) as exc_info:
-        parse_outline_flow_arguments(
+    with pytest.raises(ProposalIntentArgumentError) as exc_info:
+        parse_create_flow_intent_arguments(
             {
                 "flow_name": "Felplacerade fält",
                 "plan_rationale": "Input fields ska vara root-level.",
                 "steps": [
                     {
                         "name": "Bearbeta",
-                        "task": "Bearbeta med extra körningsfält.",
+                        "instructions": "Bearbeta med extra körningsfält.",
                         "input_fields": [
                             {
                                 "variable_name": "case_id",
@@ -2575,11 +2575,11 @@ def test_parse_outline_flow_rejects_step_local_input_fields() -> None:
 
 
 def test_parse_outline_flow_ignores_step_only_fields_at_root() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Root noise outline",
             "plan_rationale": "Weak models may place step-only fields at root.",
-            "uses_input_fields": ["audience"],
+            "uses_form_fields": ["audience"],
             "citations_requested": True,
             "model_ref": "model-default",
             "knowledge_refs": ["kb-ref"],
@@ -2590,7 +2590,7 @@ def test_parse_outline_flow_ignores_step_only_fields_at_root() -> None:
             "steps": [
                 {
                     "name": "Do the work",
-                    "task": "Follow the user's confirmed requirements.",
+                    "instructions": "Follow the user's confirmed requirements.",
                 }
             ],
         }
@@ -2601,14 +2601,14 @@ def test_parse_outline_flow_ignores_step_only_fields_at_root() -> None:
 
 
 def test_parse_outline_flow_attaches_orphan_field_specs_to_previous_step() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Orphan field outline",
             "plan_rationale": "Weak models may put output field specs in steps[].",
             "steps": [
                 {
                     "name": "Extract facts",
-                    "task": "Extract structured facts.",
+                    "instructions": "Extract structured facts.",
                     "output_type": "json",
                     "output_fields": [
                         {
@@ -2639,7 +2639,7 @@ def test_parse_outline_flow_attaches_orphan_field_specs_to_previous_step() -> No
                 },
                 {
                     "name": "Write report",
-                    "task": "Write the final report.",
+                    "instructions": "Write the final report.",
                     "output_type": "text",
                 },
             ],
@@ -2657,14 +2657,14 @@ def test_parse_outline_flow_attaches_orphan_field_specs_to_previous_step() -> No
 def test_outline_flow_truncates_over_deep_structured_fields_before_draft_validation() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Nested outline",
             "plan_rationale": "Weak models may over-nest JSON fields.",
             "steps": [
                 {
                     "name": "Extract",
-                    "task": "Extract nested facts.",
+                    "instructions": "Extract nested facts.",
                     "output_type": "json",
                     "output_fields": [
                         {
@@ -2695,7 +2695,7 @@ def test_outline_flow_truncates_over_deep_structured_fields_before_draft_validat
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     output_contract = draft.steps[0].output_contract
     assert output_contract is not None
@@ -2707,21 +2707,21 @@ def test_outline_flow_truncates_over_deep_structured_fields_before_draft_validat
 
 
 def test_parse_outline_flow_allows_advanced_step_counts_above_old_limit() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Advanced workflow",
             "plan_rationale": "The requested process has many meaningful phases.",
             "steps": [
                 {
                     "name": f"Phase {index}",
-                    "task": f"Perform semantic phase {index}.",
+                    "instructions": f"Perform semantic phase {index}.",
                 }
                 for index in range(1, 21)
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -2734,35 +2734,35 @@ def test_parse_outline_flow_allows_advanced_step_counts_above_old_limit() -> Non
 
 
 def test_parse_outline_flow_allows_advanced_step_counts_above_old_soft_cap() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Very advanced workflow",
             "plan_rationale": "Some valid enterprise processes need many phases.",
             "steps": [
                 {
                     "name": f"Phase {index}",
-                    "task": f"Perform semantic phase {index}.",
+                    "instructions": f"Perform semantic phase {index}.",
                 }
                 for index in range(1, 81)
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     assert len(outline.steps) == 80
     assert len(draft.steps) == 80
 
 
 def test_parse_outline_flow_normalizes_malformed_array_item_fields() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured extraction",
             "plan_rationale": "Weak models may emit one field object instead of a list.",
             "steps": [
                 {
                     "name": "Extract rows",
-                    "task": "Extract row summaries.",
+                    "instructions": "Extract row summaries.",
                     "output_fields": [
                         {
                             "name": "rows",
@@ -2792,14 +2792,14 @@ def test_parse_outline_flow_normalizes_malformed_array_item_fields() -> None:
 
 
 def test_parse_outline_flow_normalizes_json_schema_like_output_fields() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Schema-like extraction",
             "plan_rationale": "Weak models often emit JSON Schema-like properties.",
             "steps": [
                 {
                     "name": "Extract fields",
-                    "task": "Extract structured fields.",
+                    "instructions": "Extract structured fields.",
                     "output_fields": {
                         "properties": {
                             "case_id": {
@@ -2835,7 +2835,7 @@ def test_parse_outline_flow_normalizes_json_schema_like_output_fields() -> None:
 
 
 def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Case report",
             "flow_description": "Analyzes uploaded source material.",
@@ -2851,7 +2851,7 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
             "steps": [
                 {
                     "name": "Extract facts",
-                    "task": "Extract the key facts and open questions.",
+                    "instructions": "Extract the key facts and open questions.",
                     "output_fields": [
                         {
                             "name": "facts",
@@ -2871,17 +2871,17 @@ def test_compile_outline_flow_derives_runtime_input_fields_and_final_docx() -> N
                 },
                 {
                     "name": "Quality check",
-                    "task": "Check for missing information and uncertainty.",
+                    "instructions": "Check for missing information and uncertainty.",
                     "output_type": "text",
-                    "uses_input_fields": ["case_id"],
+                    "uses_form_fields": ["case_id"],
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(
+        context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.DOCX,
             runtime_required=True,
@@ -2924,7 +2924,7 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
 ):
     """Server-derived runtime field hints are suggestions for fields the
     user mentioned in free text. They are only added to `form_fields`
-    when the planner actually references them via `uses_input_fields`
+    when the planner actually references them via `uses_form_fields`
     on at least one step. Hints the planner ignored are dropped so they
     do not surface as orphan UI controls or trigger the semantic critic
     spuriously — the planner asked for a flow with no input fields and
@@ -2934,26 +2934,26 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
         find_unused_form_fields,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Review report",
             "plan_rationale": "Review source material and produce a report.",
             "steps": [
                 {
                     "name": "Review",
-                    "task": "Review the source material.",
+                    "instructions": "Review the source material.",
                 }
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(variable_name="audience", label="Audience"),
             RuntimeInputFieldHint(variable_name="detail_level", label="Detail level"),
         ),
     )
 
-    draft = compile_outline_to_create_spec(outline, context=context)
+    draft = compile_create_intent_to_spec(outline, context=context)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -2963,11 +2963,11 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
     assert find_unused_form_fields(compiled) == []
 
 
-def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_input_fields() -> (
+def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_form_fields() -> (
     None
 ):
     """A server-derived hint completes the declaration when the planner
-    referenced its variable name via `uses_input_fields` even without
+    referenced its variable name via `uses_form_fields` even without
     declaring an explicit `input_fields` entry. The compiler then wires
     the field into the step's underlag automatically — the planner
     needs only to mention the name once.
@@ -2976,27 +2976,27 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_inp
         find_unused_form_fields,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Review report",
             "plan_rationale": "Review source material for the chosen audience.",
             "steps": [
                 {
                     "name": "Review",
-                    "task": "Review the source material for the chosen audience.",
-                    "uses_input_fields": ["audience"],
+                    "instructions": "Review the source material for the chosen audience.",
+                    "uses_form_fields": ["audience"],
                 }
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(variable_name="audience", label="Audience"),
             RuntimeInputFieldHint(variable_name="detail_level", label="Detail level"),
         ),
     )
 
-    draft = compile_outline_to_create_spec(outline, context=context)
+    draft = compile_create_intent_to_spec(outline, context=context)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3015,14 +3015,14 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
         find_unused_form_fields,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Review report",
             "plan_rationale": "Review source material for the chosen audience.",
             "steps": [
                 {
                     "name": "Extract report facts",
-                    "task": "Extract facts for the selected report type.",
+                    "instructions": "Extract facts for the selected report type.",
                     "output_fields": [
                         {
                             "name": "facts",
@@ -3039,17 +3039,17 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
                             ],
                         }
                     ],
-                    "uses_input_fields": ["report_type"],
+                    "uses_form_fields": ["report_type"],
                 },
                 {
                     "name": "Review for audience",
-                    "task": "Review the extracted facts for the chosen audience.",
-                    "uses_input_fields": ["audience"],
+                    "instructions": "Review the extracted facts for the chosen audience.",
+                    "uses_form_fields": ["audience"],
                 },
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(variable_name="audience", label="Audience"),
             RuntimeInputFieldHint(variable_name="report_type", label="Report type"),
@@ -3057,7 +3057,7 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
         ),
     )
 
-    draft = compile_outline_to_create_spec(outline, context=context)
+    draft = compile_create_intent_to_spec(outline, context=context)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3089,19 +3089,19 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
         "ladda upp ljud från samtalet."
     )
     field_hints = extract_runtime_input_field_hints(prompt)
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Utvecklingssamtal",
             "plan_rationale": "Transkribera samtal och skapa en strukturerad bedömning.",
             "steps": [
                 {
                     "name": "Transkribera samtal",
-                    "task": "Transkribera ljudet från utvecklingssamtalet.",
+                    "instructions": "Transkribera ljudet från utvecklingssamtalet.",
                     "output_type": "text",
                 },
                 {
                     "name": "Analysera samtal",
-                    "task": (
+                    "instructions": (
                         "Analysera transkriptionen och använd metadatafält vid "
                         "bedömningen."
                     ),
@@ -3118,12 +3118,12 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_type=InputType.AUDIO,
         runtime_input_field_hints=field_hints,
     )
 
-    draft = compile_outline_to_create_spec(outline, context=context)
+    draft = compile_create_intent_to_spec(outline, context=context)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3132,7 +3132,7 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
     )
 
     # The planner declared no `input_fields` and did not list any hint name
-    # in `uses_input_fields`, so the server-derived hints stay out of
+    # in `uses_form_fields`, so the server-derived hints stay out of
     # form_fields entirely. The flow validates without orphan UI controls.
     assert [field.name for field in (draft.form_fields or [])] == []
     assert compiled.form_fields is None or compiled.form_fields == []
@@ -3152,7 +3152,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
         find_unused_form_fields,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Overlap audience",
             "plan_rationale": "Use audience for tone.",
@@ -3167,13 +3167,13 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
             "steps": [
                 {
                     "name": "Write",
-                    "task": "Write for the audience.",
-                    "uses_input_fields": ["audience"],
+                    "instructions": "Write for the audience.",
+                    "uses_form_fields": ["audience"],
                 }
             ],
         }
     )
-    context = OutlineCompileContext(
+    context = CreateCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(
                 variable_name="audience", label="Audience hint label"
@@ -3181,7 +3181,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
         ),
     )
 
-    draft = compile_outline_to_create_spec(outline, context=context)
+    draft = compile_create_intent_to_spec(outline, context=context)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3196,10 +3196,10 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
     assert find_unused_form_fields(compiled) == []
 
 
-def test_compile_outline_flow_orphan_uses_input_fields_reference_is_dropped_silently() -> (
+def test_compile_outline_flow_orphan_uses_form_fields_reference_is_dropped_silently() -> (
     None
 ):
-    """When a step lists a name in `uses_input_fields` that exists in
+    """When a step lists a name in `uses_form_fields` that exists in
     NEITHER `outline.input_fields` NOR any server-derived hint, the
     reference is silently dropped. The compiled spec is valid (no
     orphan template variable, no exception).
@@ -3208,21 +3208,21 @@ def test_compile_outline_flow_orphan_uses_input_fields_reference_is_dropped_sile
         find_unused_form_fields,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Orphan reference",
             "plan_rationale": "Reference a name that does not exist.",
             "steps": [
                 {
                     "name": "Write",
-                    "task": "Write something useful.",
-                    "uses_input_fields": ["missing_field"],
+                    "instructions": "Write something useful.",
+                    "uses_form_fields": ["missing_field"],
                 }
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3238,7 +3238,7 @@ def test_compile_outline_flow_orphan_uses_input_fields_reference_is_dropped_sile
 def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Customer reply",
             "plan_rationale": "Classify the request before drafting an answer.",
@@ -3253,7 +3253,7 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
             "steps": [
                 {
                     "name": "Classify request",
-                    "task": "Classify the incoming customer request.",
+                    "instructions": "Classify the incoming customer request.",
                     "output_fields": [
                         {
                             "name": "category",
@@ -3264,9 +3264,9 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
                 },
                 {
                     "name": "Draft reply",
-                    "task": "Draft a concise reply based on the classification.",
+                    "instructions": "Draft a concise reply based on the classification.",
                     "output_type": "text",
-                    "uses_input_fields": ["text"],
+                    "uses_form_fields": ["text"],
                 },
             ],
         }
@@ -3291,9 +3291,9 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(
+        draft = compile_create_intent_to_spec(
             outline,
-            context=outline_compile_context_from_planning_state(state),
+            context=create_compile_context_from_planning_state(state),
         )
     compiled = draft
     validation = validate_spec(compiled)
@@ -3314,7 +3314,7 @@ def test_compile_outline_flow_drops_field_that_shadows_primary_text_input(
 
 
 def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audience aware reply",
             "plan_rationale": "Classify the request and adapt the response.",
@@ -3329,7 +3329,7 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
             "steps": [
                 {
                     "name": "Classify request",
-                    "task": "Classify the incoming customer request.",
+                    "instructions": "Classify the incoming customer request.",
                     "output_fields": [
                         {
                             "name": "category",
@@ -3340,9 +3340,9 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
                 },
                 {
                     "name": "Draft reply",
-                    "task": "Draft a concise reply for the selected audience.",
+                    "instructions": "Draft a concise reply for the selected audience.",
                     "output_type": "text",
-                    "uses_input_fields": ["audience"],
+                    "uses_form_fields": ["audience"],
                 },
             ],
         }
@@ -3363,9 +3363,9 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -3381,7 +3381,7 @@ def test_compile_outline_flow_keeps_secondary_text_metadata_for_text_input() -> 
 def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Kommunstyrelsemöte till DOCX",
             "plan_rationale": "Transkribera och strukturera mötet innan DOCX skapas.",
@@ -3408,13 +3408,13 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "task": "Transkribera den uppladdade ljudfilen.",
+                    "instructions": "Transkribera den uppladdade ljudfilen.",
                     "output_type": "text",
-                    "uses_input_fields": ["language"],
+                    "uses_form_fields": ["language"],
                 },
                 {
                     "name": "Identifiera rubriker",
-                    "task": "Dela in mötet i kommunstyrelserubriker.",
+                    "instructions": "Dela in mötet i kommunstyrelserubriker.",
                     "output_fields": [
                         {
                             "name": "sections",
@@ -3423,13 +3423,13 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
                             "required": True,
                         }
                     ],
-                    "uses_input_fields": ["output_style"],
+                    "uses_form_fields": ["output_style"],
                 },
                 {
                     "name": "Skriv dokumenttext",
-                    "task": "Skriv slutlig dokumenttext.",
+                    "instructions": "Skriv slutlig dokumenttext.",
                     "output_type": "text",
-                    "uses_input_fields": ["include_timestamps"],
+                    "uses_form_fields": ["include_timestamps"],
                 },
             ],
         }
@@ -3460,9 +3460,9 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(
+        draft = compile_create_intent_to_spec(
             outline,
-            context=outline_compile_context_from_planning_state(state),
+            context=create_compile_context_from_planning_state(state),
         )
     compiled = draft
     validation = validate_spec(compiled)
@@ -3507,7 +3507,7 @@ def test_compile_outline_flow_drops_runtime_fields_when_metadata_is_disabled(
 
 
 def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audience aware reply",
             "plan_rationale": "Classify the request and adapt the response.",
@@ -3522,7 +3522,7 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
             "steps": [
                 {
                     "name": "Classify request",
-                    "task": "Classify the incoming customer request.",
+                    "instructions": "Classify the incoming customer request.",
                     "output_fields": [
                         {
                             "name": "category",
@@ -3533,9 +3533,9 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
                 },
                 {
                     "name": "Draft reply",
-                    "task": "Draft a concise reply for the selected audience.",
+                    "instructions": "Draft a concise reply for the selected audience.",
                     "output_type": "text",
-                    "uses_input_fields": ["audience"],
+                    "uses_form_fields": ["audience"],
                 },
             ],
         }
@@ -3562,9 +3562,9 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -3580,19 +3580,19 @@ def test_compile_outline_flow_keeps_runtime_fields_when_metadata_is_detailed() -
 def test_compile_outline_flow_folds_leading_zero_contract_text_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Customer reply",
             "plan_rationale": "Classify first, then draft the reply.",
             "steps": [
                 {
                     "name": "Receive question",
-                    "task": "Use the customer question as the source material.",
+                    "instructions": "Use the customer question as the source material.",
                     "output_type": "text",
                 },
                 {
                     "name": "Classify request",
-                    "task": "Classify the incoming request.",
+                    "instructions": "Classify the incoming request.",
                     "output_fields": [
                         {
                             "name": "category",
@@ -3603,7 +3603,7 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
                 },
                 {
                     "name": "Draft reply",
-                    "task": "Draft a concise customer reply.",
+                    "instructions": "Draft a concise customer reply.",
                     "output_type": "text",
                 },
             ],
@@ -3614,14 +3614,14 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(outline)
+        draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
     folded_records = [
         record
         for record in caplog.records
-        if record.message == "ai_builder_outline_zero_contract_steps_folded"
+        if record.message == "ai_builder_create_intent_zero_contract_steps_folded"
     ]
     assert folded_records
     assert getattr(folded_records[0], "folded_step_names") == ["Receive question"]
@@ -3643,14 +3643,14 @@ def test_compile_outline_flow_folds_leading_zero_contract_text_step(
 
 
 def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured intake",
             "plan_rationale": "Extract structured fields before writing.",
             "steps": [
                 {
                     "name": "Extract intake",
-                    "task": "Extract the source fields.",
+                    "instructions": "Extract the source fields.",
                     "output_type": "text",
                     "output_fields": [
                         {
@@ -3662,14 +3662,14 @@ def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> N
                 },
                 {
                     "name": "Write answer",
-                    "task": "Write the final answer.",
+                    "instructions": "Write the final answer.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3680,7 +3680,7 @@ def test_compile_outline_flow_preserves_leading_step_with_output_contract() -> N
 
 
 def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audience reply",
             "plan_rationale": "Use runtime audience metadata while drafting.",
@@ -3695,20 +3695,20 @@ def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> 
             "steps": [
                 {
                     "name": "Prepare audience context",
-                    "task": "Prepare context for the selected audience.",
+                    "instructions": "Prepare context for the selected audience.",
                     "output_type": "text",
-                    "uses_input_fields": ["audience"],
+                    "uses_form_fields": ["audience"],
                 },
                 {
                     "name": "Write answer",
-                    "task": "Write the final answer.",
+                    "instructions": "Write the final answer.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3723,28 +3723,28 @@ def test_compile_outline_flow_preserves_leading_step_with_form_field_usage() -> 
 
 
 def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Document summary",
             "plan_rationale": "Prepare uploaded documents before summarizing.",
             "steps": [
                 {
                     "name": "Read documents",
-                    "task": "Read the uploaded documents.",
+                    "instructions": "Read the uploaded documents.",
                     "output_type": "text",
                 },
                 {
                     "name": "Summarize",
-                    "task": "Summarize the document material.",
+                    "instructions": "Summarize the document material.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(runtime_input_type=InputType.DOCUMENT),
+        context=CreateCompileContext(runtime_input_type=InputType.DOCUMENT),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -3755,27 +3755,27 @@ def test_compile_outline_flow_preserves_file_runtime_leading_step() -> None:
 
 
 def test_compile_outline_flow_preserves_leading_step_with_model_ref() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Specialized first pass",
             "plan_rationale": "Use a selected model for the first pass.",
             "steps": [
                 {
                     "name": "Specialized reading",
-                    "task": "Read the source text with the selected model.",
+                    "instructions": "Read the source text with the selected model.",
                     "output_type": "text",
                     "model_ref": "model-specialist",
                 },
                 {
                     "name": "Write answer",
-                    "task": "Write the final answer.",
+                    "instructions": "Write the final answer.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3788,27 +3788,27 @@ def test_compile_outline_flow_preserves_leading_step_with_model_ref() -> None:
 
 
 def test_compile_outline_flow_preserves_leading_step_with_knowledge_refs() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Policy grounded reply",
             "plan_rationale": "Ground the first pass in a selected knowledge base.",
             "steps": [
                 {
                     "name": "Ground in policy",
-                    "task": "Read the source text against the policy base.",
+                    "instructions": "Read the source text against the policy base.",
                     "output_type": "text",
                     "knowledge_refs": ["kb-policy"],
                 },
                 {
                     "name": "Write answer",
-                    "task": "Write the final answer.",
+                    "instructions": "Write the final answer.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -3818,28 +3818,28 @@ def test_compile_outline_flow_preserves_leading_step_with_knowledge_refs() -> No
 
 
 def test_compile_outline_flow_folds_before_final_artifact_append() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "DOCX report",
             "plan_rationale": "Prepare source text and generate a report.",
             "steps": [
                 {
                     "name": "Receive text",
-                    "task": "Use the submitted text as report source.",
+                    "instructions": "Use the submitted text as report source.",
                     "output_type": "text",
                 },
                 {
                     "name": "Draft report content",
-                    "task": "Draft the report body.",
+                    "instructions": "Draft the report body.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(final_output_type=OutputType.DOCX),
+        context=CreateCompileContext(final_output_type=OutputType.DOCX),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -3889,7 +3889,7 @@ def test_outline_compile_context_extracts_runtime_hints_when_state_allows_source
         ),
     }
 
-    context = outline_compile_context_from_planning_state(
+    context = create_compile_context_from_planning_state(
         state,
         runtime_input_hint_source=RuntimeInputFieldHintSource(
             aggregated_conversation_text=(
@@ -3920,7 +3920,7 @@ def test_outline_compile_context_suppresses_runtime_hints_when_state_forbids_sou
         ),
     }
 
-    context = outline_compile_context_from_planning_state(
+    context = create_compile_context_from_planning_state(
         state,
         runtime_input_hint_source=RuntimeInputFieldHintSource(
             aggregated_conversation_text=(
@@ -3946,7 +3946,7 @@ def test_outline_compile_context_does_not_extract_runtime_hints_without_source()
         ),
     }
 
-    context = outline_compile_context_from_planning_state(state)
+    context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert context.runtime_input_field_hints == ()
@@ -3965,7 +3965,7 @@ def test_outline_compile_context_keeps_hints_empty_when_state_and_source_absent(
         ),
     }
 
-    context = outline_compile_context_from_planning_state(state)
+    context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert context.runtime_input_field_hints == ()
@@ -3984,7 +3984,7 @@ def test_outline_compile_context_does_not_extract_runtime_hints_from_empty_sourc
         ),
     }
 
-    context = outline_compile_context_from_planning_state(
+    context = create_compile_context_from_planning_state(
         state,
         runtime_input_hint_source=RuntimeInputFieldHintSource(
             aggregated_conversation_text=""
@@ -4004,26 +4004,26 @@ def test_outline_compile_context_treats_architecture_any_input_as_no_override() 
         required_capabilities=[],
     )
 
-    context = outline_compile_context_from_planning_state(state)
+    context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert context.runtime_input_type is None
 
 
 def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio report",
             "plan_rationale": "Transcribe and summarize.",
             "steps": [
                 {
                     "name": "Transcribe",
-                    "task": "Transcribe the uploaded audio.",
+                    "instructions": "Transcribe the uploaded audio.",
                     "output_type": "text",
                 },
                 {
                     "name": "Summarize",
-                    "task": "Summarize the transcript for the reader.",
+                    "instructions": "Summarize the transcript for the reader.",
                     "output_type": "text",
                 },
             ],
@@ -4045,9 +4045,9 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4067,14 +4067,14 @@ def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() 
 def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_step() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio PDF report",
             "plan_rationale": "Create a report from uploaded audio.",
             "steps": [
                 {
                     "name": "Create report",
-                    "task": "Summarize the recording and create the final PDF.",
+                    "instructions": "Summarize the recording and create the final PDF.",
                 }
             ],
         }
@@ -4095,9 +4095,9 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4120,19 +4120,19 @@ def test_compile_outline_flow_inserts_audio_transcription_for_single_artifact_st
 
 
 def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio PDF report",
             "plan_rationale": "Review the transcript before creating the report.",
             "steps": [
                 {
                     "name": "Transcribe audio",
-                    "task": "Transcribe the uploaded audio to text.",
+                    "instructions": "Transcribe the uploaded audio to text.",
                     "review_mode": "edit",
                 },
                 {
                     "name": "Create report",
-                    "task": "Summarize the reviewed transcript and create the final PDF.",
+                    "instructions": "Summarize the reviewed transcript and create the final PDF.",
                 },
             ],
         }
@@ -4153,9 +4153,9 @@ def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> N
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4177,14 +4177,14 @@ def test_compile_outline_flow_moves_review_to_backend_audio_transcription() -> N
 def test_compile_outline_flow_does_not_leak_review_to_backend_audio_transcription() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio PDF report",
             "plan_rationale": "Review the analysis before creating the report.",
             "steps": [
                 {
                     "name": "Analyze transcript",
-                    "task": "Analyze the transcript.",
+                    "instructions": "Analyze the transcript.",
                     "review_mode": "edit",
                 },
             ],
@@ -4206,9 +4206,9 @@ def test_compile_outline_flow_does_not_leak_review_to_backend_audio_transcriptio
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4230,19 +4230,19 @@ def test_compile_outline_flow_does_not_leak_review_to_backend_audio_transcriptio
 def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "task": "Transkribera den uppladdade ljudinspelningen till text.",
+                    "instructions": "Transkribera den uppladdade ljudinspelningen till text.",
                     "model_ref": "default_small_model",
                 },
                 {
                     "name": "Strukturera innehållet",
-                    "task": "Dela transkriptionen i tydliga rubriker.",
+                    "instructions": "Dela transkriptionen i tydliga rubriker.",
                     "output_fields": [
                         {
                             "name": "sections",
@@ -4268,7 +4268,7 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
                 },
                 {
                     "name": "Skriv dokumenttext",
-                    "task": "Skriv ett sammanhängande dokument från rubrikerna.",
+                    "instructions": "Skriv ett sammanhängande dokument från rubrikerna.",
                 },
             ],
         }
@@ -4292,9 +4292,9 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(
+        draft = compile_create_intent_to_spec(
             outline,
-            context=outline_compile_context_from_planning_state(state),
+            context=create_compile_context_from_planning_state(state),
         )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4309,7 +4309,7 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
         record
         for record in caplog.records
         if record.message
-        == "ai_builder_redundant_audio_transcription_outline_step_dropped"
+        == "ai_builder_redundant_audio_transcription_semantic_step_dropped"
     ]
     assert drop_records
     assert getattr(drop_records[0], "step_name") == "Transkribera ljud"
@@ -4320,18 +4320,18 @@ def test_compile_outline_flow_drops_redundant_leading_audio_transcription_step(
 def test_compile_outline_flow_drops_task_only_audio_to_text_transcription_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Förbered textunderlag",
-                    "task": "Transkribera uppladdade ljudinspelningar till text.",
+                    "instructions": "Transkribera uppladdade ljudinspelningar till text.",
                 },
                 {
                     "name": "Strukturera innehållet",
-                    "task": "Dela transkriptionen i tydliga rubriker.",
+                    "instructions": "Dela transkriptionen i tydliga rubriker.",
                 },
             ],
         }
@@ -4355,9 +4355,9 @@ def test_compile_outline_flow_drops_task_only_audio_to_text_transcription_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(
+        draft = compile_create_intent_to_spec(
             outline,
-            context=outline_compile_context_from_planning_state(state),
+            context=create_compile_context_from_planning_state(state),
         )
 
     assert [step.name for step in draft.steps] == [
@@ -4367,7 +4367,7 @@ def test_compile_outline_flow_drops_task_only_audio_to_text_transcription_step(
     ]
     assert any(
         record.message
-        == "ai_builder_redundant_audio_transcription_outline_step_dropped"
+        == "ai_builder_redundant_audio_transcription_semantic_step_dropped"
         and getattr(record, "step_name") == "Förbered textunderlag"
         for record in caplog.records
     )
@@ -4376,14 +4376,14 @@ def test_compile_outline_flow_drops_task_only_audio_to_text_transcription_step(
 def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Transkribera mötesljud",
-                    "task": "Transkribera uppladdade ljudinspelningar till text.",
+                    "instructions": "Transkribera uppladdade ljudinspelningar till text.",
                     "output_fields": [
                         {
                             "name": "transcript",
@@ -4409,7 +4409,7 @@ def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
                 },
                 {
                     "name": "Extrahera beslut",
-                    "task": "Identifiera beslut och åtgärder från transkriptionen.",
+                    "instructions": "Identifiera beslut och åtgärder från transkriptionen.",
                 },
             ],
         }
@@ -4433,9 +4433,9 @@ def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(
+        draft = compile_create_intent_to_spec(
             outline,
-            context=outline_compile_context_from_planning_state(state),
+            context=create_compile_context_from_planning_state(state),
         )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4447,21 +4447,21 @@ def test_compile_outline_flow_rewrites_structured_audio_transcription_step(
         record
         for record in caplog.records
         if record.message
-        == "ai_builder_redundant_audio_transcription_outline_step_rewritten"
+        == "ai_builder_redundant_audio_transcription_semantic_step_rewritten"
     ]
     assert rewrite_records
     assert validation.valid
 
 
 def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Summarize recording",
-                    "task": "Summarize the transcribed audio.",
+                    "instructions": "Summarize the transcribed audio.",
                 }
             ],
         }
@@ -4481,9 +4481,9 @@ def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() ->
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4511,14 +4511,14 @@ def test_compile_outline_flow_audio_to_docx_uses_skeleton_terminal_artifact() ->
 def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_requested() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Generera DOCX-dokument",
-                    "task": "Skapa dokumentets rubriker och textinnehåll.",
+                    "instructions": "Skapa dokumentets rubriker och textinnehåll.",
                     "output_fields": [
                         {
                             "name": "docx_title",
@@ -4552,9 +4552,9 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4582,19 +4582,19 @@ def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction
         build_conversation_aware_quality_feedback,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio PDF report",
             "plan_rationale": "Extract key information and produce a PDF.",
             "steps": [
                 {
                     "name": "Extrahera nyckeluppgifter",
-                    "task": "Extrahera nyckeluppgifter från transkriptionen.",
+                    "instructions": "Extrahera nyckeluppgifter från transkriptionen.",
                     "output_type": "json",
                 },
                 {
                     "name": "Skapa PDF-innehåll",
-                    "task": "Skriv PDF-innehåll från de extraherade uppgifterna.",
+                    "instructions": "Skriv PDF-innehåll från de extraherade uppgifterna.",
                     "output_type": "pdf",
                 },
             ],
@@ -4615,9 +4615,9 @@ def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4648,14 +4648,14 @@ def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction
 def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured_work(
     final_output_type: str,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio artifact report",
             "plan_rationale": "Create a document report from uploaded audio.",
             "steps": [
                 {
                     "name": "Identifiera och segmentera innehåll per rubrik",
-                    "task": "Dela in mötet i rubriker.",
+                    "instructions": "Dela in mötet i rubriker.",
                     "output_fields": [
                         {
                             "name": "sections",
@@ -4681,7 +4681,7 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
                 },
                 {
                     "name": "Skapa sammanfattning av allt ovan",
-                    "task": "Sammanfatta rubrikavsnitten.",
+                    "instructions": "Sammanfatta rubrikavsnitten.",
                     "output_fields": [
                         {
                             "name": "overall_summary",
@@ -4693,7 +4693,7 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
                 },
                 {
                     "name": "Bygg dokument med rubriker och innehåll",
-                    "task": "Skriv dokumentets fullständiga text från alla tidigare steg.",
+                    "instructions": "Skriv dokumentets fullständiga text från alla tidigare steg.",
                 },
             ],
         }
@@ -4713,9 +4713,9 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4735,18 +4735,18 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
 
 
 def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Rensa transkription",
-                    "task": "Normalisera transkriptionen inför analys.",
+                    "instructions": "Normalisera transkriptionen inför analys.",
                 },
                 {
                     "name": "Identifiera rubrikavsnitt",
-                    "task": "Dela in mötet i rubriker.",
+                    "instructions": "Dela in mötet i rubriker.",
                     "output_fields": [
                         {
                             "name": "sections",
@@ -4766,7 +4766,7 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
                 },
                 {
                     "name": "Skapa sammanfattning",
-                    "task": "Sammanfatta rubrikavsnitten.",
+                    "instructions": "Sammanfatta rubrikavsnitten.",
                     "output_fields": [
                         {
                             "name": "overall_summary",
@@ -4778,7 +4778,7 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
                 },
                 {
                     "name": "Bygg DOCX-dokument",
-                    "task": "Skriv dokumentets fullständiga text från alla tidigare steg.",
+                    "instructions": "Skriv dokumentets fullständiga text från alla tidigare steg.",
                 },
             ],
         }
@@ -4798,9 +4798,9 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -4840,14 +4840,14 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
         PlannerPatternSignals,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesrapport från ljud till Word",
             "plan_rationale": "Transkribera ljud och skapa DOCX-rapport.",
             "steps": [
                 {
                     "name": "Identifiera mötesmetadata",
-                    "task": "Identifiera deltagare och datum från transkriptionen.",
+                    "instructions": "Identifiera deltagare och datum från transkriptionen.",
                     "output_fields": [
                         {
                             "name": "meeting_title",
@@ -4865,7 +4865,7 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
                 },
                 {
                     "name": "Identifiera beslut",
-                    "task": "Lista alla beslut.",
+                    "instructions": "Lista alla beslut.",
                     "output_fields": [
                         {
                             "name": "decisions_summary",
@@ -4877,7 +4877,7 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
                 },
                 {
                     "name": "Skriv strukturerad rapport",
-                    "task": "Skriv en strukturerad mötesrapport på svenska.",
+                    "instructions": "Skriv en strukturerad mötesrapport på svenska.",
                 },
             ],
         }
@@ -4897,9 +4897,9 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -6733,14 +6733,14 @@ def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:
 def test_source_material_targeted_underlag_converges_between_outline_and_direct_draft() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Transkribera ljud och skapa rapport.",
             "steps": [
                 {
                     "name": "Etablera möteskontext",
-                    "task": "Skapa möteskontext.",
+                    "instructions": "Skapa möteskontext.",
                     "output_fields": [
                         {
                             "name": "meeting_context",
@@ -6752,7 +6752,7 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
                 },
                 {
                     "name": "Analysera beslut",
-                    "task": "Extrahera beslut.",
+                    "instructions": "Extrahera beslut.",
                     "output_fields": [
                         {
                             "name": "decisions",
@@ -6764,14 +6764,14 @@ def test_source_material_targeted_underlag_converges_between_outline_and_direct_
                 },
                 {
                     "name": "Skriv rapport",
-                    "task": "Skriv rapporten från underlaget.",
+                    "instructions": "Skriv rapporten från underlaget.",
                 },
             ],
         }
     )
-    outline_compiled = compile_outline_to_create_spec(
+    outline_compiled = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(
+        context=CreateCompileContext(
             runtime_input_type=InputType.AUDIO,
             ui_language="sv",
         ),
@@ -6951,14 +6951,14 @@ def test_normalize_create_step_mechanics_is_idempotent_for_targeted_underlag() -
 
 
 def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesprotokoll från ljud till Word",
             "plan_rationale": "Transkribera ljud och skapa DOCX-protokoll.",
             "steps": [
                 {
                     "name": "Strukturera transkription",
-                    "task": "Strukturera den redan transkriberade texten.",
+                    "instructions": "Strukturera den redan transkriberade texten.",
                     "output_fields": [
                         {
                             "name": "transcription_text",
@@ -6984,7 +6984,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
                 },
                 {
                     "name": "Identifiera mötesmetadata",
-                    "task": "Identifiera titel, organisation och sekreterare.",
+                    "instructions": "Identifiera titel, organisation och sekreterare.",
                     "output_fields": [
                         {
                             "name": "meeting_title",
@@ -7002,7 +7002,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
                 },
                 {
                     "name": "Skapa mötesprotokoll med fasta rubriker",
-                    "task": "Skapa protokollsektioner från metadata och transkription.",
+                    "instructions": "Skapa protokollsektioner från metadata och transkription.",
                     "output_fields": [
                         {
                             "name": "protocol_sections",
@@ -7028,7 +7028,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
                 },
                 {
                     "name": "Förbered DOCX-innehåll",
-                    "task": "Skriv dokumentets fullständiga text från tidigare steg.",
+                    "instructions": "Skriv dokumentets fullständiga text från tidigare steg.",
                 },
             ],
         }
@@ -7048,9 +7048,9 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state, ui_language="sv"),
+        context=create_compile_context_from_planning_state(state, ui_language="sv"),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7348,14 +7348,14 @@ def test_compile_create_steps_to_spec_text_report_keeps_source_and_structured_un
 def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesprotokoll från ljud till PDF",
             "plan_rationale": "Transkribera ljud och skapa PDF-protokoll.",
             "steps": [
                 {
                     "name": "Strukturera transkription",
-                    "task": "Strukturera den redan transkriberade texten.",
+                    "instructions": "Strukturera den redan transkriberade texten.",
                     "output_fields": [
                         {
                             "name": "transcription_text",
@@ -7367,7 +7367,7 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
                 },
                 {
                     "name": "Identifiera mötesmetadata",
-                    "task": "Identifiera titel, organisation och sekreterare.",
+                    "instructions": "Identifiera titel, organisation och sekreterare.",
                     "output_fields": [
                         {
                             "name": "meeting_title",
@@ -7379,7 +7379,7 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
                 },
                 {
                     "name": "Skapa mötesprotokoll med fasta rubriker",
-                    "task": "Skapa protokollsektioner från metadata och transkription.",
+                    "instructions": "Skapa protokollsektioner från metadata och transkription.",
                     "output_fields": [
                         {
                             "name": "protocol_sections",
@@ -7415,9 +7415,9 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state, ui_language="sv"),
+        context=create_compile_context_from_planning_state(state, ui_language="sv"),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7437,14 +7437,14 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
 def test_compile_outline_audio_document_without_pattern_still_creates_transcript_source(
     final_output_type: str,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Analysera transkriberat ljud och skapa rapport.",
             "steps": [
                 {
                     "name": "Etablera gemensam möteskontext",
-                    "task": "Läs hela den transkriberade mötestexten.",
+                    "instructions": "Läs hela den transkriberade mötestexten.",
                     "output_fields": [
                         {
                             "name": "meeting_context",
@@ -7464,7 +7464,7 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
                 },
                 {
                     "name": "Analysera bakgrund",
-                    "task": "Analysera hela transkriberingen med fokus på bakgrund.",
+                    "instructions": "Analysera hela transkriberingen med fokus på bakgrund.",
                     "output_fields": [
                         {
                             "name": "background_points",
@@ -7484,7 +7484,7 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
                 },
                 {
                     "name": "Skriv strukturerad mötesrapport",
-                    "task": (
+                    "instructions": (
                         "Skriv en fullständig strukturerad mötesrapport på svenska "
                         "utifrån allt ackumulerat analysunderlag."
                     ),
@@ -7493,9 +7493,9 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         }
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(
+        context=CreateCompileContext(
             runtime_input_type=InputType.AUDIO,
             final_output_type=OutputType(final_output_type),
             ui_language="sv",
@@ -7544,27 +7544,27 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
 
 
 def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Mötesrapport från ljud",
             "plan_rationale": "Transkribera ljud och skapa rapport.",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "task": "Transkribera uppladdat mötesljud till text.",
+                    "instructions": "Transkribera uppladdat mötesljud till text.",
                     "output_type": "json",
                 },
                 {
                     "name": "Skriv rapport",
-                    "task": "Skriv en rapport från transkriberingen.",
+                    "instructions": "Skriv en rapport från transkriberingen.",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(
+        context=CreateCompileContext(
             runtime_input_type=InputType.AUDIO,
             final_output_type=OutputType.PDF,
             ui_language="sv",
@@ -7596,11 +7596,11 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
 def test_compile_outline_wraps_skeleton_materialization_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Broken skeleton",
             "plan_rationale": "Compile a broken skeleton.",
-            "steps": [{"name": "Analyze", "task": "Analyze the input."}],
+            "steps": [{"name": "Analyze", "instructions": "Analyze the input."}],
         }
     )
 
@@ -7613,7 +7613,7 @@ def test_compile_outline_wraps_skeleton_materialization_failure(
     )
 
     with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_outline_to_create_spec(outline)
+        compile_create_intent_to_spec(outline)
 
     assert exc_info.value.public_code == "architecture_materialization_failed"
     assert exc_info.value.detail == "invalid skeleton tuple"
@@ -7625,14 +7625,14 @@ def test_compile_outline_wraps_skeleton_materialization_failure(
 def test_compile_outline_flow_audio_artifact_aggregate_keeps_synthesis_before_terminal() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Aggregate audio report",
             "plan_rationale": "Aggregate several analyses into one PDF.",
             "steps": [
-                {"name": "Extract themes", "task": "Extract main themes."},
-                {"name": "Assess risks", "task": "Assess risks in the recording."},
-                {"name": "Synthesize", "task": "Synthesize all prior work."},
+                {"name": "Extract themes", "instructions": "Extract main themes."},
+                {"name": "Assess risks", "instructions": "Assess risks in the recording."},
+                {"name": "Synthesize", "instructions": "Synthesize all prior work."},
             ],
         }
     )
@@ -7652,9 +7652,9 @@ def test_compile_outline_flow_audio_artifact_aggregate_keeps_synthesis_before_te
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7677,14 +7677,14 @@ def test_compile_outline_flow_audio_artifact_aggregate_keeps_synthesis_before_te
 def test_compile_outline_flow_keeps_text_artifact_step_after_audio_transcription() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio text report",
             "plan_rationale": "Create a readable report from uploaded audio.",
             "steps": [
                 {
                     "name": "Write report",
-                    "task": "Write a concise report from the transcribed audio.",
+                    "instructions": "Write a concise report from the transcribed audio.",
                     "output_type": "text",
                 }
             ],
@@ -7705,9 +7705,9 @@ def test_compile_outline_flow_keeps_text_artifact_step_after_audio_transcription
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7740,7 +7740,7 @@ def test_outline_compile_context_reads_pattern_chain_from_architecture_commit() 
         )
     )
 
-    context = outline_compile_context_from_planning_state(state)
+    context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert context.pattern_ids == ("audio_to_artifact_report",)
@@ -7771,7 +7771,7 @@ def test_outline_compile_context_preserves_compiled_chain_and_semantic_patterns(
         )
     )
 
-    context = outline_compile_context_from_planning_state(state)
+    context = create_compile_context_from_planning_state(state)
 
     assert context is not None
     assert set(context.pattern_ids) == {
@@ -7783,14 +7783,14 @@ def test_outline_compile_context_preserves_compiled_chain_and_semantic_patterns(
 
 
 def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "plan_rationale": "Fill a DOCX template from uploaded material.",
             "steps": [
                 {
                     "name": "Prepare report content",
-                    "task": "Prepare the content that should be placed in the template.",
+                    "instructions": "Prepare the content that should be placed in the template.",
                 }
             ],
         }
@@ -7810,9 +7810,9 @@ def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> Non
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7835,18 +7835,18 @@ def test_compile_outline_flow_realizes_docx_template_chain_from_pattern() -> Non
 
 
 def test_compile_outline_flow_docx_chain_preserves_all_semantic_steps() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "plan_rationale": "Fill a DOCX template from uploaded material.",
             "steps": [
                 {
                     "name": "Extract findings",
-                    "task": "Extract the findings that matter for the report.",
+                    "instructions": "Extract the findings that matter for the report.",
                 },
                 {
                     "name": "Write narrative",
-                    "task": "Write the narrative content for the template.",
+                    "instructions": "Write the narrative content for the template.",
                 },
             ],
         }
@@ -7866,9 +7866,9 @@ def test_compile_outline_flow_docx_chain_preserves_all_semantic_steps() -> None:
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7884,18 +7884,18 @@ def test_compile_outline_flow_docx_chain_preserves_all_semantic_steps() -> None:
 
 
 def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template comparison report",
             "plan_rationale": "Compare uploaded material before filling the template.",
             "steps": [
                 {
                     "name": "Extract findings",
-                    "task": "Extract findings from the uploaded material.",
+                    "instructions": "Extract findings from the uploaded material.",
                 },
                 {
                     "name": "Write synthesis",
-                    "task": "Compare all prior work and write the report narrative.",
+                    "instructions": "Compare all prior work and write the report narrative.",
                 },
             ],
         }
@@ -7916,9 +7916,9 @@ def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7938,14 +7938,14 @@ def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None
 
 
 def test_compile_outline_flow_docx_chain_still_wraps_rich_template_outline() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "plan_rationale": "Fill a DOCX template from several phases.",
             "steps": [
                 {
                     "name": f"Prepare section {index}",
-                    "task": f"Prepare section {index} for the template.",
+                    "instructions": f"Prepare section {index} for the template.",
                 }
                 for index in range(1, 6)
             ],
@@ -7966,9 +7966,9 @@ def test_compile_outline_flow_docx_chain_still_wraps_rich_template_outline() -> 
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -7989,14 +7989,14 @@ def test_compile_outline_flow_docx_chain_still_wraps_rich_template_outline() -> 
 def test_compile_outline_flow_uses_committed_template_fill_mode_without_pattern() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Template report",
             "plan_rationale": "Fill a DOCX template from uploaded material.",
             "steps": [
                 {
                     "name": "Prepare report",
-                    "task": "Prepare the report content for the template.",
+                    "instructions": "Prepare the report content for the template.",
                 }
             ],
         }
@@ -8016,8 +8016,8 @@ def test_compile_outline_flow_uses_committed_template_fill_mode_without_pattern(
         )
     )
 
-    context = outline_compile_context_from_planning_state(state)
-    draft = compile_outline_to_create_spec(outline, context=context)
+    context = create_compile_context_from_planning_state(state)
+    draft = compile_create_intent_to_spec(outline, context=context)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -8035,14 +8035,14 @@ def test_compile_outline_flow_uses_committed_template_fill_mode_without_pattern(
 
 
 def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured report",
             "plan_rationale": "Analyze uploaded material and produce a final PDF.",
             "steps": [
                 {
                     "name": "Analyze material",
-                    "task": "Analyze the uploaded material and produce the requested report.",
+                    "instructions": "Analyze the uploaded material and produce the requested report.",
                 }
             ],
         }
@@ -8062,9 +8062,9 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -8092,14 +8092,14 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
 def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_output() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Jämför dokument",
             "plan_rationale": "Extrahera fakta, identifiera motsägelser och skriv svar.",
             "steps": [
                 {
                     "name": "Identifiera motsägelser",
-                    "task": "Identifiera motsägelser mellan källorna.",
+                    "instructions": "Identifiera motsägelser mellan källorna.",
                 }
             ],
         }
@@ -8120,9 +8120,9 @@ def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_out
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(
+        context=create_compile_context_from_planning_state(
             state,
             ui_language="sv",
         ),
@@ -8142,14 +8142,14 @@ def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_out
 
 
 def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Riskanalys",
             "plan_rationale": "Analysera uppladdade dokument.",
             "steps": [
                 {
                     "name": "Analysera innehåll",
-                    "task": "Identifiera risker och beslutspunkter.",
+                    "instructions": "Identifiera risker och beslutspunkter.",
                     "output_type": "json",
                 }
             ],
@@ -8170,9 +8170,9 @@ def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(
+        context=create_compile_context_from_planning_state(
             state,
             ui_language="sv",
         ),
@@ -8196,18 +8196,18 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         PlannerPatternSignals,
     )
 
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured report",
             "plan_rationale": "Analyze uploaded material and produce a final PDF.",
             "steps": [
                 {
                     "name": "Analyze material",
-                    "task": "Analyze the uploaded material.",
+                    "instructions": "Analyze the uploaded material.",
                 },
                 {
                     "name": "Draft report",
-                    "task": "Draft the report from the analysis.",
+                    "instructions": "Draft the report from the analysis.",
                 },
             ],
         }
@@ -8227,9 +8227,9 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -8262,14 +8262,14 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
 
 
 def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Detailed report",
             "plan_rationale": "The model already supplied a detailed semantic plan.",
             "steps": [
                 {
                     "name": f"Phase {index}",
-                    "task": f"Perform analysis phase {index}.",
+                    "instructions": f"Perform analysis phase {index}.",
                 }
                 for index in range(1, 5)
             ],
@@ -8290,9 +8290,9 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -8312,14 +8312,14 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
 
 
 def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured extraction",
             "plan_rationale": "Extract fields, then summarize.",
             "steps": [
                 {
                     "name": "Extract fields",
-                    "task": "Extract stable facts.",
+                    "instructions": "Extract stable facts.",
                     "output_type": "text",
                     "output_fields": [
                         {
@@ -8330,12 +8330,12 @@ def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> Non
                         }
                     ],
                 },
-                {"name": "Write summary", "task": "Write the final summary."},
+                {"name": "Write summary", "instructions": "Write the final summary."},
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
 
     assert draft.steps[0].output_type.value == "json"
@@ -8345,22 +8345,22 @@ def test_compile_outline_flow_treats_output_fields_as_structured_signal() -> Non
 
 
 def test_compile_outline_flow_preserves_requested_json_intermediate() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Structured intermediate",
             "plan_rationale": "Create an intermediate JSON result before prose.",
             "steps": [
                 {
                     "name": "Build structure",
-                    "task": "Create structured intermediate data.",
+                    "instructions": "Create structured intermediate data.",
                     "output_type": "json",
                 },
-                {"name": "Write answer", "task": "Write the final answer."},
+                {"name": "Write answer", "instructions": "Write the final answer."},
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -8445,14 +8445,14 @@ def test_compile_create_steps_to_spec_prefers_specific_previous_fields_for_text_
 def test_compile_outline_flow_logs_semantic_output_type_drift(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "DOCX report",
             "plan_rationale": "Backend owns the artifact output.",
             "steps": [
                 {
                     "name": "Write report",
-                    "task": "Write report content.",
+                    "instructions": "Write report content.",
                     "output_type": "pdf",
                 }
             ],
@@ -8463,9 +8463,9 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
         logging.INFO,
         logger=CREATE_COMPILER_LOGGER,
     ):
-        draft = compile_outline_to_create_spec(
+        draft = compile_create_intent_to_spec(
             outline,
-            context=OutlineCompileContext(
+            context=CreateCompileContext(
                 runtime_input_type=InputType.DOCUMENT,
                 final_output_type=OutputType.DOCX,
             ),
@@ -8485,22 +8485,22 @@ def test_compile_outline_flow_logs_semantic_output_type_drift(
 
 
 def test_compile_outline_flow_default_outline_stays_linear() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Synthesis",
             "plan_rationale": "Analyze two branches and synthesize.",
             "steps": [
-                {"name": "Branch A", "task": "Analyze from angle A."},
-                {"name": "Branch B", "task": "Analyze from angle B."},
+                {"name": "Branch A", "instructions": "Analyze from angle A."},
+                {"name": "Branch B", "instructions": "Analyze from angle B."},
                 {
                     "name": "Synthesize",
-                    "task": "Synthesize all earlier work.",
+                    "instructions": "Synthesize all earlier work.",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
     compiled = draft
     validation = validate_spec(compiled)
 
@@ -8521,64 +8521,64 @@ def test_compile_outline_flow_default_outline_stays_linear() -> None:
 
 
 def test_compile_outline_flow_preserves_step_mcp_refs() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "MCP-flöde",
             "plan_rationale": "Hämtar extern ärendedata innan analys.",
             "steps": [
                 {
                     "name": "Hämta ärendedata",
-                    "task": "Hämta aktuell status från ärendesystemet.",
+                    "instructions": "Hämta aktuell status från ärendesystemet.",
                     "mcp_tool_refs": ["case_lookup_tool"],
                 },
                 {
                     "name": "Sammanfatta",
-                    "task": "Sammanfatta statusen för användaren.",
+                    "instructions": "Sammanfatta statusen för användaren.",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     assert draft.steps[0].assistant_spec.mcp_tool_refs == ["case_lookup_tool"]
     assert draft.steps[0].assistant_spec.mcp_server_refs == []
 
 
 def test_compile_outline_flow_does_not_fold_mcp_entry_step() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "MCP-flöde",
             "plan_rationale": "Hämtar externt underlag och skriver svar.",
             "steps": [
                 {
                     "name": "Hämta underlag",
-                    "task": "Använd MCP-verktyget för att hämta underlag.",
+                    "instructions": "Använd MCP-verktyget för att hämta underlag.",
                     "mcp_tool_refs": ["lookup_tool"],
                 },
                 {
                     "name": "Skriv svar",
-                    "task": "Skriv ett tydligt svar.",
+                    "instructions": "Skriv ett tydligt svar.",
                 },
             ],
         }
     )
 
-    draft = compile_outline_to_create_spec(outline)
+    draft = compile_create_intent_to_spec(outline)
 
     assert [step.name for step in draft.steps] == ["Hämta underlag", "Skriv svar"]
     assert draft.steps[0].assistant_spec.mcp_tool_refs == ["lookup_tool"]
 
 
 def test_compile_outline_flow_comparison_pattern_owns_final_fan_in() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Comparison",
             "plan_rationale": "Analyze branches, then compare.",
             "steps": [
-                {"name": "Extract source facts", "task": "Extract facts."},
-                {"name": "Assess differences", "task": "Assess differences."},
-                {"name": "Compare and conclude", "task": "Compare all work."},
+                {"name": "Extract source facts", "instructions": "Extract facts."},
+                {"name": "Assess differences", "instructions": "Assess differences."},
+                {"name": "Compare and conclude", "instructions": "Compare all work."},
             ],
         }
     )
@@ -8597,9 +8597,9 @@ def test_compile_outline_flow_comparison_pattern_owns_final_fan_in() -> None:
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -8617,26 +8617,26 @@ def test_compile_outline_flow_comparison_pattern_owns_final_fan_in() -> None:
 
 
 def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Multi-document report",
             "plan_rationale": "Extract facts, analyze them, and write a report.",
             "steps": [
                 {
                     "name": "Extract source facts",
-                    "task": "Extract structured facts from the uploaded material.",
+                    "instructions": "Extract structured facts from the uploaded material.",
                     "output_type": "json",
                     "output_fields": [{"name": "facts", "field_type": "array"}],
                 },
                 {
                     "name": "Analyze differences",
-                    "task": "Analyze the extracted facts and highlight differences.",
+                    "instructions": "Analyze the extracted facts and highlight differences.",
                     "output_type": "json",
                     "output_fields": [{"name": "differences", "field_type": "array"}],
                 },
                 {
                     "name": "Write report",
-                    "task": "Write the final report.",
+                    "instructions": "Write the final report.",
                     "output_type": "docx",
                 },
             ],
@@ -8664,9 +8664,9 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -8685,14 +8685,14 @@ def test_compile_outline_flow_multiple_document_scope_owns_one_fan_in() -> None:
 
 
 def test_compile_outline_flow_audio_docx_ignores_document_scope_fan_in() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audio DOCX report",
             "plan_rationale": "Create a DOCX report from uploaded audio.",
             "steps": [
                 {
                     "name": "Summarize recording",
-                    "task": "Summarize the transcribed audio for a final document.",
+                    "instructions": "Summarize the transcribed audio for a final document.",
                 }
             ],
         }
@@ -8719,9 +8719,9 @@ def test_compile_outline_flow_audio_docx_ignores_document_scope_fan_in() -> None
         ),
     }
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)
@@ -8738,7 +8738,7 @@ def test_compile_outline_flow_audio_docx_ignores_document_scope_fan_in() -> None
 def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sources() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Comparison with metadata",
             "plan_rationale": "Compare all prior work with runtime metadata.",
@@ -8751,12 +8751,12 @@ def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sou
                 }
             ],
             "steps": [
-                {"name": "Extract source facts", "task": "Extract facts."},
-                {"name": "Assess differences", "task": "Assess differences."},
+                {"name": "Extract source facts", "instructions": "Extract facts."},
+                {"name": "Assess differences", "instructions": "Assess differences."},
                 {
                     "name": "Compare",
-                    "task": "Compare all work.",
-                    "uses_input_fields": ["audience"],
+                    "instructions": "Compare all work.",
+                    "uses_form_fields": ["audience"],
                 },
             ],
         }
@@ -8776,9 +8776,9 @@ def test_compile_outline_flow_all_previous_with_form_fields_avoids_relisting_sou
         )
     )
 
-    draft = compile_outline_to_create_spec(
+    draft = compile_create_intent_to_spec(
         outline,
-        context=outline_compile_context_from_planning_state(state),
+        context=create_compile_context_from_planning_state(state),
     )
     compiled = draft
     validation = validate_spec(compiled)

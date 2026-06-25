@@ -401,7 +401,7 @@ def _normalize_tool_arguments(
             "steps": [
                 {
                     "name": "Extrahera fakta",
-                    "task": "Extrahera fakta.",
+                    "instructions": "Extrahera fakta.",
                     "output_type": "text",
                 }
             ],
@@ -429,7 +429,7 @@ def _normalize_create_step(step: Any) -> Any:
 
     normalized: dict[str, Any] = {
         "name": step.get("name", "Step"),
-        "task": step.get("instructions")
+        "instructions": step.get("instructions")
         or assistant_spec.get("instructions")
         or "Do things.",
         "output_type": "text" if output_mode == "transcribe_only" else output_type,
@@ -1574,7 +1574,7 @@ class TestSendMessageToolCall:
             "steps": [
                 {
                     "name": "Bad {{ Step }}",
-                    "task": "X",
+                    "instructions": "X",
                 }
             ],
         }

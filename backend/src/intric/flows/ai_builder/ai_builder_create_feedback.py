@@ -15,7 +15,7 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
         "Beskriv varje rubrik eller sektion som ett eget inmatningsfält och låt senare semantiska steg använda dessa värden för slutresultatet."
     ),
     "rich_workflow_requires_form_fields": (
-        "Lägg till de manuella kompletteringarna som namngivna inmatningsfält i outline-planen och beskriv vilka steg som behöver dem."
+        "Lägg till de manuella kompletteringarna som namngivna inmatningsfält i intentionen och beskriv vilka steg som behöver dem."
     ),
     "rich_workflow_requires_json_contract_step": (
         'Lägg till ett mellanliggande extraktionssteg med output_type="json" och output_fields med namngivna fält innan analys, rapport eller dokumentleverans.'
@@ -51,7 +51,7 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
         "Låt varje avsnittssteg beskriva vilka namngivna fält från den strukturerade extraktionen som behövs för just det avsnittet, så att varje rubrik får relevant underlag utan att läsa allt tidigare innehåll."
     ),
     "requested_output_sections_require_section_writers": (
-        "Bevara användarens namngivna rapportavsnitt som tydliga semantiska skrivsteg i outline-planen, och gruppera bara närliggande rubriker när det behövs."
+        "Bevara användarens namngivna rapportavsnitt som tydliga semantiska skrivsteg i intentionen, och gruppera bara närliggande rubriker när det behövs."
     ),
     "redundant_terminal_json_format_tail_after_final_text_composer": (
         "Ta bort det extra JSON-formatsteget efter sluttexten när användaren inte har valt JSON som slutformat. Låt det semantiska textsteget som skriver slutversionen vara terminalt."
@@ -63,7 +63,7 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
         "Koppla varje deklarerat inmatningsfält till minst ett semantiskt steg som faktiskt behöver värdet, eller ta bort fältet från planen."
     ),
     "simple_text_transform_must_remain_single_step": (
-        "För en direkt textomvandling utan filer, JSON, extra fält eller granskning ska outline-planen innehålla ett enda textsteg som gör omvandlingen."
+        "För en direkt textomvandling utan filer, JSON, extra fält eller granskning ska intentionen innehålla ett enda textsteg som gör omvandlingen."
     ),
 }
 CREATE_CRITIC_REMEDIATION_PASSTHROUGH_IDS: frozenset[str] = frozenset(
@@ -93,29 +93,29 @@ def format_create_quality_feedback(feedback: str | None) -> str | None:
         )
     if not repair_rules:
         return feedback
-    return f"{feedback}\n\nOutline-flow quality repair rules:\n- " + "\n- ".join(
+    return f"{feedback}\n\nCreate-intent quality repair rules:\n- " + "\n- ".join(
         repair_rules
     )
 
 
-def format_create_outline_quality_feedback(feedback: str | None) -> str | None:
+def format_create_intent_quality_feedback(feedback: str | None) -> str | None:
     if feedback is None:
         return None
 
-    outline_feedback = feedback.replace("output_contract", "output_fields")
-    normalized_feedback = outline_feedback.casefold()
+    intent_feedback = feedback.replace("output_contract", "output_fields")
+    normalized_feedback = intent_feedback.casefold()
     repair_rules: list[str] = []
     if "output_type 'json'" in normalized_feedback and "output_fields" in (
         normalized_feedback
     ):
         repair_rules.append(
-            "For every JSON outline step that feeds later steps, set output_fields with named fields that match the step's extracted data."
+            "For every JSON semantic step that feeds later steps, set output_fields with named fields that match the step's extracted data."
         )
 
-    formatted = format_create_quality_feedback(outline_feedback)
+    formatted = format_create_quality_feedback(intent_feedback)
     if not repair_rules:
         return formatted
-    return f"{formatted}\n\nOutline-flow schema repair rules:\n- " + "\n- ".join(
+    return f"{formatted}\n\nCreate-intent schema repair rules:\n- " + "\n- ".join(
         repair_rules
     )
 

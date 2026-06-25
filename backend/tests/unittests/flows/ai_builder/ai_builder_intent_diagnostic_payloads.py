@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, cast
 
-_STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
+_STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT: dict[str, Any] = {
     "flow_name": "Transkribering och nyckeluppgifter i PDF",
     "flow_description": (
         "Tar emot ljud, transkriberar och använder strukturerad analys för att "
@@ -18,7 +18,7 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
     "steps": [
         {
             "name": "Transkribera ljud till text",
-            "task": (
+            "instructions": (
                 "Transkribera inkommande ljud till sammanhängande text som "
                 "grund för vidare analys."
             ),
@@ -27,7 +27,7 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
         },
         {
             "name": "Identifiera nyckeluppgifter (lista att extrahera)",
-            "task": (
+            "instructions": (
                 "Gå igenom transkriptionen och identifiera vilka typer av "
                 "nyckeluppgifter som faktiskt förekommer och vilka som "
                 "efterfrågas men saknas/är otydliga. Skapa en intern lista "
@@ -81,7 +81,7 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
             ],
             "model_ref": "model.gpt-5-4-2026-03-05",
             "citations_requested": False,
-            "uses_input_fields": [],
+            "uses_form_fields": [],
             "knowledge_refs": [],
             "mcp_server_refs": [],
             "mcp_tool_refs": [],
@@ -95,7 +95,7 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
         },
         {
             "name": "Extrahera nyckeluppgifter (strukturerat resultat)",
-            "task": (
+            "instructions": (
                 "Använd transkriptionen för att extrahera de identifierade "
                 "nyckeluppgifterna till ett slutligt strukturerat resultat. "
                 "Inkludera endast värden som stöds av källmaterialet. För "
@@ -195,7 +195,7 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
             ],
             "model_ref": "model.gpt-5-4-2026-03-05",
             "citations_requested": False,
-            "uses_input_fields": [],
+            "uses_form_fields": [],
             "knowledge_refs": [],
             "mcp_server_refs": [],
             "mcp_tool_refs": [],
@@ -213,7 +213,7 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
         },
         {
             "name": "Sammanställ PDF-innehåll",
-            "task": (
+            "instructions": (
                 "Skapa det kompletta dokumentinnehållet för PDF: inkludera "
                 "sektionen 'Extracted key information' med extraherade "
                 "nyckeluppgifter och sektionen 'Missing or unspecified values' "
@@ -234,8 +234,8 @@ _STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE: dict[str, Any] = {
 }
 
 
-def self_correction_outline_with_step_assumptions_payload() -> dict[str, Any]:
-    return cast(dict[str, Any], deepcopy(_STEP_ASSUMPTIONS_DIAGNOSTIC_OUTLINE))
+def self_correction_intent_with_step_assumptions_payload() -> dict[str, Any]:
+    return cast(dict[str, Any], deepcopy(_STEP_ASSUMPTIONS_DIAGNOSTIC_INTENT))
 
 
 def expected_step_assumption_strings() -> list[str]:

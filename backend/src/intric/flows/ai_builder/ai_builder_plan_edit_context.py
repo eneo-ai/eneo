@@ -267,7 +267,7 @@ def resolve_scoped_step_revision_if_requested(
 ) -> ScopedStepRevision | None:
     """Handle selected-step edits that are safer as deterministic patches.
 
-    The outline LLM cannot reliably edit backend-inserted steps such as the
+    The create intent LLM cannot reliably edit backend-inserted steps such as the
     audio transcription step or a terminal artifact change. When the selected
     step and requested change are unambiguous, patch the prior plan directly
     instead of asking repair to chase LLM drift on unrelated steps.

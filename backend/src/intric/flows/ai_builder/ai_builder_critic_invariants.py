@@ -1466,7 +1466,7 @@ _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS = CriticInvariant(
     evidence=_requested_output_sections_require_section_writers_evidence,
     remediation=(
         "Användaren har namngivit flera rubriker/avsnitt för slutrapporten. "
-        "Dela upp outline-planen i tydliga semantiska avsnittssteg, högst ett "
+        "Dela upp intentionen i tydliga semantiska avsnittssteg, högst ett "
         "par närliggande rubriker per steg, och lägg ett avslutande "
         "sammanställningssteg före DOCX/PDF/textleveransen."
     ),
@@ -1679,10 +1679,10 @@ _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED = CriticInvariant(
     remediation=(
         "Ett eller flera deklarerade fält saknar koppling till något steg. "
         "Reparera på något av följande sätt: "
-        "(a) Skapa-läge: lista varje fält i `uses_input_fields` på minst ett "
+        "(a) Skapa-läge: lista varje fält i `uses_form_fields` på minst ett "
         "steg som behöver värdet — kompilatorn injicerar då `{{ <namn> }}` "
         "automatiskt i stegets underlag/`input_bindings`. Skriv inte själva "
-        "`{{ ... }}`-syntaxen i `task`-fältet (det är förbjudet av schemat). "
+        "`{{ ... }}`-syntaxen i `instructions`-fältet (det är förbjudet av schemat). "
         "(b) Redigera-läge: lägg fältet i `uses_form_fields` på minst ett steg "
         "och referera det med exakt `{{ <namn> }}` (utan `form.`-prefix) i "
         "stegets `instructions` eller `input_bindings.question`. "

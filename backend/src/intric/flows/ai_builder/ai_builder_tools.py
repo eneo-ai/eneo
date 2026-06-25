@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    build_outline_flow_tool_schema,
-    parse_outline_flow_arguments,
-)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     supported_structured_question_ids,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    build_create_flow_tool_schema,
+    parse_create_flow_intent_arguments,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -185,7 +185,7 @@ def build_propose_flow_tool_schema(
     current_steps: list["FlowStep"] | None = None,
 ) -> dict[str, Any]:
     if current_steps is None:
-        return build_outline_flow_tool_schema(
+        return build_create_flow_tool_schema(
             resource_catalog=resource_catalog,
             tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
@@ -233,6 +233,6 @@ __all__ = [
     "extract_plan_rationale",
     "extract_reasoning",
     "parse_confirm_requirements",
-    "parse_outline_flow_arguments",
+    "parse_create_flow_intent_arguments",
     "parse_structured_question",
 ]

@@ -279,19 +279,19 @@ def _build_retry_feedback(
     retry_count: int = 1,
 ) -> str:
     suffix = f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
-    # target_kind is session-scoped; outline repair rules only belong to propose_flow.
+    # target_kind is session-scoped; create-intent repair rules only belong to propose_flow.
     if target_tool_name == PROPOSE_FLOW_TOOL_NAME and target_kind == TargetKind.CREATE:
-        outline_rules = [
-            "Every steps[] item must be one complete semantic outline step with at least name and task.",
-            "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_input_fields.",
+        intent_rules = [
+            "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
+            "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_form_fields.",
             "Do not emit input_source, input_type, input_bindings, output_mode, refs, ids, hashes, or timestamps; backend compiles those mechanics.",
         ]
         if "duplicate_step_name" in failure_codes:
-            outline_rules.append(
+            intent_rules.append(
                 "Every steps[] name must be unique case-insensitively; rename duplicate semantic steps with specific labels."
             )
         suffix = (
-            " ".join(outline_rules)
+            " ".join(intent_rules)
             + f" Keep valid semantic parts and fix only the listed issues. Return one complete {target_tool_name} call."
         )
     if retry_count >= 2:

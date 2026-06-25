@@ -3,17 +3,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
-    ModifyExistingStep,
-    OrderedEditProposal,
-)
 from intric.flows.ai_builder.ai_builder_create_compiler import (
-    OutlineCompileContext,
+    CreateCompileContext,
+    compile_create_intent_to_spec,
     compile_create_steps_to_spec,
-    compile_outline_to_create_spec,
-)
-from intric.flows.ai_builder.ai_builder_create_outline import (
-    parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
     CRITIC_INVARIANTS,
@@ -33,6 +26,11 @@ from intric.flows.ai_builder.ai_builder_output_sections_signals import (
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    ModifyExistingStep,
+    OrderedEditProposal,
+    parse_create_flow_intent_arguments,
+)
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
@@ -50,7 +48,7 @@ def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
 def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repair() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Priority review",
             "plan_rationale": "Classify the request before drafting the answer.",
@@ -65,7 +63,7 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
             "steps": [
                 {
                     "name": "Classify request",
-                    "task": "Classify the submitted request.",
+                    "instructions": "Classify the submitted request.",
                     "output_fields": [
                         {
                             "name": "category",
@@ -76,14 +74,14 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
                 },
                 {
                     "name": "Draft answer",
-                    "task": "Draft the final answer.",
+                    "instructions": "Draft the final answer.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    compiled = compile_outline_to_create_spec(outline)
+    compiled = compile_create_intent_to_spec(outline)
 
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["priority"]
@@ -97,7 +95,7 @@ def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repai
 def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_field() -> (
     None
 ):
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "PDF report",
             "plan_rationale": "Analyze the document before rendering PDF.",
@@ -112,7 +110,7 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
             "steps": [
                 {
                     "name": "Extract risks",
-                    "task": "Extract risks from the document.",
+                    "instructions": "Extract risks from the document.",
                     "output_fields": [
                         {
                             "name": "risks",
@@ -123,21 +121,21 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
                 },
                 {
                     "name": "Prepare report body",
-                    "task": "Write the report body from the extracted risks.",
+                    "instructions": "Write the report body from the extracted risks.",
                     "output_type": "text",
                 },
                 {
                     "name": "Assemble final text",
-                    "task": "Prepare the final PDF body text.",
+                    "instructions": "Prepare the final PDF body text.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    compiled = compile_outline_to_create_spec(
+    compiled = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(
+        context=CreateCompileContext(
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.PDF,
         ),
@@ -151,7 +149,7 @@ def test_renderer_terminal_form_field_fallback_does_not_hide_multi_step_unused_f
 
 
 def test_single_step_outline_form_field_fallback_binds_only_available_step() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "PDF report",
             "plan_rationale": "Render a short PDF.",
@@ -166,16 +164,16 @@ def test_single_step_outline_form_field_fallback_binds_only_available_step() -> 
             "steps": [
                 {
                     "name": "Write PDF body",
-                    "task": "Render the submitted material as PDF.",
+                    "instructions": "Render the submitted material as PDF.",
                     "output_type": "text",
                 },
             ],
         }
     )
 
-    compiled = compile_outline_to_create_spec(
+    compiled = compile_create_intent_to_spec(
         outline,
-        context=OutlineCompileContext(final_output_type=OutputType.PDF),
+        context=CreateCompileContext(final_output_type=OutputType.PDF),
     )
     question = _question_binding(compiled.steps[-1].input_bindings)
 
@@ -234,7 +232,7 @@ def test_intermediate_form_field_use_flows_through_structured_previous_field() -
 
 
 def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
-    outline = parse_outline_flow_arguments(
+    outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Audience response",
             "plan_rationale": "Classify a request and adapt the answer.",
@@ -249,8 +247,8 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
             "steps": [
                 {
                     "name": "Classify request",
-                    "task": "Classify the request for the selected audience.",
-                    "uses_input_fields": ["audience"],
+                    "instructions": "Classify the request for the selected audience.",
+                    "uses_form_fields": ["audience"],
                     "output_fields": [
                         {
                             "name": "category",
@@ -261,15 +259,15 @@ def test_one_input_field_can_feed_two_step_bindings_once_each() -> None:
                 },
                 {
                     "name": "Draft answer",
-                    "task": "Draft an answer for the selected audience.",
+                    "instructions": "Draft an answer for the selected audience.",
                     "output_type": "text",
-                    "uses_input_fields": ["audience"],
+                    "uses_form_fields": ["audience"],
                 },
             ],
         }
     )
 
-    compiled = compile_outline_to_create_spec(outline)
+    compiled = compile_create_intent_to_spec(outline)
     first_question = _question_binding(compiled.steps[0].input_bindings)
     final_question = _question_binding(compiled.steps[-1].input_bindings)
 

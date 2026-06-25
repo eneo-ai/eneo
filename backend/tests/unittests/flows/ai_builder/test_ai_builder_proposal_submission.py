@@ -344,7 +344,7 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
             "steps": [
                 {
                     "name": "Hämta tid",
-                    "task": "Hämta aktuell tid via Time MCP.",
+                    "instructions": "Hämta aktuell tid via Time MCP.",
                     "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
                 }
             ],
@@ -403,7 +403,7 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
         {
             "flow_name": "Audio report",
             "plan_rationale": "Create a report from audio.",
-            "steps": [{"name": "Summarize", "task": "Summarize the recording."}],
+            "steps": [{"name": "Summarize", "instructions": "Summarize the recording."}],
         },
         tool_call_id="call-architecture",
     )
@@ -431,7 +431,7 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
             "run_tool_self_correction"
         ) as repair,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -525,7 +525,7 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -566,7 +566,7 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -690,7 +690,7 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
         patch.object(
@@ -725,10 +725,10 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
             "flow_name": "Document analysis",
             "plan_rationale": "Analyze documents.",
             "steps": [
-                {"name": "Read", "task": "Read the material."},
-                {"name": "Extract", "task": "Extract key facts."},
-                {"name": "Compare", "task": "Compare findings."},
-                {"name": "Report", "task": "Create the report."},
+                {"name": "Read", "instructions": "Read the material."},
+                {"name": "Extract", "instructions": "Extract key facts."},
+                {"name": "Compare", "instructions": "Compare findings."},
+                {"name": "Report", "instructions": "Create the report."},
             ],
         },
         tool_call_id="call-outline",
@@ -758,7 +758,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
             return_value=_events(),
         ) as repair,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
     ):
@@ -822,7 +822,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission."
-            "process_outline_arguments",
+            "process_create_intent_arguments",
             new=process_outline,
         ),
         patch.object(

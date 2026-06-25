@@ -11,7 +11,7 @@ from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import RuntimeToolCall
 from intric.flows.ai_builder.ai_builder_create_feedback import (
-    format_create_outline_quality_feedback,
+    format_create_intent_quality_feedback,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -284,7 +284,7 @@ class CompiledProposalFinalizer:
                 if feedback
             )
             return ToolProcessingResult(
-                feedback=format_create_outline_quality_feedback(combined_feedback),
+                feedback=format_create_intent_quality_feedback(combined_feedback),
                 failure_kind="validation",
                 failure_codes=frozenset(
                     error.code for error in compiled.validation.errors
@@ -313,7 +313,7 @@ class CompiledProposalFinalizer:
             )
             or None
         )
-        combined_quality_feedback = format_create_outline_quality_feedback(
+        combined_quality_feedback = format_create_intent_quality_feedback(
             combined_quality_feedback
         )
         if combined_quality_feedback is None:

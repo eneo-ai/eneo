@@ -7,15 +7,24 @@ import pytest
 from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
-    AddStep,
-    AssistantSpecPatch,
-    ModifyExistingStep,
-    OrderedEditProposal,
+    MaterializedAddStep as AddStep,
+)
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
+    MaterializedOrderedEditProposal as OrderedEditProposal,
+)
+from intric.flows.ai_builder.ai_builder_authoring_projection import (
     compile_ordered_edit_proposal,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    AssistantSpecPatch,
+    ModifyExistingStep,
+)
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
+    OrderedEditProposal as IntentOrderedEditProposal,
 )
 from intric.flows.application.flow_authoring_snapshot import (
     current_flow_authoring_spec,
@@ -43,10 +52,10 @@ def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
 
 def test_ordered_edit_proposal_requires_plan_rationale() -> None:
     with pytest.raises(ValidationError, match="plan_rationale"):
-        OrderedEditProposal.model_validate({"steps": []})
+        IntentOrderedEditProposal.model_validate({"steps": []})
 
     with pytest.raises(ValidationError, match="plan_rationale must not be empty"):
-        OrderedEditProposal(plan_rationale=" ", steps=[])
+        IntentOrderedEditProposal(plan_rationale=" ", steps=[])
 
 
 def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:

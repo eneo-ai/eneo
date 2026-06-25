@@ -239,10 +239,10 @@ PLANNER_FAILURE_EVENTS_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_planner_failure_events.py"
 )
 PLANNER_PATH = Path("src/intric/flows/ai_builder/ai_builder_planner.py")
-CREATE_OUTLINE_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_create_outline")
+PROPOSAL_INTENT_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_intent")
 )
-CREATE_OUTLINE_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_outline.py")
+PROPOSAL_INTENT_PATH = Path("src/intric/flows/ai_builder/ai_builder_proposal_intent.py")
 CREATE_PROPOSAL_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_proposal.py")
 CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compiler.py")
 CREATE_COMPILER_MODULE = ".".join(
@@ -276,25 +276,25 @@ TOOL_TURN_PERSISTENCE_PATH = Path(
 )
 CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
-        "OutlineCompileContext",
+        "CreateCompileContext",
         "RuntimeInputFieldHintSource",
         "compile_create_steps_to_spec",
-        "compile_outline_to_create_spec",
-        "outline_compile_context_from_planning_state",
+        "compile_create_intent_to_spec",
+        "create_compile_context_from_planning_state",
     }
 )
-CREATE_OUTLINE_BANNED_COMPILER_NAMES = frozenset(
+PROPOSAL_INTENT_BANNED_COMPILER_NAMES = frozenset(
     {
         "ArchitectureCommit",
         "ArchitectureCommitDraft",
         "ArchitectureEnvelope",
         "AIBuilderArchitectureError",
-        "OutlineCompileContext",
+        "CreateCompileContext",
         "PlanningState",
-        "compile_outline_to_create_spec",
+        "compile_create_intent_to_spec",
         "derive_architecture_commit_draft",
         "materialize_step_skeleton",
-        "outline_compile_context_from_planning_state",
+        "create_compile_context_from_planning_state",
         "resolve_step_skeleton_patterns",
     }
 )
@@ -1092,8 +1092,11 @@ def test_edit_compiler_consumes_ordered_proposals_without_operation_ir() -> None
         violations.append(
             f"{edit_compiler_path}: missing compile_ordered_edit_proposal import"
         )
-    if "OrderedEditProposal" not in authoring_imports:
-        violations.append(f"{edit_compiler_path}: missing OrderedEditProposal import")
+    proposal_intent_imports = imported_names_by_module.get(PROPOSAL_INTENT_MODULE, set())
+    if "OrderedEditProposal" not in proposal_intent_imports:
+        violations.append(
+            f"{edit_compiler_path}: missing model-facing OrderedEditProposal import"
+        )
     snapshot_imports = imported_names_by_module.get(
         FLOW_AUTHORING_SNAPSHOT_MODULE, set()
     )
@@ -1499,9 +1502,9 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
             violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
 
     for banned_import in {
-        "process_outline_arguments",
+        "process_create_intent_arguments",
         "process_edit_arguments",
-        "build_outline_flow_tool_schema",
+        "build_create_flow_tool_schema",
         "build_edit_flow_tool_schema",
         "OUTLINE_FLOW_FORCED_TOOL_PROMPT",
         "EDIT_FLOW_FORCED_TOOL_PROMPT",
@@ -2059,7 +2062,7 @@ def test_planner_failure_events_has_canonical_owner() -> None:
 
 def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    outline_path = backend_root / CREATE_OUTLINE_PATH
+    outline_path = backend_root / PROPOSAL_INTENT_PATH
     compiler_path = backend_root / CREATE_COMPILER_PATH
     outline_tree = ast.parse(outline_path.read_text(), filename=str(outline_path))
     compiler_tree = ast.parse(compiler_path.read_text(), filename=str(compiler_path))
@@ -2074,14 +2077,14 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
             imported_names = {
                 alias.name
                 for alias in node.names
-                if alias.name in CREATE_OUTLINE_BANNED_COMPILER_NAMES
+                if alias.name in PROPOSAL_INTENT_BANNED_COMPILER_NAMES
             }
             if imported_names:
                 names = ", ".join(sorted(imported_names))
                 violations.append(f"{outline_path}:{node.lineno} imports {names}")
         if (
             isinstance(node, ast.Name)
-            and node.id in CREATE_OUTLINE_BANNED_COMPILER_NAMES
+            and node.id in PROPOSAL_INTENT_BANNED_COMPILER_NAMES
         ):
             violations.append(f"{outline_path}:{node.lineno} references {node.id}")
 
@@ -2090,7 +2093,7 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
         for node in ast.walk(tree):
             if (
                 not isinstance(node, ast.ImportFrom)
-                or node.module != CREATE_OUTLINE_MODULE
+                or node.module != PROPOSAL_INTENT_MODULE
             ):
                 continue
             imported_names = {
@@ -2108,8 +2111,8 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
         violations.append(f"{compiler_path}: missing public names {missing_public}")
 
     compiler_text = compiler_path.read_text()
-    if "build_outline_flow_tool_schema" in compiler_text:
-        violations.append(f"{compiler_path}: builds outline LLM tool schema")
+    if "build_create_flow_tool_schema" in compiler_text:
+        violations.append(f"{compiler_path}: builds create intent LLM tool schema")
 
     assert violations == []
 
@@ -2207,7 +2210,7 @@ def test_runtime_metadata_state_extraction_is_private_to_create_compiler() -> No
 
 def test_create_form_field_type_has_single_ai_builder_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    outline_path = backend_root / CREATE_OUTLINE_PATH
+    outline_path = backend_root / PROPOSAL_INTENT_PATH
     compiler_path = backend_root / CREATE_COMPILER_PATH
     outline_tree = ast.parse(outline_path.read_text(), filename=str(outline_path))
     compiler_text = compiler_path.read_text()

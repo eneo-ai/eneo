@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
-    OrderedEditProposal,
-)
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
@@ -22,6 +19,7 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
 )
+from intric.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
     terminal_output_type_for_conversation,
 )

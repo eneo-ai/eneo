@@ -430,7 +430,7 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         ),
     ),
     # These structural hints are intentionally not coupled to prompt recipes.
-    # The server-owned outline compiler and Flow capability manifest own
+    # The server-owned create intent compiler and Flow capability manifest own
     # low-level realization.
     _pattern(
         id="multi_step_quality_chain",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from functools import cache
-from typing import Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -19,7 +19,10 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
+    PreviousFieldRef,
     StructuredFieldDraft,
+    ensure_structured_field_depth,
     mixes_knowledge_and_mcp_refs,
     normalize_authoring_string_list,
 )
@@ -35,17 +38,22 @@ from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
     looks_like_structured_field_spec,
     normalize_structured_field_list,
 )
+from intric.flows.domain.flow import FlowPersistedJsonObject
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from intric.flows.flow_authoring_spec import (
+    FormFieldSpec,
+    InputSource,
+    InputType,
+    MCPPolicy,
     OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 # Safety guard against runaway tool output. This should not be a practical
 # product cap for legitimate advanced flows.
-MAX_OUTLINE_STEPS = 256
+MAX_PROPOSAL_STEPS = 256
 
-_OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
+_CREATE_INTENT_STEP_BACKEND_OWNED_KEYS = frozenset(
     {
         "aggregate_prior_outputs",
         "document_delivery_mode",
@@ -66,12 +74,12 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
     }
 )
 logger = logging.getLogger(__name__)
-_OUTLINE_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
-_OUTLINE_ASSUMPTIONS_FIELD = "assumptions"
-_OUTLINE_STEP_ROOT_RECOVERED_KEYS = frozenset({_OUTLINE_ASSUMPTIONS_FIELD})
+_CREATE_INTENT_ROOT_IGNORED_KEYS = frozenset({"final_output_type", "reasoning"})
+_CREATE_INTENT_ASSUMPTIONS_FIELD = "assumptions"
+_CREATE_INTENT_STEP_ROOT_RECOVERED_KEYS = frozenset({_CREATE_INTENT_ASSUMPTIONS_FIELD})
 
 
-class OutlineInputField(BaseModel):
+class FlowInputFieldIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variable_name: str
@@ -101,14 +109,14 @@ class OutlineInputField(BaseModel):
         return normalize_authoring_string_list(value)
 
 
-class OutlineStep(BaseModel):
+class SemanticStepIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    task: str
-    output_type: str | None = None
+    instructions: str
+    output_type: OutputType | None = None
     output_fields: list[StructuredFieldDraft] | None = None
-    uses_input_fields: list[str] = Field(default_factory=list)
+    uses_form_fields: list[str] = Field(default_factory=list)
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)
@@ -116,21 +124,25 @@ class OutlineStep(BaseModel):
     citations_requested: bool = False
     review_mode: FlowStepReviewMode | None = None
 
-    @field_validator("name", "task")
+    @field_validator("name", "instructions")
     @classmethod
     def _normalize_required_text(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
-            raise ValueError("Outline steps require non-empty text values.")
+            raise ValueError("Semantic steps require non-empty text values.")
         if "{{" in normalized or "}}" in normalized:
-            raise ValueError("Outline steps must not contain template variables.")
+            raise ValueError("Semantic steps must not contain template variables.")
         return normalized
 
-    @field_validator("output_type")
+    @field_validator("output_type", mode="before")
     @classmethod
-    def _validate_output_type(cls, value: str | None) -> str | None:
+    def _validate_output_type(cls, value: Any) -> Any:
         if value is None:
             return None
+        if isinstance(value, OutputType):
+            return value
+        if not isinstance(value, str):
+            return value
         normalized = value.strip()
         if normalized not in builder_output_type_values():
             allowed = ", ".join(builder_output_type_values())
@@ -143,7 +155,7 @@ class OutlineStep(BaseModel):
         return normalize_structured_field_list(value)
 
     @field_validator(
-        "uses_input_fields", "knowledge_refs", "mcp_server_refs", "mcp_tool_refs"
+        "uses_form_fields", "knowledge_refs", "mcp_server_refs", "mcp_tool_refs"
     )
     @classmethod
     def _normalize_string_list(cls, values: list[str]) -> list[str]:
@@ -158,26 +170,96 @@ class OutlineStep(BaseModel):
         return normalized or None
 
     @model_validator(mode="after")
-    def _validate_resource_mode(self) -> "OutlineStep":
+    def _validate_resource_mode(self) -> "SemanticStepIntent":
         if mixes_knowledge_and_mcp_refs(
             knowledge_refs=self.knowledge_refs,
             mcp_server_refs=self.mcp_server_refs,
             mcp_tool_refs=self.mcp_tool_refs,
         ):
             raise ValueError(
-                "Outline steps cannot combine knowledge_refs with MCP refs."
+                "Semantic steps cannot combine knowledge_refs with MCP refs."
             )
+        if self.output_fields:
+            ensure_structured_field_depth(self.output_fields)
         return self
 
 
-def _empty_outline_input_fields() -> list[OutlineInputField]:
+class AssistantSpecPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instructions: str | None = None
+    model_ref: str | None = None
+    knowledge_refs: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    mcp_tool_refs: list[str] = Field(default_factory=list)
+
+
+class ModifyExistingStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["modify"] = "modify"
+    existing_step_ref: str
+    name: str | None = None
+    assistant_spec: AssistantSpecPatch | None = None
+    mcp_policy: MCPPolicy | None = None
+    input_source: InputSource | None = None
+    input_type: InputType | None = None
+    output_type: OutputType | None = None
+    output_contract: FlowPersistedJsonObject | None = None
+    review_mode: FlowStepReviewMode | None = None
+    uses_form_fields: list[str] | None = None
+    uses_previous_fields: list[PreviousFieldRef] | None = None
+    document_delivery_mode: DocumentDeliveryMode | None = None
+
+
+class AddStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["add"] = "add"
+    step: SemanticStepIntent
+
+
+OrderedEditStep = Annotated[ModifyExistingStep | AddStep, Field(discriminator="kind")]
+
+
+class OrderedEditProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan_rationale: str
+    assumptions: list[str] = Field(default_factory=list)
+    flow_name: str | None = None
+    flow_description: str | None = None
+    steps: list[OrderedEditStep]
+    removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
+    form_fields: list[FormFieldSpec] | None = None
+
+    @field_validator("plan_rationale")
+    @classmethod
+    def _normalize_plan_rationale(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("plan_rationale must not be empty.")
+        return normalized
+
+    @field_validator("assumptions")
+    @classmethod
+    def _normalize_assumptions(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            assumption = value.strip()
+            if assumption:
+                normalized.append(assumption)
+        return normalized
+
+
+def _empty_semantic_input_fields() -> list[FlowInputFieldIntent]:
     return []
 
 
-class FlowCreateOutline(BaseModel):
+class CreateFlowIntent(BaseModel):
     """Small LLM-facing contract for create mode.
 
-    The outline is semantic. It intentionally omits Flow mechanics such as
+    The intent is semantic. It intentionally omits Flow mechanics such as
     input_source, output_mode, input_bindings, runtime config, step refs, and
     document output config; the backend compiler owns those.
     """
@@ -187,10 +269,10 @@ class FlowCreateOutline(BaseModel):
     flow_name: str
     flow_description: str | None = None
     plan_rationale: str
-    input_fields: list[OutlineInputField] = Field(
-        default_factory=_empty_outline_input_fields
+    input_fields: list[FlowInputFieldIntent] = Field(
+        default_factory=_empty_semantic_input_fields
     )
-    steps: list[OutlineStep]
+    steps: list[SemanticStepIntent]
     assumptions: list[str] = Field(default_factory=list)
 
     @field_validator("flow_name", "plan_rationale")
@@ -198,9 +280,9 @@ class FlowCreateOutline(BaseModel):
     def _normalize_required_text(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
-            raise ValueError("Outline fields require non-empty text values.")
+            raise ValueError("Create-flow fields require non-empty text values.")
         if "{{" in normalized or "}}" in normalized:
-            raise ValueError("Outline fields must not contain template variables.")
+            raise ValueError("Create-flow fields must not contain template variables.")
         return normalized
 
     @field_validator("flow_description")
@@ -215,12 +297,12 @@ class FlowCreateOutline(BaseModel):
 
     @field_validator("steps")
     @classmethod
-    def _validate_steps(cls, value: list[OutlineStep]) -> list[OutlineStep]:
+    def _validate_steps(cls, value: list[SemanticStepIntent]) -> list[SemanticStepIntent]:
         if not value:
             raise ValueError("propose_flow requires at least one step.")
-        if len(value) > MAX_OUTLINE_STEPS:
+        if len(value) > MAX_PROPOSAL_STEPS:
             raise ValueError(
-                f"propose_flow supports at most {MAX_OUTLINE_STEPS} semantic steps."
+                f"propose_flow supports at most {MAX_PROPOSAL_STEPS} semantic steps."
             )
         return value
 
@@ -238,15 +320,17 @@ class FlowCreateOutline(BaseModel):
         return normalized
 
 
-def parse_outline_flow_arguments(arguments: dict[str, Any]) -> FlowCreateOutline:
+def parse_create_flow_intent_arguments(arguments: dict[str, Any]) -> CreateFlowIntent:
     try:
-        return FlowCreateOutline.model_validate(_normalize_outline_arguments(arguments))
+        return CreateFlowIntent.model_validate(
+            _normalize_create_intent_arguments(arguments)
+        )
     except ValidationError as error:
-        raise OutlineFlowArgumentError(error) from error
+        raise ProposalIntentArgumentError(error) from error
 
 
-class OutlineFlowArgumentError(ValueError):
-    """Safe outline validation feedback for logs and model repair prompts.
+class ProposalIntentArgumentError(ValueError):
+    """Safe proposal validation feedback for logs and model repair prompts.
 
     Pydantic's default message can include input excerpts. The AI Builder logs
     and retry prompts only need field paths, error types, and human-readable
@@ -272,10 +356,10 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
     return tuple(issues) or ("propose_flow validation failed [validation_error]",)
 
 
-def _normalize_outline_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Strip fields outside the semantic outline contract before validation.
+def _normalize_create_intent_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Strip fields outside the semantic create-intent contract before validation.
 
-    Outline mode is semantic. Some model outputs may still include fields
+    Create mode is semantic. Some model outputs may still include fields
     outside that contract, but those fields must never become the source of
     truth for Flow wiring.
     """
@@ -283,46 +367,49 @@ def _normalize_outline_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     normalized = {
         key: value
         for key, value in arguments.items()
-        if key not in _outline_root_ignored_keys()
+        if key not in _create_intent_root_ignored_keys()
     }
     raw_steps = normalized.get("steps")
     if isinstance(raw_steps, list):
         typed_steps = cast(list[Any], raw_steps)
-        normalized_steps, misplaced_assumptions = _normalize_outline_steps(typed_steps)
+        normalized_steps, misplaced_assumptions = _normalize_semantic_steps(typed_steps)
         normalized["steps"] = normalized_steps
         if misplaced_assumptions:
-            normalized[_OUTLINE_ASSUMPTIONS_FIELD] = _merge_outline_assumptions(
-                normalized.get(_OUTLINE_ASSUMPTIONS_FIELD),
+            normalized[_CREATE_INTENT_ASSUMPTIONS_FIELD] = _merge_create_intent_assumptions(
+                normalized.get(_CREATE_INTENT_ASSUMPTIONS_FIELD),
                 misplaced_assumptions,
             )
     return normalized
 
 
 @cache
-def _outline_root_ignored_keys() -> frozenset[str]:
+def _create_intent_root_ignored_keys() -> frozenset[str]:
     return (
-        _OUTLINE_STEP_BACKEND_OWNED_KEYS
-        | _outline_step_only_keys()
-        | _OUTLINE_ROOT_IGNORED_KEYS
+        _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
+        | _semantic_step_only_keys()
+        | _CREATE_INTENT_ROOT_IGNORED_KEYS
     )
 
 
 @cache
-def _outline_step_ignored_keys() -> frozenset[str]:
-    return _OUTLINE_STEP_BACKEND_OWNED_KEYS | _OUTLINE_STEP_ROOT_RECOVERED_KEYS
-
-
-@cache
-def _outline_step_only_keys() -> frozenset[str]:
-    return frozenset(OutlineStep.model_fields.keys()) - frozenset(
-        FlowCreateOutline.model_fields.keys()
+def _semantic_step_ignored_keys() -> frozenset[str]:
+    return (
+        _CREATE_INTENT_STEP_BACKEND_OWNED_KEYS
+        | _CREATE_INTENT_STEP_ROOT_RECOVERED_KEYS
     )
 
 
-def _normalize_outline_steps(raw_steps: list[Any]) -> tuple[list[Any], list[str]]:
+@cache
+def _semantic_step_only_keys() -> frozenset[str]:
+    return frozenset(SemanticStepIntent.model_fields.keys()) - frozenset(
+        CreateFlowIntent.model_fields.keys()
+    )
+
+
+def _normalize_semantic_steps(raw_steps: list[Any]) -> tuple[list[Any], list[str]]:
     """Recover common small-model shape errors without weakening Flow models.
 
-    Outline steps are semantic units with a task. When a model accidentally
+    Semantic steps are intent units with instructions. When a model accidentally
     places assumptions on a step, keep the root source of truth by folding those
     notes into root assumptions. Orphan output field objects are attached to the
     previous step instead of being treated as broken steps.
@@ -332,7 +419,7 @@ def _normalize_outline_steps(raw_steps: list[Any]) -> tuple[list[Any], list[str]
     misplaced_assumptions: list[str] = []
     recovered_step_keys: set[str] = set()
     for raw_step in raw_steps:
-        step, step_assumptions, recovered_keys = _strip_ignored_outline_step_keys(
+        step, step_assumptions, recovered_keys = _strip_ignored_semantic_step_keys(
             raw_step
         )
         misplaced_assumptions.extend(step_assumptions)
@@ -343,34 +430,36 @@ def _normalize_outline_steps(raw_steps: list[Any]) -> tuple[list[Any], list[str]
         steps.append(step)
     if recovered_step_keys:
         logger.info(
-            "ai_builder_outline_step_assumptions_recovered",
+            "ai_builder_semantic_step_assumptions_recovered",
             extra={"keys": sorted(recovered_step_keys)},
         )
     return steps, misplaced_assumptions
 
 
-def _strip_ignored_outline_step_keys(
+def _strip_ignored_semantic_step_keys(
     value: Any,
 ) -> tuple[Any, list[str], frozenset[str]]:
     if not isinstance(value, dict):
         return value, [], frozenset()
     raw = cast(dict[str, Any], value)
     recovered_keys = frozenset(
-        key for key in raw if key in _OUTLINE_STEP_ROOT_RECOVERED_KEYS
+        key for key in raw if key in _CREATE_INTENT_STEP_ROOT_RECOVERED_KEYS
     )
-    misplaced_assumptions = _assumption_strings(raw.get(_OUTLINE_ASSUMPTIONS_FIELD))
+    misplaced_assumptions = _assumption_strings(
+        raw.get(_CREATE_INTENT_ASSUMPTIONS_FIELD)
+    )
     return (
         {
             key: step_value
             for key, step_value in raw.items()
-            if key not in _outline_step_ignored_keys()
+            if key not in _semantic_step_ignored_keys()
         },
         misplaced_assumptions,
         recovered_keys,
     )
 
 
-def _merge_outline_assumptions(
+def _merge_create_intent_assumptions(
     raw_assumptions: Any,
     misplaced_assumptions: list[str],
 ) -> Any:
@@ -393,7 +482,7 @@ def _looks_like_orphan_output_field(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
     raw = cast(dict[str, Any], value)
-    if "task" in raw:
+    if "instructions" in raw:
         return False
     return looks_like_structured_field_spec(raw) and any(
         key in raw
@@ -428,32 +517,32 @@ def _attach_orphan_output_field(
     previous_step.setdefault("output_type", OutputType.JSON.value)
 
 
-def attach_selected_mcp_refs_to_explicit_outline_steps(
-    outline: FlowCreateOutline,
+def attach_selected_mcp_refs_to_explicit_intent_steps(
+    intent: CreateFlowIntent,
     *,
     selected_server_refs: set[str] | frozenset[str],
     catalog: AIBuilderResourceCatalog,
-) -> FlowCreateOutline:
-    """Attach selected MCP refs when an outline step explicitly names them.
+) -> CreateFlowIntent:
+    """Attach selected MCP refs when a semantic step explicitly names them.
 
     User selection is the permission boundary. The text match is only a
-    catalog-backed recovery path for outline steps that already say which MCP
+    catalog-backed recovery path for semantic steps that already say which MCP
     they intend to use but omit the mechanical `mcp_*_refs` fields.
     """
 
     selected_refs = frozenset(selected_server_refs)
     if not selected_refs:
-        return outline
+        return intent
 
     changed = False
     patched_steps: list[dict[str, object]] = []
-    updated_steps: list[OutlineStep] = []
-    for step in outline.steps:
+    updated_steps: list[SemanticStepIntent] = []
+    for step in intent.steps:
         if step.mcp_server_refs or step.mcp_tool_refs or step.knowledge_refs:
             updated_steps.append(step)
             continue
 
-        step_text = f"{step.name}\n{step.task}"
+        step_text = f"{step.name}\n{step.instructions}"
         mentioned_server_refs = catalog.refs_mentioned_in_text(
             kind="mcp_server",
             text=step_text,
@@ -497,16 +586,16 @@ def attach_selected_mcp_refs_to_explicit_outline_steps(
         changed = True
 
     if not changed:
-        return outline
+        return intent
     logger.info(
-        "ai_builder_selected_mcp_refs_attached_to_outline_steps",
+        "ai_builder_selected_mcp_refs_attached_to_semantic_steps",
         extra={
             "patched_step_count": len(patched_steps),
             "patched_steps": patched_steps,
             "selected_mcp_server_refs": sorted(selected_refs),
         },
     )
-    return outline.model_copy(update={"steps": updated_steps})
+    return intent.model_copy(update={"steps": updated_steps})
 
 
 def _tool_refs_for_servers(
@@ -520,7 +609,7 @@ def _tool_refs_for_servers(
     return frozenset(refs)
 
 
-def build_outline_flow_tool_schema(
+def build_create_flow_tool_schema(
     *,
     resource_catalog: AIBuilderResourceCatalog,
     tool_name: str,
@@ -537,7 +626,7 @@ def build_outline_flow_tool_schema(
         "function": {
             "name": tool_name,
             "description": (
-                "Submit a semantic create-flow outline. Describe what the flow "
+                "Submit a semantic create-flow intent. Describe what the flow "
                 "should do; the backend will compile Flow mechanics such as "
                 "input_source, runtime input, step refs, output_mode, and "
                 "underlag/input_bindings."
@@ -573,13 +662,13 @@ def build_outline_flow_tool_schema(
                             "user fills in when running the flow. Do not include the "
                             "primary text/document/file/audio material being processed."
                         ),
-                        "items": _input_field_schema(),
+                        "items": _input_field_intent_schema(),
                     },
                     "steps": {
                         "type": "array",
                         "minItems": 1,
-                        "maxItems": MAX_OUTLINE_STEPS,
-                        "items": _outline_step_schema(
+                        "maxItems": MAX_PROPOSAL_STEPS,
+                        "items": build_semantic_step_schema(
                             model_refs=model_refs,
                             kb_refs=kb_refs,
                             mcp_server_refs=mcp_server_refs,
@@ -597,7 +686,7 @@ def build_outline_flow_tool_schema(
     }
 
 
-def _input_field_schema() -> dict[str, Any]:
+def _input_field_intent_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "required": ["variable_name", "label", "field_type", "required"],
@@ -615,7 +704,7 @@ def _input_field_schema() -> dict[str, Any]:
     }
 
 
-def _outline_step_schema(
+def build_semantic_step_schema(
     *,
     model_refs: list[str] | None = None,
     kb_refs: list[str] | None = None,
@@ -624,14 +713,14 @@ def _outline_step_schema(
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "object",
-        "required": ["name", "task"],
+        "required": ["name", "instructions"],
         "properties": {
             "name": {"type": "string", "minLength": 1},
-            "task": {
+            "instructions": {
                 "type": "string",
                 "minLength": 1,
                 "description": (
-                    "Plain task instructions. Do not include template variables "
+                    "Plain step instructions. Do not include template variables "
                     "or underlag/input_bindings syntax."
                 ),
             },
@@ -644,7 +733,7 @@ def _outline_step_schema(
                 "description": "Semantic structured fields this step should produce.",
                 "items": build_structured_field_schema(),
             },
-            "uses_input_fields": {
+            "uses_form_fields": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
@@ -667,10 +756,18 @@ def _outline_step_schema(
 
 
 __all__ = [
-    "FlowCreateOutline",
-    "OutlineFlowArgumentError",
-    "attach_selected_mcp_refs_to_explicit_outline_steps",
-    "build_outline_flow_tool_schema",
-    "parse_outline_flow_arguments",
+    "CreateFlowIntent",
+    "ProposalIntentArgumentError",
+    "AddStep",
+    "AssistantSpecPatch",
+    "FlowInputFieldIntent",
+    "ModifyExistingStep",
+    "OrderedEditProposal",
+    "OrderedEditStep",
+    "SemanticStepIntent",
+    "attach_selected_mcp_refs_to_explicit_intent_steps",
+    "build_create_flow_tool_schema",
+    "build_semantic_step_schema",
+    "parse_create_flow_intent_arguments",
     "safe_validation_issues",
 ]

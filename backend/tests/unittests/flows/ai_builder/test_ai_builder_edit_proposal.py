@@ -297,7 +297,6 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
                     "step": {
                         "name": "Summarize outcome",
                         "instructions": "Summarize the reviewed case.",
-                        "input_source": "previous_step",
                         "output_type": "text",
                     },
                 },
@@ -351,7 +350,6 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
                     "step": {
                         "name": "Review source",
                         "instructions": "Review source.",
-                        "input_source": "previous_step",
                     },
                 },
                 {"kind": "modify", "existing_step_ref": "existing_step_2"},
@@ -379,7 +377,13 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
 @pytest.mark.asyncio
 async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() -> None:
     first_result = await _process(
-        flow=_flow(_flow_step(step_order=1, user_description="Remove")),
+        flow=_flow(
+            _flow_step(
+                step_order=1,
+                user_description="Remove",
+                input_type="document",
+            )
+        ),
         arguments={
             "plan_rationale": "Replace the first step.",
             "steps": [
@@ -430,7 +434,13 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
 @pytest.mark.asyncio
 async def test_ordered_add_first_document_step_derives_runtime_input_config() -> None:
     result = await _process(
-        flow=_flow(_flow_step(step_order=1, user_description="Remove")),
+        flow=_flow(
+            _flow_step(
+                step_order=1,
+                user_description="Remove",
+                input_type="document",
+            )
+        ),
         arguments={
             "plan_rationale": "Replace the first step with document analysis.",
             "steps": [
@@ -439,7 +449,6 @@ async def test_ordered_add_first_document_step_derives_runtime_input_config() ->
                     "step": {
                         "name": "Analyze document",
                         "instructions": "Analyze the uploaded document.",
-                        "input_type": "document",
                     },
                 }
             ],
@@ -472,7 +481,6 @@ async def test_ordered_add_later_document_step_compiles_to_text_input() -> None:
                     "step": {
                         "name": "Use previous output",
                         "instructions": "Continue from the previous step.",
-                        "input_type": "document",
                     },
                 },
             ],
@@ -807,8 +815,6 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
                     "step": {
                         "name": "Transkribera ljud",
                         "instructions": "Transkribera uppladdat ljud till text.",
-                        "input_source": "flow_input",
-                        "input_type": "audio",
                         "output_type": "text",
                     },
                 },

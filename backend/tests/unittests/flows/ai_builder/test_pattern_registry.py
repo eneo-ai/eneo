@@ -374,7 +374,7 @@ class TestPositivePatternContract:
 
         The Pattern Registry chooses which token sequence belongs to a
         pattern and owns the human-readable label for each token. Concrete
-        compiler step text lives in the outline compiler. This guard makes
+        compiler step text lives in the create intent compiler. This guard makes
         token renames fail in tests instead of silently drifting between the
         planner prompt and backend compiler.
         """

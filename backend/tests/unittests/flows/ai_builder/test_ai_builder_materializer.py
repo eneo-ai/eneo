@@ -9,14 +9,14 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.assistants.assistant_update import AssistantUpdateCommand
-from intric.flows.ai_builder.ai_builder_authoring_projection import (
+from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
+from intric.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep,
     AssistantSpecPatch,
     ModifyExistingStep,
     OrderedEditProposal,
+    SemanticStepIntent,
 )
-from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
-from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -2448,11 +2448,9 @@ class TestExecuteEditFlow:
                 steps=[
                     ModifyExistingStep(existing_step_ref="existing_step_1"),
                     AddStep(
-                        step=NewStepDraft(
+                        step=SemanticStepIntent(
                             name="Hämta live-data",
                             instructions="Hämta aktuell ärendedata via valt MCP-verktyg.",
-                            input_source=InputSource.PREVIOUS_STEP,
-                            input_type=InputType.TEXT,
                             output_type=OutputType.JSON,
                             mcp_server_refs=["mcp_server.case-registry"],
                             mcp_tool_refs=["mcp_tool.case-registry-lookup"],
