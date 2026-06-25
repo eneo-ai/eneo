@@ -3,14 +3,18 @@
   import { getIntric } from "$lib/core/Intric";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { type Website } from "@intric/intric-js";
+  import { type Website, type JSONRequestBody } from "@intric/intric-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
   import { writable, type Writable } from "svelte/store";
 
-  type WebsiteCreatePayload = Parameters<ReturnType<typeof getIntric>["websites"]["create"]>[0];
+  type WebsiteCreatePayload = JSONRequestBody<"post", "/api/v1/spaces/{id}/knowledge/websites/"> & {
+    spaceId: string;
+    url: string;
+    embedding_model: { id: string };
+  };
 
   const emptyWebsite = () => {
     return {
@@ -376,7 +380,8 @@
   }
 
   async function createWebsiteIntegration() {
-    if (!$currentSpace.embedding_models.length || !editableWebsite.embedding_model) {
+    const embeddingModel = editableWebsite.embedding_model;
+    if (!$currentSpace.embedding_models.length || !embeddingModel) {
       return;
     }
 
@@ -389,6 +394,7 @@
       const websiteIntegrationPayload: WebsiteCreatePayload = {
         spaceId: $currentSpace.id,
         name: websiteName === "" ? null : websiteName,
+        url: integrationSitemapUrl.trim(),
         sitemap_url: integrationSitemapUrl.trim(),
         page_content_webhook_url:
           integrationMarkdownEndpointUrl.trim() === ""
@@ -403,7 +409,7 @@
             value: header.value.trim()
           }))
           .filter((header) => header.key.length > 0),
-        embedding_model: editableWebsite.embedding_model
+        embedding_model: embeddingModel
       };
 
       await intric.websites.create(websiteIntegrationPayload);
