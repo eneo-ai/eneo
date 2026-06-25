@@ -126,12 +126,12 @@ def test_page_needs_sync_uses_lastmod_when_available():
     )
 
 
-def test_build_markdown_config_defaults_when_endpoint_missing():
-    config = WebsiteIntegrationService._build_markdown_config(
-        markdown_endpoint_url=None,
-        markdown_endpoint_method=WebsiteIntegrationMarkdownMethod.POST,
-        markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
-        markdown_endpoint_url_param_name="target",
+def test_build_page_content_webhook_config_defaults_when_endpoint_missing():
+    config = WebsiteIntegrationService._build_page_content_webhook_config(
+        page_content_webhook_url=None,
+        page_content_webhook_method=WebsiteIntegrationMarkdownMethod.POST,
+        page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
+        page_content_webhook_url_param_name="target",
     )
 
     assert config.endpoint_url is None
@@ -140,23 +140,23 @@ def test_build_markdown_config_defaults_when_endpoint_missing():
     assert config.param_name == "url"
 
 
-def test_build_markdown_config_rejects_get_with_body():
+def test_build_page_content_webhook_config_rejects_get_with_body():
     with pytest.raises(BadRequestException, match="GET requests must send the URL"):
-        WebsiteIntegrationService._build_markdown_config(
-            markdown_endpoint_url="https://example.com/markdown",
-            markdown_endpoint_method=WebsiteIntegrationMarkdownMethod.GET,
-            markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
-            markdown_endpoint_url_param_name="url",
+        WebsiteIntegrationService._build_page_content_webhook_config(
+            page_content_webhook_url="https://example.com/markdown",
+            page_content_webhook_method=WebsiteIntegrationMarkdownMethod.GET,
+            page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
+            page_content_webhook_url_param_name="url",
         )
 
 
-def test_build_markdown_config_requires_param_name_when_endpoint_is_set():
+def test_build_page_content_webhook_config_requires_param_name_when_endpoint_is_set():
     with pytest.raises(BadRequestException, match="parameter name is required"):
-        WebsiteIntegrationService._build_markdown_config(
-            markdown_endpoint_url="https://example.com/markdown",
-            markdown_endpoint_method=WebsiteIntegrationMarkdownMethod.POST,
-            markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
-            markdown_endpoint_url_param_name=" ",
+        WebsiteIntegrationService._build_page_content_webhook_config(
+            page_content_webhook_url="https://example.com/markdown",
+            page_content_webhook_method=WebsiteIntegrationMarkdownMethod.POST,
+            page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
+            page_content_webhook_url_param_name=" ",
         )
 
 
@@ -265,16 +265,16 @@ async def test_create_or_reuse_website_reuses_accessible_existing_source():
     )
     service.website_crud_service.get_website.return_value = existing_website
 
-    website = await service.create_or_reuse_website(
+    website = await service.create_or_reuse_sitemap_webhook_integration(
         space_id=space_id,
         name="Marketing",
         url=None,
         embedding_model_id=uuid4(),
         sitemap_url="https://example.com/sitemap.xml",
-        markdown_endpoint_url=None,
-        markdown_endpoint_method=WebsiteIntegrationMarkdownMethod.GET,
-        markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation.QUERY,
-        markdown_endpoint_url_param_name="url",
+        page_content_webhook_url=None,
+        page_content_webhook_method=WebsiteIntegrationMarkdownMethod.GET,
+        page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation.QUERY,
+        page_content_webhook_url_param_name="url",
         headers=[],
     )
 
@@ -285,7 +285,7 @@ async def test_create_or_reuse_website_reuses_accessible_existing_source():
 
 
 @pytest.mark.asyncio
-async def test_create_or_reuse_website_creates_new_source_and_queues_initial_sync():
+async def test_create_or_reuse_sitemap_webhook_integration_creates_new_source_and_queues_initial_sync():
     service = _make_service()
     space_id = uuid4()
     website_id = uuid4()
@@ -306,16 +306,16 @@ async def test_create_or_reuse_website_creates_new_source_and_queues_initial_syn
     service.website_crud_service.create_website.return_value = created_website
     service.queue_sync = AsyncMock()  # type: ignore[method-assign]
 
-    website = await service.create_or_reuse_website(
+    website = await service.create_or_reuse_sitemap_webhook_integration(
         space_id=space_id,
         name="Marketing",
         url=None,
         embedding_model_id=uuid4(),
         sitemap_url="https://example.com/sitemap.xml",
-        markdown_endpoint_url="https://example.com/markdown",
-        markdown_endpoint_method=WebsiteIntegrationMarkdownMethod.POST,
-        markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
-        markdown_endpoint_url_param_name="target",
+        page_content_webhook_url="https://example.com/markdown",
+        page_content_webhook_method=WebsiteIntegrationMarkdownMethod.POST,
+        page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation.BODY,
+        page_content_webhook_url_param_name="target",
         headers=[WebsiteIntegrationHeader(key="Authorization", value="Bearer token")],
     )
 

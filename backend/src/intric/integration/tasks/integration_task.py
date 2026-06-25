@@ -76,6 +76,7 @@ async def _config_exists_with_retry(
         if attempt == retries:
             return False
         await asyncio.sleep(delay)
+    return False
 
 
 async def _validate_embedding_provider(
@@ -249,7 +250,10 @@ async def sync_website_integration(
     )
     if not exists:
         raise NotFoundException(
-            f"Website integration config {params.website_integration_config_id} not found"
+            "Sitemap webhook integration config "
+            f"{params.website_integration_config_id} not found"
         )
     service = container.website_integration_service()
-    return await service.sync_config(config_id=params.website_integration_config_id)
+    return await service.sync_sitemap_webhook_integration(
+        config_id=params.website_integration_config_id
+    )

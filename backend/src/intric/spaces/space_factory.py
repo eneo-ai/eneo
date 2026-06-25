@@ -277,10 +277,12 @@ class SpaceFactory:
                 embedding_model=embedding_model,
                 http_auth=getattr(website, "_decrypted_http_auth", None),
             )
-            website_domain.website_integration_config = getattr(
-                website, "website_integration_config", None
+            setattr(
+                website_domain,
+                "website_integration_config",
+                getattr(website, "website_integration_config", None),
             )
-            website_domain.reused_existing = False
+            setattr(website_domain, "reused_existing", False)
             space_websites.append(website_domain)
 
         ik_source: list["IntegrationKnowledgeDBModel"] = (

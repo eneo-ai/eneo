@@ -1,8 +1,16 @@
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Protocol, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+)
 from pydantic.networks import HttpUrl
 
 from intric.embedding_models.presentation.embedding_model_models import (
@@ -64,40 +72,93 @@ class WebsiteMetadata(BaseModel):
     size: int
 
 
-class WebsiteIntegrationConfigPublic(BaseModel):
+class WebsiteIntegrationConfigRecord(Protocol):
     id: UUID
-    sync_url: str
+    ping_token: str
     sitemap_url: str
-    markdown_endpoint_url: Optional[str] = None
-    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod
-    markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation
+    markdown_endpoint_url: Optional[str]
+    markdown_endpoint_method: str
+    markdown_endpoint_url_location: str
     markdown_endpoint_url_param_name: str
-    headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
+    headers: Optional[dict[str, str]]
     sync_status: str
+    last_sitemap_fetched_at: Optional[datetime]
+    last_successful_sync_at: Optional[datetime]
+    last_sync_error: Optional[str]
+    last_sync_queued_at: Optional[datetime]
+
+
+class WebsiteIntegrationConfigPublic(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    webhook_url: str = Field(
+        validation_alias=AliasChoices("webhook_url", "sync_url"),
+        serialization_alias="webhook_url",
+    )
+    sitemap_url: str
+    page_content_webhook_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url", "markdown_endpoint_url"
+        ),
+        serialization_alias="page_content_webhook_url",
+    )
+    page_content_webhook_method: WebsiteIntegrationMarkdownMethod = Field(
+        validation_alias=AliasChoices(
+            "page_content_webhook_method", "markdown_endpoint_method"
+        ),
+        serialization_alias="page_content_webhook_method",
+    )
+    page_content_webhook_url_location: WebsiteIntegrationMarkdownUrlLocation = Field(
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_location", "markdown_endpoint_url_location"
+        ),
+        serialization_alias="page_content_webhook_url_location",
+    )
+    page_content_webhook_url_param_name: str = Field(
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_param_name",
+            "markdown_endpoint_url_param_name",
+        ),
+        serialization_alias="page_content_webhook_url_param_name",
+    )
+    headers: list[WebsiteIntegrationHeader] = Field(
+        default_factory=lambda: cast(list[WebsiteIntegrationHeader], [])
+    )
+    webhook_status: str = Field(
+        validation_alias=AliasChoices("webhook_status", "sync_status"),
+        serialization_alias="webhook_status",
+    )
     last_sitemap_fetched_at: Optional[datetime] = None
     last_successful_sync_at: Optional[datetime] = None
     last_sync_error: Optional[str] = None
     last_sync_queued_at: Optional[datetime] = None
 
     @classmethod
-    def from_record(cls, config: object) -> "WebsiteIntegrationConfigPublic":
+    def from_record(
+        cls, config: WebsiteIntegrationConfigRecord
+    ) -> "WebsiteIntegrationConfigPublic":
         return cls(
             id=config.id,
-            sync_url=f"/api/v1/integrations/websites/{config.id}/sync/?token={config.ping_token}",
+            webhook_url=(
+                f"/api/v1/integrations/websites/{config.id}/sync/"
+                f"?webhook_token={config.ping_token}"
+            ),
             sitemap_url=config.sitemap_url,
-            markdown_endpoint_url=config.markdown_endpoint_url,
-            markdown_endpoint_method=WebsiteIntegrationMarkdownMethod(
+            page_content_webhook_url=config.markdown_endpoint_url,
+            page_content_webhook_method=WebsiteIntegrationMarkdownMethod(
                 config.markdown_endpoint_method
             ),
-            markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation(
+            page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation(
                 config.markdown_endpoint_url_location
             ),
-            markdown_endpoint_url_param_name=config.markdown_endpoint_url_param_name,
+            page_content_webhook_url_param_name=config.markdown_endpoint_url_param_name,
             headers=[
-                {"key": key, "value": value}
+                WebsiteIntegrationHeader(key=key, value=value)
                 for key, value in (config.headers or {}).items()
             ],
-            sync_status=config.sync_status,
+            webhook_status=config.sync_status,
             last_sitemap_fetched_at=config.last_sitemap_fetched_at,
             last_successful_sync_at=config.last_successful_sync_at,
             last_sync_error=config.last_sync_error,
@@ -210,6 +271,8 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
 
 
 class WebsiteCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: Optional[str] = None
     url: Optional[str] = None
     download_files: bool = False
@@ -231,15 +294,38 @@ class WebsiteCreate(BaseModel):
     """Password for HTTP Basic Authentication. Must be provided with username."""
 
     sitemap_url: Optional[str] = None
-    markdown_endpoint_url: Optional[str] = None
-    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod = (
-        WebsiteIntegrationMarkdownMethod.GET
+    page_content_webhook_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url", "markdown_endpoint_url"
+        ),
+        serialization_alias="page_content_webhook_url",
     )
-    markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation = (
-        WebsiteIntegrationMarkdownUrlLocation.QUERY
+    page_content_webhook_method: WebsiteIntegrationMarkdownMethod = Field(
+        default=WebsiteIntegrationMarkdownMethod.GET,
+        validation_alias=AliasChoices(
+            "page_content_webhook_method", "markdown_endpoint_method"
+        ),
+        serialization_alias="page_content_webhook_method",
     )
-    markdown_endpoint_url_param_name: str = "url"
-    headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
+    page_content_webhook_url_location: WebsiteIntegrationMarkdownUrlLocation = Field(
+        default=WebsiteIntegrationMarkdownUrlLocation.QUERY,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_location", "markdown_endpoint_url_location"
+        ),
+        serialization_alias="page_content_webhook_url_location",
+    )
+    page_content_webhook_url_param_name: str = Field(
+        default="url",
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_param_name",
+            "markdown_endpoint_url_param_name",
+        ),
+        serialization_alias="page_content_webhook_url_param_name",
+    )
+    headers: list[WebsiteIntegrationHeader] = Field(
+        default_factory=lambda: cast(list[WebsiteIntegrationHeader], [])
+    )
 
     @field_validator("http_auth_password")
     @classmethod
@@ -259,6 +345,8 @@ class WebsiteCreate(BaseModel):
 
 
 class WebsiteUpdate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     url: Union[str, NotProvided] = NOT_PROVIDED
     name: Union[str, None, NotProvided] = NOT_PROVIDED
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
@@ -276,14 +364,39 @@ class WebsiteUpdate(BaseModel):
         "Set to null to remove auth. Must be provided with username.",
     )
     sitemap_url: Union[str, None, NotProvided] = NOT_PROVIDED
-    markdown_endpoint_url: Union[str, None, NotProvided] = NOT_PROVIDED
-    markdown_endpoint_method: Union[WebsiteIntegrationMarkdownMethod, NotProvided] = (
-        NOT_PROVIDED
+    page_content_webhook_url: Union[str, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url", "markdown_endpoint_url"
+        ),
+        serialization_alias="page_content_webhook_url",
     )
-    markdown_endpoint_url_location: Union[
+    page_content_webhook_method: Union[
+        WebsiteIntegrationMarkdownMethod, NotProvided
+    ] = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_method", "markdown_endpoint_method"
+        ),
+        serialization_alias="page_content_webhook_method",
+    )
+    page_content_webhook_url_location: Union[
         WebsiteIntegrationMarkdownUrlLocation, NotProvided
-    ] = NOT_PROVIDED
-    markdown_endpoint_url_param_name: Union[str, NotProvided] = NOT_PROVIDED
+    ] = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_location", "markdown_endpoint_url_location"
+        ),
+        serialization_alias="page_content_webhook_url_location",
+    )
+    page_content_webhook_url_param_name: Union[str, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        validation_alias=AliasChoices(
+            "page_content_webhook_url_param_name",
+            "markdown_endpoint_url_param_name",
+        ),
+        serialization_alias="page_content_webhook_url_param_name",
+    )
     headers: Union[list[WebsiteIntegrationHeader], NotProvided] = NOT_PROVIDED
 
     @field_validator("http_auth_password")

@@ -6,7 +6,7 @@ import secrets
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import quote, urlparse
 from uuid import UUID
 
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from intric.info_blobs.info_blob_repo import InfoBlobRepository
     from intric.websites.application.website_crud_service import WebsiteCRUDService
     from intric.websites.domain.website import Website as WebsiteDomain
+    from intric.websites.presentation.website_models import WebsiteUpdate
 
 logger = get_logger(__name__)
 
@@ -116,21 +117,21 @@ class WebsiteIntegrationService:
         name = payload.name.strip()
         sitemap_url = payload.sitemap_url.strip()
         if not name:
-            raise BadRequestException("Website integration name is required")
+            raise BadRequestException("Sitemap webhook integration name is required")
         if not sitemap_url:
             raise BadRequestException("Sitemap URL is required")
-        markdown_config = self._build_markdown_config(
-            markdown_endpoint_url=(
-                str(payload.markdown_endpoint_url).strip()
-                if payload.markdown_endpoint_url
+        markdown_config = self._build_page_content_webhook_config(
+            page_content_webhook_url=(
+                str(payload.page_content_webhook_url).strip()
+                if payload.page_content_webhook_url
                 else None
             ),
-            markdown_endpoint_method=payload.markdown_endpoint_method,
-            markdown_endpoint_url_location=payload.markdown_endpoint_url_location,
-            markdown_endpoint_url_param_name=payload.markdown_endpoint_url_param_name,
+            page_content_webhook_method=payload.page_content_webhook_method,
+            page_content_webhook_url_location=payload.page_content_webhook_url_location,
+            page_content_webhook_url_param_name=payload.page_content_webhook_url_param_name,
         )
 
-        config = WebsiteIntegrationConfig(
+        config = cast(Any, WebsiteIntegrationConfig)(
             tenant_integration_id=tenant_integration.id,
             tenant_id=self.user.tenant_id,
             owner_type=owner_type,
@@ -167,7 +168,9 @@ class WebsiteIntegrationService:
         if is_provided(payload.name):
             name = payload.name.strip()
             if not name:
-                raise BadRequestException("Website integration name is required")
+                raise BadRequestException(
+                    "Sitemap webhook integration name is required"
+                )
             config.name = name
         if is_provided(payload.sitemap_url):
             sitemap_url = payload.sitemap_url.strip()
@@ -177,33 +180,33 @@ class WebsiteIntegrationService:
 
         markdown_endpoint_url = (
             config.markdown_endpoint_url
-            if not is_provided(payload.markdown_endpoint_url)
+            if not is_provided(payload.page_content_webhook_url)
             else (
-                payload.markdown_endpoint_url.strip()
-                if payload.markdown_endpoint_url
+                payload.page_content_webhook_url.strip()
+                if payload.page_content_webhook_url
                 else None
             )
         )
         markdown_endpoint_method = (
             WebsiteIntegrationMarkdownMethod(config.markdown_endpoint_method)
-            if not is_provided(payload.markdown_endpoint_method)
-            else payload.markdown_endpoint_method
+            if not is_provided(payload.page_content_webhook_method)
+            else payload.page_content_webhook_method
         )
         markdown_endpoint_url_location = (
             WebsiteIntegrationMarkdownUrlLocation(config.markdown_endpoint_url_location)
-            if not is_provided(payload.markdown_endpoint_url_location)
-            else payload.markdown_endpoint_url_location
+            if not is_provided(payload.page_content_webhook_url_location)
+            else payload.page_content_webhook_url_location
         )
         markdown_endpoint_url_param_name = (
             config.markdown_endpoint_url_param_name
-            if not is_provided(payload.markdown_endpoint_url_param_name)
-            else payload.markdown_endpoint_url_param_name
+            if not is_provided(payload.page_content_webhook_url_param_name)
+            else payload.page_content_webhook_url_param_name
         )
-        markdown_config = self._build_markdown_config(
-            markdown_endpoint_url=markdown_endpoint_url,
-            markdown_endpoint_method=markdown_endpoint_method,
-            markdown_endpoint_url_location=markdown_endpoint_url_location,
-            markdown_endpoint_url_param_name=markdown_endpoint_url_param_name,
+        markdown_config = self._build_page_content_webhook_config(
+            page_content_webhook_url=markdown_endpoint_url,
+            page_content_webhook_method=markdown_endpoint_method,
+            page_content_webhook_url_location=markdown_endpoint_url_location,
+            page_content_webhook_url_param_name=markdown_endpoint_url_param_name,
         )
         config.markdown_endpoint_url = markdown_config.endpoint_url
         config.markdown_endpoint_method = markdown_config.method.value
@@ -241,18 +244,18 @@ class WebsiteIntegrationService:
         config = await self._get_owned_config(
             config_id=config_id, owner_type=owner_type
         )
-        return await self._queue_sync_for_config(config)
+        return await self._queue_sitemap_webhook_sync_for_config(config)
 
-    async def queue_sync_for_token(
-        self, *, config_id: UUID, ping_token: str
+    async def queue_webhook_sync_for_token(
+        self, *, config_id: UUID, webhook_token: str
     ) -> JobInDb:
         config = await self._get_config_by_id(config_id)
-        if not secrets.compare_digest(config.ping_token, ping_token):
-            raise UnauthorizedException("Invalid ping token")
+        if not secrets.compare_digest(config.ping_token, webhook_token):
+            raise UnauthorizedException("Invalid webhook token")
 
-        return await self._queue_sync_for_config(config)
+        return await self._queue_sitemap_webhook_sync_for_config(config)
 
-    async def _queue_sync_for_config(
+    async def _queue_sitemap_webhook_sync_for_config(
         self,
         config: WebsiteIntegrationConfig,
     ) -> JobInDb:
@@ -270,7 +273,7 @@ class WebsiteIntegrationService:
 
         return await self.job_service.queue_job(
             task=Task.SYNC_WEBSITE_INTEGRATION,
-            name=f"Website integration sync: {config.name}",
+            name=f"Sitemap webhook integration sync: {config.name}",
             task_params=WebsiteIntegrationSyncTaskParam(
                 user_id=self.user.id,
                 id=config.id,
@@ -278,11 +281,13 @@ class WebsiteIntegrationService:
             ),
         )
 
-    async def sync_config(self, *, config_id: UUID) -> WebsiteIntegrationConfigPublic:
+    async def sync_sitemap_webhook_integration(
+        self, *, config_id: UUID
+    ) -> WebsiteIntegrationConfigPublic:
         config = await self._get_config_by_id(config_id)
         if config.website_id is None:
             raise BadRequestException(
-                "Website integration is not linked to a website source"
+                "Sitemap webhook integration is not linked to a website source"
             )
         root_website = await self.website_crud_service.get_website(config.website_id)
         config.sync_status = "in_progress"
@@ -344,7 +349,7 @@ class WebsiteIntegrationService:
                     )
 
                 if existing is None:
-                    existing = WebsiteIntegrationPage(
+                    existing = cast(Any, WebsiteIntegrationPage)(
                         website_integration_config_id=config.id,
                         page_url=page_url,
                         website_id=root_website.id,
@@ -389,7 +394,8 @@ class WebsiteIntegrationService:
             return self._to_public(config)
         except Exception as exc:
             logger.exception(
-                "Website integration sync failed", extra={"config_id": str(config_id)}
+                "Sitemap webhook integration sync failed",
+                extra={"config_id": str(config_id)},
             )
             config.sync_status = "failed"
             config.last_sync_error = str(exc)
@@ -419,9 +425,9 @@ class WebsiteIntegrationService:
             .first()
         )
         if integration is None:
-            raise BadRequestException("Website integration is not available")
+            raise BadRequestException("Sitemap webhook integration is not available")
 
-        tenant_integration = TenantIntegration(
+        tenant_integration = cast(Any, TenantIntegration)(
             tenant_id=self.user.tenant_id,
             integration_id=integration.id,
         )
@@ -429,7 +435,7 @@ class WebsiteIntegrationService:
         await self.session.flush()
         return tenant_integration
 
-    async def create_or_reuse_website(
+    async def create_or_reuse_sitemap_webhook_integration(
         self,
         *,
         space_id: UUID,
@@ -437,10 +443,10 @@ class WebsiteIntegrationService:
         url: str | None,
         embedding_model_id: UUID | None,
         sitemap_url: str,
-        markdown_endpoint_url: str | None,
-        markdown_endpoint_method: WebsiteIntegrationMarkdownMethod,
-        markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation,
-        markdown_endpoint_url_param_name: str,
+        page_content_webhook_url: str | None,
+        page_content_webhook_method: WebsiteIntegrationMarkdownMethod,
+        page_content_webhook_url_location: WebsiteIntegrationMarkdownUrlLocation,
+        page_content_webhook_url_param_name: str,
         headers: list[WebsiteIntegrationHeader],
     ) -> "WebsiteDomain":
         normalized_sitemap_url = sitemap_url.strip()
@@ -452,19 +458,22 @@ class WebsiteIntegrationService:
             sitemap_url=normalized_sitemap_url,
         )
         if existing_config is not None:
-            website = await self.website_crud_service.get_website(
-                existing_config.website_id
-            )
-            website.website_integration_config = existing_config
-            website.reused_existing = True
+            existing_website_id = existing_config.website_id
+            if existing_website_id is None:
+                raise BadRequestException(
+                    "Sitemap webhook integration is missing its linked website"
+                )
+            website = await self.website_crud_service.get_website(existing_website_id)
+            setattr(website, "website_integration_config", existing_config)
+            setattr(website, "reused_existing", True)
             return website
 
         tenant_integration = await self._get_or_create_website_tenant_integration()
-        markdown_config = self._build_markdown_config(
-            markdown_endpoint_url=markdown_endpoint_url,
-            markdown_endpoint_method=markdown_endpoint_method,
-            markdown_endpoint_url_location=markdown_endpoint_url_location,
-            markdown_endpoint_url_param_name=markdown_endpoint_url_param_name,
+        markdown_config = self._build_page_content_webhook_config(
+            page_content_webhook_url=page_content_webhook_url,
+            page_content_webhook_method=page_content_webhook_method,
+            page_content_webhook_url_location=page_content_webhook_url_location,
+            page_content_webhook_url_param_name=page_content_webhook_url_param_name,
         )
 
         website = await self.website_crud_service.create_website(
@@ -478,7 +487,7 @@ class WebsiteIntegrationService:
             run_initial_crawl=False,
         )
 
-        config = WebsiteIntegrationConfig(
+        config = cast(Any, WebsiteIntegrationConfig)(
             website_id=website.id,
             tenant_integration_id=tenant_integration.id,
             tenant_id=self.user.tenant_id,
@@ -504,15 +513,15 @@ class WebsiteIntegrationService:
         await self.session.flush()
         await self.queue_sync(config_id=config.id, owner_type=None)
         await self.session.refresh(config)
-        website.website_integration_config = config
-        website.reused_existing = False
+        setattr(website, "website_integration_config", config)
+        setattr(website, "reused_existing", False)
         return website
 
     async def update_for_website(
         self,
         *,
         website_id: UUID,
-        payload: "object",
+        payload: "WebsiteUpdate",
     ) -> WebsiteIntegrationConfig | None:
         config = await self._get_config_by_website_id(website_id)
         if config is None:
@@ -528,33 +537,33 @@ class WebsiteIntegrationService:
 
         markdown_endpoint_url = (
             config.markdown_endpoint_url
-            if not is_provided(payload.markdown_endpoint_url)
+            if not is_provided(payload.page_content_webhook_url)
             else (
-                payload.markdown_endpoint_url.strip()
-                if payload.markdown_endpoint_url
+                payload.page_content_webhook_url.strip()
+                if payload.page_content_webhook_url
                 else None
             )
         )
         markdown_endpoint_method = (
             WebsiteIntegrationMarkdownMethod(config.markdown_endpoint_method)
-            if not is_provided(payload.markdown_endpoint_method)
-            else payload.markdown_endpoint_method
+            if not is_provided(payload.page_content_webhook_method)
+            else payload.page_content_webhook_method
         )
         markdown_endpoint_url_location = (
             WebsiteIntegrationMarkdownUrlLocation(config.markdown_endpoint_url_location)
-            if not is_provided(payload.markdown_endpoint_url_location)
-            else payload.markdown_endpoint_url_location
+            if not is_provided(payload.page_content_webhook_url_location)
+            else payload.page_content_webhook_url_location
         )
         markdown_endpoint_url_param_name = (
             config.markdown_endpoint_url_param_name
-            if not is_provided(payload.markdown_endpoint_url_param_name)
-            else payload.markdown_endpoint_url_param_name
+            if not is_provided(payload.page_content_webhook_url_param_name)
+            else payload.page_content_webhook_url_param_name
         )
-        markdown_config = self._build_markdown_config(
-            markdown_endpoint_url=markdown_endpoint_url,
-            markdown_endpoint_method=markdown_endpoint_method,
-            markdown_endpoint_url_location=markdown_endpoint_url_location,
-            markdown_endpoint_url_param_name=markdown_endpoint_url_param_name,
+        markdown_config = self._build_page_content_webhook_config(
+            page_content_webhook_url=markdown_endpoint_url,
+            page_content_webhook_method=markdown_endpoint_method,
+            page_content_webhook_url_location=markdown_endpoint_url_location,
+            page_content_webhook_url_param_name=markdown_endpoint_url_param_name,
         )
         config.sitemap_url = sitemap_url
         config.markdown_endpoint_url = markdown_config.endpoint_url
@@ -600,11 +609,15 @@ class WebsiteIntegrationService:
     ) -> tuple[UUID, UUID | None]:
         if owner_type == "tenant":
             space = await self.space_service.get_or_create_tenant_space()
+            if space.id is None:
+                raise BadRequestException("Tenant space is missing an id")
             return space.id, None
 
         space = await self.space_service.get_personal_space()
         if space is None:
             space = await self.space_service.create_personal_space()
+        if space.id is None:
+            raise BadRequestException("Personal space is missing an id")
         return space.id, self.user.id
 
     def _base_config_stmt(self, *, owner_type: Literal["tenant", "user"]):
@@ -624,11 +637,11 @@ class WebsiteIntegrationService:
     ) -> WebsiteIntegrationConfig:
         config = await self._get_config_by_id(config_id)
         if config.tenant_id != self.user.tenant_id:
-            raise NotFoundException("Website integration not found")
+            raise NotFoundException("Sitemap webhook integration not found")
         if owner_type is not None and config.owner_type != owner_type:
-            raise NotFoundException("Website integration not found")
+            raise NotFoundException("Sitemap webhook integration not found")
         if config.owner_type == "user" and config.owner_user_id != self.user.id:
-            raise NotFoundException("Website integration not found")
+            raise NotFoundException("Sitemap webhook integration not found")
         if (
             config.owner_type == "tenant"
             and Permission.ADMIN not in self.user.permissions
@@ -647,7 +660,7 @@ class WebsiteIntegrationService:
     async def _get_config_by_id(self, config_id: UUID) -> WebsiteIntegrationConfig:
         config = await self.session.get(WebsiteIntegrationConfig, config_id)
         if config is None:
-            raise NotFoundException("Website integration not found")
+            raise NotFoundException("Sitemap webhook integration not found")
         return config
 
     async def _find_accessible_config_for_space(
@@ -722,23 +735,24 @@ class WebsiteIntegrationService:
                 config.markdown_endpoint_url_location
             )
             endpoint = config.markdown_endpoint_url
-            request_kwargs: dict[str, object] = {"headers": config.headers}
-
             if location == WebsiteIntegrationMarkdownUrlLocation.QUERY:
                 endpoint = self._append_query_param(
                     base_url=config.markdown_endpoint_url,
                     key=param_name,
                     value=page_url,
                 )
-            else:
-                request_kwargs["json"] = payload
+                request = (
+                    self.aiohttp_session.get
+                    if method == WebsiteIntegrationMarkdownMethod.GET
+                    else self.aiohttp_session.post
+                )
+                async with request(endpoint, headers=config.headers) as response:
+                    response.raise_for_status()
+                    return self._extract_markdown_response(await response.text())
 
-            request = (
-                self.aiohttp_session.get
-                if method == WebsiteIntegrationMarkdownMethod.GET
-                else self.aiohttp_session.post
-            )
-            async with request(endpoint, **request_kwargs) as response:
+            async with self.aiohttp_session.post(
+                endpoint, headers=config.headers, json=payload
+            ) as response:
                 response.raise_for_status()
                 return self._extract_markdown_response(await response.text())
 
@@ -890,8 +904,9 @@ class WebsiteIntegrationService:
                 return response_text
 
             if isinstance(parsed, dict):
+                parsed_dict = cast(dict[str, Any], parsed)
                 for key in ("markdown", "content", "data"):
-                    value = parsed.get(key)
+                    value = parsed_dict.get(key)
                     if isinstance(value, str):
                         return value
 
@@ -902,15 +917,17 @@ class WebsiteIntegrationService:
         return response_text
 
     @staticmethod
-    def _build_markdown_config(
+    def _build_page_content_webhook_config(
         *,
-        markdown_endpoint_url: str | None,
-        markdown_endpoint_method: WebsiteIntegrationMarkdownMethod,
-        markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation,
-        markdown_endpoint_url_param_name: str,
+        page_content_webhook_url: str | None,
+        page_content_webhook_method: WebsiteIntegrationMarkdownMethod,
+        page_content_webhook_url_location: WebsiteIntegrationMarkdownUrlLocation,
+        page_content_webhook_url_param_name: str,
     ) -> SimpleMarkdownConfig:
-        endpoint_url = markdown_endpoint_url.strip() if markdown_endpoint_url else None
-        param_name = markdown_endpoint_url_param_name.strip()
+        endpoint_url = (
+            page_content_webhook_url.strip() if page_content_webhook_url else None
+        )
+        param_name = page_content_webhook_url_param_name.strip()
 
         if endpoint_url is None:
             return SimpleMarkdownConfig(
@@ -925,8 +942,8 @@ class WebsiteIntegrationService:
                 "Markdown endpoint URL parameter name is required"
             )
         if (
-            markdown_endpoint_method == WebsiteIntegrationMarkdownMethod.GET
-            and markdown_endpoint_url_location
+            page_content_webhook_method == WebsiteIntegrationMarkdownMethod.GET
+            and page_content_webhook_url_location
             == WebsiteIntegrationMarkdownUrlLocation.BODY
         ):
             raise BadRequestException(
@@ -935,8 +952,8 @@ class WebsiteIntegrationService:
 
         return SimpleMarkdownConfig(
             endpoint_url=endpoint_url,
-            method=markdown_endpoint_method,
-            url_location=markdown_endpoint_url_location,
+            method=page_content_webhook_method,
+            url_location=page_content_webhook_url_location,
             param_name=param_name,
         )
 
@@ -945,29 +962,29 @@ class WebsiteIntegrationService:
         return WebsiteIntegrationConfigPublic(
             id=config.id,
             tenant_integration_id=config.tenant_integration_id,
-            sync_url=(
+            webhook_url=(
                 f"/api/v1/integrations/websites/{config.id}/sync/"
-                f"?token={config.ping_token}"
+                f"?webhook_token={config.ping_token}"
             ),
-            owner_type=config.owner_type,
+            owner_type=cast(Literal["tenant", "user", "space"], config.owner_type),
             owner_user_id=config.owner_user_id,
             owner_space_id=config.owner_space_id,
             created_by_user_id=config.created_by_user_id,
             name=config.name,
             sitemap_url=config.sitemap_url,
-            markdown_endpoint_url=config.markdown_endpoint_url,
-            markdown_endpoint_method=WebsiteIntegrationMarkdownMethod(
+            page_content_webhook_url=config.markdown_endpoint_url,
+            page_content_webhook_method=WebsiteIntegrationMarkdownMethod(
                 config.markdown_endpoint_method
             ),
-            markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation(
+            page_content_webhook_url_location=WebsiteIntegrationMarkdownUrlLocation(
                 config.markdown_endpoint_url_location
             ),
-            markdown_endpoint_url_param_name=config.markdown_endpoint_url_param_name,
+            page_content_webhook_url_param_name=config.markdown_endpoint_url_param_name,
             headers=[
-                {"key": key, "value": value}
+                WebsiteIntegrationHeader(key=key, value=value)
                 for key, value in (config.headers or {}).items()
             ],
-            sync_status=config.sync_status,
+            webhook_status=config.sync_status,
             last_sitemap_fetched_at=config.last_sitemap_fetched_at,
             last_successful_sync_at=config.last_successful_sync_at,
             last_sync_error=config.last_sync_error,

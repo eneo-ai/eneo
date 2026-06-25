@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import AsyncIterator
 
+import aiohttp
 import redis.asyncio as aioredis
 from dependency_injector import containers, providers
 
@@ -255,7 +256,7 @@ from intric.jobs.job_repo import JobRepository
 from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
 from intric.limits.limit_service import LimitService
-from intric.main.aiohttp_client import aiohttp_client
+from intric.main.aiohttp_client import AioHttpClient, aiohttp_client
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.mcp_servers.application.mcp_server_service import MCPServerService
@@ -493,6 +494,10 @@ class SessionProxy:
         # this branch in practice. Pyright still flags both the call and the
         # unknown return, so we suppress both rules.
         return session(*args, **kwargs)  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
+
+
+def _get_aiohttp_session(client: AioHttpClient) -> aiohttp.ClientSession:
+    return client()
 
 
 class Container(containers.DeclarativeContainer):
@@ -1543,7 +1548,7 @@ class Container(containers.DeclarativeContainer):
         text_processor=text_processor,
         datastore=datastore,
         info_blob_repo=info_blob_repo,
-        aiohttp_session=providers.Callable(lambda client: client(), aiohttp_client),
+        aiohttp_session=providers.Callable(_get_aiohttp_session, aiohttp_client),
     )
     transcriber = providers.Factory(
         Transcriber,

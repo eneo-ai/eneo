@@ -37,14 +37,14 @@
     website?: Omit<Website, "embedding_model"> & {
       embedding_model?: { id: string } | null;
       integration?: {
-        sync_url: string;
+        webhook_url: string;
         sitemap_url: string;
-        markdown_endpoint_url?: string | null;
-        markdown_endpoint_method: "get" | "post";
-        markdown_endpoint_url_location: "query" | "body";
-        markdown_endpoint_url_param_name: string;
+        page_content_webhook_url?: string | null;
+        page_content_webhook_method: "get" | "post";
+        page_content_webhook_url_location: "query" | "body";
+        page_content_webhook_url_param_name: string;
         headers: Array<{ key: string; value: string }>;
-        sync_status: string;
+        webhook_status: string;
       } | null;
     };
     showDialog?: Dialog.OpenState;
@@ -67,15 +67,15 @@
   let httpAuthPassword = "";
   let showPassword = false;
   let integrationSitemapUrl = $state(website?.integration?.sitemap_url ?? "");
-  let integrationMarkdownEndpointUrl = $state(website?.integration?.markdown_endpoint_url ?? "");
+  let integrationMarkdownEndpointUrl = $state(website?.integration?.page_content_webhook_url ?? "");
   let integrationMarkdownEndpointMethod = $state<"get" | "post">(
-    website?.integration?.markdown_endpoint_method ?? "get"
+    website?.integration?.page_content_webhook_method ?? "get"
   );
   let integrationMarkdownEndpointLocation = $state<"query" | "body">(
-    website?.integration?.markdown_endpoint_url_location ?? "query"
+    website?.integration?.page_content_webhook_url_location ?? "query"
   );
   let integrationMarkdownEndpointParamName = $state(
-    website?.integration?.markdown_endpoint_url_param_name ?? "url"
+    website?.integration?.page_content_webhook_url_param_name ?? "url"
   );
   let integrationHeaders = $state<Array<{ key: string; value: string }>>(
     website?.integration?.headers?.length
@@ -107,12 +107,12 @@
 
   function syncIntegrationEditorState() {
     integrationSitemapUrl = website?.integration?.sitemap_url ?? "";
-    integrationMarkdownEndpointUrl = website?.integration?.markdown_endpoint_url ?? "";
-    integrationMarkdownEndpointMethod = website?.integration?.markdown_endpoint_method ?? "get";
+    integrationMarkdownEndpointUrl = website?.integration?.page_content_webhook_url ?? "";
+    integrationMarkdownEndpointMethod = website?.integration?.page_content_webhook_method ?? "get";
     integrationMarkdownEndpointLocation =
-      website?.integration?.markdown_endpoint_url_location ?? "query";
+      website?.integration?.page_content_webhook_url_location ?? "query";
     integrationMarkdownEndpointParamName =
-      website?.integration?.markdown_endpoint_url_param_name ?? "url";
+      website?.integration?.page_content_webhook_url_param_name ?? "url";
     integrationHeaders = website?.integration?.headers?.length
       ? website.integration.headers.map((header) => ({ ...header }))
       : [{ key: "", value: "" }];
@@ -242,21 +242,21 @@
     httpAuthPassword = "";
   }
 
-  function absoluteSyncUrl(syncUrl: string) {
-    return new URL(syncUrl, intric.client.baseUrl).toString();
+  function absoluteWebhookUrl(webhookUrl: string) {
+    return new URL(webhookUrl, intric.client.baseUrl).toString();
   }
 
-  async function copySyncUrl(syncUrl: string) {
+  async function copyWebhookUrl(webhookUrl: string) {
     try {
-      await navigator.clipboard.writeText(absoluteSyncUrl(syncUrl));
+      await navigator.clipboard.writeText(absoluteWebhookUrl(webhookUrl));
     } catch (e) {
       toastError(e);
     }
   }
 
-  async function syncWebsiteIntegration(syncUrl: string) {
+  async function triggerWebhookSync(webhookUrl: string) {
     try {
-      const response = await fetch(absoluteSyncUrl(syncUrl), {
+      const response = await fetch(absoluteWebhookUrl(webhookUrl), {
         method: "POST",
         credentials: "include"
       });
@@ -307,11 +307,11 @@
 
       if (website?.integration) {
         editsAny.sitemap_url = integrationSitemapUrl;
-        editsAny.markdown_endpoint_url =
+        editsAny.page_content_webhook_url =
           integrationMarkdownEndpointUrl.trim() === "" ? null : integrationMarkdownEndpointUrl;
-        editsAny.markdown_endpoint_method = integrationMarkdownEndpointMethod;
-        editsAny.markdown_endpoint_url_location = integrationMarkdownEndpointLocation;
-        editsAny.markdown_endpoint_url_param_name = integrationMarkdownEndpointParamName;
+        editsAny.page_content_webhook_method = integrationMarkdownEndpointMethod;
+        editsAny.page_content_webhook_url_location = integrationMarkdownEndpointLocation;
+        editsAny.page_content_webhook_url_param_name = integrationMarkdownEndpointParamName;
         editsAny.headers = integrationHeaders
           .map((header) => ({
             key: header.key.trim(),
@@ -381,13 +381,13 @@
         spaceId: $currentSpace.id,
         name: websiteName === "" ? null : websiteName,
         sitemap_url: integrationSitemapUrl.trim(),
-        markdown_endpoint_url:
+        page_content_webhook_url:
           integrationMarkdownEndpointUrl.trim() === ""
             ? null
             : integrationMarkdownEndpointUrl.trim(),
-        markdown_endpoint_method: integrationMarkdownEndpointMethod,
-        markdown_endpoint_url_location: integrationMarkdownEndpointLocation,
-        markdown_endpoint_url_param_name: integrationMarkdownEndpointParamName.trim() || "url",
+        page_content_webhook_method: integrationMarkdownEndpointMethod,
+        page_content_webhook_url_location: integrationMarkdownEndpointLocation,
+        page_content_webhook_url_param_name: integrationMarkdownEndpointParamName.trim() || "url",
         headers: integrationHeaders
           .map((header) => ({
             key: header.key.trim(),
@@ -480,7 +480,7 @@
           bind:value={createSourceType}
           options={[
             { label: m.crawl_website(), value: "crawl" },
-            { label: m.website_integration_sitemap(), value: "integration" }
+            { label: m.sitemap_webhook_integration(), value: "integration" }
           ]}
         >
           {m.source_type()}
@@ -508,8 +508,8 @@
         />
         <Input.Text
           bind:value={integrationMarkdownEndpointUrl}
-          label={m.markdown_endpoint_url()}
-          description={m.markdown_endpoint_description()}
+          label={m.page_content_webhook_url()}
+          description={m.page_content_webhook_description()}
           class="border-default hover:bg-hover-dimmer border-b p-4"
         />
 
@@ -693,30 +693,30 @@
         <div class="p-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div class="text-sm font-semibold">{m.website_integration_label()}</div>
+              <div class="text-sm font-semibold">{m.sitemap_webhook_integration()}</div>
               <div class="text-secondary text-xs">
-                {m.sync_status_value({ status: website.integration.sync_status })}
+                {m.sync_status_value({ status: website.integration.webhook_status })}
               </div>
             </div>
             <div class="flex gap-2">
               <Button
                 variant="outlined"
                 type="button"
-                onclick={() => copySyncUrl(website.integration.sync_url)}
+                onclick={() => copyWebhookUrl(website.integration.webhook_url)}
               >
-                {m.copy_sync_url()}
+                {m.copy_webhook_url()}
               </Button>
               <Button
                 variant="outlined"
                 type="button"
-                onclick={() => syncWebsiteIntegration(website.integration.sync_url)}
+                onclick={() => triggerWebhookSync(website.integration.webhook_url)}
               >
                 {m.sync_now()}
               </Button>
             </div>
           </div>
           <div class="text-secondary text-xs break-all">
-            {absoluteSyncUrl(website.integration.sync_url)}
+            {absoluteWebhookUrl(website.integration.webhook_url)}
           </div>
         </div>
 
@@ -729,8 +729,8 @@
         />
         <Input.Text
           bind:value={integrationMarkdownEndpointUrl}
-          label={m.markdown_endpoint_url()}
-          description={m.markdown_endpoint_description()}
+          label={m.page_content_webhook_url()}
+          description={m.page_content_webhook_description()}
           class="border-default hover:bg-hover-dimmer border-b p-4"
         />
 

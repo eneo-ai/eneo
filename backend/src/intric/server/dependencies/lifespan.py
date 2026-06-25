@@ -75,7 +75,7 @@ async def _queue_website_integration_startup_syncs() -> None:
 
                 await container.job_service().queue_job(
                     task=Task.SYNC_WEBSITE_INTEGRATION,
-                    name=f"Website integration sync: {config.name}",
+                    name=f"Sitemap webhook integration sync: {config.name}",
                     task_params=WebsiteIntegrationSyncTaskParam(
                         user_id=user.id,
                         id=config.id,
@@ -86,7 +86,7 @@ async def _queue_website_integration_startup_syncs() -> None:
         if "website_integration_configs" not in str(exc):
             raise
         logger.warning(
-            "Skipping website integration startup sync because migrations are not applied yet"
+            "Skipping sitemap webhook integration startup sync because migrations are not applied yet"
         )
 
 

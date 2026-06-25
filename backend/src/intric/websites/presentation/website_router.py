@@ -219,7 +219,7 @@ async def update_website(
         website_id=id, payload=website_update
     )
     if config is not None:
-        website.website_integration_config = config
+        setattr(website, "website_integration_config", config)
 
     # Audit logging
     audit_service = container.audit_service()

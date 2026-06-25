@@ -687,9 +687,9 @@ async def create_space_groups(
     response_model=WebsitePublic,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
-    summary="Create a website crawler",
+    summary="Create a website source",
     description="""
-    Create a new website crawler that will extract content and make it available to assistants in this space.
+    Create a new website source that either crawls a site directly or sets up a sitemap webhook integration.
 
     **Update Intervals:**
     - `never` (default): Manual crawls only
@@ -708,7 +708,7 @@ async def create_space_groups(
     }
     ```
 
-    The crawl will start immediately upon creation.
+    Direct crawls start immediately upon creation. Sitemap webhook integrations queue an initial webhook sync.
     """,
 )
 async def create_space_websites(
@@ -722,7 +722,7 @@ async def create_space_websites(
     user = container.user()
 
     if website.sitemap_url:
-        created_website = await website_integration_service.create_or_reuse_website(
+        created_website = await website_integration_service.create_or_reuse_sitemap_webhook_integration(
             space_id=id,
             name=website.name,
             url=website.url,
@@ -730,10 +730,10 @@ async def create_space_websites(
                 website.embedding_model.id if website.embedding_model else None
             ),
             sitemap_url=website.sitemap_url,
-            markdown_endpoint_url=website.markdown_endpoint_url,
-            markdown_endpoint_method=website.markdown_endpoint_method,
-            markdown_endpoint_url_location=website.markdown_endpoint_url_location,
-            markdown_endpoint_url_param_name=website.markdown_endpoint_url_param_name,
+            page_content_webhook_url=website.page_content_webhook_url,
+            page_content_webhook_method=website.page_content_webhook_method,
+            page_content_webhook_url_location=website.page_content_webhook_url_location,
+            page_content_webhook_url_param_name=website.page_content_webhook_url_param_name,
             headers=website.headers,
         )
     else:

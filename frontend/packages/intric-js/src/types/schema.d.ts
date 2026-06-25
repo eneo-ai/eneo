@@ -17760,17 +17760,17 @@ export interface components {
       http_auth_password?: string | null;
       /** Sitemap Url */
       sitemap_url?: string | null;
-      /** Markdown Endpoint Url */
-      markdown_endpoint_url?: string | null;
+      /** Page Content Webhook Url */
+      page_content_webhook_url?: string | null;
       /** @default get */
-      markdown_endpoint_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      page_content_webhook_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
       /** @default query */
-      markdown_endpoint_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      page_content_webhook_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
       /**
-       * Markdown Endpoint Url Param Name
+       * Page Content Webhook Url Param Name
        * @default url
        */
-      markdown_endpoint_url_param_name?: string;
+      page_content_webhook_url_param_name?: string;
       /** Headers */
       headers?: components["schemas"]["WebsiteIntegrationHeader"][];
     };
@@ -17838,20 +17838,20 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /** Sync Url */
-      sync_url: string;
+      /** Webhook Url */
+      webhook_url: string;
       /** Sitemap Url */
       sitemap_url: string;
-      /** Markdown Endpoint Url */
-      markdown_endpoint_url?: string | null;
-      markdown_endpoint_method: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
-      markdown_endpoint_url_location: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
-      /** Markdown Endpoint Url Param Name */
-      markdown_endpoint_url_param_name: string;
+      /** Page Content Webhook Url */
+      page_content_webhook_url?: string | null;
+      page_content_webhook_method: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      page_content_webhook_url_location: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /** Page Content Webhook Url Param Name */
+      page_content_webhook_url_param_name: string;
       /** Headers */
       headers?: components["schemas"]["WebsiteIntegrationHeader"][];
-      /** Sync Status */
-      sync_status: string;
+      /** Webhook Status */
+      webhook_status: string;
       /** Last Sitemap Fetched At */
       last_sitemap_fetched_at?: string | null;
       /** Last Successful Sync At */
@@ -17969,14 +17969,14 @@ export interface components {
       http_auth_password?: string | null;
       /** Sitemap Url */
       sitemap_url?: string | null;
-      /** Markdown Endpoint Url */
-      markdown_endpoint_url?: string | null;
-      /** Markdown Endpoint Method */
-      markdown_endpoint_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
-      /** Markdown Endpoint Url Location */
-      markdown_endpoint_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
-      /** Markdown Endpoint Url Param Name */
-      markdown_endpoint_url_param_name?: string;
+      /** Page Content Webhook Url */
+      page_content_webhook_url?: string | null;
+      /** Page Content Webhook Method */
+      page_content_webhook_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      /** Page Content Webhook Url Location */
+      page_content_webhook_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /** Page Content Webhook Url Param Name */
+      page_content_webhook_url_param_name?: string;
       /** Headers */
       headers?: components["schemas"]["WebsiteIntegrationHeader"][];
     };

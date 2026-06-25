@@ -14,7 +14,7 @@
   export let website: WebsiteSparse;
   const SKIPPED_PREFIX = "skipped duplicate crawl";
   type WebsiteIntegrationStatus = {
-    sync_status: string;
+    webhook_status: string;
     last_successful_sync_at?: string | null;
     last_sync_error?: string | null;
   };
@@ -27,28 +27,28 @@
     const integration = (
       website as WebsiteSparse & { integration?: WebsiteIntegrationStatus | null }
     ).integration;
-    if (integration?.sync_status === "queued") {
+    if (integration?.webhook_status === "queued") {
       return {
         color: "blue",
         label: m.queued(),
         tooltip: m.website_sync_waiting()
       };
     }
-    if (integration?.sync_status === "in_progress") {
+    if (integration?.webhook_status === "in_progress") {
       return {
         color: "yellow",
         label: m.sync_in_progress(),
         tooltip: m.website_sync_fetching()
       };
     }
-    if (integration?.sync_status === "failed") {
+    if (integration?.webhook_status === "failed") {
       return {
         color: "orange",
         label: m.sync_failed(),
         tooltip: integration.last_sync_error ?? m.website_sync_failed_latest()
       };
     }
-    if (integration?.sync_status === "complete" && integration?.last_successful_sync_at) {
+    if (integration?.webhook_status === "complete" && integration?.last_successful_sync_at) {
       const completed = dayjs(integration.last_successful_sync_at);
       return {
         color: dayjs().diff(completed, "days") < 10 ? "green" : "yellow",

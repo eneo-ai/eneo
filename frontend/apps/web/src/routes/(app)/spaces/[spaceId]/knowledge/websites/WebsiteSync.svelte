@@ -14,7 +14,7 @@
 
   export let website: WebsiteSparse;
   type WebsiteIntegrationMeta = {
-    sync_status?: string;
+    webhook_status?: string;
     last_successful_sync_at?: string | null;
   };
 
