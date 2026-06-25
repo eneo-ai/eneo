@@ -50,5 +50,10 @@ def is_model_effectively_deprecated(
     provider_type: Optional[str] = None,
     manually_deprecated: bool = False,
 ) -> bool:
-    """Check persisted and LiteLLM-derived deprecation state together."""
-    return manually_deprecated or is_model_deprecated(model_name, provider_type)
+    """Return the persisted Eneo deprecation decision.
+
+    LiteLLM metadata is advisory and may change on dependency upgrades. It is
+    exposed through ``get_litellm_deprecation_date`` for admin/UI enrichment,
+    but must not silently change access to an already configured Eneo model.
+    """
+    return manually_deprecated

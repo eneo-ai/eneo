@@ -1,9 +1,6 @@
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
-from intric.ai_models.completion_models.completion_model import (
-    ModelKwargs,
-)
 from intric.apps.apps.api.app_models import (
     AppPublic,
     InputField,
@@ -27,6 +24,7 @@ from intric.transcription_models.presentation import TranscriptionModelPublic
 
 if TYPE_CHECKING:
     from intric.main.models import ResourcePermission
+    from intric.users.user import UserInDB
 
 # Max files per input type
 _TEXT_MAX_FILES = 3
@@ -37,9 +35,11 @@ _IMAGE_MAX_FILES = 2
 class AppAssembler:
     def __init__(
         self,
+        user: "UserInDB",
         prompt_assembler: PromptAssembler,
     ):
         super().__init__()
+        self.user = user
         self.prompt_assembler = prompt_assembler
 
     def _get_accepted_file_types(
@@ -142,16 +142,16 @@ class AppAssembler:
         )
         completion_model = (
             CompletionModelAssembler.from_completion_model_to_sparse(
-                completion_model=app.completion_model
+                completion_model=app.completion_model,
+                show_pricing=self.user.can_view_model_pricing,
             )
             if app.completion_model is not None
             else None
         )
-        model_kwargs = (
-            app.completion_model_kwargs
-            if app.completion_model_kwargs is not None
-            else ModelKwargs()
-        )
+        # No defensive coalesce: the App constructor enforces non-None, so
+        # falling back to `ModelKwargs()` here would silently hide an
+        # upstream regression instead of letting it surface.
+        model_kwargs = app.completion_model_kwargs
         settings = get_settings()
         allowed_attachments = FileRestrictions(
             accepted_file_types=[

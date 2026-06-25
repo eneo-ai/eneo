@@ -72,7 +72,10 @@ class App:
         prompt: Prompt | None,
         completion_model: "CompletionModel | CompletionModelSparse | None",
         transcription_model: "TranscriptionModel | None",
-        completion_model_kwargs: ModelKwargs | None,
+        # Non-optional on the domain object; the factory normalises legacy
+        # DB NULL into ModelKwargs() so reads, .model_dump() writes and the
+        # AppPublic response can rely on it being present.
+        completion_model_kwargs: ModelKwargs,
         input_fields: list[InputField],
         attachments: list[File],
         published: bool,

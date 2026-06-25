@@ -1,7 +1,7 @@
-import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional, Protocol, Sequence
+from typing import Any, Optional, Protocol, Sequence
 from uuid import UUID
 
 from typing_extensions import override
@@ -12,18 +12,27 @@ from intric.ai_models.completion_models.completion_model import (
     Message,
     MessageToolCall,
 )
+from intric.completion_models.infrastructure.message_payload import (
+    build_turn_messages,
+    countable_messages,
+)
 from intric.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
     TRANSCRIPTION_PROMPT,
 )
 from intric.files.file_models import File, FileType
-from intric.main.exceptions import QueryException
+from intric.main.config import get_settings
 from intric.questions.question import ToolCallInfo
 from intric.sessions.session import SessionInDB
 from intric.tokens.token_utils import (
+    count_image_tokens_from_blob,
+    count_message_tokens,
     count_tokens,  # noqa: F401 — re-exported for external callers
+    count_tool_tokens,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _replayable_tool_calls(
@@ -60,15 +69,38 @@ def _replayable_tool_calls(
     return replayable
 
 
-def _tool_calls_token_count(tool_calls: list[MessageToolCall], model_name: str) -> int:
-    """Count tokens contributed by replayed tool_use + tool_result blocks."""
-    total = 0
-    for tc in tool_calls:
-        arguments_json = json.dumps(tc.arguments) if tc.arguments is not None else ""
-        total += count_tokens(tc.tool_name, model_name)
-        total += count_tokens(arguments_json, model_name)
-        total += count_tokens(tc.result, model_name)
-    return total
+def _image_files_tokens(images: list[File], model_name: str) -> int:
+    """Image cost depends on pixel dimensions alone — price straight from the
+    stored blobs instead of building base64 payloads just to count them."""
+    return sum(count_image_tokens_from_blob(image.blob, model_name) for image in images)
+
+
+def count_attachment_tokens(
+    text_files: list[File], image_files: list[File], model_name: str = ""
+) -> int:
+    """Tokens a set of attachments adds to a request.
+
+    Text files are inlined into the user message; image files ride along as
+    image_url blocks priced by the provider's image-token formula.
+    """
+    text = build_files_string(text_files, model_name=model_name)
+    return count_tokens(text, model_name) + _image_files_tokens(image_files, model_name)
+
+
+def _turn_tokens(
+    question: str,
+    answer: str | None,
+    images: list[File],
+    tool_calls: list[MessageToolCall],
+    model_name: str,
+) -> int:
+    """Count one Q&A turn in the same shape the adapter replays it."""
+    turn = build_turn_messages(
+        question=question, answer=answer, images=[], tool_calls=tool_calls
+    )
+    return count_message_tokens(
+        countable_messages(turn), model_name
+    ) + _image_files_tokens(images, model_name)
 
 
 MIN_PERCENTAGE_KNOWLEDGE = (
@@ -89,23 +121,53 @@ class _InformationChunkLike(Protocol):
     content: str
 
 
-def build_files_string(files: list[File]) -> str:
-    if files:
-        # Use json.dumps() to properly escape special characters in filenames and text
-        # This prevents broken JSON if the content contains quotes or other special chars
-        files_string = "\n".join(
-            json.dumps({"filename": file.name, "text": file.text}) for file in files
-        )
+ATTACHMENT_TRUNCATION_NOTICE = (
+    "[... the rest of this file was truncated because it exceeds the "
+    "attachment size budget — tell the user if the cut-off content matters]"
+)
 
-        return (
-            "Below are files uploaded by the user. "
-            "You should act like you can see the files themselves, "
-            "and not reveal the specific formatting "
-            "you see below:"
-            f"\n\n{files_string}"
-        )
 
-    return ""
+def _truncate_to_tokens(text: str, max_tokens: int, model_name: str = "") -> str:
+    tokens = count_tokens(text, model_name)
+    if tokens <= max_tokens:
+        return text
+
+    # The appended notice spends part of the budget too.
+    notice_tokens = count_tokens(ATTACHMENT_TRUNCATION_NOTICE, model_name)
+    budget = max(max_tokens - notice_tokens - 2, 1)
+    keep_chars = max(int(len(text) * budget / tokens), 0)
+    truncated = text[:keep_chars]
+    # The proportional ratio assumes uniform token density; token-dense text
+    # (CJK, base64 blobs) can survive the cut, so tighten until within budget.
+    while truncated and count_tokens(truncated, model_name) > budget:
+        keep_chars = int(keep_chars * 0.9)
+        truncated = text[:keep_chars]
+    return f"{truncated}\n{ATTACHMENT_TRUNCATION_NOTICE}"
+
+
+def build_files_string(files: list[File], model_name: str = "") -> str:
+    if not files:
+        return ""
+
+    max_tokens_per_file = get_settings().attachment_max_tokens_per_file
+    blocks: list[str] = []
+    for file in files:
+        header = f"FILE: {file.name}"
+        if file.mimetype:
+            header = f"{header} ({file.mimetype})"
+        text = _truncate_to_tokens(
+            file.text or "", max_tokens=max_tokens_per_file, model_name=model_name
+        )
+        blocks.append(f"{header}\n{text}")
+
+    files_string = "\n\n---\n\n".join(blocks)
+    return (
+        "Below are files uploaded by the user. "
+        "You should act like you can see the files themselves, "
+        "and not reveal the specific formatting "
+        "you see below:"
+        f"\n\n{files_string}"
+    )
 
 
 @dataclass
@@ -318,7 +380,14 @@ class _Prompt:
 
     @property
     def num_tokens(self) -> int:
-        return count_tokens(str(self), self.model_name)
+        # The prompt is sent as a system message (when non-empty), so count it
+        # as one — message scaffolding included.
+        prompt_text = str(self)
+        if not prompt_text:
+            return 0
+        return count_message_tokens(
+            [{"role": "system", "content": prompt_text}], self.model_name
+        )
 
     def add_prompt(self, prompt: str, transcription: bool) -> None:
         if transcription and not prompt:
@@ -344,11 +413,11 @@ class _Prompt:
         chunk_list = list(chunks)
         self.knowledge = self._reconstruct_and_order_chunks(
             chunks=chunk_list,
-            max_tokens=max_tokens - self.num_tokens,
+            max_tokens=max_tokens,
         )
 
     def add_attachments(self, files: list[File]) -> None:
-        self.attachments = build_files_string(files=files)
+        self.attachments = build_files_string(files=files, model_name=self.model_name)
 
     def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
@@ -382,13 +451,14 @@ class ContextBuilder:
         input_str: str,
         files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
+        model_name: str = "",
     ) -> str:
         if files is None:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
         if files:
-            files_string = build_files_string(files)
+            files_string = build_files_string(files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
 
         if transcription_inputs:
@@ -412,6 +482,7 @@ class ContextBuilder:
         max_tokens: int,
         min_len: int = 3,
         model_name: str = "",
+        vision: bool = True,
     ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
@@ -423,18 +494,27 @@ class ContextBuilder:
             question = self._build_input(
                 message.question,
                 self._get_files_by_type(message.files, FileType.TEXT),
+                model_name=model_name,
             )
             answer = message.answer
-            images = self._get_files_by_type(message.files, FileType.IMAGE)
-            generated_images = self._get_files_by_type(
-                message.generated_files, FileType.IMAGE
-            )
+            # History can contain images (e.g. after a model switch) — never
+            # replay them to a model without vision.
+            if vision:
+                images = self._get_files_by_type(message.files, FileType.IMAGE)
+                generated_images = self._get_files_by_type(
+                    message.generated_files, FileType.IMAGE
+                )
+            else:
+                images = []
+                generated_images = []
             tool_calls = _replayable_tool_calls(message.tool_calls)
 
-            message_tokens = (
-                count_tokens(question, model_name)
-                + count_tokens(answer, model_name)
-                + _tool_calls_token_count(tool_calls, model_name)
+            message_tokens = _turn_tokens(
+                question=question,
+                answer=answer,
+                images=images + generated_images,
+                tool_calls=tool_calls,
+                model_name=model_name,
             )
 
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
@@ -471,6 +551,8 @@ class ContextBuilder:
         use_image_generation: bool = False,
         web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
+        extra_tool_dicts: list[dict[str, Any]] | None = None,
+        vision: bool = True,
     ) -> Context:
         if files is None:
             files = []
@@ -486,14 +568,53 @@ class ContextBuilder:
             mcp_tools = []
         tokens_used = 0
 
-        # Create the input, count the tokens.
+        # Create the input, count the tokens. The current question is sent as
+        # a user message carrying both the text and any attached images, so it
+        # is counted in exactly that shape.
         _input_string = self._build_input(
             input_str=input_str,
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
+            model_name=model_name,
         )
-        tokens_used_input = count_tokens(_input_string, model_name)
+        # Attachment images (prompt_files) travel with every request, the same
+        # way attachment text does — they ride on the current user message.
+        current_images: list[File] = []
+        if vision:
+            current_images = self._get_files_by_type(files, FileType.IMAGE)
+            seen_image_ids = {file.id for file in current_images}
+            current_images += [
+                file
+                for file in self._get_files_by_type(prompt_files, FileType.IMAGE)
+                if file.id not in seen_image_ids
+            ]
+        tokens_used_input = count_message_tokens(
+            [{"role": "user", "content": _input_string}], model_name
+        ) + _image_files_tokens(current_images, model_name)
         tokens_used += tokens_used_input
+
+        # Tool definitions occupy context space too — count them up front so
+        # the history and knowledge budgets shrink accordingly. extra_tool_dicts
+        # carries definitions merged later by the adapter (MCP proxy tools).
+        functions: list[FunctionDefinition] = []
+        if use_image_generation:
+            functions.extend(self._functions())
+        functions.extend(mcp_tools)
+
+        tool_dicts: list[dict[str, Any]] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": func_def.name,
+                    "description": func_def.description,
+                    "parameters": func_def.schema,
+                },
+            }
+            for func_def in functions
+        ]
+        if extra_tool_dicts:
+            tool_dicts.extend(extra_tool_dicts)
+        tokens_used += count_tool_tokens(tool_dicts, model_name)
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
@@ -523,34 +644,34 @@ class ContextBuilder:
             max_tokens=max_tokens_messages,
             min_len=3,
             model_name=model_name,
+            vision=vision,
         )
         tokens_used += tokens_used_messages
 
-        # Check for worst case.
-        # Up until this point, all text will be
-        # assumed by the user to be there,
-        # and erroring is preferable to not
-        # including something.
+        # Local counting is an estimate. Do not reject a request solely because
+        # it crosses the configured limit: provider tokenization is authoritative
+        # and may accept it. Knowledge below receives no remaining budget, while
+        # the required prompt/input is still sent so the provider can decide.
         if tokens_used > max_tokens:
-            raise QueryException(tokens_used=tokens_used, token_limit=max_tokens)
+            logger.warning(
+                "Estimated context exceeds configured model limit: "
+                "%d estimated tokens vs %d configured tokens; sending request "
+                "to provider for authoritative validation",
+                tokens_used,
+                max_tokens,
+            )
 
         # Add the knowledge in all the space that is left.
-        tokens_left = max_tokens - tokens_used
+        tokens_left = max(max_tokens - tokens_used, 0)
         _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
         prompt_text = str(_prompt)
         tokens_used += _prompt.get_tokens_of_knowledge()
-
-        # Combine image generation tools with MCP tools
-        functions: list[FunctionDefinition] = []
-        if use_image_generation:
-            functions.extend(self._functions())
-        functions.extend(mcp_tools)
 
         return Context(
             input=_input_string,
             prompt=prompt_text,
             messages=messages,
-            images=self._get_files_by_type(files, FileType.IMAGE),
+            images=current_images,
             token_count=tokens_used,
             function_definitions=functions,
         )

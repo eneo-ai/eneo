@@ -1,0 +1,17 @@
+{
+  "src/lib/Chart/theme.ts": {
+    "intric/no-raw-color": {
+      "count": 90
+    }
+  },
+  "src/lib/CodeBlock/CodeBlock.svelte": {
+    "intric/no-raw-color": {
+      "count": 35
+    }
+  },
+  "src/lib/Dialog/Content.svelte": {
+    "intric/no-raw-color": {
+      "count": 2
+    }
+  }
+}

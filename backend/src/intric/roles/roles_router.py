@@ -44,7 +44,12 @@ async def get_permissions(
     return await service.get_permissions()
 
 
-@router.get("/templates/")
+@router.get(
+    "/templates/",
+    description="List the predefined role templates available for creating roles.",
+    responses=responses.get_responses([]),
+    response_model=None,
+)
 async def get_role_templates(
     container: Container = Depends(get_container(with_user=True)),
 ):
@@ -57,7 +62,9 @@ async def get_role_templates(
 
 @router.get(
     "/",
+    description="List all roles for the current tenant.",
     response_model=RolesPaginatedResponse,
+    responses=responses.get_responses([403]),
 )
 async def get_roles(
     container: _ContainerDep,
@@ -71,7 +78,7 @@ async def get_roles(
 @router.get(
     "/{role_id}/",
     response_model=RolePublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_role_by_id(
     role_id: UUID,
@@ -81,7 +88,12 @@ async def get_role_by_id(
     return await service.get_role_by_uuid(role_id)
 
 
-@router.post("/", response_model=RolePublic)
+@router.post(
+    "/",
+    description="Create a new role for the current tenant.",
+    response_model=RolePublic,
+    responses=responses.get_responses([400, 403]),
+)
 async def create_role(
     role: RoleCreateRequest,
     container: _ContainerDep,
@@ -114,8 +126,9 @@ async def create_role(
 
 @router.post(
     "/{role_id}/",
+    description="Update an existing role by id.",
     response_model=RolePublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def update_role(
     role_id: UUID,
@@ -163,8 +176,9 @@ async def update_role(
 
 @router.delete(
     "/{role_id}/",
+    description="Delete a role by id.",
     response_model=RolePublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_role_by_id(
     role_id: UUID,
@@ -201,8 +215,9 @@ async def delete_role_by_id(
 
 @router.post(
     "/{role_id}/reset/",
+    description="Reset a role's permissions to its default template.",
     response_model=RolePublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def reset_role_to_default(
     role_id: UUID,
@@ -243,8 +258,9 @@ async def reset_role_to_default(
 
 @router.post(
     "/{role_id}/set-default/",
+    description="Set the given role as the tenant's default role.",
     response_model=RolePublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def set_default_role(
@@ -284,7 +300,9 @@ async def set_default_role(
 
 @router.post(
     "/clear-default/",
-    responses=responses.get_responses([]),
+    description="Clear the tenant's default role.",
+    responses=responses.get_responses([403]),
+    response_model=None,
     dependencies=[Depends(require_permission(Permission.ADMIN))],
 )
 async def clear_default_role(

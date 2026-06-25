@@ -4,6 +4,7 @@ Integration test fixtures using testcontainers for PostgreSQL and Redis.
 
 import json
 import os
+import socket
 from collections.abc import Callable
 from pathlib import Path
 
@@ -136,6 +137,29 @@ _IN_DEVCONTAINER = os.getenv("POSTGRES_HOST") == "db"
 _TEST_NETWORK = "eneo" if _IN_DEVCONTAINER else None
 
 
+def _host_resolves(host: str) -> bool:
+    try:
+        socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+
+    return True
+
+
+def _container_network_ip(container, network_name: str | None) -> str | None:
+    if not network_name:
+        return None
+
+    container.reload()
+    network = (
+        container.attrs.get("NetworkSettings", {}).get("Networks", {}).get(network_name)
+    )
+    if not network:
+        return None
+
+    return network.get("IPAddress") or None
+
+
 @pytest.fixture(scope="session")
 def postgres_container() -> Generator[PostgresContainer, None, None]:
     """
@@ -183,16 +207,26 @@ def test_settings(
     """
     Create test settings using testcontainer connection strings.
     """
-    # In devcontainer: use container name and internal port (same network)
-    # Outside devcontainer: use host IP and exposed port (bridge network)
-    if _IN_DEVCONTAINER:
-        pg_host = postgres_container._container.name
+    # In devcontainer: prefer container DNS when it is actually reachable.
+    # GitHub Codespaces exposes compose services like "db", but does not always
+    # make ad-hoc testcontainer names resolvable from the Codespaces container.
+    container_name = postgres_container._container.name
+    network_ip = _container_network_ip(postgres_container._container, _TEST_NETWORK)
+    if _IN_DEVCONTAINER and _host_resolves(container_name):
+        pg_host = container_name
         pg_port = 5432
-        redis_host = "redis"  # Use existing Redis service in devcontainer
-        redis_port = 6379
+    elif _IN_DEVCONTAINER and network_ip:
+        pg_host = network_ip
+        pg_port = 5432
     else:
         pg_host = postgres_container.get_container_host_ip()
         pg_port = int(postgres_container.get_exposed_port(5432))
+
+    if _IN_DEVCONTAINER:
+        redis_host = "redis"  # Use existing Redis service in devcontainer
+        redis_port = 6379
+    else:
+        assert redis_container is not None
         redis_host = redis_container.get_container_host_ip()
         redis_port = int(redis_container.get_exposed_port(6379))
 
@@ -354,6 +388,7 @@ async def setup_database(test_settings: Settings):
     backend_dir = Path(__file__).parent.parent.parent
     alembic_ini_path = backend_dir / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini_path))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
 
     try:

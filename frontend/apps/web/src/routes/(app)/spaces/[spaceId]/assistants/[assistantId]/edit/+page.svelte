@@ -3,6 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
   import { Button, Input, Tooltip } from "@intric/ui";
+  import { IconSparkles } from "@intric/icons/sparkles";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
@@ -12,9 +13,10 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
-  import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
+  import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { page } from "$app/state";
@@ -30,6 +32,14 @@
   import { untrack } from "svelte";
 
   let { data } = $props();
+
+  // Help assistants have logging permanently disabled (PRD §6); surface the
+  // explanation in the security section on their edit page. `is_help_assistant`
+  // is computed by the single-assistant GET endpoint and is not yet part of the
+  // generated OpenAPI schema, hence the local cast.
+  const isHelpAssistant = $derived(
+    (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
+  );
 
   const {
     state: { currentSpace },
@@ -51,6 +61,29 @@
   );
 
   let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  const effectiveConfig = $derived($resource.effective_config);
+  const promptLocked = $derived(effectiveConfig?.prompt_locked === true);
+  const modelsEnforced = $derived(effectiveConfig?.models_enforced === true);
+  const policyAllowedModelIds = $derived(
+    modelsEnforced ? new Set(effectiveConfig?.available_models.map((model) => model.id)) : null
+  );
+  const availableModels = $derived(
+    policyAllowedModelIds
+      ? $currentSpace.completion_models.filter((model) => policyAllowedModelIds.has(model.id))
+      : $currentSpace.completion_models
+  );
+  const lockedModel = $derived(
+    modelsEnforced && effectiveConfig?.locked_model
+      ? ($currentSpace.completion_models.find(
+          (model) => model.id === effectiveConfig?.locked_model?.id
+        ) ?? effectiveConfig.locked_model)
+      : null
+  );
+  const mcpEnforced = $derived(effectiveConfig?.mcp_enforced === true);
+  const availableMCPServers = $derived(
+    mcpEnforced ? (effectiveConfig?.available_mcp_servers ?? []) : undefined
+  );
 
   // Icon state
   let currentIconId = $state<string | null>($resource.icon_id ?? null);
@@ -114,6 +147,35 @@
     // For regular models, show changes if any kwargs changed
     return true;
   });
+
+  // Prompt Guide (help-assistants): an availability-gated toolbar action.
+  // The availability endpoint is the single source of truth for whether the
+  // helper is usable here (role assigned + enabled + visible + a usable
+  // completion model + caller has EDIT on this assistant) and is prefetched
+  // in `+page.ts` so the button renders with its real state on first paint —
+  // same cadence as the History button next to it, with no post-mount flash.
+  // SvelteKit re-runs the load on navigation between assistants, so the
+  // value tracks `data.assistant.id` automatically.
+  let isModalOpen = $state(false);
+  // Bound to the modal's active run so the Apply handler can mark it completed.
+  let promptGuideRunId = $state<string | null>(null);
+  const promptGuideAvailability = $derived(data.promptGuideAvailability);
+
+  function promptGuideDisabledTooltip(reason: string | null | undefined): string {
+    switch (reason) {
+      case "role_disabled":
+        return m.prompt_guide_disabled_role_disabled();
+      case "role_not_visible":
+        return m.prompt_guide_disabled_role_not_visible();
+      case "no_completion_model":
+        return m.prompt_guide_disabled_no_completion_model();
+      case "no_edit_rights":
+        return m.prompt_guide_disabled_no_edit_rights();
+      case "no_assignment":
+      default:
+        return m.prompt_guide_disabled_no_assignment();
+    }
+  }
 
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
@@ -252,27 +314,81 @@
           fullWidth
           let:aria
         >
-          <div slot="toolbar" class="text-secondary">
-            <PromptVersionDialog
-              title={m.prompt_history_for({ name: $resource.name })}
-              loadPromptVersionHistory={() => {
-                return data.intric.assistants.listPrompts({ id: data.assistant.id });
+          <div slot="toolbar" class="text-secondary flex items-center gap-1">
+            {#if promptGuideAvailability}
+              <Tooltip
+                text={promptGuideAvailability.available
+                  ? m.prompt_guide_button_tooltip()
+                  : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
+              >
+                <Button
+                  variant="simple"
+                  padding="icon-leading"
+                  disabled={!promptGuideAvailability.available}
+                  on:click={() => (isModalOpen = true)}
+                >
+                  <IconSparkles />
+                  {m.prompt_guide_button()}
+                </Button>
+              </Tooltip>
+            {/if}
+            {#if !promptLocked}
+              <PromptVersionDialog
+                title={m.prompt_history_for({ name: $resource.name })}
+                loadPromptVersionHistory={() => {
+                  return data.intric.assistants.listPrompts({ id: data.assistant.id });
+                }}
+                onPromptSelected={(prompt) => {
+                  const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
+                  $update.prompt.text = prompt.text;
+                  $update.prompt.description = `Restored prompt from ${restoredDate}`;
+                }}
+              ></PromptVersionDialog>
+            {/if}
+            <PromptGuideModal
+              bind:open={isModalOpen}
+              bind:runId={promptGuideRunId}
+              targetType="assistant"
+              targetId={data.assistant.id}
+              targetPrompt={$update.prompt.text}
+              hasUnsavedPromptChanges={$currentChanges.diff.prompt !== undefined}
+              onApply={(text) => {
+                // Apply only mutates local editor state (PRD §10): the produced
+                // prompt is written into $update.prompt.text and persisted later
+                // through the normal Save button (intric.assistants.update),
+                // exactly like a manual edit. There is no parallel
+                // apply-and-save path here.
+                $update.prompt.text = text;
+                $update.prompt.description = m.prompt_guide_apply_description({
+                  date: dayjs().format("YYYY-MM-DD HH:mm")
+                });
+                isModalOpen = false;
+                // Mark the Q&A run completed — best-effort, must not block Apply.
+                if (promptGuideRunId) {
+                  data.intric.helpAssistants.runs
+                    .setStatus({ run_id: promptGuideRunId, status: "completed" })
+                    .catch(() => {});
+                }
               }}
-              onPromptSelected={(prompt) => {
-                const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
-                $update.prompt.text = prompt.text;
-                $update.prompt.description = `Restored prompt from ${restoredDate}`;
-              }}
-            ></PromptVersionDialog>
+            />
           </div>
+          {#if promptLocked}
+            <p
+              class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
+            >
+              <span class="font-bold">{m.warning()}:&nbsp;</span>
+              {m.governance_assistant_prompt_locked_hint()}
+            </p>
+          {/if}
           <textarea
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
+            disabled={promptLocked}
             onchange={() => {
               $update.prompt.description = "";
             }}
-            class="border-default bg-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
+            class="border-default bg-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:opacity-60"
           ></textarea>
         </Settings.Row>
 
@@ -319,7 +435,7 @@
             </p>
           {/if}
           <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
-            <SelectKnowledgeV2
+            <SelectKnowledge
               originMode="personal"
               bind:selectedWebsites={$update.websites}
               bind:selectedCollections={$update.groups}
@@ -349,7 +465,7 @@
             </p>
           {/if}
           <div class={knowledgeDisabledByMCP ? "pointer-events-none opacity-50" : ""}>
-            <SelectKnowledgeV2
+            <SelectKnowledge
               originMode="organization"
               bind:selectedWebsites={$update.websites}
               bind:selectedCollections={$update.groups}
@@ -369,12 +485,22 @@
           }}
           let:aria
         >
-          <SelectAIModelV2
-            bind:selectedModel={$update.completion_model}
-            availableModels={$currentSpace.completion_models}
-            showCost={false}
-            {aria}
-          ></SelectAIModelV2>
+          {#if lockedModel}
+            <div class="border-default bg-secondary/30 rounded-lg border px-3 py-2">
+              <p class="text-default text-sm font-medium">
+                {lockedModel.nickname ?? lockedModel.name}
+              </p>
+              <p class="text-muted text-xs">{m.governance_assistant_locked_by_policy()}</p>
+            </div>
+          {:else}
+            <SelectAIModelV2 bind:selectedModel={$update.completion_model} {availableModels} {aria}
+            ></SelectAIModelV2>
+            {#if modelsEnforced}
+              <p class="text-muted mt-2 text-xs">
+                {m.governance_assistant_models_filtered_hint()}
+              </p>
+            {/if}
+          {/if}
         </Settings.Row>
 
         <Settings.Row
@@ -437,17 +563,42 @@
               >{m.mcp_disabled_when_knowledge_active()}
             </p>
           {/if}
-          <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
-            <SelectMCPServers
-              bind:selectedMCPServers={$update.mcp_servers}
-              bind:selectedMCPTools={$update.mcp_tools}
-              selectedModel={$update.completion_model}
-            />
-          </div>
+          {#if mcpEnforced}
+            <!-- Policy GRANTs these servers to the personal assistant; they are
+                 applied automatically at ask-time, so the picker is read-only. -->
+            {#if availableMCPServers && availableMCPServers.length > 0}
+              <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
+                {#each availableMCPServers as server (server.id)}
+                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                {/each}
+              </div>
+            {:else}
+              <p class="text-muted text-sm">{m.governance_assistant_mcp_none()}</p>
+            {/if}
+            <p class="text-muted mt-2 text-xs">
+              {m.governance_assistant_mcp_provided_by_policy()}
+            </p>
+          {:else}
+            <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+              <SelectMCPServers
+                bind:selectedMCPServers={$update.mcp_servers}
+                bind:selectedMCPTools={$update.mcp_tools}
+                selectedModel={$update.completion_model}
+                allowedMCPServers={availableMCPServers}
+              />
+            </div>
+          {/if}
         </Settings.Row>
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>
+        {#if isHelpAssistant}
+          <p
+            class="border-default bg-primary text-secondary mb-2 rounded-lg border px-3 py-2 text-sm"
+          >
+            {m.admin_help_assistants_edit_logging_explanation()}
+          </p>
+        {/if}
         <Settings.Row
           hasChanges={$currentChanges.diff.data_retention_days !== undefined}
           revertFn={() => {

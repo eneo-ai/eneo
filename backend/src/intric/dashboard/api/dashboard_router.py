@@ -7,12 +7,18 @@ from intric.dashboard.api.dashboard_models import Dashboard
 from intric.main.container.container import Container
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
 with_user_container = get_container(with_user=True)
 
 
-@router.get("/", response_model=Dashboard)
+@router.get(
+    "/",
+    response_model=Dashboard,
+    description="Get the current user's dashboard (spaces and published applications).",
+    responses=responses.get_responses([]),
+)
 async def get_dashboard(
     request: Request,
     container: Annotated[Container, Depends(with_user_container)],

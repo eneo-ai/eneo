@@ -7,16 +7,15 @@ from uuid import UUID, uuid4
 
 import jwt
 import pytest
-from httpx import AsyncClient
 import sqlalchemy as sa
-
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from httpx import AsyncClient
 
 from intric.authentication.auth_service import AuthService
-from intric.tenants.tenant_repo import TenantRepository
-from intric.database.tables.tenant_table import Tenants
 from intric.database.database import sessionmanager
+from intric.database.tables.tenant_table import Tenants
+from intric.tenants.tenant_repo import TenantRepository
 
 
 async def _patch_federation_config(async_session, tenant_id: UUID, new_config: dict):
@@ -424,6 +423,26 @@ async def test_put_federation_still_requires_full_payload(
         headers={"X-API-Key": super_admin_token},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_patch_federation_rejects_null_required_field(
+    client: AsyncClient,
+    super_admin_token: str,
+    mock_transcription_models,
+):
+    slug = f"federation-null-{uuid4().hex[:6]}"
+    tenant = await _create_tenant(client, super_admin_token, slug)
+
+    response = await client.patch(
+        f"/api/v1/sysadmin/tenants/{tenant['id']}/federation",
+        json={"client_id": None},
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert response.status_code == 422
+    assert "PATCH does not allow null for: client_id" in response.text
 
 
 @pytest.mark.integration

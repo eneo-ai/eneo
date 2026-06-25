@@ -505,7 +505,15 @@ def get_application():
 
         return response
 
-    @app.get("/api/healthz")
+    @app.get(
+        "/api/healthz",
+        description="Report backend and worker health for deployment probes.",
+        responses={
+            200: {"description": "Backend and worker are healthy"},
+            503: {"description": "Worker health check failed"},
+        },
+        response_model=None,
+    )
     async def get_healthz():
         from datetime import datetime, timezone
 
@@ -551,7 +559,12 @@ def get_application():
 
         return response_data
 
-    @app.get("/api/healthz/crawler", response_model=CrawlerHealthResponse)
+    @app.get(
+        "/api/healthz/crawler",
+        response_model=CrawlerHealthResponse,
+        description="Get detailed crawler queue and worker diagnostics.",
+        responses={200: {"description": "Crawler diagnostics"}},
+    )
     async def crawler_health(include_all: bool = False) -> CrawlerHealthResponse:
         """Detailed crawler diagnostics. NOT for K8s probes.
 
@@ -837,7 +850,12 @@ def get_application():
             ),
         )
 
-    @app.get("/version")
+    @app.get(
+        "/version",
+        description="Get the running backend version.",
+        responses={200: {"description": "Backend version"}},
+        response_model=None,
+    )
     async def get_version():
         return VersionResponse(version=get_settings().app_version)
 

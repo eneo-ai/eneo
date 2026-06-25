@@ -141,7 +141,7 @@ class TestIsModelEffectivelyDeprecated:
 
         assert result is True
 
-    def test_litellm_deprecation_counts_when_manual_flag_is_false(
+    def test_litellm_deprecation_is_advisory_when_manual_flag_is_false(
         self, mock_model_cost
     ):
         with patch("litellm.model_cost", mock_model_cost):
@@ -150,4 +150,4 @@ class TestIsModelEffectivelyDeprecated:
                 manually_deprecated=False,
             )
 
-        assert result is True
+        assert result is False

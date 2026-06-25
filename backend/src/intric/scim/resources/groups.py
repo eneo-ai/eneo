@@ -11,6 +11,7 @@ from intric.scim.domain.errors import (
     ScimGroupNotFoundError,
     ScimHttpError,
 )
+from intric.scim.openapi import scim_responses
 from intric.scim.schemas.common import ListResponse
 from intric.scim.schemas.group import ScimGroup, ScimGroupRequest
 from intric.scim.schemas.user import PatchRequest
@@ -19,7 +20,13 @@ from intric.scim.services.group_service import ScimGroupService
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Groups"])
 
 
-@router.post("/Groups", status_code=status.HTTP_201_CREATED, response_model=ScimGroup)
+@router.post(
+    "/Groups",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ScimGroup,
+    description="Provision a SCIM group.",
+    responses=scim_responses(400, 401, 409, 500),
+)
 async def create_group(
     payload: ScimGroupRequest,
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
@@ -36,7 +43,12 @@ async def create_group(
         raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
-@router.get("/Groups")
+@router.get(
+    "/Groups",
+    description="List and filter SCIM groups.",
+    responses=scim_responses(400, 401, 500),
+    response_model=ListResponse,
+)
 async def list_groups(
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
     filter: str | None = None,
@@ -61,7 +73,12 @@ async def list_groups(
     )
 
 
-@router.get("/Groups/{group_id}")
+@router.get(
+    "/Groups/{group_id}",
+    description="Get a SCIM group by identifier.",
+    responses=scim_responses(400, 401, 404, 500),
+    response_model=ScimGroup,
+)
 async def get_group(
     group_id: UUID,
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
@@ -72,7 +89,12 @@ async def get_group(
         raise ScimHttpError(404, "Group not found") from e
 
 
-@router.put("/Groups/{group_id}")
+@router.put(
+    "/Groups/{group_id}",
+    description="Replace a SCIM group.",
+    responses=scim_responses(400, 401, 404, 409, 500),
+    response_model=ScimGroup,
+)
 async def replace_group(
     group_id: UUID,
     payload: ScimGroupRequest,
@@ -86,7 +108,12 @@ async def replace_group(
         raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
-@router.patch("/Groups/{group_id}")
+@router.patch(
+    "/Groups/{group_id}",
+    description="Apply SCIM patch operations to a group.",
+    responses=scim_responses(400, 401, 404, 409, 500),
+    response_model=ScimGroup,
+)
 async def patch_group(
     group_id: UUID,
     payload: PatchRequest,
@@ -100,7 +127,13 @@ async def patch_group(
         raise ScimHttpError(409, str(e), scim_type="uniqueness") from e
 
 
-@router.delete("/Groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/Groups/{group_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Delete a SCIM group.",
+    responses=scim_responses(400, 401, 404, 500),
+    response_model=None,
+)
 async def delete_group(
     group_id: UUID,
     service: Annotated[ScimGroupService, Depends(get_scim_group_service)],

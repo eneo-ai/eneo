@@ -8,10 +8,10 @@ from intric.ai_models.completion_models.completion_model import (
 )
 from intric.apps.apps.api import app_assembler as app_assembler_module
 from intric.apps.apps.api.app_assembler import (
-    AppAssembler,
     _AUDIO_MAX_FILES,
     _IMAGE_MAX_FILES,
     _TEXT_MAX_FILES,
+    AppAssembler,
 )
 from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
@@ -108,7 +108,10 @@ TEST_TRANSCRIPTION_MODEL = TranscriptionModel(
 @pytest.fixture
 def assembler(monkeypatch):
     monkeypatch.setattr(app_assembler_module, "get_settings", lambda: _FAKE_SETTINGS)
-    return AppAssembler(prompt_assembler=MagicMock())
+    return AppAssembler(
+        user=SimpleNamespace(can_view_model_pricing=True),
+        prompt_assembler=MagicMock(),
+    )
 
 
 @pytest.fixture
@@ -233,7 +236,10 @@ def test_limits_change_when_settings_change(monkeypatch, app):
     )
     monkeypatch.setattr(app_assembler_module, "get_settings", lambda: settings)
 
-    assembler = AppAssembler(prompt_assembler=MagicMock())
+    assembler = AppAssembler(
+        user=SimpleNamespace(can_view_model_pricing=True),
+        prompt_assembler=MagicMock(),
+    )
     app.input_fields = [InputField(type=InputFieldType.AUDIO_UPLOAD)]
 
     app_public = assembler.from_app_to_model(app)

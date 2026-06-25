@@ -18,6 +18,7 @@ from intric.ai_models.embedding_models.embedding_models_repo import (
     AdminEmbeddingModelsService,
 )
 from intric.main.config import get_settings
+from intric.main.datetime_utils import datetime_or_utc_min
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.roles.permissions import Permission, validate_permissions
 from intric.tenants.tenant_repo import TenantRepository
@@ -76,8 +77,7 @@ class AIModelsService:
         sorted_models: list[CompletionModelPublic | EmbeddingModelPublicLegacy] = (
             sorted(
                 models,
-                key=lambda model: model.created_at
-                or "",  # created_at is Optional[datetime]; treat None as earliest
+                key=lambda model: datetime_or_utc_min(model.created_at),
                 reverse=True,
             )
         )
@@ -155,14 +155,16 @@ class AIModelsService:
             ):
                 continue
 
-            models.append(
-                CompletionModelPublic(
-                    **model.model_dump(exclude={"is_deprecated"}),
-                    is_deprecated=self._is_effectively_deprecated(model),
-                    is_locked=self._is_locked(model),
-                    can_access=self._can_access(model),
-                )
+            public_model = CompletionModelPublic(
+                **model.model_dump(exclude={"is_deprecated"}),
+                is_deprecated=self._is_effectively_deprecated(model),
+                is_locked=self._is_locked(model),
+                can_access=self._can_access(model),
             )
+            if not self.user.can_view_model_pricing:
+                public_model.input_cost_per_token = None
+                public_model.output_cost_per_token = None
+            models.append(public_model)
 
         return models
 

@@ -50,6 +50,15 @@ export function createMentionInput(params: MentionInputParams) {
     const observer = new MutationObserver(handleInputMutation);
     observer.observe(node, { childList: true, characterData: true, subtree: true });
 
+    // Seed `question` from whatever is already in the editor when this action
+    // attaches. Hydration can land after text was typed into the SSR-rendered
+    // contenteditable; the observer only fires on *future* mutations, so that
+    // pre-attach text would otherwise never reach `question` and the send button
+    // would stay disabled until the next keystroke.
+    if (node.textContent) {
+      handleInputMutation();
+    }
+
     return {
       destroy() {
         window.removeEventListener("click", handleWindowClick);

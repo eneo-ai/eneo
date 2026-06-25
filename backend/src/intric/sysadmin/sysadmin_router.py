@@ -83,7 +83,12 @@ from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direc
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
+router = APIRouter(
+    dependencies=[Security(auth.authenticate_super_api_key)],
+    # Router-level 401: every route requires the super API key, so all of them
+    # can return 401. Declared once here instead of per-route get_responses.
+    responses=responses.get_responses([401]),
+)
 
 
 class OIDCDebugToggleRequest(BaseModel):
@@ -124,6 +129,7 @@ class OIDCDebugToggleResponse(BaseModel):
 @router.post(
     "/users/",
     response_model=UserCreated,
+    description="Register a new user as sysadmin and return the created user with an access token.",
     responses=responses.get_responses([400, 401]),
 )
 async def register_new_user(
@@ -163,7 +169,12 @@ async def register_new_user(
     )
 
 
-@router.get("/users/", response_model=PaginatedResponse[UserInDB])
+@router.get(
+    "/users/",
+    response_model=PaginatedResponse[UserInDB],
+    description="List all users across all tenants.",
+    responses=responses.get_responses([]),
+)
 async def get_all_users(
     container: Annotated[Container, Depends(get_container())],
 ):
@@ -173,7 +184,12 @@ async def get_all_users(
     return protocol.to_paginated_response(users_in_db)
 
 
-@router.get("/users/{user_id}/", response_model=UserInDB)
+@router.get(
+    "/users/{user_id}/",
+    response_model=UserInDB,
+    description="Get a single user by id.",
+    responses=responses.get_responses([404]),
+)
 async def get_user(
     user_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -182,7 +198,12 @@ async def get_user(
     return await user_service.get_user(user_id)
 
 
-@router.delete("/users/{user_id}/", response_model=DeleteResponse)
+@router.delete(
+    "/users/{user_id}/",
+    response_model=DeleteResponse,
+    description="Delete a user by id.",
+    responses=responses.get_responses([400, 404]),
+)
 async def delete_user(
     user_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -220,7 +241,12 @@ async def delete_user(
     return DeleteResponse(success=success)
 
 
-@router.post("/users/{user_id}/", response_model=UserInDB)
+@router.post(
+    "/users/{user_id}/",
+    response_model=UserInDB,
+    description="Update a user by id; omitted fields are left unchanged.",
+    responses=responses.get_responses([400, 404]),
+)
 async def update_user(
     user_id: UUID,
     user_update: UserUpdatePublic,
@@ -267,7 +293,13 @@ async def update_user(
     return updated_user
 
 
-@router.post("/users/{user_id}/access-token/", include_in_schema=False)
+@router.post(
+    "/users/{user_id}/access-token/",
+    include_in_schema=False,
+    response_model=None,
+    description="Issue an access token for the given user.",
+    responses=responses.get_responses([404]),
+)
 async def get_access_token(
     user_id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -280,7 +312,12 @@ async def get_access_token(
     return auth_service.create_access_token_for_user(user)
 
 
-@router.get("/tenants/", response_model=PaginatedResponse[TenantWithMaskedCredentials])
+@router.get(
+    "/tenants/",
+    response_model=PaginatedResponse[TenantWithMaskedCredentials],
+    description="List all tenants with API credentials masked, optionally filtered by domain.",
+    responses=responses.get_responses([]),
+)
 async def get_tenants(
     container: Annotated[Container, Depends(get_container())],
     domain: Annotated[str | None, Query()] = None,
@@ -312,6 +349,7 @@ async def get_tenants(
 @router.post(
     "/tenants/",
     response_model=TenantWithMaskedCredentials,
+    description="Create a new tenant and return it with masked credentials.",
     responses=responses.get_responses([400]),
 )
 async def create_tenant(
@@ -352,7 +390,8 @@ async def create_tenant(
 @router.post(
     "/tenants/{id}/",
     response_model=TenantWithMaskedCredentials,
-    responses=responses.get_responses([404]),
+    description="Update a tenant by id and return it with masked credentials.",
+    responses=responses.get_responses([400, 404]),
 )
 async def update_tenant(
     id: UUID,
@@ -407,6 +446,7 @@ async def update_tenant(
 @router.delete(
     "/tenants/{id}/",
     response_model=TenantWithMaskedCredentials,
+    description="Delete a tenant by id and return it with masked credentials.",
     responses=responses.get_responses([404]),
 )
 async def delete_tenant_by_id(
@@ -447,7 +487,12 @@ async def delete_tenant_by_id(
     return TenantWithMaskedCredentials.from_tenant(deleted_tenant)
 
 
-@router.get("/predefined-roles/")
+@router.get(
+    "/predefined-roles/",
+    response_model=None,
+    description="List the predefined roles loaded from configuration.",
+    responses=responses.get_responses([]),
+)
 async def get_predefined_roles():
     from intric.server.dependencies.predefined_roles import (
         load_predefined_roles_from_config,
@@ -456,7 +501,12 @@ async def get_predefined_roles():
     return load_predefined_roles_from_config()
 
 
-@router.post("/crawl-all-weekly-websites/")
+@router.post(
+    "/crawl-all-weekly-websites/",
+    response_model=None,
+    description="Trigger crawls for all websites scheduled to run weekly.",
+    responses=responses.get_responses([]),
+)
 async def crawl_all_weekly_websites(
     container: Annotated[Container, Depends(get_container())],
 ):
@@ -581,7 +631,8 @@ async def get_completion_models(
 @router.post(
     "/tenants/{id}/completion-models/{completion_model_id}/",
     response_model=CompletionModelPublic,
-    responses=responses.get_responses([404]),
+    description="Enable or disable a completion model for a specific tenant.",
+    responses=responses.get_responses([400, 404]),
 )
 async def enable_completion_model(
     id: UUID,
@@ -633,7 +684,8 @@ async def enable_completion_model(
 @router.post(
     "/tenants/{id}/embedding-models/{embedding_model_id}/",
     response_model=EmbeddingModelPublicLegacy,
-    responses=responses.get_responses([404]),
+    description="Enable or disable an embedding model for a specific tenant.",
+    responses=responses.get_responses([400, 404]),
 )
 async def enable_embedding_model(
     id: UUID,
@@ -682,7 +734,12 @@ async def enable_embedding_model(
     return CompletionModelSparse.model_validate(model)
 
 
-@router.post("/allowed-origins/", response_model=AllowedOriginInDB)
+@router.post(
+    "/allowed-origins/",
+    response_model=AllowedOriginInDB,
+    description="Add an allowed CORS origin for a tenant.",
+    responses=responses.get_responses([]),
+)
 async def add_origin(
     origin: AllowedOriginCreate,
     container: Annotated[Container, Depends(get_container())],
@@ -709,7 +766,12 @@ async def add_origin(
     return created
 
 
-@router.get("/allowed-origins/", response_model=PaginatedResponse[AllowedOriginInDB])
+@router.get(
+    "/allowed-origins/",
+    response_model=PaginatedResponse[AllowedOriginInDB],
+    description="List allowed CORS origins, optionally filtered by tenant.",
+    responses=responses.get_responses([]),
+)
 async def get_origins(
     container: Annotated[Container, Depends(get_container())],
     tenant_id: Annotated[UUID | None, Query()] = None,
@@ -724,7 +786,12 @@ async def get_origins(
     return protocol.to_paginated_response(allowed_origins)
 
 
-@router.delete("/allowed-origins/{id}/", status_code=204)
+@router.delete(
+    "/allowed-origins/{id}/",
+    status_code=204,
+    description="Delete an allowed CORS origin by id (idempotent).",
+    responses=responses.get_responses([]),
+)
 async def delete_origin(
     id: UUID,
     container: Annotated[Container, Depends(get_container())],
@@ -753,7 +820,9 @@ async def delete_origin(
 
 @router.post(
     "/tenants/{tenant_id}/usage-stats/recalculate",
-    responses=responses.get_responses([404]),
+    response_model=dict[str, str | bool],
+    description="Recalculate usage statistics for a specific tenant.",
+    responses=responses.get_responses([404, 500]),
 )
 async def recalculate_tenant_usage_statistics(
     tenant_id: UUID,
@@ -778,19 +847,18 @@ async def recalculate_tenant_usage_statistics(
                 "success": True,
             }
         else:
-            from fastapi import HTTPException
-
             raise HTTPException(
                 status_code=404, detail=f"Tenant {tenant_id} not found or not active"
             )
 
+    except HTTPException:
+        # Preserve the explicit 404 above; only unexpected errors become 500.
+        raise
     except Exception as e:
         logger.error(
             f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
             exc_info=True,
         )
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=500,
             detail=f"Error recalculating usage statistics for tenant {tenant_id}: {str(e)}",
@@ -799,6 +867,8 @@ async def recalculate_tenant_usage_statistics(
 
 @router.post(
     "/system/usage-stats/recalculate-all",
+    response_model=dict[str, str | bool],
+    description="Recalculate usage statistics for all active tenants.",
     responses=responses.get_responses([500]),
 )
 async def recalculate_all_tenants_usage_statistics(
@@ -844,6 +914,7 @@ async def recalculate_all_tenants_usage_statistics(
 @router.post(
     "/tenants/{tenant_id}/completion-models/{model_id}/migrate",
     response_model=MigrationResult,
+    description="Migrate completion model usage from one model to another for a specific tenant.",
     responses=responses.get_responses([400, 403, 404, 500]),
 )
 async def migrate_completion_model_for_tenant(
@@ -986,6 +1057,7 @@ async def migrate_completion_model_for_tenant(
 @router.post(
     "/system/completion-models/{model_id}/migrate-all-tenants",
     response_model=dict,
+    description="Migrate completion model usage from one model to another across all active tenants.",
     responses=responses.get_responses([400, 403, 404, 500]),
 )
 async def migrate_completion_model_for_all_tenants(
@@ -1234,7 +1306,8 @@ async def migrate_completion_model_for_all_tenants(
 @router.post(
     "/completion-models/create",
     response_model=CompletionModelSparse,
-    responses=responses.get_responses([400, 401]),
+    description="Create global completion model metadata (system-wide operation).",
+    responses=responses.get_responses([400, 401, 409]),
 )
 async def create_completion_model(
     model_data: CompletionModelCreate,
@@ -1273,7 +1346,8 @@ async def create_completion_model(
 @router.put(
     "/completion-models/{id}/metadata",
     response_model=CompletionModelSparse,
-    responses=responses.get_responses([404, 401]),
+    description="Update global completion model metadata (system-wide operation).",
+    responses=responses.get_responses([401, 404, 409]),
 )
 async def update_completion_model_metadata(
     id: UUID,
@@ -1315,6 +1389,8 @@ async def update_completion_model_metadata(
 
 @router.delete(
     "/completion-models/{id}",
+    response_model=None,
+    description="Soft-delete global completion model metadata (system-wide operation).",
     responses=responses.get_responses([404, 400, 401]),
 )
 async def delete_completion_model(
@@ -1365,7 +1441,8 @@ async def delete_completion_model(
 @router.post(
     "/embedding-models/create",
     response_model=EmbeddingModelSparse,
-    responses=responses.get_responses([400, 401]),
+    description="Create global embedding model metadata (system-wide operation).",
+    responses=responses.get_responses([400, 401, 409]),
 )
 async def create_embedding_model(
     model_data: EmbeddingModelCreate,
@@ -1398,7 +1475,8 @@ async def create_embedding_model(
 @router.put(
     "/embedding-models/{id}/metadata",
     response_model=EmbeddingModelSparse,
-    responses=responses.get_responses([404, 401]),
+    description="Update global embedding model metadata (system-wide operation).",
+    responses=responses.get_responses([401, 404, 409]),
 )
 async def update_embedding_model_metadata(
     id: UUID,
@@ -1440,6 +1518,8 @@ async def update_embedding_model_metadata(
 
 @router.delete(
     "/embedding-models/{id}",
+    response_model=None,
+    description="Soft-delete global embedding model metadata (system-wide operation).",
     responses=responses.get_responses([404, 400, 401]),
 )
 async def delete_embedding_model(

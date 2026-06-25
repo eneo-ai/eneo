@@ -20,6 +20,9 @@ from intric.database.tables.assistant_table import (
 )
 from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.help_assistant_assignment_history_table import (
+    HelpAssistantAssignmentHistory,
+)
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.integration_table import (
@@ -27,6 +30,9 @@ from intric.database.tables.integration_table import (
 )
 from intric.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
+)
+from intric.database.tables.org_space_assistant_roles_table import (
+    OrgSpaceAssistantRoles,
 )
 from intric.database.tables.prompts_table import Prompts, PromptsAssistants
 from intric.database.tables.users_table import Users
@@ -45,6 +51,30 @@ if TYPE_CHECKING:
     )
     from intric.users.user import UserInDB
     from intric.websites.domain.website import Website
+
+
+# IMPORTANT: every list-returning method in this repo must apply this
+# filter. If you add a new list method, either call it here or document
+# the explicit exception in a comment on the new method. See PRD §4.
+def _exclude_helper_assistants(
+    query: Select[tuple[Assistants]],
+) -> Select[tuple[Assistants]]:
+    """Exclude assistants currently filling a helper role and former helpers.
+
+    Excludes any assistant that:
+      (a) has an active row in org_space_assistant_roles, OR
+      (b) has any row in help_assistant_assignment_history.
+
+    published=true does NOT override the exclusion — per PRD §4, helper-ness
+    is independent of regular publish visibility.
+    """
+    active_role = sa.select(OrgSpaceAssistantRoles.assistant_id).where(
+        OrgSpaceAssistantRoles.assistant_id == Assistants.id
+    )
+    former_helper = sa.select(HelpAssistantAssignmentHistory.assistant_id).where(
+        HelpAssistantAssignmentHistory.assistant_id == Assistants.id
+    )
+    return query.where(~sa.exists(active_role)).where(~sa.exists(former_helper))
 
 
 class AssistantRepository:
@@ -431,6 +461,8 @@ class AssistantRepository:
         if search_query is not None:
             query = query.filter(Assistants.name.like(f"%{search_query}%"))
 
+        query = _exclude_helper_assistants(query)
+
         records = await self.get_records_with_options(query)
 
         completion_models = await self.completion_model_repo.all()
@@ -464,6 +496,8 @@ class AssistantRepository:
 
         if search_query is not None:
             query = query.filter(Assistants.name.like(f"%{search_query}%"))
+
+        query = _exclude_helper_assistants(query)
 
         records = await self.get_records_with_options(query)
         completion_models = await self.completion_model_repo.all()

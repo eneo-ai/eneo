@@ -8,7 +8,6 @@ from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
 from intric.files.chunk_embedding_list import ChunkEmbeddingList
 from intric.info_blobs.info_blob import InfoBlobChunk
 from intric.main.config import SETTINGS, Settings
-from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -67,6 +66,10 @@ class CreateEmbeddingsService:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
                    Both satisfy the EmbeddingModelLike protocol.
         """
+        from intric.model_providers.infrastructure.litellm_provider import (
+            build_litellm_model_name,
+            load_active_litellm_provider,
+        )
         from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
         )
@@ -96,13 +99,9 @@ class CreateEmbeddingsService:
                 config=provider_config or {},
                 encryption_service=self.encryption_service,
             )
-            litellm_model_name = f"{provider_type}/{model.name}"
+            litellm_model_name = build_litellm_model_name(provider_type, model.name)
         else:
             # DB lookup path: requires active session
-            import sqlalchemy as sa
-
-            from intric.database.tables.model_providers_table import ModelProviders
-
             if not self.session:
                 logger.error(
                     "Model requires database session but none available",
@@ -118,37 +117,26 @@ class CreateEmbeddingsService:
                     "Please ensure the CreateEmbeddingsService is initialized with a database session."
                 )
 
-            stmt = sa.select(ModelProviders).where(
-                ModelProviders.id == model.provider_id
-            )
-            result = await self.session.execute(stmt)
-            provider_db = result.scalar_one_or_none()
-
-            if provider_db is None:
-                raise ProviderNotFoundException(
-                    f"Model provider '{model.provider_id}' not found. "
-                    "The provider may have been deleted or is not accessible."
-                )
-
-            if not provider_db.is_active:
-                raise ProviderInactiveException(
-                    f"The model provider '{provider_db.name}' is currently inactive. "
-                    "Please contact your administrator to enable the provider."
-                )
-
             if self.encryption_service is None:
                 raise ValueError(
                     "CreateEmbeddingsService requires an encryption_service to resolve credentials."
                 )
-            credential_resolver = TenantModelCredentialResolver(
-                provider_id=provider_db.id,
-                provider_type=provider_db.provider_type,
-                credentials=provider_db.credentials,
-                config=provider_db.config,
-                encryption_service=self.encryption_service,
+            if self.tenant is None:
+                raise ValueError(
+                    f"Model '{model.name}' requires tenant context to load its provider."
+                )
+            provider = await load_active_litellm_provider(
+                session=self.session,
+                provider_id=model.provider_id,
+                tenant_id=self.tenant.id,
             )
-            litellm_model_name = f"{provider_db.provider_type}/{model.name}"
-            provider_type = provider_db.provider_type
+            credential_resolver = provider.create_credential_resolver(
+                self.encryption_service
+            )
+            litellm_model_name = build_litellm_model_name(
+                provider.provider_type, model.name
+            )
+            provider_type = provider.provider_type
 
         logger.info(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",

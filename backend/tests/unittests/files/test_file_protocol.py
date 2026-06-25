@@ -186,13 +186,16 @@ async def test_to_domain_routes_audio_mime_types(protocol):
 @pytest.mark.asyncio
 async def test_to_domain_routes_image_mime_types(protocol):
     """Image MIME types should route through image_to_domain."""
-    for mime in ["image/png", "image/jpeg"]:
+    for mime in ["image/png", "image/jpeg", "image/webp", "image/avif"]:
         upload, size = _make_upload(mime, 1000)
         protocol.file_size_service.get_file_size.return_value = size
 
         result = await protocol.to_domain(upload)
 
         assert result.file_type.value == "image", f"MIME {mime} should route to image"
+        # Image data is stored as a blob, never decoded into the text column.
+        assert result.blob == b"image-bytes"
+        assert result.text is None
 
 
 @pytest.mark.asyncio

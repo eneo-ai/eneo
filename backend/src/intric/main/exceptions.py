@@ -59,6 +59,10 @@ class ErrorCodes(int, Enum):
     # referenced by an active resource (assistants, apps, services,
     # assistant/app templates). Space membership alone does not block.
     MODEL_IN_USE = 9039
+    # System user protection
+    SYSTEM_USER_PROTECTED = 9040
+    # AI provider deterministically rejected the request (4xx upstream)
+    PROVIDER_REJECTED_REQUEST = 9041
 
 
 class NotFoundException(Exception):
@@ -153,6 +157,28 @@ class UniqueException(Exception):
 
 
 class OpenAIException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+        details: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+        self.details = details
+
+
+class ProviderRejectedRequestException(OpenAIException):
+    """The AI provider deterministically rejected the request (upstream 4xx).
+
+    Subclasses OpenAIException so existing provider-error handling keeps
+    catching it, but maps to 400 instead of 503: the request/configuration is
+    at fault, not provider availability, and retrying cannot succeed.
+    """
+
     pass
 
 
@@ -338,6 +364,18 @@ class APIKeyNotConfiguredException(Exception):
     pass
 
 
+class SystemUserProtected(Exception):
+    """Raised when an admin path tries to delete or mutate a system user.
+
+    Per-tenant system users (``users.is_system_user = true``) own seeded
+    Help Assistant rows; deleting them would cascade-destroy the org-space's
+    Prompt Guide and audit history. The marker is authoritative — no admin
+    path is allowed to remove it.
+    """
+
+    pass
+
+
 class ProviderInactiveException(Exception):
     """Raised when attempting to use a model whose provider is inactive/disabled."""
 
@@ -404,6 +442,13 @@ EXCEPTION_MAP = {
     QuotaExceededException: (403, None, ErrorCodes.QUOTA_EXCEEDED),
     UniqueException: (400, None, ErrorCodes.UNIQUE_ERROR),
     OpenAIException: (503, None, ErrorCodes.OPENAI_ERROR),
+    # Starlette resolves handlers via MRO, so this subclass entry wins over
+    # the OpenAIException one for deterministic upstream rejections.
+    ProviderRejectedRequestException: (
+        400,
+        None,
+        ErrorCodes.PROVIDER_REJECTED_REQUEST,
+    ),
     ClaudeException: (503, None, ErrorCodes.CLAUDE_ERROR),
     ValidationException: (422, None, ErrorCodes.VALIDATION_ERROR),
     PydanticParseError: (500, None, ErrorCodes.PYDANTIC_PARSE_ERROR),
@@ -468,4 +513,5 @@ EXCEPTION_MAP = {
         "Resource is not ready yet.",
         ErrorCodes.RESOURCE_NOT_READY,
     ),
+    SystemUserProtected: (403, None, ErrorCodes.SYSTEM_USER_PROTECTED),
 }

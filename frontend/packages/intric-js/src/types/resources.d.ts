@@ -116,10 +116,10 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
   messages: ConversationMessage[];
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
+export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
 // num_tokens_* are populated by the backend on every persisted message and
-// streamed live via the SSE token_usage event. They're augmented here rather
-// than waiting on a full schema.d.ts regen, since the rest of the schema is
-// frozen against the openapi-typescript version used at generation time.
+// streamed live via the SSE token_usage event, but are not part of the generated
+// Message schema.
 export type ConversationMessage = components["schemas"]["Message"] & {
   num_tokens_question?: number;
   num_tokens_answer?: number;
@@ -144,6 +144,7 @@ export type Paginated<T> = {
 
 export namespace SSE {
   export type Text = Omit<components["schemas"]["SSEText"], "$defs">;
+  export type Reasoning = Omit<components["schemas"]["SSEReasoning"], "$defs">;
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
   export type Intric = Omit<components["schemas"]["SSEIntricEvent"], "$defs">;
@@ -176,6 +177,7 @@ export namespace SSE {
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
   export type Event =
     | Text
+    | Reasoning
     | FirstChunk
     | Files
     | Intric

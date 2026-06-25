@@ -126,6 +126,7 @@ class MCPServerToolPublic(BaseModel):
     id: UUID
     mcp_server_id: UUID
     name: str
+    title: Optional[str] = None
     description: Optional[str]
     input_schema: Optional[dict[str, Any]]
     is_enabled_by_default: bool

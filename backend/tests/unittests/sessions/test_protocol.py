@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from intric.sessions.session import SessionInDB
-from intric.sessions.session import SessionMetadataPublic
+from intric.questions.question import Question, ToolCallInfo
+from intric.questions.question_protocol import to_question_public
+from intric.sessions.session import SessionInDB, SessionMetadataPublic
 from intric.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_sessions_paginated_response,
@@ -115,3 +116,34 @@ def test_metadata_pagination_forward_limit():
     )
     assert len(response.items) == limit
     assert response.next_cursor == test_sessions[limit].created_at
+
+
+def test_question_public_omits_persisted_tool_result():
+    now = datetime.now(timezone.utc)
+    question = Question(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        question="Question",
+        answer="Answer",
+        num_tokens_question=1,
+        num_tokens_answer=1,
+        tenant_id=uuid4(),
+        session_id=uuid4(),
+        tool_calls=[
+            ToolCallInfo(
+                server_name="server",
+                tool_name="tool",
+                tool_call_id="call_1",
+                result="large upstream payload",
+                mcp_tool_name="server__tool",
+            )
+        ],
+    )
+
+    public = to_question_public(question)
+
+    assert len(public.tool_calls) == 1
+    assert public.tool_calls[0].result is None
+    assert question.tool_calls is not None
+    assert question.tool_calls[0].result == "large upstream payload"

@@ -9,10 +9,10 @@ Tests cover:
 - P6: Tool ownership validation in space updates
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import pytest
 from pydantic import ValidationError
 
 from intric.main.exceptions import (
@@ -31,7 +31,6 @@ from intric.mcp_servers.presentation.models import (
     MCPServerPublic,
     MCPServerUpdate,
 )
-
 
 # =============================================================================
 # P1: list_tools() error propagation
@@ -127,6 +126,54 @@ class TestMCPClientAuthenticationErrorMapping:
 
         with pytest.raises(MCPClientError):
             await client.list_tools()
+
+
+# =============================================================================
+# Mcp-Session-Id is carried only via the SDK transport, never the headers dict
+# =============================================================================
+
+
+class TestMCPClientSessionHeaderNotDuplicated:
+    """The resume session id must reach the wire exactly once.
+
+    Putting ``Mcp-Session-Id`` in the headers dict passed to the SDK makes it
+    both the httpx client default and the per-request base, while the SDK also
+    adds it from ``transport.session_id``. httpx folds the two copies into a
+    single comma-joined value (``id, id``) that shape-validating servers reject
+    with HTTP 400. The header must therefore be carried only by seeding the
+    transport's ``session_id`` — ``_build_auth_headers`` must never emit it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_resume_session_id_absent_from_auth_headers(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "bearer"
+
+        client = MCPClient(
+            server,
+            auth_credentials={"token": "secret"},
+            resume_mcp_session_id="fa5613e2-3f1a-448c-8702-8364cdd65da0",
+        )
+
+        headers = await client._build_auth_headers()
+
+        assert {k.lower() for k in headers} == {"authorization"}
+        assert not any(k.lower() == "mcp-session-id" for k in headers)
+
+    @pytest.mark.asyncio
+    async def test_fresh_connect_auth_headers_have_no_session_id(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "bearer"
+
+        client = MCPClient(server, auth_credentials={"token": "secret"})
+
+        headers = await client._build_auth_headers()
+
+        assert not any(k.lower() == "mcp-session-id" for k in headers)
 
 
 # =============================================================================

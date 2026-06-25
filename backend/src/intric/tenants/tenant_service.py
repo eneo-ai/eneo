@@ -193,6 +193,15 @@ class TenantService:
         self._validate(tenant, tenant_id)
         return await self.repo.update_api_key_policy(tenant_id, policy_updates)
 
+    async def update_show_model_pricing(
+        self,
+        tenant_id: UUID,
+        show_model_pricing: bool,
+    ) -> TenantInDB:
+        tenant = await self.get_tenant_by_id(tenant_id)
+        self._validate(tenant, tenant_id)
+        return await self.repo.update_show_model_pricing(tenant_id, show_model_pricing)
+
     async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
         return await self.repo.add_modules(list_of_module_ids, tenant_id)
 
@@ -227,7 +236,7 @@ class TenantService:
 
         Raises:
             NotFoundException: If tenant not found
-            ValueError: If validation fails
+            BadRequestException: If provider-specific validation fails
         """
         # Validate tenant exists
         tenant = await self.repo.get(tenant_id)
@@ -258,7 +267,7 @@ class TenantService:
         )
 
         if validation_errors:
-            raise ValueError(
+            raise BadRequestException(
                 f"Credential validation failed for provider '{provider}': "
                 + "; ".join(validation_errors)
             )

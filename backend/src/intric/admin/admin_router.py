@@ -62,7 +62,8 @@ from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse, DeleteResponse
 from intric.roles.role import RolePublic
 from intric.server.dependencies.container import get_container
-from intric.tenants.tenant import TenantPublic
+from intric.server.protocol import responses
+from intric.tenants.tenant import ModelPricingVisibility, TenantPublic
 from intric.users.user import (
     UserAddAdmin,
     UserAdminView,
@@ -901,7 +902,12 @@ async def get_predefined_roles(container: AdminContainer):
     return [role for role in all_roles if role.predefined_source]
 
 
-@router.post("/privacy-policy/", response_model=TenantPublic)
+@router.post(
+    "/privacy-policy/",
+    response_model=TenantPublic,
+    description="Update the tenant's privacy policy URL (admin only).",
+    responses=responses.get_responses([400, 401, 403]),
+)
 async def update_privacy_policy(url: PrivacyPolicy, container: AdminContainer):
     service = container.admin_service()
     user = container.user()
@@ -1296,6 +1302,58 @@ async def update_api_key_notification_policy(
     return ApiKeyNotificationPolicyResponse.model_validate(after_notification_policy)
 
 
+@router.put(
+    "/settings/model-pricing-visibility",
+    response_model=ModelPricingVisibility,
+    tags=["Admin"],
+    summary="Set model pricing visibility",
+    description=(
+        "Toggle whether model input/output prices are shown to regular users "
+        "across the organization."
+    ),
+    responses={
+        200: {"description": "Updated model pricing visibility."},
+        **error_responses([400, 401, 403, 429]),
+    },
+)
+async def update_model_pricing_visibility(
+    request: ModelPricingVisibility,
+    container: AdminContainer,
+):
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+
+    user = container.user()
+    before = user.tenant.show_model_pricing
+
+    tenant_service = container.tenant_service()
+    updated_tenant = await tenant_service.update_show_model_pricing(
+        user.tenant_id, request.show_model_pricing
+    )
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.TENANT_SETTINGS_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description="Updated model pricing visibility",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated_tenant,
+            changes={
+                "show_model_pricing": {
+                    "old": before,
+                    "new": updated_tenant.show_model_pricing,
+                }
+            },
+        ),
+    )
+
+    return ModelPricingVisibility(show_model_pricing=updated_tenant.show_model_pricing)
+
+
 @router.get(
     "/super-api-key-status",
     response_model=SuperApiKeyStatus,
@@ -1636,6 +1694,7 @@ async def update_api_key_admin(
     "/api-keys/{id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     tags=["Admin API Keys"],
     summary="Revoke API key (deprecated alias)",
     responses={
@@ -1851,6 +1910,7 @@ async def extend_api_key_expiration_admin(
     "/api-keys/{id}/purge",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    response_model=None,
     tags=["Admin API Keys"],
     summary="Permanently delete tenant API key",
     description=(
