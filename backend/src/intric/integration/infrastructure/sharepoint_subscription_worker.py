@@ -299,21 +299,26 @@ async def cleanup_orphaned_subscriptions(container: Container):
     return {"deleted": deleted_count, "skipped": skipped_count, "failed": failed_count}
 
 
-# SharePoint sync tasks that can leave a Job stuck IN_PROGRESS if the worker dies
-# mid-run (arq does not retry these and there is no per-task finally that fails the
-# Job). The sync lease watchdog refreshes every <5 min while a sync is alive, so a
-# Job untouched for this long is almost certainly dead, not slow.
+# SharePoint sync tasks that can leave a stuck Job if the worker dies mid-run (arq
+# does not retry these and there is no per-task finally that fails the Job). Each
+# task runs its whole body in ONE transaction committed only at the end, so a hard
+# crash rolls back the in-flight IN_PROGRESS write and the row reverts to its last
+# committed state (QUEUED). The reaper therefore targets BOTH QUEUED and IN_PROGRESS
+# (see JobRepository.mark_stale_jobs_failed). The timeout must exceed the longest
+# legitimate full sync of a large site AND any normal queue wait, so a slow-but-live
+# job is never killed.
 SHAREPOINT_SYNC_TASKS = ["pull_sharepoint_content", "sync_sharepoint_delta"]
 SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES = 120
 
 
 @worker.cron_job(minute={15, 45})  # Every 30 minutes, offset from renewal
 async def fail_stale_sharepoint_sync_jobs(container: Container):
-    """Mark SharePoint sync jobs stuck in IN_PROGRESS as FAILED.
+    """Fail SharePoint sync jobs stuck QUEUED/IN_PROGRESS past the stale timeout.
 
-    A hard crash mid-sync (worker killed, OOM) leaves the Job row in IN_PROGRESS
-    forever because arq does not retry and no finally fails it. This reaper mirrors
-    the crawl OrphanWatchdog so stuck syncs surface as failures instead of hanging.
+    A hard crash mid-sync (worker killed, OOM) leaves a stuck Job that arq will not
+    retry and no finally fails. Because the sync commits its status only at the end,
+    a crashed job reverts to QUEUED, so the reaper covers both states. Mirrors the
+    crawl OrphanWatchdog so stuck syncs surface as failures instead of hanging.
     """
     stale_before = datetime.now(timezone.utc) - timedelta(
         minutes=SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES
@@ -326,7 +331,7 @@ async def fail_stale_sharepoint_sync_jobs(container: Container):
 
     if failed_ids:
         logger.warning(
-            "Failed %d stale SharePoint sync job(s) stuck in IN_PROGRESS: %s",
+            "Failed %d stale SharePoint sync job(s) (QUEUED/IN_PROGRESS): %s",
             len(failed_ids),
             [str(job_id) for job_id in failed_ids],
         )

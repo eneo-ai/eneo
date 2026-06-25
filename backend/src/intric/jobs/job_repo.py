@@ -113,11 +113,16 @@ class JobRepository:
         tasks: list[str],
         stale_before: datetime,
     ) -> list[UUID]:
-        """Mark long-stuck IN_PROGRESS jobs as FAILED.
+        """Mark long-stuck QUEUED/IN_PROGRESS jobs as FAILED.
 
-        A hard crash mid-task (the worker dies without running its except/finally)
-        leaves the Job row stuck in IN_PROGRESS forever. This reaps such rows for
-        the given task types once they have been untouched past ``stale_before``.
+        A hard crash mid-task leaves a stuck Job row. Both states must be reaped:
+        - IN_PROGRESS if the task durably committed that status, and
+        - QUEUED because a task that runs its whole body in one transaction (e.g.
+          SharePoint sync) has its IN_PROGRESS write rolled back on a hard crash,
+          so the row reverts to its last committed state, QUEUED.
+        Reaps rows for the given task types whose updated_at is older than
+        ``stale_before`` (the threshold must exceed the longest legitimate run/queue
+        wait so live or merely-slow jobs are never killed).
 
         Returns the ids of the jobs that were failed.
         """
@@ -126,7 +131,7 @@ class JobRepository:
         stmt = (
             sa.update(Jobs)
             .where(Jobs.task.in_(tasks))
-            .where(Jobs.status == Status.IN_PROGRESS.value)
+            .where(Jobs.status.in_([Status.IN_PROGRESS.value, Status.QUEUED.value]))
             .where(Jobs.updated_at < stale_before)
             .values(
                 status=Status.FAILED.value,
