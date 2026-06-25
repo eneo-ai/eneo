@@ -1,11 +1,10 @@
-"""Commit-preservation invariant used across the orchestrator.
+"""Commit-preservation invariant used across AI Builder authoring.
 
 The architecture commit is the pinned contract between the planner's
 discovery phase and downstream persistence. Any code that transforms a
-planner response after the commit lands — the orchestrator evaluator,
-the post-commit invariance check in the dispatcher, the materialization
-bridge before it writes a draft flow — must verify the transform did not
-silently drift the commit.
+planner response after the commit lands — proposal validation, proposal
+submission, and the materialization bridge before it writes a draft flow —
+must verify the transform did not silently drift the commit.
 
 Persisted-commit preservation uses full canonical-form equality via
 `model_dump(mode="json")`. LLM-facing draft preservation is structural:

@@ -3,7 +3,7 @@
 The LLM may choose wording and semantic intent, but it should not infer
 which planner actions are legal for the current turn. This module is the
 single source for the action menu consumed by the deterministic turn
-controller and enforced by the orchestrator.
+controller and downstream server/proposal dispatch.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def build_planner_action_policy(
 def compute_unresolved_core_slots(
     planning_state: PlanningState,
 ) -> frozenset[str]:
-    """One predicate for prompt policy and orchestrator commit rejection."""
+    """One predicate for prompt policy and commit eligibility checks."""
 
     resolved = frozenset(planning_state.resolved_slots.keys())
     return CORE_ARCHITECTURAL_SLOTS - resolved

@@ -94,7 +94,7 @@ class AIBuilderRepository:
 
         Guarantees that writes performed inside the block either all
         land together or are all rolled back, independent of whether
-        the caller owns an outer transaction. Used by turn orchestrators
+        the caller owns an outer transaction. Used by AI Builder turn handlers
         that must unify several repo writes into one atomic unit.
         """
         async with self._transaction():
@@ -1079,12 +1079,12 @@ class AIBuilderRepository:
         When `architecture_commit` is provided, it is stamped on the
         rebuilt state inside the savepoint so the commit lands as one
         unit with the conversation append. This is the only path through
-        which the planner's `commit_architecture` action persists to
+        which the server-owned `commit_architecture` decision persists to
         `PlanningState.architecture_commit`.
 
         `turn.base_planning_state_version` is forwarded to
         `save_planning_state`, so every active turn uses the same CAS
-        version that the orchestrator validated against. A concurrent
+        version that request preparation validated against. A concurrent
         writer that moves the row between the guardrail's Python-side
         check and this UPDATE raises `planning_state_version_mismatch`
         instead of silently overwriting committed state.

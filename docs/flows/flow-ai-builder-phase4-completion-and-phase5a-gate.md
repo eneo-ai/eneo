@@ -2,9 +2,9 @@
 
 ## Five-line TL;DR
 
-1. Phase 4 source work is complete: the custom Builder LLM runtime has one typed planner turn owner and a narrower proposal completion boundary.
-2. The source delta from `61facd8a3` to current source deleted 3 Builder production files, 873 Builder production LOC, 31 `dict[str, Any]` occurrences, and 59 `Any` tokens.
-3. Remaining retry loops are deliberately kept because each owns product-visible stream, validation, or recovery behavior with focused tests.
+1. Phase 4 source work is complete: deterministic server decisions now use one server-owned dispatcher, while proposal generation keeps one LiteLLM/proposal boundary.
+2. The source delta from `61facd8a3` to current source deleted 16 Builder production files, 5,415 Builder production LOC, 56 `dict[str, Any]` occurrences, and 95 `Any` tokens.
+3. The deleted PlannerOutput/action runtime no longer asks an LLM to choose backend-owned questions, architecture commits, or requirements confirmation.
 4. Phase 5A now has one Assistant-owned update command boundary; MCP/capability adapters remain out of scope.
 5. Do not cherry-pick PR #480 broadly; reuse only the ideas that help create one typed Assistant command owner.
 
@@ -58,18 +58,20 @@ but the broad deletion gate has been met without a weaker abstraction:
 
 ```mermaid
 flowchart LR
-  Prompt["Planner request"]
-  Completion["LiteLLM completion boundary"]
-  Turn["run_structured_turn"]
-  Semantic["Semantic validator"]
+  Prompt["Planner request preparation"]
+  Decision["BuilderTurnDecision"]
+  ServerDispatch["Server decision dispatcher"]
+  Completion["LiteLLM proposal completion boundary"]
+  Semantic["Semantic proposal validator"]
   Proposal["Proposal submission"]
   Repair["Proposal repair"]
   QR["Question recovery"]
 
-  Prompt --> Completion --> Turn
-  Turn --> Semantic
-  Proposal --> Completion
-  Proposal --> Repair
+  Prompt --> Decision
+  Decision -->|"server decision"| ServerDispatch
+  Decision -->|"generate proposal"| Completion --> Proposal
+  Proposal --> Semantic
+  Proposal --> Repair --> Completion
   QR -->|"injected repair completion"| Completion
 ```
 
@@ -80,10 +82,10 @@ Metrics were measured for production Python files under
 
 | Metric | Baseline `61facd8a3` | Current source | Delta |
 | --- | ---: | ---: | ---: |
-| Production files | 139 | 136 | -3 |
-| Production LOC | 52,340 | 51,467 | -873 |
-| `dict[str, Any]` occurrences | 286 | 255 | -31 |
-| `Any` token occurrences | 558 | 499 | -59 |
+| Production files | 139 | 123 | -16 |
+| Production LOC | 52,340 | 46,925 | -5,415 |
+| `dict[str, Any]` occurrences | 286 | 230 | -56 |
+| `Any` token occurrences | 558 | 463 | -95 |
 | `acompletion(...)` calls under AI Builder | 4 | 4 | 0 |
 | `call_proposal_completion(...)` references | 6 | 3 | -3 |
 
@@ -120,14 +122,21 @@ Captured output:
 
 ```text
 61facd8a3 files=139 loc=52340 dict_str_any_occurrences=286 any_occurrences=558 acompletion_calls=4 proposal_completion_refs=6
-HEAD files=136 loc=51467 dict_str_any_occurrences=255 any_occurrences=499 acompletion_calls=4 proposal_completion_refs=3
+HEAD files=123 loc=46925 dict_str_any_occurrences=230 any_occurrences=463 acompletion_calls=4 proposal_completion_refs=3
 ```
 
 Name-status verification from `61facd8a3` to current source shows five deleted
-Builder runtime/capability files and two added runtime files, for net -3
-production files:
+Builder runtime/capability families plus the deleted PlannerOutput action
+runtime, for net -16 production files. Renames do not affect the net count.
 
 ```text
+D backend/src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py
+D backend/src/intric/flows/ai_builder/ai_builder_capability_projection.py
+D backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py
+D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack.py
+D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack_core.py
+D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack_edit.py
+D backend/src/intric/flows/ai_builder/ai_builder_knowledge_pack_protocol.py
 A backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py
 D backend/src/intric/flows/ai_builder/ai_builder_planner_completion.py
 D backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py
@@ -137,9 +146,13 @@ D backend/src/intric/flows/ai_builder/ai_builder_step_capabilities.py
 D backend/src/intric/flows/ai_builder/ai_builder_structured_turn.py
 D backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py
 D backend/src/intric/flows/ai_builder/ai_builder_orchestrator.py
+D backend/src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py
+D backend/src/intric/flows/ai_builder/ai_builder_planner_output_normalizer.py
 D backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py
 D backend/src/intric/flows/ai_builder/ai_builder_response_format.py
 A backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py
+R backend/src/intric/flows/ai_builder/ai_builder_create_outline.py -> backend/src/intric/flows/ai_builder/ai_builder_proposal_intent.py
+R backend/src/intric/flows/ai_builder/ai_builder_server_actions.py -> backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py
 ```
 
 ## Retry Loop Ownership Matrix
@@ -218,16 +231,20 @@ The source slices were validated before this packet:
 
 | Command | Result |
 | --- | --- |
-| `docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 /home/vscode/.local/bin/uv run pytest tests/unittests/flows/ai_builder -q` | `2656 passed` |
+| `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/unittests/flows/ai_builder'` | `2376 passed` |
+| `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run pytest tests/integration/flows/ai_builder'` | `3 passed, 12 deselected` |
+| `docker exec -u vscode eneo-flows-clean_devcontainer-eneo-1 bash -lc 'export PATH=/home/vscode/.local/bin:/home/vscode/.bun/bin:$PATH && cd /workspace/backend && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/integration/flows/ai_builder'` | Passed |
+| `ENEO_DEVCONTAINER_NAME=eneo-flows-clean_devcontainer-eneo-1 backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py src/intric/flows/ai_builder/ai_builder_turn_controller.py src/intric/flows/ai_builder/ai_builder_planner_failure_events.py src/intric/flows/ai_builder/ai_builder_telemetry.py src/intric/flows/ai_builder/ai_builder_service.py` | `0 errors, 0 warnings, 0 informations` |
+| Claude peer loop, `flow-builder-control-plane-direct-dispatch`, iteration 2 | Blocked by Claude monthly spend limit; artifact saved under `.codex/artifacts/`. |
+| Antigravity peer loop, `flow-builder-direct-server-decision-dispatch`, iteration 3 | `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9` |
 | Focused tests listed in the question-recovery boundary doc | Passed during the relevant source slice. |
 | Import ownership tests for completion boundary | Passed during the relevant source slice. |
 | `docker exec eneo-flows-clean_devcontainer-eneo-1 sh -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py src/intric/flows/ai_builder/ai_builder_question_recovery.py'` | Passed for the RuntimeToolCall cleanup. |
 | `docker exec eneo-flows-clean_devcontainer-eneo-1 sh -lc 'cd /workspace/backend && .venv/bin/python -m pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_service.py -q'` | `177 passed` for the RuntimeToolCall cleanup. |
 
-Direct pyright on the RuntimeToolCall cleanup files still reports the existing
-strict-typing baseline around Pydantic model methods/decorators and older
-`ProposalTurnContext` optional-field unknown propagation. The cleanup removed
-the introduced `RuntimeToolCall`/`LLMCompletionToolCall` mismatch before commit.
+Direct pyright is now green for the changed deterministic-turn source files.
+Broader strict-typing cleanup for proposal repair/submission remains a future
+typed-residual target, not a blocker for this Phase 4 completion packet.
 
 ## Historical Phase 5A Go / No-Go Packet
 

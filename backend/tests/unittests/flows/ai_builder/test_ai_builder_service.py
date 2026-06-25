@@ -30,7 +30,7 @@ async def _noop_savepoint() -> AsyncIterator[None]:
 
 def _make_repo_mock() -> AsyncMock:
     """Return an `AsyncMock` repo wired with a working `savepoint()`
-    context manager so tests exercising the plan-proposal orchestrator
+    context manager so tests exercising proposal submission
     can enter its savepoint without tripping the async-CM protocol.
     """
     repo = AsyncMock()

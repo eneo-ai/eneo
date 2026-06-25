@@ -140,10 +140,9 @@ class BuilderSession(BaseModel):
     )
     requirements_version: str | None = None
     # Monotonic counter bumped by `save_planning_state`. Exposed on the
-    # domain model so the JSON planner contract can echo it as
-    # `base_planning_state_version` and the orchestrator's optimistic-
-    # concurrency guard can reject stale deltas without a second repo
-    # round-trip. Fresh rows default to 0 per the DB `server_default`.
+    # domain model so the active turn can carry `base_planning_state_version`
+    # through proposal submission and reject stale deltas without a second
+    # repo round-trip. Fresh rows default to 0 per the DB `server_default`.
     planning_state_version: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
