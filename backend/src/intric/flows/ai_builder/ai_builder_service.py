@@ -90,7 +90,6 @@ if TYPE_CHECKING:
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
 
-DISCOVERY_TEMPERATURE = 0.6  # Higher for creative question-asking
 PLANNER_TEMPERATURE = 0.4  # Lower for precise proposal generation
 SELF_CORRECTION_TEMPERATURE = 0.35
 SELF_CORRECTION_BUMPED_TEMPERATURE = 0.6
@@ -578,7 +577,6 @@ class AIBuilderService:
             user=self.user,
             repo=self.repo,
             litellm_client=litellm,
-            discovery_temperature=DISCOVERY_TEMPERATURE,
             planner_temperature=PLANNER_TEMPERATURE,
             self_correction_temperature=SELF_CORRECTION_TEMPERATURE,
             self_correction_bumped_temperature=SELF_CORRECTION_BUMPED_TEMPERATURE,

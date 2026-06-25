@@ -26,17 +26,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_orchestrator import (
-    AskQuestionAction,
-    AskQuestionPayload,
-    PlannerOutput,
-    PlanningStateDelta,
-)
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
-from intric.flows.ai_builder.ai_builder_planner_action_dispatch import (
-    BackendSelectedQuestionDispatchRequest,
-    dispatch_backend_selected_question_if_any,
-)
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_dict,
 )
@@ -48,6 +38,10 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
+)
+from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    ServerDecisionDispatchRequest,
+    dispatch_server_decision,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -61,6 +55,7 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
 )
+from intric.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
@@ -3083,7 +3078,7 @@ class TestPlannerConversationEncoding:
 
 class TestPlannerDiscoveryQuestionDispatch:
     @pytest.mark.asyncio
-    async def test_server_question_dispatch_skips_redundant_planner_internal_question(
+    async def test_server_question_fallback_text_is_persisted(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -3097,33 +3092,34 @@ class TestPlannerDiscoveryQuestionDispatch:
                 ),
             )
         ]
-        action = AskQuestionAction(
-            kind="ask_question",
-            payload=AskQuestionPayload(
-                question_id="structured_analysis_need",
-                slot_name="structured_analysis_need",
-                prompt="Should the flow use structured analysis?",
-            ),
-        )
-        server_output = PlannerOutput(
-            planner_action=action,
-            planning_state_delta=PlanningStateDelta(base_planning_state_version=0),
+        decision = AskCanonicalQuestion(
+            slot_name="structured_analysis_need",
+            prompt="Should the flow use structured analysis?",
         )
 
-        events = await dispatch_backend_selected_question_if_any(
-            BackendSelectedQuestionDispatchRequest(
+        result = await dispatch_server_decision(
+            ServerDecisionDispatchRequest(
                 repo=repo,
                 turn=_make_turn(),
-                server_output=server_output,
+                decision=decision,
                 conversation=conversation,
-                new_messages_start=len(conversation),
+                new_messages_start=0,
                 flow=None,
+                discovery_analysis=None,
+                requirements_confirmed=False,
+                ui_language="en",
+                request_id="req-test",
+                litellm_model="server",
+                used_auxiliary_llm=False,
             )
         )
 
-        assert events is not None
-        assert [event["event"] for event in events] == ["text"]
-        repo.commit_turn.assert_not_awaited()
+        assert [event["event"] for event in result.events] == ["text"]
+        repo.commit_turn.assert_awaited_once()
+        commit_kwargs = repo.commit_turn.await_args.kwargs
+        assert commit_kwargs["new_messages"][0].role == "user"
+        assert commit_kwargs["new_messages"][-1].role == "assistant"
+        assert commit_kwargs["new_messages"][-1].content == decision.prompt
 
     @pytest.mark.asyncio
     async def test_uses_backend_followup_after_llm_slot_classification_for_blocking_discovery(

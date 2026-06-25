@@ -19,16 +19,9 @@ from intric.flows.ai_builder.ai_builder_action_policy import (
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
-from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
-from intric.flows.ai_builder.ai_builder_orchestrator import (
-    AskQuestionAction,
-    AskQuestionPayload,
-    CommitArchitectureAction,
-    CommitArchitecturePayload,
-    ConfirmRequirementsAction,
-    ConfirmRequirementsPayload,
-    PlannerOutput,
-    PlanningStateDelta,
+from intric.flows.ai_builder.ai_builder_event_models import (
+    KeyDecisionPayload,
+    RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     DEFAULT_FINAL_OUTPUT_NEEDS_REVIEW_EN,
@@ -62,7 +55,7 @@ class CommitArchitecture:
 
 @dataclass(frozen=True, slots=True)
 class ConfirmRequirements:
-    payload: ConfirmRequirementsPayload
+    payload: RequirementsSummaryPayload
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,51 +159,6 @@ def _decision_from_policy(
     )
 
 
-def planner_output_for_turn_decision(
-    *,
-    decision: BuilderTurnDecision,
-    base_planning_state_version: int,
-) -> PlannerOutput | None:
-    if isinstance(decision, AskCanonicalQuestion):
-        return PlannerOutput(
-            planning_state_delta=PlanningStateDelta(
-                base_planning_state_version=base_planning_state_version,
-            ),
-            planner_action=AskQuestionAction(
-                kind="ask_question",
-                payload=AskQuestionPayload(
-                    question_id=decision.slot_name,
-                    slot_name=decision.slot_name,
-                    prompt=decision.prompt,
-                ),
-            ),
-        )
-    if isinstance(decision, CommitArchitecture):
-        return PlannerOutput(
-            planning_state_delta=PlanningStateDelta(
-                base_planning_state_version=base_planning_state_version,
-                architecture_commit=decision.architecture_commit,
-            ),
-            planner_action=CommitArchitectureAction(
-                kind="commit_architecture",
-                payload=CommitArchitecturePayload(
-                    note="Architecture committed from resolved planning state."
-                ),
-            ),
-        )
-    if isinstance(decision, ConfirmRequirements):
-        return PlannerOutput(
-            planning_state_delta=PlanningStateDelta(
-                base_planning_state_version=base_planning_state_version,
-            ),
-            planner_action=ConfirmRequirementsAction(
-                kind="confirm_requirements",
-                payload=decision.payload,
-            ),
-        )
-    return None
-
-
 def _question_prompt(target: str, ui_language: str | None) -> str:
     rendered = render_question(target, _locale(ui_language))
     option_lines = "\n".join(
@@ -228,7 +176,7 @@ def _locale(ui_language: str | None) -> Locale:
 def _confirm_requirements_payload(
     session_state: PlanningState,
     locale: Locale,
-) -> ConfirmRequirementsPayload:
+) -> RequirementsSummaryPayload:
     resolved = session_state.resolved_slots
     key_decisions = [
         KeyDecisionPayload(
@@ -246,7 +194,7 @@ def _confirm_requirements_payload(
         key_decisions.append(architecture_decision)
     input_description = _input_description(resolved, locale)
     output_description = _output_description(resolved, locale)
-    return ConfirmRequirementsPayload(
+    return RequirementsSummaryPayload(
         summary=_summary_text(resolved, locale),
         key_decisions=key_decisions,
         input_description=input_description,
@@ -482,6 +430,5 @@ __all__ = [
     "ConfirmRequirements",
     "GenerateProposal",
     "determine_turn_decision",
-    "planner_output_for_turn_decision",
     "resolve_turn_control",
 ]

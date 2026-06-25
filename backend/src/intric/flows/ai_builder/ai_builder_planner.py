@@ -3,19 +3,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from functools import partial
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
 from uuid import UUID, uuid4
 
 from intric.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
-    unsupported_structured_output_decision,
 )
 from intric.files.file_models import File
-from intric.flows.ai_builder.ai_builder_accepted_action_rendering import (
-    RequirementsSummaryRenderContext,
-    build_accepted_action_messages,
-)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
@@ -40,36 +34,19 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
-from intric.flows.ai_builder.ai_builder_orchestrator import (
-    OrchestrationContext,
-    PlannerOutput,
-)
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     resolve_plan_edit_context,
 )
-from intric.flows.ai_builder.ai_builder_planner_action_dispatch import (
-    BackendSelectedQuestionDispatchRequest,
-    DispatchedActionEventRequest,
-    build_dispatched_action_events,
-    dispatch_backend_selected_question_if_any,
-)
 from intric.flows.ai_builder.ai_builder_planner_failure_events import (
-    PlannerTurnResultEventRequest,
-    build_planner_turn_error_event,
     build_planner_upstream_error_event,
     build_session_send_lease_lost_event,
-    record_planner_turn_result,
 )
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
     prepare_planner_request,
-)
-from intric.flows.ai_builder.ai_builder_planner_turn import (
-    build_planner_litellm_kwargs,
-    run_planner_turn,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
@@ -79,11 +56,12 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
 )
-from intric.flows.ai_builder.ai_builder_response_format import (
-    build_planner_request_response_format,
-)
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     adjudicate_pending_question_answer,
+)
+from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    ServerDecisionDispatchRequest,
+    dispatch_server_decision,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -127,10 +105,6 @@ class PlannerMetadataResolution:
     used_auxiliary_llm: bool
 
 
-def _default_structured_output_decision() -> StructuredOutputCapabilityDecision:
-    return unsupported_structured_output_decision()
-
-
 class AIBuilderPlanner:
     def __init__(
         self,
@@ -138,7 +112,6 @@ class AIBuilderPlanner:
         user: "UserInDB",
         repo: AIBuilderRepository,
         litellm_client: Any,
-        discovery_temperature: float = 0.6,
         planner_temperature: float = 0.4,
         self_correction_temperature: float = 0.35,
         self_correction_bumped_temperature: float = 0.6,
@@ -148,7 +121,6 @@ class AIBuilderPlanner:
         self.user = user
         self.repo = repo
         self.litellm_client = litellm_client
-        self.discovery_temperature = discovery_temperature
         self.planner_temperature = planner_temperature
         self.proposal_processor = AIBuilderProposalProcessor(
             user=user,
@@ -293,6 +265,7 @@ class AIBuilderPlanner:
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
+        _ = structured_output_decision
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
 
@@ -311,10 +284,6 @@ class AIBuilderPlanner:
                 "AI Builder planner budget settings are missing.",
                 code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING,
             )
-
-        response_format_selection = build_planner_request_response_format(
-            structured_output_decision or _default_structured_output_decision()
-        )
 
         session = await self.repo.get_session(
             session_id=session_id,
@@ -448,10 +417,6 @@ class AIBuilderPlanner:
                 prepared_request.slot_classification_metadata,
             )
 
-            precomputed_output: PlannerOutput | None
-            planner_turn_messages: list[dict[str, Any]]
-            planner_turn_context: OrchestrationContext
-            planner_prompt_hash: str | None
             match prepared_request:
                 case ProposalPrepared() as proposal_request:
                     async for event in self.proposal_processor.propose_plan(
@@ -476,9 +441,7 @@ class AIBuilderPlanner:
                         assistant_metadata=build_assistant_message_metadata(
                             conversation
                         ),
-                        planning_state=(
-                            proposal_request.orchestration_context.session_state
-                        ),
+                        planning_state=proposal_request.planning_state,
                         discovery_runtime=proposal_request.discovery_runtime,
                         plan_edit_context=proposal_request.plan_edit_context,
                         prior_plan_for_revision=(
@@ -489,123 +452,60 @@ class AIBuilderPlanner:
                     yield {"event": SSE_EVENT_DONE, "data": ""}
                     return
                 case ServerOutputPrepared() as planner_turn_request:
-                    server_question_events = (
-                        await dispatch_backend_selected_question_if_any(
-                            BackendSelectedQuestionDispatchRequest(
+                    try:
+                        dispatch_result = await dispatch_server_decision(
+                            ServerDecisionDispatchRequest(
                                 repo=self.repo,
                                 turn=turn,
-                                server_output=planner_turn_request.server_output,
+                                decision=planner_turn_request.server_decision,
                                 conversation=conversation,
                                 new_messages_start=new_messages_start,
                                 flow=flow,
                                 discovery_analysis=(
                                     planner_turn_request.discovery_analysis
                                 ),
+                                requirements_confirmed=requirements_state.confirmed,
+                                ui_language=ui_language,
+                                request_id=request_id,
+                                litellm_model=litellm_model,
+                                used_auxiliary_llm=(
+                                    metadata_resolution.used_auxiliary_llm
+                                ),
                             )
                         )
-                    )
-                    if server_question_events is not None:
-                        for event in server_question_events:
-                            yield event
+                    except AIBuilderBadRequestException as error:
+                        if error.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST:
+                            yield build_session_send_lease_lost_event(
+                                request_id=request_id
+                            )
+                            yield {"event": SSE_EVENT_DONE, "data": ""}
+                            return
+                        raise
+                    except Exception as error:
+                        logger.error(
+                            "AI Builder server decision dispatch failed",
+                            exc_info=error,
+                            extra={"request_id": request_id},
+                        )
+                        yield build_planner_upstream_error_event(
+                            request_id=request_id
+                        )
                         yield {"event": SSE_EVENT_DONE, "data": ""}
                         return
-                    precomputed_output = planner_turn_request.server_output
-                    planner_turn_messages = []
-                    planner_turn_context = planner_turn_request.orchestration_context
-                    planner_prompt_hash = None
-                case _:
-                    assert_never(prepared_request)
 
-            render_context = RequirementsSummaryRenderContext(
-                conversation=conversation,
-                flow=flow,
-                ui_language=ui_language,
-            )
+                    if lease_lost_event.is_set():
+                        yield build_session_send_lease_lost_event(
+                            request_id=request_id
+                        )
+                        yield {"event": SSE_EVENT_DONE, "data": ""}
+                        return
 
-            try:
-                turn_result = await run_planner_turn(
-                    repo=self.repo,
-                    litellm_client=self.litellm_client,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=build_planner_litellm_kwargs(
-                        litellm_kwargs=litellm_kwargs,
-                        max_tokens=max_output_tokens,
-                        temperature=(
-                            self.discovery_temperature
-                            if not requirements_state.confirmed
-                            else self.planner_temperature
-                        ),
-                        response_format_selection=response_format_selection,
-                    ),
-                    turn=turn,
-                    flow=flow,
-                    base_messages=planner_turn_messages,
-                    orchestration_context=planner_turn_context,
-                    build_new_messages=partial(
-                        build_accepted_action_messages,
-                        context=render_context,
-                        new_messages_start=new_messages_start,
-                        used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
-                    ),
-                    precomputed_output=precomputed_output,
-                )
-            except AIBuilderBadRequestException as error:
-                if error.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST:
-                    yield build_session_send_lease_lost_event(request_id=request_id)
+                    for event in dispatch_result.events:
+                        yield event
                     yield {"event": SSE_EVENT_DONE, "data": ""}
                     return
-                raise
-            except Exception as error:
-                logger.error(
-                    "AI Builder planner turn failed",
-                    exc_info=error,
-                    extra={"request_id": request_id},
-                )
-                yield build_planner_upstream_error_event(request_id=request_id)
-                yield {"event": SSE_EVENT_DONE, "data": ""}
-                return
-
-            if lease_lost_event.is_set():
-                yield build_session_send_lease_lost_event(request_id=request_id)
-                yield {"event": SSE_EVENT_DONE, "data": ""}
-                return
-
-            turn_event_request = PlannerTurnResultEventRequest(
-                turn_result=turn_result,
-                request_id=request_id,
-                session_id=session_id,
-                tenant_id=self.user.tenant_id,
-                planning_state_version=session.planning_state_version,
-                planner_prompt_hash=planner_prompt_hash,
-                response_format_selection=response_format_selection,
-                max_output_tokens=max_output_tokens,
-            )
-            record_planner_turn_result(turn_event_request)
-
-            error_event = build_planner_turn_error_event(turn_event_request)
-            if error_event is not None:
-                yield error_event
-            elif turn_result.kind == "dispatched":
-                events = await build_dispatched_action_events(
-                    DispatchedActionEventRequest(
-                        repo=self.repo,
-                        litellm_client=self.litellm_client,
-                        turn=turn,
-                        turn_result=turn_result,
-                        conversation=conversation,
-                        litellm_model=litellm_model,
-                        litellm_kwargs=litellm_kwargs,
-                        response_format_selection=response_format_selection,
-                        flow=flow,
-                        requirements_confirmed=requirements_state.confirmed,
-                        ui_language=ui_language,
-                        planner_temperature=self.planner_temperature,
-                    )
-                )
-                for event in events:
-                    yield event
-
-            yield {"event": SSE_EVENT_DONE, "data": ""}
+                case _:
+                    assert_never(prepared_request)
         finally:
             lease_stop_event.set()
             try:

@@ -28,7 +28,6 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
-from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
 from intric.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
     PlannerMetadataResolution,
@@ -50,6 +49,10 @@ from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     PendingQuestionResolution,
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from intric.flows.ai_builder.ai_builder_turn_controller import (
+    AskCanonicalQuestion,
+    CommitArchitecture,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -516,8 +519,7 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
         )
 
     assert isinstance(prepared, ServerOutputPrepared)
-    assert prepared.server_output is not None
-    assert prepared.server_output.planner_action.kind == "ask_question"
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
     assert not hasattr(prepared, "llm_messages")
     compute_budget.assert_not_called()
 
@@ -578,8 +580,7 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
         )
 
     assert isinstance(prepared, ServerOutputPrepared)
-    assert prepared.server_output is not None
-    assert prepared.server_output.planner_action.kind == "commit_architecture"
+    assert isinstance(prepared.server_decision, CommitArchitecture)
     assert not hasattr(prepared, "llm_messages")
 
 
@@ -959,10 +960,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             prior_plan_for_revision=cast(BuilderPlan, prior_plan),
             slot_classification_metadata=None,
             plan_edit_context=None,
-            orchestration_context=OrchestrationContext(
-                current_version=0,
-                session_state=PlanningState.empty(),
-            ),
+            planning_state=PlanningState.empty(),
             discovery_runtime=_runtime_result(
                 None,
                 DiscoveryAnalysis(issues=()),

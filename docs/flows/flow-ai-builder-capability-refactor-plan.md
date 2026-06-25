@@ -104,8 +104,8 @@ This section keeps the active plan aligned with source reality.
 | Slice | Canonical owner after Phase 4 | Deletion / consolidation |
 | --- | --- | --- |
 | Shared planner/proposal provider completion | `ai_builder_litellm_completion.py` | Collapsed separate planner/proposal completion modules into one provider boundary. |
-| Planner retry execution | `ai_builder_structured_turn.py` | Moved planner parse/semantic retry execution into one typed turn runner; `ai_builder_orchestration_pipeline.py` remains a thin planner adapter. |
-| Generic repair wrapper | Deleted | Removed the broad repair wrapper module after `run_structured_turn(...)` owned the needed planner behavior. |
+| Server-owned turn decisions | `ai_builder_server_decision_dispatch.py` and `ai_builder_turn_controller.py` | Deleted the former `PlannerOutput` action runtime (`ai_builder_orchestrator.py`, `ai_builder_planner_turn.py`, `ai_builder_structured_turn.py`, `ai_builder_orchestration_pipeline.py`, and response-format/normalizer/dispatcher adapters). Deterministic questions, architecture commits, and requirements confirmation now dispatch directly. |
+| Generic repair wrapper | Deleted | Removed the broad repair wrapper module; proposal-specific repair remains under the proposal owners, and deterministic server decisions no longer use a planner repair loop. |
 | Proposal repair runtime wrapper | Deleted | Carried proposal repair through `ProposalTurnContext` instead of a parallel wrapper. |
 | Question-recovery completion ownership | `AIBuilderProposalProcessor` creates the tracked callable; `ai_builder_question_recovery.py` receives it | Deleted question recovery's direct provider-completion import and manual request construction. |
 

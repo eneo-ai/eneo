@@ -49,8 +49,8 @@ but the broad deletion gate has been met without a weaker abstraction:
 
 | Area | Phase 4 disposition | Evidence |
 | --- | --- | --- |
-| Planner provider boundary | Kept and narrowed. Planner and proposal completions now share `ai_builder_litellm_completion.py`; classifier/adjudication remain separate features. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:75`, `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:106`, `backend/src/intric/flows/ai_builder/ai_builder_slot_classifier.py:101`, `backend/src/intric/flows/ai_builder/ai_builder_semantic_adjudication.py:70` |
-| Planner retry owner | Consolidated into `run_structured_turn(...)`; orchestration is now a planner adapter. | `backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py:55`, `backend/src/intric/flows/ai_builder/ai_builder_structured_turn.py:75` |
+| Planner provider boundary | Deleted for deterministic server decisions. Proposal completions still use `ai_builder_litellm_completion.py`; classifier/adjudication remain separate features. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py`, `backend/src/intric/flows/ai_builder/ai_builder_slot_classifier.py`, `backend/src/intric/flows/ai_builder/ai_builder_semantic_adjudication.py` |
+| Server decision owner | Added. Questions, architecture commits, and requirements confirmation dispatch directly from `BuilderTurnDecision`; the former `PlannerOutput` action runtime is gone. | `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py`, `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py` |
 | Question recovery provider dependency | Removed. Question recovery receives a tracked completion callable and builds requests through `ProposalTurnContext`. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:81`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:294` |
 | Proposal repair provider wrapper | Removed. Repair now carries `ProposalTurnContext`; the former repair runtime wrapper is gone. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:64`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:77` |
 | Proposal submission | Kept as the active proposal composition owner. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:260` |
@@ -134,7 +134,12 @@ D backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py
 D backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py
 D backend/src/intric/flows/ai_builder/ai_builder_repair.py
 D backend/src/intric/flows/ai_builder/ai_builder_step_capabilities.py
-A backend/src/intric/flows/ai_builder/ai_builder_structured_turn.py
+D backend/src/intric/flows/ai_builder/ai_builder_structured_turn.py
+D backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py
+D backend/src/intric/flows/ai_builder/ai_builder_orchestrator.py
+D backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py
+D backend/src/intric/flows/ai_builder/ai_builder_response_format.py
+A backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py
 ```
 
 ## Retry Loop Ownership Matrix
@@ -146,8 +151,8 @@ failure modes behind a generic retry abstraction.
 
 | Loop | Canonical owner | Kept behavior | Guard tests | Disposition |
 | --- | --- | --- | --- | --- |
-| Planner structured turn semantic retry | `run_structured_turn(...)` with planner-specific retry config from `run_planner_pipeline(...)` | Semantic rejection can trigger bounded repair and then re-enter validation. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_structured_turn.py:213`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py:306`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py:639` | Keep. Consolidated enough for Phase 4. |
-| Planner parse repair loop | `_run_parse_repair_loop(...)` | Malformed JSON from an otherwise useful planner/repair response gets one parse repair path with diagnostics. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_structured_turn.py:233`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py:493`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py:811` | Keep. This is the bounded retry owner. |
+| Planner structured turn semantic retry | Deleted | Server-owned decisions no longer ask an LLM to choose `ask_question`, `commit_architecture`, or `confirm_requirements`, so semantic retry is not a product behavior. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py` | Delete completed. |
+| Planner parse repair loop | Deleted | The deleted `PlannerOutput` JSON contract no longer exists. Proposal tool repair remains below. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` | Delete completed. |
 | Proposal self-correction loop | `_request_self_correction_events(...)` | Proposal tool validation feedback streams to the user, retries with bounded attempts, and preserves usage accounting. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:640`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:650`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:664`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:1234` | Keep. Product-specific streamed repair, not planner generic retry. |
 | Proposal forced-tool retry after text | `_execute_forced_tool_retry(...)` and `run_forced_tool_retry_after_text(...)` | Text-only proposal output gets one forced tool retry or direct JSON-text parsing, with visible repair events. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:281`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:398`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:434`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:905` | Keep. Distinct proposal-tool failure mode. |
 | Question recovery continuation | `stream_structured_question_tool_call(...)` | A recovered backend-owned question may continue once into a non-question tool dispatch, and repeated questions exhaust cleanly. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:191`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:222`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:359`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:578` | Keep. It owns user-visible recovery stream semantics. |
@@ -174,8 +179,10 @@ streamed-repair contract that reuses the existing `RuntimeToolCall` boundary.
 | Module | Keep / delete | Reason |
 | --- | --- | --- |
 | `ai_builder_litellm_completion.py` | Keep | One owner for planner/proposal provider normalization and proposal usage tracking. |
-| `ai_builder_structured_turn.py` | Keep | One typed planner turn result and bounded retry owner. |
-| `ai_builder_orchestration_pipeline.py` | Keep thin | Planner-specific prompt repair messages and eligibility rules stay here; retry execution moved to `run_structured_turn(...)`. |
+| `ai_builder_server_decision_dispatch.py` | Keep | Direct persistence/event owner for server-selected question, architecture commit, and requirements confirmation turns. |
+| `ai_builder_structured_turn.py` | Delete completed | Former typed planner turn runner no longer earns a source file after server decisions stopped flowing through `PlannerOutput`. |
+| `ai_builder_orchestration_pipeline.py` | Delete completed | Former planner adapter was only used by the deleted action planner runtime. |
+| `ai_builder_orchestrator.py` | Delete completed | Former model-visible action contract replaced by `BuilderTurnDecision` plus proposal-only tool calls. |
 | `ai_builder_repair.py` | Delete completed | Former generic repair wrapper no longer earns a source file. |
 | `ai_builder_proposal_repair_runtime.py` | Delete completed | Former proposal repair runtime wrapper no longer earns a source file. |
 | `ai_builder_proposal_tool_contracts.py` | Keep | `ProposalTurnContext` and `ProposalCompletionRequest` are the current typed boundary. `ProposalCompletionFn` remains because replacing it is lateral churn today. |

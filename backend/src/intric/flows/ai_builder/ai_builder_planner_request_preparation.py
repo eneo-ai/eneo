@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
 from intric.files.file_models import File
-from intric.flows.ai_builder.ai_builder_action_policy import PlannerActionPolicy
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
 )
@@ -38,10 +37,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_resource_selection_values,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
-from intric.flows.ai_builder.ai_builder_orchestrator import (
-    OrchestrationContext,
-    PlannerOutput,
-)
 from intric.flows.ai_builder.ai_builder_output_sections_signals import (
     extract_requested_output_sections,
 )
@@ -60,9 +55,6 @@ from intric.flows.ai_builder.ai_builder_prompts import (
     compute_conversation_token_budget,
     trim_conversation_for_context,
 )
-from intric.flows.ai_builder.ai_builder_question_state import (
-    derive_asked_question_state,
-)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     latest_confirmed_requirements,
@@ -76,8 +68,8 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.ai_builder_turn_controller import (
+    BuilderTurnDecision,
     GenerateProposal,
-    planner_output_for_turn_decision,
     resolve_turn_control,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
@@ -138,9 +130,8 @@ class _PreparedBase:
 
 @dataclass(frozen=True, slots=True)
 class ServerOutputPrepared(_PreparedBase):
-    server_output: PlannerOutput
+    server_decision: BuilderTurnDecision
     discovery_analysis: DiscoveryAnalysis
-    orchestration_context: OrchestrationContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +141,7 @@ class ProposalPrepared(_PreparedBase):
     plan_edit_context: AIBuilderPlanEditContext | None
     prior_plan_for_revision: BuilderPlan | None
     resource_catalog: AIBuilderResourceCatalog
-    orchestration_context: OrchestrationContext
+    planning_state: PlanningState
     discovery_runtime: DiscoveryRuntimeResult
 
 
@@ -207,20 +198,7 @@ async def prepare_planner_request(
         is_edit_mode=request.flow is not None,
         ui_language=ui_language,
     )
-    action_policy = turn_control.action_policy
-    unresolved_architectural_choices = turn_control.unresolved_architectural_choices
-    orchestration_context = _build_orchestration_context(
-        current_version=request.base_planning_state_version,
-        conversation=request.conversation,
-        session_state=rebuilt_planning_state,
-        action_policy=action_policy,
-        unresolved_architectural_choices=unresolved_architectural_choices,
-    )
-    server_output = planner_output_for_turn_decision(
-        decision=turn_control.decision,
-        base_planning_state_version=request.base_planning_state_version,
-    )
-    if server_output is not None:
+    if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(
             requirements_state=requirements_state,
             ui_language=ui_language,
@@ -228,8 +206,7 @@ async def prepare_planner_request(
                 discovery_runtime.slot_classification_metadata
             ),
             discovery_analysis=discovery_analysis,
-            server_output=server_output,
-            orchestration_context=orchestration_context,
+            server_decision=turn_control.decision,
         )
 
     confirmed_requirements = latest_confirmed_requirements(request.conversation)
@@ -299,7 +276,7 @@ async def prepare_planner_request(
         plan_edit_context=request.plan_edit_context,
         prior_plan_for_revision=request.prior_plan_for_revision,
         resource_catalog=resource_catalog,
-        orchestration_context=orchestration_context,
+        planning_state=rebuilt_planning_state,
         discovery_runtime=discovery_runtime,
     )
 
@@ -319,23 +296,6 @@ def _build_flow_context_if_needed(
         is_edit_mode=True,
         capabilities=discovery_profile.capabilities,
         edit_scope=discovery_profile.edit_scope,
-    )
-
-
-def _build_orchestration_context(
-    *,
-    current_version: int,
-    conversation: list[ConversationMessage],
-    session_state: PlanningState,
-    action_policy: PlannerActionPolicy,
-    unresolved_architectural_choices: frozenset[str],
-) -> OrchestrationContext:
-    return OrchestrationContext.for_turn(
-        current_version=current_version,
-        session_state=session_state,
-        asked_question_state=derive_asked_question_state(conversation),
-        unresolved_architectural_choices=unresolved_architectural_choices,
-        action_policy=action_policy,
     )
 
 

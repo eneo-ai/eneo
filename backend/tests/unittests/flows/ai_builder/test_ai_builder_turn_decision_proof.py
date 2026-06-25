@@ -24,7 +24,6 @@ from intric.flows.ai_builder.ai_builder_turn_controller import (
     CommitArchitecture,
     ConfirmRequirements,
     GenerateProposal,
-    planner_output_for_turn_decision,
     resolve_turn_control,
 )
 from intric.flows.ai_builder.planning_state import (
@@ -198,7 +197,7 @@ def _cases() -> tuple[TurnDecisionCase, ...]:
 
 
 @pytest.mark.parametrize("case", _cases(), ids=lambda case: case.id)
-def test_turn_controller_projects_current_pipeline_decisions(
+def test_turn_controller_returns_canonical_server_decisions(
     case: TurnDecisionCase,
 ) -> None:
     turn_control = resolve_turn_control(
@@ -215,12 +214,6 @@ def test_turn_controller_projects_current_pipeline_decisions(
         turn_control.unresolved_architectural_choices
         == compute_unresolved_core_slots(case.state)
     )
-
-    planner_output = planner_output_for_turn_decision(
-        decision=decision,
-        base_planning_state_version=1,
-    )
-    assert (planner_output is None) is isinstance(decision, GenerateProposal)
 
     if isinstance(decision, AskCanonicalQuestion):
         assert decision.slot_name == case.expected_slot_name

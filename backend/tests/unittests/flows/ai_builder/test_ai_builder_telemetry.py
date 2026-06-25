@@ -7,12 +7,10 @@ from intric.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummar
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
 from intric.flows.ai_builder.ai_builder_telemetry import (
     _empty_session_telemetry,
     build_assistant_message_metadata,
     build_planner_telemetry,
-    build_planner_telemetry_from_turn,
     summarize_session_telemetry,
 )
 
@@ -129,7 +127,7 @@ def test_build_assistant_message_metadata_advances_existing_session_summary() ->
     assert session_telemetry["last_model"] == "openai/gpt-5.4"
 
 
-def _turn_telemetry(
+def _planner_telemetry(
     *,
     outcome_kind: str = "dispatched",
     wall_clock_ms: int = 120,
@@ -144,37 +142,43 @@ def _turn_telemetry(
     model: str = "openai/gpt-5.4",
     token_usage_source: str | None = "provider",
     token_usage_estimated: bool = False,
-) -> TurnTelemetry:
-    return TurnTelemetry(
+) -> dict[str, object]:
+    return build_planner_telemetry(
         request_id=request_id,
         model=model,
-        outcome_kind=outcome_kind,  # type: ignore[arg-type]
+        finish_reason=finish_reason,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        tool_call_count=0,
+        used_auxiliary_llm=False,
+        token_usage_source=token_usage_source,
+        token_usage_estimated=token_usage_estimated,
+        outcome_kind=outcome_kind,
         wall_clock_ms=wall_clock_ms,
         llm_calls_made=llm_calls_made,
         repair_attempts=repair_attempts,
         architecture_commit_populated=architecture_commit_populated,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        finish_reason=finish_reason,
-        token_usage_source=token_usage_source,
-        token_usage_estimated=token_usage_estimated,
     )
 
 
-def test_build_planner_telemetry_from_turn_renders_per_turn_fields() -> None:
-    telemetry = _turn_telemetry(
+def test_build_planner_telemetry_renders_per_turn_fields() -> None:
+    rendered = build_planner_telemetry(
+        request_id="req-turn",
+        model="openai/gpt-5.4",
+        finish_reason="stop",
+        prompt_tokens=40,
+        completion_tokens=8,
+        total_tokens=48,
+        tool_call_count=3,
+        used_auxiliary_llm=True,
+        token_usage_source="provider",
+        token_usage_estimated=False,
         outcome_kind="dispatched",
         wall_clock_ms=210,
         llm_calls_made=2,
         repair_attempts=1,
         architecture_commit_populated=True,
-    )
-
-    rendered = build_planner_telemetry_from_turn(
-        telemetry,
-        used_auxiliary_llm=True,
-        tool_call_count=3,
     )
 
     assert rendered["request_id"] == "req-turn"
@@ -194,10 +198,8 @@ def test_build_planner_telemetry_from_turn_renders_per_turn_fields() -> None:
     assert rendered["architecture_commit_populated"] is True
 
 
-def test_build_planner_telemetry_from_turn_defaults_aux_and_tool_call_count() -> None:
-    telemetry = _turn_telemetry(outcome_kind="rejected")
-
-    rendered = build_planner_telemetry_from_turn(telemetry)
+def test_build_planner_telemetry_defaults_aux_and_tool_call_count() -> None:
+    rendered = _planner_telemetry(outcome_kind="rejected")
 
     assert rendered["used_auxiliary_llm"] is False
     assert rendered["tool_call_count"] == 0
@@ -206,27 +208,23 @@ def test_build_planner_telemetry_from_turn_defaults_aux_and_tool_call_count() ->
 
 
 def test_session_summary_accumulates_per_turn_fields_from_turn_telemetry() -> None:
-    first_turn = build_planner_telemetry_from_turn(
-        _turn_telemetry(
-            outcome_kind="dispatched",
-            wall_clock_ms=100,
-            llm_calls_made=1,
-            repair_attempts=0,
-            architecture_commit_populated=True,
-            request_id="req-1",
-        )
+    first_turn = _planner_telemetry(
+        outcome_kind="dispatched",
+        wall_clock_ms=100,
+        llm_calls_made=1,
+        repair_attempts=0,
+        architecture_commit_populated=True,
+        request_id="req-1",
     )
-    second_turn = build_planner_telemetry_from_turn(
-        _turn_telemetry(
-            outcome_kind="rejected",
-            wall_clock_ms=250,
-            llm_calls_made=3,
-            repair_attempts=2,
-            architecture_commit_populated=False,
-            request_id="req-2",
-            token_usage_source="litellm_estimate",
-            token_usage_estimated=True,
-        )
+    second_turn = _planner_telemetry(
+        outcome_kind="rejected",
+        wall_clock_ms=250,
+        llm_calls_made=3,
+        repair_attempts=2,
+        architecture_commit_populated=False,
+        request_id="req-2",
+        token_usage_source="litellm_estimate",
+        token_usage_estimated=True,
     )
 
     conversation = [
@@ -359,17 +357,15 @@ def test_session_summary_clamps_negative_additive_deltas_per_turn() -> None:
         "repair_attempts": -1,
         "architecture_commit_populated": False,
     }
-    clean_turn = build_planner_telemetry_from_turn(
-        _turn_telemetry(
-            outcome_kind="dispatched",
-            wall_clock_ms=80,
-            llm_calls_made=1,
-            repair_attempts=0,
-            prompt_tokens=30,
-            completion_tokens=5,
-            total_tokens=35,
-            request_id="req-clean",
-        )
+    clean_turn = _planner_telemetry(
+        outcome_kind="dispatched",
+        wall_clock_ms=80,
+        llm_calls_made=1,
+        repair_attempts=0,
+        prompt_tokens=30,
+        completion_tokens=5,
+        total_tokens=35,
+        request_id="req-clean",
     )
 
     conversation = [

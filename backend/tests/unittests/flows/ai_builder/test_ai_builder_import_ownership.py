@@ -214,11 +214,8 @@ PROPOSAL_TURN_TEST_DOUBLES_MODULE = Path(
 AI_BUILDER_PLANNER_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_planner")
 )
-ACCEPTED_ACTION_RENDERING_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_accepted_action_rendering")
-)
-PLANNER_ACTION_DISPATCH_MODULE = ".".join(
-    ("intric", "flows", "ai_builder", "ai_builder_planner_action_dispatch")
+SERVER_DECISION_DISPATCH_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_server_decision_dispatch")
 )
 PLANNER_REQUEST_PREPARATION_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_planner_request_preparation")
@@ -226,11 +223,8 @@ PLANNER_REQUEST_PREPARATION_MODULE = ".".join(
 PLANNER_FAILURE_EVENTS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_planner_failure_events")
 )
-ACCEPTED_ACTION_RENDERING_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"
-)
-PLANNER_ACTION_DISPATCH_PATH = Path(
-    "src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
+SERVER_DECISION_DISPATCH_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py"
 )
 PLANNER_REQUEST_PREPARATION_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
@@ -299,20 +293,12 @@ PROPOSAL_INTENT_BANNED_COMPILER_NAMES = frozenset(
     }
 )
 DELETED_CREATE_FORM_FIELD_DRAFT = "CreateFormFieldDraft"
-ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
+SERVER_DECISION_DISPATCH_PUBLIC_NAMES = frozenset(
     {
-        "RequirementsSummaryRenderContext",
-        "build_accepted_action_events",
-        "build_accepted_action_messages",
+        "ServerDecisionDispatchRequest",
+        "ServerDecisionDispatchResult",
         "build_requirements_summary_payload",
-    }
-)
-PLANNER_ACTION_DISPATCH_PUBLIC_NAMES = frozenset(
-    {
-        "BackendSelectedQuestionDispatchRequest",
-        "DispatchedActionEventRequest",
-        "build_dispatched_action_events",
-        "dispatch_backend_selected_question_if_any",
+        "dispatch_server_decision",
     }
 )
 PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
@@ -327,15 +313,9 @@ PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
 )
 PLANNER_FAILURE_EVENTS_PUBLIC_NAMES = frozenset(
     {
-        "PlannerTurnResultEventRequest",
-        "build_planner_turn_error_event",
         "build_planner_upstream_error_event",
         "build_session_send_lease_lost_event",
-        "record_planner_turn_result",
     }
-)
-PLANNER_ACTION_CLASSES = frozenset(
-    {"AskQuestionAction", "CommitArchitectureAction", "ConfirmRequirementsAction"}
 )
 PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
     {
@@ -584,7 +564,7 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
     conversation_metadata_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_conversation_metadata.py"
     )
-    rendering_path = backend_root / ACCEPTED_ACTION_RENDERING_PATH
+    dispatch_path = backend_root / SERVER_DECISION_DISPATCH_PATH
     violations: list[str] = []
 
     discovery_tree = ast.parse(
@@ -662,11 +642,11 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
                 f"param={annotation}"
             )
 
-    rendering_tree = ast.parse(rendering_path.read_text(), filename=str(rendering_path))
+    dispatch_tree = ast.parse(dispatch_path.read_text(), filename=str(dispatch_path))
     rendering_function = next(
         (
             node
-            for node in ast.walk(rendering_tree)
+            for node in ast.walk(dispatch_tree)
             if isinstance(node, ast.FunctionDef)
             and node.name == "build_requirements_summary_payload"
         ),
@@ -674,7 +654,7 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
     )
     if rendering_function is None:
         violations.append(
-            f"{rendering_path}: missing build_requirements_summary_payload"
+            f"{dispatch_path}: missing build_requirements_summary_payload"
         )
     else:
         rendering_return = (
@@ -684,7 +664,7 @@ def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
         )
         if rendering_return != "RequirementsSummaryPayload":
             violations.append(
-                f"{rendering_path}:{rendering_function.lineno} return={rendering_return}"
+                f"{dispatch_path}:{rendering_function.lineno} return={rendering_return}"
             )
 
     assert violations == []
@@ -1175,27 +1155,26 @@ def test_old_edit_operation_ir_files_are_deleted() -> None:
     assert violations == []
 
 
-def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> None:
+def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     completion_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_litellm_completion.py"
     )
-    deleted_repair_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_repair.py"
-    )
-    pipeline_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"
-    )
-    structured_turn_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_structured_turn.py"
-    )
-
     completion_tree = ast.parse(
         completion_path.read_text(), filename=str(completion_path)
     )
     violations: list[str] = []
-    if deleted_repair_path.exists():
-        violations.append(f"{deleted_repair_path}: stale planner repair owner exists")
+    deleted_paths = (
+        Path("src/intric/flows/ai_builder/ai_builder_repair.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_structured_turn.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_planner_turn.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_orchestrator.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_response_format.py"),
+    )
+    for path in deleted_paths:
+        if (backend_root / path).exists():
+            violations.append(f"{path}: stale structured planner runtime exists")
 
     acompletion_refs = [
         node
@@ -1205,12 +1184,6 @@ def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> No
     if len(acompletion_refs) != 2:
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{completion_path}: acompletion refs {lines}")
-
-    for path in (pipeline_path, structured_turn_path):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr == "acompletion":
-                violations.append(f"{path}:{node.lineno} calls acompletion")
 
     completion_imports = _imported_modules(completion_tree)
     banned_imports = {
@@ -1222,24 +1195,6 @@ def test_litellm_completion_owns_provider_calls_for_planner_and_proposal() -> No
     }
     for module in sorted(completion_imports & banned_imports):
         violations.append(f"{completion_path}: imports {module}")
-
-    structured_turn_tree = ast.parse(
-        structured_turn_path.read_text(), filename=str(structured_turn_path)
-    )
-    structured_turn_imports = _imported_modules(structured_turn_tree)
-    banned_structured_turn_imports = {
-        "intric.flows.ai_builder.ai_builder_orchestrator",
-        "intric.flows.ai_builder.ai_builder_orchestration_pipeline",
-        "intric.flows.ai_builder.ai_builder_planner_turn",
-        "intric.flows.ai_builder.ai_builder_proposal_submission",
-        "intric.flows.ai_builder.ai_builder_proposal_tool_contracts",
-        "intric.flows.ai_builder.ai_builder_repo",
-        "intric.flows.ai_builder.ai_builder_session_turn",
-        "intric.flows.ai_builder.planning_state",
-        "intric.flows.domain.flow",
-    }
-    for module in sorted(structured_turn_imports & banned_structured_turn_imports):
-        violations.append(f"{structured_turn_path}: imports {module}")
 
     assert violations == []
 
@@ -1820,16 +1775,22 @@ def test_proposal_turn_test_setup_modules_keep_their_contracts() -> None:
     assert violations == []
 
 
-def test_planner_action_rendering_and_dispatch_have_canonical_owners() -> None:
+def test_server_decision_dispatch_has_canonical_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     planner_path = backend_root / PLANNER_PATH
-    rendering_path = backend_root / ACCEPTED_ACTION_RENDERING_PATH
-    dispatch_path = backend_root / PLANNER_ACTION_DISPATCH_PATH
+    dispatch_path = backend_root / SERVER_DECISION_DISPATCH_PATH
     violations: list[str] = []
 
-    for path in (rendering_path, dispatch_path):
-        if not path.is_file():
-            violations.append(f"{path}: missing planner action owner module")
+    if not dispatch_path.is_file():
+        violations.append(f"{dispatch_path}: missing server decision owner module")
+    deleted_paths = (
+        Path("src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"),
+        Path("src/intric/flows/ai_builder/ai_builder_dispatcher.py"),
+    )
+    for path in deleted_paths:
+        if (backend_root / path).exists():
+            violations.append(f"{path}: stale planner action owner exists")
 
     planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
     planner_class = next(
@@ -1842,10 +1803,7 @@ def test_planner_action_rendering_and_dispatch_have_canonical_owners() -> None:
         for node in planner_class.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    for method_name in {
-        "_dispatch_server_question",
-        "_dispatch_chained_server_action_after_commit",
-    }:
+    for method_name in {"_dispatch_server_question", "_dispatch_server_decision"}:
         if method_name in planner_methods:
             violations.append(f"{planner_path}: AIBuilderPlanner defines {method_name}")
     if "_requirements_summary_data" in _top_level_names(planner_tree):
@@ -1864,60 +1822,19 @@ def test_planner_action_rendering_and_dispatch_have_canonical_owners() -> None:
             violations.append(
                 f"{planner_path}:{node.lineno} defines _build_new_messages"
             )
-        if _isinstance_matches_planner_action(node):
-            violations.append(
-                f"{planner_path}:{node.lineno} directly checks planner action type"
-            )
-
-    if rendering_path.is_file():
-        rendering_text = rendering_path.read_text()
-        rendering_tree = ast.parse(rendering_text, filename=str(rendering_path))
-        public_names = _top_level_public_names(rendering_tree)
-        if public_names != ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES:
-            violations.append(f"{rendering_path}: public names {sorted(public_names)}")
-        for module in _imported_modules(rendering_tree):
-            if module in {
-                AI_BUILDER_PLANNER_MODULE,
-                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
-                "intric.flows.ai_builder.ai_builder_repo",
-                "intric.flows.ai_builder.ai_builder_backend_question_persistence",
-            }:
-                violations.append(f"{rendering_path}: imports {module}")
-        for node in ast.walk(rendering_tree):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "intric.flows.ai_builder.ai_builder_planner_turn"
-            ):
-                banned_names = sorted(
-                    alias.name for alias in node.names if alias.name != "TurnTelemetry"
-                )
-                if banned_names:
-                    names = ", ".join(banned_names)
-                    violations.append(f"{rendering_path}:{node.lineno} imports {names}")
-        for node in ast.walk(rendering_tree):
-            if (
-                isinstance(node, ast.Dict)
-                and node.keys
-                and all(isinstance(key, ast.Constant) for key in node.keys)
-                and {"event", "data"} <= {key.value for key in node.keys}
-            ):
-                violations.append(f"{rendering_path}:{node.lineno} builds SSE dict")
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                docstring = ast.get_docstring(node)
-                if docstring is not None and len(docstring.splitlines()) > 6:
-                    violations.append(f"{rendering_path}:{node.lineno} long docstring")
 
     if dispatch_path.is_file():
         dispatch_tree = ast.parse(
             dispatch_path.read_text(), filename=str(dispatch_path)
         )
         public_names = _top_level_public_names(dispatch_tree)
-        if public_names != PLANNER_ACTION_DISPATCH_PUBLIC_NAMES:
+        if public_names != SERVER_DECISION_DISPATCH_PUBLIC_NAMES:
             violations.append(f"{dispatch_path}: public names {sorted(public_names)}")
         for module in _imported_modules(dispatch_tree):
             if module in {
                 AI_BUILDER_PLANNER_MODULE,
                 AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
+                "intric.flows.ai_builder.ai_builder_orchestrator",
             }:
                 violations.append(f"{dispatch_path}: imports {module}")
         for node in ast.walk(dispatch_tree):
@@ -2437,24 +2354,6 @@ def _imported_modules(tree: ast.Module) -> frozenset[str]:
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
     return frozenset(modules)
-
-
-def _isinstance_matches_planner_action(node: ast.AST) -> bool:
-    if not isinstance(node, ast.Call):
-        return False
-    if not isinstance(node.func, ast.Name) or node.func.id != "isinstance":
-        return False
-    if len(node.args) < 2:
-        return False
-    checked = node.args[1]
-    if isinstance(checked, ast.Name):
-        return checked.id in PLANNER_ACTION_CLASSES
-    if isinstance(checked, ast.Tuple):
-        return any(
-            isinstance(element, ast.Name) and element.id in PLANNER_ACTION_CLASSES
-            for element in checked.elts
-        )
-    return False
 
 
 def _python_files() -> list[Path]:

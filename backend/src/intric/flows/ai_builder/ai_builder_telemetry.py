@@ -3,39 +3,16 @@
 The session aggregator here reads metrics out of persisted assistant
 messages. By design it covers **committed turns only** — turns that
 became part of the durable conversation history the user sees.
-
-Rejected planner outputs and parse failures never persist assistant-
-message metadata. Their metrics therefore do not appear in
-``summarize_session_telemetry`` and do not influence session health
-scores. That is intentional: the session aggregator is the contract
-for "what the user experienced," not "what the planner attempted."
-
-Observability for failed turns lives on the structured log stream
-(``logger.info`` lines emitted around ``run_planner_turn`` already
-record every outcome including ``rejected`` / ``parse_failed`` with
-their ``TurnTelemetry``). Operators who need failed-turn aggregates
-consume those logs.
-
-Extending the session aggregator to include failed-turn metrics is
-tracked as deferred work; the trigger is the first downstream
-consumer that needs failed-turn counts inline with committed-turn
-metrics (e.g. a future observability dashboard that cannot join
-against the log stream). That enhancement must add a dedicated
-side-channel rather than mutate the current committed-turns-only
-contract.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-
-if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
 
 PLANNER_TELEMETRY_KEY = "planner_telemetry"
 SESSION_TELEMETRY_KEY = "session_telemetry"
@@ -109,58 +86,6 @@ def build_planner_telemetry(
             proposal_repair_invocation_reasons or ()
         )
     return telemetry
-
-
-def build_planner_telemetry_from_turn(
-    telemetry: "TurnTelemetry",
-    *,
-    used_auxiliary_llm: bool = False,
-    tool_call_count: int = 0,
-) -> dict[str, Any]:
-    """Render a `TurnTelemetry` dataclass into the persisted dict shape.
-
-    The per-turn record on assistant-message metadata is a persisted
-    dict owned by this module. This helper keeps that shape stable
-    while adding the per-turn fields (`wall_clock_ms`, `llm_calls_made`,
-    `repair_attempts`, `parse_repair_attempts`,
-    `architecture_commit_populated`, `outcome_kind`) so the session
-    aggregator can reason about commit-populated rate, repair-loop
-    trigger rate, and parse-repair trigger rate without peeking at
-    domain objects.
-
-    `repair_attempts` and `parse_repair_attempts` are intentionally
-    separate counters. `repair_attempts` counts evaluator-domain
-    corrective turns (the planner's parsed output violated an
-    invariant). `parse_repair_attempts` counts parse-domain corrective
-    turns (the LLM's raw bytes could not be decoded into a
-    PlannerOutput at all). Conflating the two would obscure whether a
-    session is hitting schema drift vs. transport-level malformation.
-
-    `used_auxiliary_llm` and `tool_call_count` are set by the caller's
-    own bookkeeping (auxiliary
-    adjudication LLM for free-form answers, and any structured-question
-    assistant messages the caller materializes from ask_question
-    actions). Both default to ``False`` / ``0`` when the caller does
-    not populate them.
-    """
-    return {
-        "request_id": telemetry.request_id,
-        "model": telemetry.model,
-        "finish_reason": telemetry.finish_reason,
-        "prompt_tokens": telemetry.prompt_tokens,
-        "completion_tokens": telemetry.completion_tokens,
-        "total_tokens": telemetry.total_tokens,
-        "token_usage_source": telemetry.token_usage_source,
-        "token_usage_estimated": telemetry.token_usage_estimated,
-        "tool_call_count": tool_call_count,
-        "used_auxiliary_llm": used_auxiliary_llm,
-        "outcome_kind": telemetry.outcome_kind,
-        "wall_clock_ms": telemetry.wall_clock_ms,
-        "llm_calls_made": telemetry.llm_calls_made,
-        "repair_attempts": telemetry.repair_attempts,
-        "parse_repair_attempts": telemetry.parse_repair_attempts,
-        "architecture_commit_populated": telemetry.architecture_commit_populated,
-    }
 
 
 def build_assistant_message_metadata(

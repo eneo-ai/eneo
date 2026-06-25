@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from intric.flows.ai_builder.ai_builder_orchestrator import (
-    OrchestrationContext,
-    PlannerOutput,
-    evaluate_planner_output,
-)
 from intric.flows.ai_builder.ai_builder_turn_controller import (
-    BuilderTurnControl,
-    planner_output_for_turn_decision,
+    AskCanonicalQuestion,
+    CommitArchitecture,
+    ConfirmRequirements,
     resolve_turn_control,
 )
 from intric.flows.ai_builder.planning_state import (
@@ -36,43 +32,28 @@ def _state(**slots: str) -> PlanningState:
     return state
 
 
-def _turn_output(
+def _decision(
     *,
     state: PlanningState,
-    base_planning_state_version: int,
     ui_language: str | None,
     requirements_confirmed: bool = False,
-) -> tuple[PlannerOutput | None, BuilderTurnControl]:
-    turn_control = resolve_turn_control(
+) -> object:
+    return resolve_turn_control(
         session_state=state,
         selected_discovery_question_ids=(),
         requirements_confirmed=requirements_confirmed,
         is_edit_mode=False,
         ui_language=ui_language,
-    )
-    return (
-        planner_output_for_turn_decision(
-            decision=turn_control.decision,
-            base_planning_state_version=base_planning_state_version,
-        ),
-        turn_control,
-    )
+    ).decision
 
 
 def test_server_builds_ask_question_for_allowed_target() -> None:
     state = _state(primary_runtime_input="documents", terminal_output="text")
-    output, _ = _turn_output(
-        state=state,
-        base_planning_state_version=7,
-        ui_language="en",
-    )
+    decision = _decision(state=state, ui_language="en")
 
-    assert output is not None
-    assert output.planning_state_delta.base_planning_state_version == 7
-    assert output.planner_action.kind == "ask_question"
-    assert output.planner_action.payload.question_id == "document_material_scope"
-    assert output.planner_action.payload.slot_name == "document_material_scope"
-    assert "uploaded source material" in output.planner_action.payload.prompt
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "document_material_scope"
+    assert "uploaded source material" in decision.prompt
 
 
 def test_server_builds_commit_when_no_questions_remain() -> None:
@@ -81,16 +62,10 @@ def test_server_builds_commit_when_no_questions_remain() -> None:
         terminal_output="text",
         document_material_scope="flexible_document_case",
     )
-    output, _ = _turn_output(
-        state=state,
-        base_planning_state_version=8,
-        ui_language="sv",
-    )
+    decision = _decision(state=state, ui_language="sv")
 
-    assert output is not None
-    assert output.planning_state_delta.base_planning_state_version == 8
-    assert output.planner_action.kind == "commit_architecture"
-    assert output.planning_state_delta.architecture_commit is not None
+    assert isinstance(decision, CommitArchitecture)
+    assert decision.architecture_commit.tuples_chain
 
 
 def test_server_commit_for_text_docx_has_resolvable_pattern() -> None:
@@ -98,30 +73,12 @@ def test_server_commit_for_text_docx_has_resolvable_pattern() -> None:
         primary_runtime_input="text",
         terminal_output="docx_document",
     )
-    output, turn_control = _turn_output(
-        state=state,
-        base_planning_state_version=8,
-        ui_language="sv",
-    )
+    decision = _decision(state=state, ui_language="sv")
 
-    assert output is not None
-    commit = output.planning_state_delta.architecture_commit
-    assert commit is not None
-    assert commit.chosen_patterns == ["text_to_artifact_report"]
-    assert (
-        evaluate_planner_output(
-            output,
-            OrchestrationContext(
-                current_version=8,
-                session_state=state,
-                action_policy=turn_control.action_policy,
-                unresolved_architectural_choices=(
-                    turn_control.unresolved_architectural_choices
-                ),
-            ),
-        )
-        is None
-    )
+    assert isinstance(decision, CommitArchitecture)
+    assert decision.architecture_commit.chosen_patterns == [
+        "text_to_artifact_report"
+    ]
 
 
 def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
@@ -145,17 +102,10 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="a" * 64,
     )
-    output, _ = _turn_output(
-        state=state,
-        base_planning_state_version=9,
-        ui_language="sv",
-    )
+    decision = _decision(state=state, ui_language="sv")
 
-    assert output is not None
-    assert output.planning_state_delta.base_planning_state_version == 9
-    assert output.planner_action.kind == "confirm_requirements"
-    assert output.planning_state_delta.architecture_commit is None
-    payload = output.planner_action.payload
+    assert isinstance(decision, ConfirmRequirements)
+    payload = decision.payload
     assert (
         payload.summary
         == "Flödet ska ta emot Dokument vid körning och leverera DOCX-dokument."
@@ -201,15 +151,10 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="b" * 64,
     )
-    output, _ = _turn_output(
-        state=state,
-        base_planning_state_version=10,
-        ui_language="sv",
-    )
+    decision = _decision(state=state, ui_language="sv")
 
-    assert output is not None
-    assert output.planner_action.kind == "confirm_requirements"
-    payload = output.planner_action.payload
+    assert isinstance(decision, ConfirmRequirements)
+    payload = decision.payload
     assert "Resultatet ska hjälpa till med: Beslut, nästa steg" in payload.summary
     assert {decision.topic for decision in payload.key_decisions} >= {
         "Syfte med bearbetningen",
@@ -242,16 +187,10 @@ def test_server_confirmation_names_json_to_json_architecture() -> None:
         committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
         architecture_hash="c" * 64,
     )
-    output, _ = _turn_output(
-        state=state,
-        base_planning_state_version=11,
-        ui_language="sv",
-    )
+    decision = _decision(state=state, ui_language="sv")
 
-    assert output is not None
-    assert output.planner_action.kind == "confirm_requirements"
-    payload = output.planner_action.payload
+    assert isinstance(decision, ConfirmRequirements)
     decisions = {
-        decision.topic: decision.decision for decision in payload.key_decisions
+        decision.topic: decision.decision for decision in decision.payload.key_decisions
     }
     assert decisions["Planerad bearbetning"] == "JSON till JSON"
