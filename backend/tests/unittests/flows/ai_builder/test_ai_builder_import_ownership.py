@@ -86,29 +86,14 @@ FINALIZATION_FORBIDDEN_COMPLETION_NAMES = frozenset(
 FINALIZATION_REQUEST_COMPLETION_FIELD_NAMES = frozenset(
     {"litellm_model", "litellm_kwargs", "max_output_tokens"}
 )
-QUESTION_RECOVERY_METHODS = frozenset(
-    {"request_non_question_continuation", "_handle_structured_question"}
+OBSOLETE_MODEL_TOOL_RUNTIME_PATHS = (
+    Path("src/intric/flows/ai_builder/ai_builder_question_recovery.py"),
+    Path("src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"),
 )
-CONFIRM_REQUIREMENTS_METHODS = frozenset(
-    {"_process_confirm_requirements_arguments", "_confirm_requirements_retry_config"}
-)
-QUESTION_RECOVERY_ALLOWED_ANY_NAMES = frozenset(
+OBSOLETE_MODEL_TOOL_RUNTIME_MODULES = frozenset(
     {
-        "assistant_metadata",
-        "discovery_litellm_client",
-        "litellm_kwargs",
-        "llm_messages",
-        "tool_call",
-        "tool_calls",
-        "tool_schemas",
-    }
-)
-CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES = frozenset(
-    {
-        "arguments",
-        "assistant_metadata",
-        "litellm_client",
-        "litellm_kwargs",
+        "intric.flows.ai_builder.ai_builder_question_recovery",
+        "intric.flows.ai_builder.ai_builder_confirm_requirements",
     }
 )
 PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
@@ -867,113 +852,87 @@ def test_propose_flow_tool_name_has_single_owner() -> None:
     assert violations == []
 
 
-def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
+def test_obsolete_model_visible_ask_confirm_runtime_is_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
     )
-    question_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+    tools_path = backend_root / Path("src/intric/flows/ai_builder/ai_builder_tools.py")
+    parsing_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_tool_parsing.py"
     )
     processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
-    question_text = question_path.read_text()
-    question_tree = ast.parse(question_text, filename=str(question_path))
+    tools_tree = ast.parse(tools_path.read_text(), filename=str(tools_path))
+    parsing_tree = ast.parse(parsing_path.read_text(), filename=str(parsing_path))
     violations: list[str] = []
+
+    for rel_path in OBSOLETE_MODEL_TOOL_RUNTIME_PATHS:
+        if (backend_root / rel_path).exists():
+            violations.append(f"{rel_path}: obsolete model-visible runtime exists")
 
     processor_class = next(
         node
         for node in ast.walk(processor_tree)
         if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
     )
+    obsolete_processor_methods = {
+        "handle_tool_call",
+        "_dispatch_known_tool_call",
+        "_handle_question_recovery_dispatch",
+        "_handle_confirm_requirements",
+    }
     for node in processor_class.body:
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in QUESTION_RECOVERY_METHODS
+            and node.name in obsolete_processor_methods
         ):
             violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
 
-    request_class = next(
-        node
-        for node in ast.walk(question_tree)
-        if isinstance(node, ast.ClassDef)
-        and node.name == "StructuredQuestionRecoveryRequest"
-    )
-    request_fields = [
-        stmt.target.id
-        for stmt in request_class.body
-        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
-    ]
-    if request_fields != ["ctx", "tool_call"]:
-        violations.append(
-            f"{question_path}:{request_class.lineno} fields {request_fields}"
-        )
-
-    for node in ast.walk(question_tree):
-        if isinstance(node, ast.ImportFrom):
-            if node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS:
-                violations.append(
-                    f"{question_path}:{node.lineno} imports {node.module}"
-                )
-            if node.module == "intric.flows.ai_builder.ai_builder_litellm_completion":
-                violations.append(
-                    f"{question_path}:{node.lineno} imports completion provider"
-                )
-
-        if isinstance(node, ast.ClassDef) and node.name.endswith(
-            ("Processor", "Service", "Manager")
-        ):
-            violations.append(f"{question_path}:{node.lineno} defines {node.name}")
-
-        if isinstance(node, ast.Attribute) and node.attr == "acompletion":
-            violations.append(f"{question_path}:{node.lineno} calls acompletion")
-
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name) and func.id == "ProposalCompletionRequest":
-                violations.append(
-                    f"{question_path}:{node.lineno} builds ProposalCompletionRequest"
-                )
+    obsolete_tool_functions = {
+        "build_all_tool_schemas",
+        "build_ask_structured_question_tool_schema",
+        "build_confirm_requirements_tool_schema",
+        "build_discovery_complete_tool_schemas",
+        "build_free_discovery_tool_schemas",
+    }
+    obsolete_parser_functions = {
+        "parse_structured_question",
+        "parse_confirm_requirements",
+    }
+    for tree, path, banned_functions in (
+        (tools_tree, tools_path, obsolete_tool_functions),
+        (parsing_tree, parsing_path, obsolete_parser_functions),
+    ):
+        for node in ast.walk(tree):
             if (
-                isinstance(func, ast.Name)
-                and func.id == "make_usage_tracked_proposal_completion"
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name in banned_functions
             ):
-                violations.append(
-                    f"{question_path}:{node.lineno} constructs completion factory"
-                )
+                violations.append(f"{path}:{node.lineno} defines {node.name}")
 
-        if isinstance(node, ast.Name) and node.id in {
-            "AIBuilderProposalProcessor",
-            "ProposalContext",
-            "handle_tool_call",
-            "from_context",
-        }:
-            violations.append(f"{question_path}:{node.lineno} uses {node.id}")
-
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.args.kwarg is not None:
-                annotation = node.args.kwarg.annotation
-                if annotation is not None and ast.unparse(annotation) == "Any":
-                    violations.append(
-                        f"{question_path}:{node.lineno} defines **kwargs: Any"
-                    )
-            for arg in [*node.args.args, *node.args.kwonlyargs]:
-                if _annotation_uses_any(arg.annotation) and (
-                    arg.arg not in QUESTION_RECOVERY_ALLOWED_ANY_NAMES
-                ):
-                    violations.append(
-                        f"{question_path}:{node.lineno} arg {arg.arg} uses Any"
-                    )
-
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if _annotation_uses_any(node.annotation) and (
-                node.target.id not in QUESTION_RECOVERY_ALLOWED_ANY_NAMES
-            ):
-                violations.append(
-                    f"{question_path}:{node.lineno} field {node.target.id} uses Any"
-                )
-
-    if question_text.count('"question-recovery"') != 1:
-        violations.append(f"{question_path}: question-recovery literal count changed")
+    obsolete_runtime_names = {
+        "ConfirmRequirementsProcessingRequest",
+        "ConfirmRequirementsRetryConfigRequest",
+        "RecoveredToolDispatchRequest",
+        "StructuredQuestionRecoveryRequest",
+        "build_confirm_requirements_retry_config",
+        "process_confirm_requirements",
+        "stream_structured_question_tool_call",
+        *obsolete_parser_functions,
+        *obsolete_tool_functions,
+    }
+    source_root = backend_root / "src/intric/flows/ai_builder"
+    for path in source_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module in OBSOLETE_MODEL_TOOL_RUNTIME_MODULES:
+                    violations.append(f"{path}:{node.lineno} imports {node.module}")
+                imported_names = {alias.name for alias in node.names}
+                for name in sorted(imported_names & obsolete_runtime_names):
+                    violations.append(f"{path}:{node.lineno} imports {name}")
+            elif isinstance(node, ast.Name) and node.id in obsolete_runtime_names:
+                violations.append(f"{path}:{node.lineno} references {node.id}")
 
     assert violations == []
 
@@ -993,8 +952,6 @@ def test_proposal_completion_has_single_request_boundary() -> None:
         backend_root
         / Path("src/intric/flows/ai_builder/ai_builder_proposal_repair.py"),
         submission_path,
-        backend_root
-        / Path("src/intric/flows/ai_builder/ai_builder_question_recovery.py"),
     ]
     contracts_tree = ast.parse(contracts_path.read_text(), filename=str(contracts_path))
     completion_text = completion_path.read_text()
@@ -1195,86 +1152,6 @@ def test_litellm_completion_owns_provider_calls_for_proposals() -> None:
     }
     for module in sorted(completion_imports & banned_imports):
         violations.append(f"{completion_path}: imports {module}")
-
-    assert violations == []
-
-
-def test_confirm_requirements_has_single_owner_and_typed_boundary() -> None:
-    backend_root = Path(__file__).resolve().parents[4]
-    processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
-    )
-    confirm_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
-    )
-    processor_text = processor_path.read_text()
-    confirm_text = confirm_path.read_text()
-    processor_tree = ast.parse(processor_text, filename=str(processor_path))
-    confirm_tree = ast.parse(confirm_text, filename=str(confirm_path))
-    violations: list[str] = []
-
-    processor_class = next(
-        node
-        for node in ast.walk(processor_tree)
-        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
-    )
-    for node in processor_class.body:
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in CONFIRM_REQUIREMENTS_METHODS
-        ):
-            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
-        if (
-            isinstance(node, ast.AsyncFunctionDef)
-            and node.name == "_handle_confirm_requirements"
-        ):
-            source = ast.get_source_segment(processor_text, node) or ""
-            if "ASK_STRUCTURED_QUESTION_TOOL_NAME" in source:
-                violations.append(
-                    f"{processor_path}:{node.lineno} confirm handler owns ask stub"
-                )
-
-    for node in ast.walk(processor_tree):
-        if isinstance(node, ast.Name) and node.id == "parse_confirm_requirements":
-            violations.append(f"{processor_path}:{node.lineno} parses requirements")
-
-    for node in ast.walk(confirm_tree):
-        if isinstance(node, ast.ImportFrom) and (
-            node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
-        ):
-            violations.append(f"{confirm_path}:{node.lineno} imports {node.module}")
-
-        if isinstance(node, ast.ClassDef):
-            if node.name == "ConfirmRequirementsOutcome":
-                violations.append(f"{confirm_path}:{node.lineno} defines {node.name}")
-            if node.name.endswith(("Processor", "Service", "Manager")):
-                violations.append(f"{confirm_path}:{node.lineno} defines {node.name}")
-
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.args.kwarg is not None:
-                annotation = node.args.kwarg.annotation
-                if annotation is not None and ast.unparse(annotation) == "Any":
-                    violations.append(
-                        f"{confirm_path}:{node.lineno} defines **kwargs: Any"
-                    )
-            for arg in [*node.args.args, *node.args.kwonlyargs]:
-                if _annotation_uses_any(arg.annotation) and (
-                    arg.arg not in CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES
-                ):
-                    violations.append(
-                        f"{confirm_path}:{node.lineno} arg {arg.arg} uses Any"
-                    )
-
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if _annotation_uses_any(node.annotation) and (
-                node.target.id not in CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES
-            ):
-                violations.append(
-                    f"{confirm_path}:{node.lineno} field {node.target.id} uses Any"
-                )
-
-    if 'tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}]' not in confirm_text:
-        violations.append(f"{confirm_path}: missing synthetic ask-question stub")
 
     assert violations == []
 
@@ -2164,12 +2041,6 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
     proposal_repair_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
     )
-    question_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_question_recovery.py"
-    )
-    confirm_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
-    )
     violations: list[str] = []
 
     if importlib.util.find_spec(REPAIR_TRANSPORT_MODULE) is not None:
@@ -2234,20 +2105,6 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
                     violations.append(
                         f"{path}:{node.lineno} imports append_retry_feedback_turn"
                     )
-
-    question_tree = ast.parse(question_path.read_text(), filename=str(question_path))
-    question_imports = _imported_modules(question_tree)
-    if PROPOSAL_REPAIR_MODULE not in question_imports:
-        violations.append(f"{question_path}: missing proposal-repair retry import")
-    if TOOL_TURN_PERSISTENCE_MODULE not in question_imports:
-        violations.append(f"{question_path}: missing tool-turn persistence import")
-
-    confirm_tree = ast.parse(confirm_path.read_text(), filename=str(confirm_path))
-    confirm_imports = _imported_modules(confirm_tree)
-    if PROPOSAL_REPAIR_MODULE in confirm_imports:
-        violations.append(f"{confirm_path}: imports proposal repair")
-    if TOOL_TURN_PERSISTENCE_MODULE not in confirm_imports:
-        violations.append(f"{confirm_path}: missing tool-turn persistence import")
 
     assert violations == []
 

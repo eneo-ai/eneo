@@ -462,6 +462,7 @@ class ProposalSubmissionOwner:
                 flow=invocation.flow,
                 assistant_snapshots=assistant_snapshots,
                 resource_catalog=invocation.resource_catalog,
+                planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
             )
@@ -633,7 +634,7 @@ class ProposalSubmissionOwner:
         target_kind = TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT
         is_create = target_kind == TargetKind.CREATE
         assistant_snapshots = None if is_create else ctx.assistant_snapshots
-        planning_state = ctx.planning_state if is_create else None
+        planning_state = ctx.planning_state
         if is_create:
             (
                 blocked,

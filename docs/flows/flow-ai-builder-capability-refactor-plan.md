@@ -16,19 +16,20 @@ Current status: Phase 5A implemented only the Assistant-owned update command
 boundary. A later explicit capability-deduplication slice deleted the
 Builder-local step capability mirror and made the Flow Capability Manifest the
 single owner for those read-only Flow facts. A later narrow cleanup reused the
-existing `RuntimeToolCall` protocol for proposal dispatch, proposal repair,
-proposal submission, and question recovery instead of inventing another
-provider adapter. None of these slices started shared descriptors, MCP adapters,
-internal Builder-to-MCP calls, PR #480 cherry-picks, or
-generated-client-visible API changes. The detailed Phase 5A evidence lives in
+existing `RuntimeToolCall` protocol for proposal dispatch, proposal repair, and
+proposal submission instead of inventing another provider adapter. A later
+deletion slice removed the obsolete model-visible ask/confirm tool runtime.
+None of these slices started shared descriptors, MCP adapters, internal
+Builder-to-MCP calls, PR #480 cherry-picks, or generated-client-visible API
+changes. The detailed Phase 5A evidence lives in
 [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
 
 Related docs keep their existing ownership:
 
 - [Eneo Capabilities And MCP Architecture Opinion](./eneo-capabilities-mcp-architecture-opinion.md)
   owns the long-term capability/MCP rationale.
-- [Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md)
-  owns the detailed question-recovery completion slice and its failure-mode-to-test mapping.
+- [Flow Builder Ask/Confirm Runtime Deletion Packet](./flow-builder-delete-obsolete-ask-confirm-runtime-packet-2026-06-25.md)
+  owns the current ask/confirm runtime deletion evidence and next go/no-go recommendation.
 - [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md)
   owns final Phase 4 completion evidence, retry-loop disposition, and the Phase 5A go/no-go packet.
 - This document owns the active goal sequence: Phase 4 completion, Phase 5A command ownership, Flow capability mirror deletion, then stop.
@@ -49,10 +50,10 @@ MCP never becomes the owner.
 | Finding | Evidence |
 | --- | --- |
 | Proposal completion already has a current provider boundary. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` defines `call_proposal_completion`. |
-| Question recovery no longer calls provider proposal completion directly. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:81` receives `repair_completion`; `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:294` awaits it with `ctx.completion_request(...)`. |
 | The first Phase 4 slice was dependency inversion, not deletion of the executor. | `call_proposal_completion` survives at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94`; active submission still calls it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261`; the usage-tracked factory wraps it at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:143`. |
-| Question recovery still needs LiteLLM context for discovery runtime. | The boundary doc records that the completion import is the smell, not all `litellm_client` usage. |
 | `ProposalTurnContext.completion_request(...)` is the existing typed request builder. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144`. |
+| Active proposal generation exposes only the `propose_flow` schema. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:162` builds the active schema list; `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:266` forces `tool_choice` to `propose_flow`. |
+| Obsolete ask/confirm model-visible tool runtime is deleted. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:89` lists the deleted runtime paths and `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` enforces they stay absent. |
 | Flow Capability Manifest already owns engine feature truth. | `backend/src/intric/flows/flow_capability_manifest.py:121` defines the runtime-input mapping, `backend/src/intric/flows/flow_capability_manifest.py:496` defines final-output artifact mapping, and `backend/src/intric/flows/flow_capability_manifest.py:511` onward owns step I/O, document generation, and citation predicates. |
 | Builder now consumes FCM facts directly instead of a Builder-local mirror. | `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:17` imports FCM constants/functions, and `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:101` stores typed Flow enums in the discovery signature. |
 | Flow authoring already has the command shape we want to reuse, not generalize. | `backend/src/intric/flows/application/flow_authoring_command.py:127` owns preview/prepare/apply through `FlowAuthoringCommandService`. |
@@ -107,10 +108,10 @@ This section keeps the active plan aligned with source reality.
 | Server-owned turn decisions | `ai_builder_server_decision_dispatch.py` and `ai_builder_turn_controller.py` | Deleted the former `PlannerOutput` action runtime (`ai_builder_orchestrator.py`, `ai_builder_planner_turn.py`, `ai_builder_structured_turn.py`, `ai_builder_orchestration_pipeline.py`, and response-format/normalizer/dispatcher adapters). Deterministic questions, architecture commits, and requirements confirmation now dispatch directly. |
 | Generic repair wrapper | Deleted | Removed the broad repair wrapper module; proposal-specific repair remains under the proposal owners, and deterministic server decisions no longer use a planner repair loop. |
 | Proposal repair runtime wrapper | Deleted | Carried proposal repair through `ProposalTurnContext` instead of a parallel wrapper. |
-| Question-recovery completion ownership | `AIBuilderProposalProcessor` creates the tracked callable; `ai_builder_question_recovery.py` receives it | Deleted question recovery's direct provider-completion import and manual request construction. |
+| Model-visible ask/confirm runtime | Deleted | Removed the obsolete `ask_structured_question` and `confirm_requirements` tool schemas, parsers, processor dispatch, question-recovery runtime, and confirm-requirements runtime after server-owned decisions made them unreachable. |
 
-Question-recovery completion ownership remains documented in detail in
-[Flow AI Builder Phase 4: Question Recovery Completion Boundary](./flow-ai-builder-phase4-question-recovery-completion-boundary.md).
+The current ask/confirm deletion evidence is documented in
+[Flow Builder Ask/Confirm Runtime Deletion Packet](./flow-builder-delete-obsolete-ask-confirm-runtime-packet-2026-06-25.md).
 
 ### Candidate Follow-up Slices
 
@@ -120,7 +121,7 @@ These are candidates, not automatic work. Each requires preflight proof of a can
 | --- | --- |
 | Proposal completion callable cleanup | Skipped for Phase 4. Reassess `ProposalCompletionFn` only if replacing it reduces total production code and ownership-guard complexity. |
 | Planner orchestration repair consolidation | Completed for retry execution. Do not fold planner prompt/message helpers further unless that deletes more than it moves. |
-| Streamed repair skeleton duplication | Deferred. Proposal repair, question recovery, and confirm requirements share repair-event skeletons, but each owns distinct product semantics. Only replace them with one typed streamed-repair contract if the same change deletes the remaining event-dict and message-dict residuals while reusing `RuntimeToolCall`. |
+| Streamed repair skeleton duplication | Reduced. Proposal repair remains because malformed proposal generation is still model-owned. Ask/confirm repair skeletons were deleted with the obsolete model-visible runtime. |
 | Builder step capability duplicates | Completed as a Flow capability-deduplication slice: `ai_builder_step_capabilities.py` was deleted, FCM owns the read-only capability facts, and Builder consumers translate only at their own boundary. |
 | Prompt hard-rule duplication | Defer unless every touched rule stays within Builder runtime/planner ownership. Future capability work should enforce: every model-visible capability claim must have canonical enforcement. |
 | Capability projection complexity | Completed for the old planner prompt path: `ai_builder_capability_projection.py` was deleted, and surviving Builder turn/proposal paths consume server-owned state and FCM facts at their own boundary. |
@@ -133,8 +134,7 @@ worktree and recorded in the final packet.
 | Metric | Phase 4 completion requirement |
 | --- | --- |
 | Direct proposal-provider owner | Only the current proposal-completion provider boundary owns provider proposal completion. |
-| Question recovery | Zero imports from `ai_builder_litellm_completion`. |
-| Manual completion-request construction | Zero `ProposalCompletionRequest(...)` construction in question recovery. |
+| Obsolete ask/confirm runtime | Deleted modules, schema builders, parsers, and processor dispatch stay absent. |
 | Usage accounting | One owner records proposal-completion usage; repair count remains preserved. |
 | Retry ownership | The final packet lists each remaining retry loop by file/function and records either the product-visible retry semantics plus guard test, or the consolidation/deletion commit. |
 | Phase 4 modules | Explicit keep/delete disposition exists for planner, question recovery, proposal repair, and orchestration pipeline. |
@@ -145,43 +145,6 @@ worktree and recorded in the final packet.
 
 Current Phase 4 status: source slices are complete. The stop gate is this plan
 plus the final completion packet.
-
-## Historical Baseline Commands For Question-Recovery Slice
-
-The question-recovery source slice has already landed. Its source baseline was
-`dfe1e71c0`, and baseline commands ran from docs-only commit `76f6afde0`
-before source edits. Treat `76f6afde0` as a docs-only wrapper around the same
-source behavior when comparing historical baseline results.
-
-Focused validation for that slice used:
-
-```bash
-docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
-  /home/vscode/.local/bin/uv run pytest \
-  tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py
-
-docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
-  /home/vscode/.local/bin/uv run ruff check \
-  src/intric/flows/ai_builder/ai_builder_question_recovery.py \
-  src/intric/flows/ai_builder/ai_builder_proposal_processor.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py
-
-docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
-  /home/vscode/.local/bin/uv run pyright \
-  src/intric/flows/ai_builder \
-  tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py \
-  tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py
-
-docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 \
-  /home/vscode/.local/bin/uv run lint-imports --no-cache
-```
-
-Future source slices must record their own baseline SHA and focused validation;
-do not reuse this historical question-recovery baseline for Phase 5A.
 
 ## Phase 4 Acceptance Gates
 

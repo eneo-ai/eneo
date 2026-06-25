@@ -1,9 +1,7 @@
-"""Tests for discovery flow: confirm_requirements handling in proposal processor
-and forced-proposal gating in the planner."""
+"""Tests for discovery flow and server-owned planning decisions."""
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -33,9 +31,6 @@ from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
 from intric.flows.ai_builder.ai_builder_prompts import (
     has_confirmed_requirements,
 )
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
-    AIBuilderProposalProcessor,
-)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
@@ -51,10 +46,7 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.ai_builder_tools import (
-    CONFIRM_REQUIREMENTS_TOOL_NAME,
-    PROPOSE_FLOW_TOOL_NAME,
-)
+from intric.flows.ai_builder.ai_builder_tools import CONFIRM_REQUIREMENTS_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -64,30 +56,6 @@ from intric.flows.domain.flow import Flow, FlowStep
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_processor(**overrides: Any) -> AIBuilderProposalProcessor:
-    defaults: dict[str, Any] = {
-        "user": MagicMock(tenant_id=uuid4()),
-        "repo": AsyncMock(),
-        "litellm_client": AsyncMock(),
-        "self_correction_temperature": 0.2,
-        "self_correction_bumped_temperature": 0.5,
-        "forced_proposal_temperature": 0.3,
-        "quality_retry_warning_codes": set(),
-    }
-    defaults.update(overrides)
-    return AIBuilderProposalProcessor(**defaults)
-
-
-def _make_tool_call(
-    name: str, arguments: dict[str, Any], tool_call_id: str | None = None
-) -> MagicMock:
-    tc = MagicMock()
-    tc.id = tool_call_id or f"call_{uuid4().hex[:8]}"
-    tc.function.name = name
-    tc.function.arguments = json.dumps(arguments)
-    return tc
 
 
 def _make_turn(
@@ -102,253 +70,6 @@ def _make_turn(
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         base_planning_state_version=base_planning_state_version,
     )
-
-
-# ---------------------------------------------------------------------------
-# confirm_requirements handling in proposal processor
-# ---------------------------------------------------------------------------
-
-
-class TestHandleConfirmRequirements:
-    @pytest.mark.asyncio
-    async def test_converts_incomplete_confirmation_into_next_discovery_question(
-        self,
-    ) -> None:
-        processor = _make_processor()
-        # Short prompt with document+case signals — the next discovery question
-        # should be one of the early-priority blockers (processing scope,
-        # input mode, or final output) rather than a deeper detail question.
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content="Analysera dokument från case material",
-            )
-        ]
-        tool_call = _make_tool_call(
-            CONFIRM_REQUIREMENTS_TOOL_NAME,
-            {
-                "summary": "A case-material flow.",
-                "key_decisions": [{"topic": "Scope", "decision": "Unclear"}],
-                "input_description": "Case material",
-                "output_description": "Summary report",
-            },
-        )
-
-        events: list[dict[str, str]] = []
-        async for event in processor.handle_tool_call(
-            turn=_make_turn(),
-            conversation=conversation,
-            new_messages_start=len(conversation),
-            tool_calls=[tool_call],
-            text_content=None,
-            llm_messages=[],
-            tool_schemas=[],
-            litellm_model="test-model",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            max_output_tokens=8192,
-            request_id="req-discovery-block",
-        ):
-            events.append(event)
-
-        assert [event["event"] for event in events] == ["text", "question"]
-        payload = json.loads(events[1]["data"])
-        # Vague prompt → both blocking and high_value pass through budget
-        assert payload["question_id"] in (
-            "processing_scope",
-            "final_output_mode",
-            "input_material_mode",
-        )
-        assert len(conversation) == 3
-        assert conversation[-2].role == "assistant"
-        assert conversation[-1].role == "tool"
-
-    @pytest.mark.asyncio
-    async def test_emits_requirements_summary_event(self) -> None:
-        processor = _make_processor()
-        tool_call = _make_tool_call(
-            CONFIRM_REQUIREMENTS_TOOL_NAME,
-            {
-                "summary": "A PDF analysis flow.",
-                "key_decisions": [{"topic": "Input", "decision": "Multiple PDFs"}],
-                "input_description": "PDF uploads",
-                "output_description": "DOCX report",
-            },
-        )
-
-        events: list[dict[str, str]] = []
-        async for event in processor.handle_tool_call(
-            turn=_make_turn(),
-            conversation=[],
-            new_messages_start=0,
-            tool_calls=[tool_call],
-            text_content="Här är min sammanfattning:",
-            llm_messages=[],
-            tool_schemas=[],
-            litellm_model="test-model",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            max_output_tokens=8192,
-            request_id="req-1",
-        ):
-            events.append(event)
-
-        event_types = [e["event"] for e in events]
-        assert "text" in event_types
-        assert "requirements_summary" in event_types
-
-        summary_event = next(e for e in events if e["event"] == "requirements_summary")
-        payload = json.loads(summary_event["data"])
-        assert payload["summary"] == "A PDF analysis flow."
-        assert len(payload["key_decisions"]) == 1
-
-    @pytest.mark.asyncio
-    async def test_appends_conversation_messages(self) -> None:
-        processor = _make_processor()
-        conversation: list[ConversationMessage] = []
-        tool_call = _make_tool_call(
-            CONFIRM_REQUIREMENTS_TOOL_NAME,
-            {
-                "summary": "A flow.",
-                "key_decisions": [{"topic": "A", "decision": "B"}],
-                "input_description": "X",
-                "output_description": "Y",
-            },
-        )
-
-        events = []
-        async for event in processor.handle_tool_call(
-            turn=_make_turn(),
-            conversation=conversation,
-            new_messages_start=0,
-            tool_calls=[tool_call],
-            text_content=None,
-            llm_messages=[],
-            tool_schemas=[],
-            litellm_model="test-model",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            max_output_tokens=8192,
-            request_id="req-2",
-        ):
-            events.append(event)
-
-        # Should have appended assistant (tool_call) + tool (result) messages
-        assert len(conversation) == 2
-        assert conversation[0].role == "assistant"
-        assert conversation[0].tool_calls is not None
-        assert conversation[1].role == "tool"
-        assert "awaiting confirmation" in conversation[1].content.lower()
-
-    @pytest.mark.asyncio
-    async def test_invalid_payload_emits_error(self) -> None:
-        processor = _make_processor()
-        tool_call = _make_tool_call(
-            CONFIRM_REQUIREMENTS_TOOL_NAME,
-            {"summary": ""},  # Invalid: empty summary
-        )
-
-        events = []
-        async for event in processor.handle_tool_call(
-            turn=_make_turn(),
-            conversation=[],
-            new_messages_start=0,
-            tool_calls=[tool_call],
-            text_content=None,
-            llm_messages=[],
-            tool_schemas=[],
-            litellm_model="test-model",
-            litellm_kwargs={},
-            available_model_refs=None,
-            available_kb_refs=None,
-            max_output_tokens=8192,
-            request_id="req-3",
-        ):
-            events.append(event)
-
-        event_types = [e["event"] for e in events]
-        assert "error" in event_types
-
-
-class TestProposalGating:
-    @pytest.mark.asyncio
-    async def test_outline_flow_is_rejected_until_latest_requirements_are_confirmed(
-        self,
-    ) -> None:
-        processor = _make_processor()
-        conversation = [
-            ConversationMessage(
-                role="assistant",
-                content=None,
-                tool_calls=[
-                    {
-                        "id": "call_requirements",
-                        "name": CONFIRM_REQUIREMENTS_TOOL_NAME,
-                        "arguments": {"summary": "A document flow"},
-                    }
-                ],
-            ),
-            ConversationMessage(
-                role="tool",
-                content="Requirements presented to user. Awaiting confirmation.",
-                tool_call_id="call_requirements",
-                metadata={
-                    "requirements_summary": {
-                        "summary": "A document flow",
-                        "key_decisions": [{"topic": "Input", "decision": "PDF"}],
-                        "input_description": "PDF",
-                        "output_description": "DOCX",
-                        "manual_setup_notes": [],
-                    },
-                    "requirements_version": "req-v1",
-                },
-            ),
-        ]
-        tool_call = _make_tool_call(
-            PROPOSE_FLOW_TOOL_NAME,
-            {
-                "flow_name": "Test Flow",
-                "plan_rationale": "Extraktion först.",
-                "final_output_type": "text",
-                "steps": [
-                    {
-                        "name": "Extract",
-                        "instructions": "Extract the text.",
-                        "output_type": "text",
-                    }
-                ],
-            },
-        )
-
-        with patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-        ) as store_plan:
-            events: list[dict[str, str]] = []
-            async for event in processor.handle_tool_call(
-                turn=_make_turn(),
-                conversation=conversation,
-                new_messages_start=len(conversation),
-                tool_calls=[tool_call],
-                text_content="Här är mitt förslag:",
-                llm_messages=[],
-                tool_schemas=[],
-                litellm_model="test-model",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                max_output_tokens=4096,
-                request_id="req-proposal-gate",
-            ):
-                events.append(event)
-
-        event_types = [event["event"] for event in events]
-        assert "error" in event_types
-        assert "plan" not in event_types
-        store_plan.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

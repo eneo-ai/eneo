@@ -88,12 +88,21 @@ def compile_edit_proposal(
     current_metadata_json: dict[str, Any] | None = None,
     assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
+    requested_primary_runtime_input_type: InputType | None = None,
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
-    primary_runtime_input_type = _primary_runtime_input_type_from_steps(current_steps)
+    primary_runtime_input_type = (
+        requested_primary_runtime_input_type
+        or _primary_runtime_input_type_from_steps(current_steps)
+    )
     materialized_proposal = materialize_ordered_edit_proposal(
         proposal,
         primary_runtime_input_type=primary_runtime_input_type,
+        primary_runtime_required=(
+            _primary_runtime_required_from_steps(current_steps)
+            if requested_primary_runtime_input_type is not None
+            else False
+        ),
     )
     prepared = _prepare_ordered_edit_proposal(
         proposal=materialized_proposal,
@@ -704,6 +713,15 @@ def _primary_runtime_input_type_from_steps(
         except ValueError:
             return None
     return None
+
+
+def _primary_runtime_required_from_steps(steps: list[FlowStep]) -> bool:
+    if not steps:
+        return True
+    first_step = min(steps, key=lambda item: item.step_order)
+    if first_step.input_source != InputSource.FLOW_INPUT.value:
+        return True
+    return _runtime_input_required(first_step.input_config)
 
 
 def _without_primary_runtime_shadow_fields(

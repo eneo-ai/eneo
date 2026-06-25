@@ -9,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_argume
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
@@ -844,12 +845,67 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
     )
 
 
+@pytest.mark.asyncio
+async def test_added_edit_step_uses_server_requested_primary_runtime_input() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="IBIC-extraktion",
+            input_source="flow_input",
+            input_type="document",
+            input_config={
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "document",
+                }
+            },
+        )
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_planning_state_with_primary_input("audio"),
+        arguments={
+            "plan_rationale": "Add transcription before document analysis.",
+            "steps": [
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "Transkribera ljudfil",
+                        "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
+                        "output_type": "text",
+                    },
+                },
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                },
+            ],
+        },
+    )
+
+    assert result.compiled_proposal is not None
+    steps = result.compiled_proposal.content.spec.steps
+    assert steps[0].input_source == InputSource.FLOW_INPUT
+    assert steps[0].input_type == InputType.AUDIO
+    assert steps[0].output_mode == OutputMode.TRANSCRIBE_ONLY
+    assert steps[0].input_config is not None
+    assert steps[0].input_config["runtime_input"]["required"] is True
+    assert steps[1].existing_step_ref == "existing_step_1"
+    assert steps[1].input_source == InputSource.PREVIOUS_STEP
+    assert steps[1].input_type == InputType.TEXT
+
+
 async def _process(
     *,
     flow: SimpleNamespace,
     arguments: dict[str, object],
     assistant_snapshots=None,
     resource_catalog=None,
+    planning_state: PlanningState | None = None,
 ):
     return await process_edit_arguments(
         turn=_make_turn(),
@@ -860,6 +916,7 @@ async def _process(
         flow=flow,
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
+        planning_state=planning_state,
     )
 
 
@@ -906,6 +963,18 @@ def _flow_step(
         output_config=output_config,
         mcp_policy="inherit",
     )
+
+
+def _planning_state_with_primary_input(value: str) -> PlanningState:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value=value,
+        source="structured_answer",
+        evidence=[],
+        confidence="high",
+    )
+    return state
 
 
 def _form_metadata(*fields: dict[str, object]) -> dict[str, object]:

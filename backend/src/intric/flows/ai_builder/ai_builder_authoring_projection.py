@@ -71,6 +71,7 @@ def materialize_ordered_edit_proposal(
     proposal: OrderedEditProposal,
     *,
     primary_runtime_input_type: InputType | None = None,
+    primary_runtime_required: bool = True,
 ) -> MaterializedOrderedEditProposal:
     payload = proposal.model_dump(
         mode="python",
@@ -82,6 +83,7 @@ def materialize_ordered_edit_proposal(
             item,
             step_index=index,
             primary_runtime_input_type=primary_runtime_input_type,
+            primary_runtime_required=primary_runtime_required,
         )
         for index, item in enumerate(proposal.steps)
     ]
@@ -93,6 +95,7 @@ def _materialize_ordered_edit_step(
     *,
     step_index: int,
     primary_runtime_input_type: InputType | None,
+    primary_runtime_required: bool,
 ) -> object:
     if not isinstance(item, IntentAddStep):
         return item
@@ -101,6 +104,7 @@ def _materialize_ordered_edit_step(
             item.step,
             step_index=step_index,
             primary_runtime_input_type=primary_runtime_input_type,
+            primary_runtime_required=primary_runtime_required,
         )
     )
 
@@ -110,17 +114,20 @@ def _new_step_draft_from_semantic_intent(
     *,
     step_index: int,
     primary_runtime_input_type: InputType | None,
+    primary_runtime_required: bool,
 ) -> NewStepDraft:
-    input_type = (
-        primary_runtime_input_type
-        if step_index == 0 and primary_runtime_input_type is not None
-        else InputType.TEXT
-    )
+    if step_index == 0 and primary_runtime_input_type is not None:
+        is_primary_runtime_step = True
+        input_type = primary_runtime_input_type
+    else:
+        is_primary_runtime_step = False
+        input_type = InputType.TEXT
     return NewStepDraft(
         name=step.name,
         instructions=step.instructions,
         input_type=input_type,
         output_type=step.output_type or OutputType.TEXT,
+        runtime_required=primary_runtime_required if is_primary_runtime_step else False,
         model_ref=step.model_ref,
         knowledge_refs=list(step.knowledge_refs),
         mcp_server_refs=list(step.mcp_server_refs),

@@ -897,44 +897,6 @@ def _structured_question_payload_from_suggestion(
     )
 
 
-def build_discovery_guidance(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    analysis: DiscoveryAnalysis | None = None,
-) -> str | None:
-    analysis = analysis or analyze_discovery(conversation, flow=flow)
-    next_issue = analysis.next_issue
-    if next_issue is None or next_issue.suggestion is None:
-        return None
-
-    suggestion = next_issue.suggestion
-    lines = [
-        "- Discovery protocol: there is still blocking ambiguity or a contradiction.",
-        "- Ask exactly ONE structured question now. Do not call `confirm_requirements` or `propose_flow` yet.",
-        f"- Highest-priority blocker: {next_issue.message}",
-        f'- Use `question_id="{suggestion.question_id}"`.',
-        f"- Ask this question: {suggestion.question}",
-        "- Use these clickable options with stable ids and values:",
-    ]
-    for option in suggestion.options:
-        lines.append(
-            f'  - id="{option.id}", label="{option.label}", value="{option.value}", description="{option.description}"'
-        )
-
-    remaining = [issue.message for issue in analysis.blocking_issues[1:]]
-    if remaining:
-        lines.append(
-            "- After the user answers, reevaluate these remaining blockers before summarizing:"
-        )
-        lines.extend(f"  - {issue}" for issue in remaining)
-
-    lines.append(
-        "- Keep looping until there are no blocking ambiguities or contradictions left."
-    )
-    return "\n".join(lines)
-
-
 def build_discovery_block_message(
     conversation: list[ConversationMessage],
     *,

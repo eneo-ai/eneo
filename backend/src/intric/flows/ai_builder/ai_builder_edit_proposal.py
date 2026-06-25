@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from intric.flows.ai_builder.ai_builder_create_compiler import (
+    create_compile_context_from_planning_state,
+)
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_quality_feedback,
 )
@@ -21,6 +24,7 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
+    resolve_ui_language,
     terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -33,7 +37,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from intric.flows.flow_authoring_spec import InputType
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 
@@ -57,6 +63,7 @@ async def process_edit_arguments(
     flow: Flow | None,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
+    planning_state: PlanningState | None = None,
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
@@ -86,6 +93,10 @@ async def process_edit_arguments(
             current_metadata_json=flow.metadata_json,
             assistant_snapshots=assistant_snapshots,
             resource_catalog=resource_catalog,
+            requested_primary_runtime_input_type=_requested_primary_runtime_input_type(
+                planning_state=planning_state,
+                conversation=conversation,
+            ),
         )
     except BadRequestException as exc:
         return ToolProcessingResult(
@@ -191,6 +202,20 @@ async def process_edit_arguments(
             ),
         ),
     )
+
+
+def _requested_primary_runtime_input_type(
+    *,
+    planning_state: PlanningState | None,
+    conversation: list[ConversationMessage],
+) -> InputType | None:
+    compile_context = create_compile_context_from_planning_state(
+        planning_state,
+        ui_language=resolve_ui_language(conversation),
+    )
+    if compile_context is None:
+        return None
+    return compile_context.runtime_input_type
 
 
 def _format_edit_compilation_request_error(exc: BadRequestException) -> str:

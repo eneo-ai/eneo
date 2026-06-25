@@ -172,6 +172,66 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
 
 
 @pytest.mark.asyncio
+async def test_create_propose_flow_is_blocked_until_requirements_are_confirmed() -> (
+    None
+):
+    submission = _make_submission()
+    process_create = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+    tool_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Test Flow",
+            "plan_rationale": "Extraktion först.",
+            "steps": [
+                {
+                    "name": "Extract",
+                    "instructions": "Extract the text.",
+                    "output_type": "text",
+                }
+            ],
+        },
+        tool_call_id="call-before-confirmation",
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=False),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=SimpleNamespace(followup=None)),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "analyze_discovery_ready",
+            return_value=True,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "process_create_intent_arguments",
+            new=process_create,
+        ),
+    ):
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=_make_context(request_id="req-proposal-gate"),
+            tool_call=tool_call,
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "requirements_not_confirmed"
+    assert payload["phase"] == "requirements"
+    process_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_scoped_revision_preflight_skips_existing_flow_edit_context() -> None:
     submission = _make_submission()
     ctx = _make_context(flow=SimpleNamespace(id=uuid4()))

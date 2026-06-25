@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -22,8 +22,6 @@ from intric.database.tables.spaces_table import (
     SpacesTranscriptionModels,
 )
 from intric.database.tables.tenant_table import Tenants
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
-from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderEditApproval,
@@ -465,10 +463,7 @@ def _make_builder_plan_spec(*, existing_step_ref: str | None) -> FlowDraftSpecCo
 
 def _compiled_builder_plan(spec: FlowDraftSpecCore) -> CompiledProposal:
     return CompiledProposal(
-        spec=spec,
-        assumptions=tuple(),
-        plan_rationale=None,
-        reasoning=None,
+        content=FlowBuilderProposalContent(spec=spec),
         validation=SpecValidationResult(),
     )
 
@@ -2478,16 +2473,19 @@ async def test_store_plan_and_update_conversation_rejects_lost_session_send_leas
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
+async def test_server_requirements_confirmation_with_lost_lease_rolls_back(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
 ):
-    """Confirm-requirements persistence must reject a stale active-turn lease."""
-    from intric.flows.ai_builder.ai_builder_confirm_requirements import (
-        ConfirmRequirementsProcessingRequest,
-        process_confirm_requirements,
+    """Server-owned requirements persistence must reject a stale active-turn lease."""
+    from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+        ServerDecisionDispatchRequest,
+        dispatch_server_decision,
+    )
+    from intric.flows.ai_builder.ai_builder_turn_controller import (
+        ConfirmRequirements,
     )
 
     space_id = await _create_space_with_planner_model(
@@ -2522,40 +2520,30 @@ async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
             tenant_id=tenant_id,
             base_planning_state_version=0,
         )
-        with patch(
-            "intric.flows.ai_builder.ai_builder_confirm_requirements.build_discovery_runtime_result",
-            new=AsyncMock(
-                return_value=DiscoveryRuntimeResult(
-                    discovery_block_message=None,
-                    discovery_analysis=DiscoveryAnalysis(issues=()),
-                    planning_state=PlanningState.empty(),
+        with pytest.raises(BadRequestException) as exc:
+            await dispatch_server_decision(
+                ServerDecisionDispatchRequest(
+                    repo=repo,
+                    turn=stale_turn,
+                    decision=ConfirmRequirements(
+                        payload=RequirementsSummaryPayload(
+                            summary="Bygg ett textflöde.",
+                            key_decisions=[],
+                            input_description="Användaren skriver text.",
+                            output_description="Flödet svarar med text.",
+                        )
+                    ),
+                    conversation=[],
+                    new_messages_start=0,
+                    flow=None,
+                    discovery_analysis=None,
+                    requirements_confirmed=False,
+                    ui_language="sv",
+                    request_id="req-requirements-lost-lease",
+                    litellm_model="server",
+                    used_auxiliary_llm=False,
                 )
-            ),
-        ):
-            with pytest.raises(BadRequestException) as exc:
-                await process_confirm_requirements(
-                    ConfirmRequirementsProcessingRequest(
-                        repo=repo,
-                        turn=stale_turn,
-                        conversation=[],
-                        new_messages_start=0,
-                        arguments={
-                            "summary": "Bygg ett textflöde.",
-                            "key_decisions": [
-                                {"topic": "Input", "decision": "Text"},
-                                {"topic": "Output", "decision": "Text"},
-                            ],
-                            "input_description": "Användaren skriver text.",
-                            "output_description": "Flödet svarar med text.",
-                        },
-                        tool_call_id="call-requirements-lost-lease",
-                        flow=None,
-                        litellm_client=AsyncMock(),
-                        litellm_model="openai/gpt-4o-mini",
-                        litellm_kwargs={"api_key": "sk-test"},
-                        tenant_id=tenant_id,
-                    )
-                )
+            )
 
     assert exc.value.code == "session_send_lease_lost"
 
@@ -2572,15 +2560,19 @@ async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_handle_structured_question_recovery_with_lost_lease_rolls_back(
+async def test_server_question_with_lost_lease_rolls_back(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
 ):
-    """Fallback question recovery must not persist after the send lease is lost."""
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        AIBuilderProposalProcessor,
+    """Server-owned backend questions must reject a stale active-turn lease."""
+    from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+        ServerDecisionDispatchRequest,
+        dispatch_server_decision,
+    )
+    from intric.flows.ai_builder.ai_builder_turn_controller import (
+        AskCanonicalQuestion,
     )
 
     space_id = await _create_space_with_planner_model(
@@ -2608,65 +2600,33 @@ async def test_handle_structured_question_recovery_with_lost_lease_rolls_back(
             tenant_id=tenant_id,
         )
 
-    tool_call = _make_tool_call(
-        name="ask_structured_question",
-        arguments={
-            "question": "Vilket format vill du ha?",
-            "options": [{"label": "PDF"}, {"label": "DOCX"}],
-        },
-    )
-
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        user = container.user()
-        processor = AIBuilderProposalProcessor(
-            user=user,
-            repo=repo,
-            litellm_client=AsyncMock(),
-            self_correction_temperature=0.2,
-            self_correction_bumped_temperature=0.5,
-            forced_proposal_temperature=0.3,
-            quality_retry_warning_codes=set(),
-        )
         stale_turn = _make_session_send_turn(
             session_id=session_id,
             tenant_id=tenant_id,
             base_planning_state_version=0,
         )
-        with (
-            patch(
-                "intric.flows.ai_builder.ai_builder_question_recovery."
-                "build_discovery_runtime_result",
-                new=AsyncMock(
-                    return_value=DiscoveryRuntimeResult(
-                        discovery_block_message=None,
-                        discovery_analysis=DiscoveryAnalysis(issues=()),
-                        planning_state=PlanningState.empty(),
-                    )
-                ),
-            ),
-            pytest.raises(BadRequestException) as exc,
-        ):
-            _ = [
-                event
-                async for event in processor.handle_tool_call(
+        with pytest.raises(BadRequestException) as exc:
+            await dispatch_server_decision(
+                ServerDecisionDispatchRequest(
+                    repo=repo,
                     turn=stale_turn,
+                    decision=AskCanonicalQuestion(
+                        slot_name="primary_runtime_input",
+                        prompt="Vilken indata ska flödet använda?",
+                    ),
                     conversation=[],
                     new_messages_start=0,
-                    tool_calls=[tool_call],
-                    text_content=None,
-                    llm_messages=[],
-                    tool_schemas=[],
-                    litellm_model="openai/gpt-4o-mini",
-                    litellm_kwargs={"api_key": "sk-test"},
-                    available_model_refs=None,
-                    available_kb_refs=None,
-                    resource_catalog=None,
-                    max_output_tokens=512,
-                    request_id="req-structured-lost-lease",
                     flow=None,
+                    discovery_analysis=None,
+                    requirements_confirmed=False,
+                    ui_language="sv",
+                    request_id="req-question-lost-lease",
+                    litellm_model="server",
+                    used_auxiliary_llm=False,
                 )
-            ]
+            )
 
     assert exc.value.code == "session_send_lease_lost"
 
@@ -2694,6 +2654,9 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     """Edit proposal storage must roll back if the active send lease is stale."""
     from intric.flows.ai_builder.ai_builder_proposal_processor import (
         AIBuilderProposalProcessor,
+    )
+    from intric.flows.ai_builder.ai_builder_resource_catalog import (
+        build_ai_builder_resource_catalog,
     )
 
     async with db_container() as container:
@@ -2731,20 +2694,6 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         user = container.user()
-        processor = AIBuilderProposalProcessor(
-            user=user,
-            repo=repo,
-            litellm_client=AsyncMock(),
-            self_correction_temperature=0.2,
-            self_correction_bumped_temperature=0.5,
-            forced_proposal_temperature=0.3,
-            quality_retry_warning_codes=set(),
-        )
-        stale_turn = _make_session_send_turn(
-            session_id=session_id,
-            tenant_id=tenant_id,
-            base_planning_state_version=0,
-        )
         edit_flow_call = _make_tool_call(
             tool_call_id="call-edit-lost-lease",
             name=PROPOSE_FLOW_TOOL_NAME,
@@ -2756,31 +2705,50 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                         "step": {
                             "name": "Sammanfatta text",
                             "instructions": "Sammanfatta användarens text.",
-                            "input_source": "flow_input",
-                            "input_type": "text",
                             "output_type": "text",
                         },
                     }
                 ],
             },
         )
+        litellm_client = AsyncMock()
+        litellm_client.acompletion = AsyncMock(
+            return_value=_make_llm_response(tool_calls=[edit_flow_call])
+        )
+        processor = AIBuilderProposalProcessor(
+            user=user,
+            repo=repo,
+            litellm_client=litellm_client,
+            self_correction_temperature=0.2,
+            self_correction_bumped_temperature=0.5,
+            forced_proposal_temperature=0.3,
+            quality_retry_warning_codes=set(),
+        )
+        stale_turn = _make_session_send_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            base_planning_state_version=0,
+        )
+        resource_catalog = build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+            available_mcps=[],
+        )
         with pytest.raises(BadRequestException) as exc:
             _ = [
                 event
-                async for event in processor.handle_tool_call(
+                async for event in processor.propose_plan(
                     turn=stale_turn,
                     conversation=[],
                     new_messages_start=0,
-                    tool_calls=[edit_flow_call],
-                    text_content=None,
                     llm_messages=[],
-                    tool_schemas=[],
                     litellm_model="openai/gpt-4o-mini",
                     litellm_kwargs={"api_key": "sk-test"},
                     available_model_refs=None,
                     available_kb_refs=None,
-                    resource_catalog=None,
+                    resource_catalog=resource_catalog,
                     max_output_tokens=512,
+                    proposal_temperature=0.3,
                     request_id="req-edit-lost-lease",
                     flow=flow,
                     assistant_snapshots=None,
@@ -3634,7 +3602,7 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recovery_loop(
+async def test_ai_builder_api_resolved_architecture_emits_requirements_summary(
     client,
     bearer_token,
     completion_model_factory,
@@ -3648,131 +3616,121 @@ async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recove
         space_name="AI Builder API recovery exhaustion",
     )
 
-    async def fail_question_recovery(
-        **_kwargs: object,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        raise AssertionError("Question recovery should not run for resolved state")
-        yield {}
-
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.stream_structured_question_tool_call",
-        new=fail_question_recovery,
+        "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
+        new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
     ):
-        with patch(
-            "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
-            new=AsyncMock(return_value=("openai/gpt-4o-mini", {"api_key": "sk-test"})),
-        ):
-            session_id = await _create_ai_builder_session(
-                client=client,
-                bearer_token=bearer_token,
-                space_id=space_id,
+        session_id = await _create_ai_builder_session(
+            client=client,
+            bearer_token=bearer_token,
+            space_id=space_id,
+        )
+        async with db_container() as container:
+            repo = AIBuilderRepository(container.session())
+            session = await repo.get_session(
+                session_id=UUID(session_id),
+                tenant_id=container.user().tenant_id,
             )
-            async with db_container() as container:
-                repo = AIBuilderRepository(container.session())
-                session = await repo.get_session(
-                    session_id=UUID(session_id),
-                    tenant_id=container.user().tenant_id,
-                )
-                turn = await _claim_session_send_turn(
-                    repo=repo,
-                    session_id=session.id,
-                    tenant_id=session.tenant_id,
-                )
-                await repo.update_session_conversation(
-                    session_id=session.id,
-                    tenant_id=session.tenant_id,
-                    conversation=[
-                        ConversationMessage(
-                            role="user",
-                            content="Jag vill bygga ett enkelt PDF-flöde.",
-                            metadata={"ui_language": "sv"},
-                        ),
-                        ConversationMessage(
-                            role="user",
-                            content="Ett ärende åt gången",
-                            metadata={
-                                "question_answer": {
-                                    "question_id": "processing_scope",
-                                    "selected_option_id": "single_case",
-                                    "answer": "single_case",
-                                },
-                                "ui_language": "sv",
-                            },
-                        ),
-                        ConversationMessage(
-                            role="user",
-                            content="Dokument",
-                            metadata={
-                                "question_answer": {
-                                    "question_id": "input_material_mode",
-                                    "selected_option_id": "documents",
-                                    "answer": "documents",
-                                },
-                                "ui_language": "sv",
-                            },
-                        ),
-                        ConversationMessage(
-                            role="user",
-                            content="Ett huvuddokument per ärende",
-                            metadata={
-                                "question_answer": {
-                                    "question_id": "document_material_scope",
-                                    "selected_option_id": "single_document_case",
-                                    "answer": "single_document_case",
-                                },
-                                "ui_language": "sv",
-                            },
-                        ),
-                        ConversationMessage(
-                            role="user",
-                            content="PDF-dokument",
-                            metadata={
-                                "question_answer": {
-                                    "question_id": "final_output_mode",
-                                    "selected_option_id": "pdf_document",
-                                    "answer": "pdf_document",
-                                },
-                                "ui_language": "sv",
-                            },
-                        ),
-                        ConversationMessage(
-                            role="user",
-                            content="Strukturerad rapport",
-                            metadata={
-                                "question_answer": {
-                                    "question_id": "final_pdf_type",
-                                    "selected_option_id": "structured_report_pdf",
-                                    "answer": "structured_report_pdf",
-                                },
-                                "ui_language": "sv",
-                            },
-                        ),
-                        ConversationMessage(
-                            role="user",
-                            content="Blandad målgrupp",
-                            metadata={
-                                "question_answer": {
-                                    "question_id": "output_reader",
-                                    "selected_option_id": "mixed_reader",
-                                    "answer": "mixed_reader",
-                                },
-                                "ui_language": "sv",
-                            },
-                        ),
-                    ],
-                    lease=turn.lease,
-                )
-                await repo.release_session_send(
-                    session_id=session.id,
-                    tenant_id=session.tenant_id,
-                    lease=turn.lease,
-                )
-            second_events = await _send_builder_message(
-                client=client,
-                bearer_token=bearer_token,
-                session_id=session_id,
-                message="Bygg vidare",
+            turn = await _claim_session_send_turn(
+                repo=repo,
+                session_id=session.id,
+                tenant_id=session.tenant_id,
             )
+            await repo.update_session_conversation(
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+                conversation=[
+                    ConversationMessage(
+                        role="user",
+                        content="Jag vill bygga ett enkelt PDF-flöde.",
+                        metadata={"ui_language": "sv"},
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="Ett ärende åt gången",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "processing_scope",
+                                "selected_option_id": "single_case",
+                                "answer": "single_case",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="Dokument",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "input_material_mode",
+                                "selected_option_id": "documents",
+                                "answer": "documents",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="Ett huvuddokument per ärende",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "document_material_scope",
+                                "selected_option_id": "single_document_case",
+                                "answer": "single_document_case",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="PDF-dokument",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "final_output_mode",
+                                "selected_option_id": "pdf_document",
+                                "answer": "pdf_document",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="Strukturerad rapport",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "final_pdf_type",
+                                "selected_option_id": "structured_report_pdf",
+                                "answer": "structured_report_pdf",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                    ConversationMessage(
+                        role="user",
+                        content="Blandad målgrupp",
+                        metadata={
+                            "question_answer": {
+                                "question_id": "output_reader",
+                                "selected_option_id": "mixed_reader",
+                                "answer": "mixed_reader",
+                            },
+                            "ui_language": "sv",
+                        },
+                    ),
+                ],
+                lease=turn.lease,
+            )
+            await repo.release_session_send(
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+                lease=turn.lease,
+            )
+        second_events = await _send_builder_message(
+            client=client,
+            bearer_token=bearer_token,
+            session_id=session_id,
+            message="Bygg vidare",
+        )
 
     assert not any(event["event"] == "error" for event in second_events)
     assert any(event["event"] == "requirements_summary" for event in second_events)
@@ -3808,20 +3766,15 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
             "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
-            "runtime_input": {
-                "input_type": "text",
-                "required": True,
-            },
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "task": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
+                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
                     "output_type": "text",
                 },
                 {
                     "name": "Skapa PDF-sammanfattning",
-                    "task": (
+                    "instructions": (
                         "Sammanfatta transkriberingen på tydlig svenska med de "
                         "viktigaste punkterna för en mänsklig läsare."
                     ),
@@ -3829,7 +3782,7 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
                 },
                 {
                     "name": "Generera PDF-dokument",
-                    "task": (
+                    "instructions": (
                         "Skapa ett läsbart PDF-dokument utifrån sammanfattningen."
                     ),
                     "output_type": "pdf",
@@ -4209,10 +4162,7 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                     "step": {
                         "name": "Transkribera ljudfil",
                         "instructions": "Transkribera ljudfilen ordagrant till svensk text.",
-                        "input_source": "flow_input",
-                        "input_type": "audio",
                         "output_type": "text",
-                        "runtime_required": True,
                     },
                 },
                 {
@@ -4247,10 +4197,13 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                 bearer_token=bearer_token,
                 session_id=session_id,
                 initial_message=(
-                    "Lägg till transkribering före det befintliga dokumentsteget men behåll resten."
+                    "Lägg till ett första steg som tar emot en uppladdad "
+                    "ljudfil, transkriberar den före det befintliga "
+                    "dokumentsteget och behåll resten."
                 ),
                 structured_answers={
                     "document_kind": "case_documents",
+                    "input_material_mode": "audio",
                     "flow_input_architecture": "audio_primary_input",
                 },
             )
@@ -4318,20 +4271,15 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
             "flow_name": "Ljudtranskribering till PDF",
             "flow_description": "Transkriberar uppladdat ljud och skapar en PDF-sammanfattning.",
             "plan_rationale": "Transkribera först och generera sedan PDF-sammanfattningen.",
-            "runtime_input": {
-                "input_type": "text",
-                "required": True,
-            },
-            "final_output_type": "json",
             "steps": [
                 {
                     "name": "Transkribera ljud",
-                    "task": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
+                    "instructions": "Transkribera den uppladdade ljudfilen ordagrant till svensk text.",
                     "output_type": "text",
                 },
                 {
                     "name": "Skapa PDF-sammanfattning",
-                    "task": (
+                    "instructions": (
                         "Sammanfatta transkriberingen på tydlig svenska med de "
                         "viktigaste punkterna för en mänsklig läsare."
                     ),
@@ -4339,7 +4287,7 @@ async def test_ai_builder_api_create_mode_audio_apply_without_transcription_mode
                 },
                 {
                     "name": "Generera PDF-dokument",
-                    "task": (
+                    "instructions": (
                         "Skapa ett läsbart PDF-dokument utifrån sammanfattningen."
                     ),
                     "output_type": "pdf",

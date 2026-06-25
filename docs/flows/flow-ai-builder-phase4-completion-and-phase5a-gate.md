@@ -3,7 +3,7 @@
 ## Five-line TL;DR
 
 1. Phase 4 source work is complete: deterministic server decisions now use one server-owned dispatcher, while proposal generation keeps one LiteLLM/proposal boundary.
-2. The source delta from `61facd8a3` to current source deleted 16 Builder production files, 5,415 Builder production LOC, 56 `dict[str, Any]` occurrences, and 95 `Any` tokens.
+2. A later ask/confirm runtime deletion slice removed the obsolete model-visible question and requirements tool runtime; see the current deletion packet for exact slice metrics.
 3. The deleted PlannerOutput/action runtime no longer asks an LLM to choose backend-owned questions, architecture commits, or requirements confirmation.
 4. Phase 5A now has one Assistant-owned update command boundary; MCP/capability adapters remain out of scope.
 5. Do not cherry-pick PR #480 broadly; reuse only the ideas that help create one typed Assistant command owner.
@@ -51,7 +51,7 @@ but the broad deletion gate has been met without a weaker abstraction:
 | --- | --- | --- |
 | Planner provider boundary | Deleted for deterministic server decisions. Proposal completions still use `ai_builder_litellm_completion.py`; classifier/adjudication remain separate features. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py`, `backend/src/intric/flows/ai_builder/ai_builder_slot_classifier.py`, `backend/src/intric/flows/ai_builder/ai_builder_semantic_adjudication.py` |
 | Server decision owner | Added. Questions, architecture commits, and requirements confirmation dispatch directly from `BuilderTurnDecision`; the former `PlannerOutput` action runtime is gone. | `backend/src/intric/flows/ai_builder/ai_builder_turn_controller.py`, `backend/src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py` |
-| Question recovery provider dependency | Removed. Question recovery receives a tracked completion callable and builds requests through `ProposalTurnContext`. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:81`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:294` |
+| Ask/confirm model-visible runtime | Deleted after reachability proof. Server-owned decisions now own questions and requirements confirmation; active proposal generation exposes only `propose_flow`. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:162`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:266`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` |
 | Proposal repair provider wrapper | Removed. Repair now carries `ProposalTurnContext`; the former repair runtime wrapper is gone. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:64`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:77` |
 | Proposal submission | Kept as the active proposal composition owner. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:260` |
 | Pydantic AI / AI SDK / LangGraph / MCP | Not adopted. No framework deleted enough named code to earn the migration in Phase 4. | Completion boundary and typed turn runner are local and smaller than a framework adapter. |
@@ -65,14 +65,12 @@ flowchart LR
   Semantic["Semantic proposal validator"]
   Proposal["Proposal submission"]
   Repair["Proposal repair"]
-  QR["Question recovery"]
 
   Prompt --> Decision
   Decision -->|"server decision"| ServerDispatch
   Decision -->|"generate proposal"| Completion --> Proposal
   Proposal --> Semantic
   Proposal --> Repair --> Completion
-  QR -->|"injected repair completion"| Completion
 ```
 
 ## Before / After Metrics
@@ -168,24 +166,19 @@ failure modes behind a generic retry abstraction.
 | Planner parse repair loop | Deleted | The deleted `PlannerOutput` JSON contract no longer exists. Proposal tool repair remains below. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py` | Delete completed. |
 | Proposal self-correction loop | `_request_self_correction_events(...)` | Proposal tool validation feedback streams to the user, retries with bounded attempts, and preserves usage accounting. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:640`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:650`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:664`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:1234` | Keep. Product-specific streamed repair, not planner generic retry. |
 | Proposal forced-tool retry after text | `_execute_forced_tool_retry(...)` and `run_forced_tool_retry_after_text(...)` | Text-only proposal output gets one forced tool retry or direct JSON-text parsing, with visible repair events. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:281`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:398`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:434`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py:905` | Keep. Distinct proposal-tool failure mode. |
-| Question recovery continuation | `stream_structured_question_tool_call(...)` | A recovered backend-owned question may continue once into a non-question tool dispatch, and repeated questions exhaust cleanly. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:191`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:222`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:359`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py:578` | Keep. It owns user-visible recovery stream semantics. |
-| Confirm-requirements validation follow-up | `process_confirm_requirements(...)` and `build_confirm_requirements_retry_config(...)` | Confirmation parsing/validation feedback can produce a follow-up event before final dispatch. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py:181`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py:197`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py:239`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py:328` | Keep. Cross-module streamed repair skeleton is a Phase 5+ candidate, not a Phase 4 cleanup. |
+| Model-visible ask/confirm repair loops | Deleted | Active turns no longer expose `ask_structured_question` or `confirm_requirements`, so their parser, repair, and processor-dispatch behavior is obsolete. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869`, `backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py` | Delete completed. |
 
 ### Deferred Duplication
 
-`ai_builder_proposal_repair`, `ai_builder_question_recovery`, and
-`ai_builder_confirm_requirements` still share a visible skeleton: stream a
-`repairing` event, build a retry or follow-up invocation, and translate
-tool/validation feedback into event dictionaries. That is real duplication,
-but it is not a safe Phase 4 fold because the product semantics differ by tool:
+`ai_builder_proposal_repair` still owns the proposal-specific retry skeleton:
+stream a `repairing` event, build a forced proposal invocation, and translate
+proposal validation feedback into events. The former ask/confirm repair
+skeletons were deleted with the obsolete model-visible runtime, so there is no
+remaining cross-tool repair abstraction to preserve.
 
-- proposal repair owns forced proposal-tool invocation and JSON-text fallback;
-- question recovery owns backend-owned follow-up questions and repeated-question exhaustion;
-- confirm requirements owns confirmation parsing and validation follow-up.
-
-Phase 5+ may replace that skeleton only if the same change deletes the
-remaining event/message dictionary residuals listed below and leaves one typed
-streamed-repair contract that reuses the existing `RuntimeToolCall` boundary.
+Phase 5+ may replace the remaining proposal repair dictionaries only if the
+same change deletes the residual event/message dictionary construction and
+keeps the proposal failure modes explicit.
 
 ## Module Disposition
 
@@ -201,8 +194,8 @@ streamed-repair contract that reuses the existing `RuntimeToolCall` boundary.
 | `ai_builder_proposal_tool_contracts.py` | Keep | `ProposalTurnContext` and `ProposalCompletionRequest` are the current typed boundary. `ProposalCompletionFn` remains because replacing it is lateral churn today. |
 | `ai_builder_proposal_submission.py` | Keep | Active proposal composition and first-pass proposal completion owner. |
 | `ai_builder_proposal_repair.py` | Keep | Product-specific streamed proposal repair owner. |
-| `ai_builder_question_recovery.py` | Keep | Product-specific backend-owned question recovery owner. |
-| `ai_builder_confirm_requirements.py` | Keep | Product-specific confirmation parsing and follow-up owner. |
+| `ai_builder_question_recovery.py` | Delete completed | Obsolete model-visible question-recovery runtime after deterministic server decisions. |
+| `ai_builder_confirm_requirements.py` | Delete completed | Obsolete model-visible requirements-confirmation runtime after deterministic server decisions. |
 
 ## Typed Residuals
 
@@ -214,16 +207,14 @@ residuals are the Phase 5+ deletion target, not a reason to keep editing Phase
 | --- | --- | --- |
 | Provider message/tool schema bags | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:47`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:48`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:50` | Typed provider message/tool schema boundary, only if it deletes local `dict[str, Any]` construction. |
 | Dynamic tool choice shape | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:53` | Narrow value object or provider-owned schema wrapper. |
-| Stream event dictionaries | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:68`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:69`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:53`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:78` | One typed Builder event contract if it deletes all tuple/dict event variants. |
-| Repair message lists | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:80`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:73` | Typed repair transcript if it replaces provider-shaped message dicts. |
+| Stream event dictionaries | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:68`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:69`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:53` | One typed Builder event contract if it deletes all tuple/dict event variants. |
+| Repair message lists | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:80` | Typed repair transcript if it replaces provider-shaped message dicts. |
 
-Resolved after the original packet: proposal dispatch, proposal repair,
-proposal submission, and question recovery now share the existing
-`RuntimeToolCall` protocol. Evidence: `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
-`backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:126`,
-`backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:65`,
-`backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:175`,
-and `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:64`.
+Resolved after the original packet: proposal dispatch, proposal repair, and
+proposal submission share the existing `RuntimeToolCall` protocol. Evidence:
+`backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
+`backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:65`, and
+`backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:175`.
 
 ## Validation Record
 
@@ -237,10 +228,8 @@ The source slices were validated before this packet:
 | `ENEO_DEVCONTAINER_NAME=eneo-flows-clean_devcontainer-eneo-1 backend/scripts/run_pyright_in_devcontainer.sh src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py src/intric/flows/ai_builder/ai_builder_turn_controller.py src/intric/flows/ai_builder/ai_builder_planner_failure_events.py src/intric/flows/ai_builder/ai_builder_telemetry.py src/intric/flows/ai_builder/ai_builder_service.py` | `0 errors, 0 warnings, 0 informations` |
 | Claude peer loop, `flow-builder-control-plane-direct-dispatch`, iteration 2 | Blocked by Claude monthly spend limit; artifact saved under `.codex/artifacts/`. |
 | Antigravity peer loop, `flow-builder-direct-server-decision-dispatch`, iteration 3 | `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 9` |
-| Focused tests listed in the question-recovery boundary doc | Passed during the relevant source slice. |
 | Import ownership tests for completion boundary | Passed during the relevant source slice. |
-| `docker exec eneo-flows-clean_devcontainer-eneo-1 sh -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py src/intric/flows/ai_builder/ai_builder_question_recovery.py'` | Passed for the RuntimeToolCall cleanup. |
-| `docker exec eneo-flows-clean_devcontainer-eneo-1 sh -lc 'cd /workspace/backend && .venv/bin/python -m pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_service.py -q'` | `177 passed` for the RuntimeToolCall cleanup. |
+| Ask/confirm runtime deletion validation | See [Flow Builder Ask/Confirm Runtime Deletion Packet](./flow-builder-delete-obsolete-ask-confirm-runtime-packet-2026-06-25.md). |
 
 Direct pyright is now green for the changed deterministic-turn source files.
 Broader strict-typing cleanup for proposal repair/submission remains a future
