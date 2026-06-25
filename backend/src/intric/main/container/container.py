@@ -1355,6 +1355,7 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         oauth_token_repo=oauth_token_repo,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
     )
 
     oauth_token_service = providers.Factory(

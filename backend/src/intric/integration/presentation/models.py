@@ -93,11 +93,13 @@ class IntegrationCreate(BaseModel):
 
 class AuthUrlPublic(BaseModel):
     auth_url: str
+    state: str
 
 
 class AuthCallbackParams(BaseModel):
     auth_code: str
     tenant_integration_id: UUID
+    state: str
 
 
 class ConfluenceContentTaskParam(ResourceTaskParams):

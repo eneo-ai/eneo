@@ -29,12 +29,13 @@ router = APIRouter()
 async def gen_url(
     tenant_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    state: Annotated[Optional[str], Query()] = None,
+    state: Annotated[Optional[str], Query()] = None,  # noqa: ARG001 — ignored; backend generates its own CSRF state
 ):
     oauth2_service = container.oauth2_service()
+    user = container.user()
 
     return await oauth2_service.start_auth(
-        tenant_integration_id=tenant_integration_id, state=state
+        tenant_integration_id=tenant_integration_id, user_id=user.id
     )
 
 
@@ -57,6 +58,7 @@ async def on_auth_callback(
         user_id=user.id,
         tenant_integration_id=params.tenant_integration_id,
         auth_code=params.auth_code,
+        state=params.state,
     )
 
     # Audit logging

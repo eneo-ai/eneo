@@ -9147,11 +9147,15 @@ export interface components {
        * Format: uuid
        */
       tenant_integration_id: string;
+      /** State */
+      state: string;
     };
     /** AuthUrlPublic */
     AuthUrlPublic: {
       /** Auth Url */
       auth_url: string;
+      /** State */
+      state: string;
     };
     /**
      * AvailabilityResponse

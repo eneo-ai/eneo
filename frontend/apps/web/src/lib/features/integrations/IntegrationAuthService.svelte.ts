@@ -76,9 +76,8 @@ export class IntegrationAuthService {
       `width=${width},height=${height},top=${top},left=${left},popup`
     );
 
-    const url = await this.#intric.integrations.user.getAuthUrl({
-      integration: { tenant_integration_id },
-      state: tenant_integration_id
+    const { url, state } = await this.#intric.integrations.user.getAuthUrl({
+      integration: { tenant_integration_id }
     });
 
     if (popup) {
@@ -96,10 +95,13 @@ export class IntegrationAuthService {
       }
     }, 1000);
 
+    // Keyed by tenant_integration_id (for isConnecting / duplicate checks); the
+    // backend-issued CSRF `state` is stored to correlate the popup callback.
     this.#authRequests.set(integration.tenant_integration_id!, {
       popup,
       popupInspectInterval,
-      integration
+      integration,
+      state
     });
   }
 
@@ -125,21 +127,21 @@ export class IntegrationAuthService {
     if (!allowedOrigins.includes(origin)) return;
     if (!isIntegrationCallbackMessage(data)) return;
 
-    const { code, state: integrationId } = data;
+    const { code, state } = data;
 
-    // code and id are required
-    if (!code || !integrationId) {
+    // code and state are required
+    if (!code || !state) {
       const missing = [];
       if (!code) missing.push("code");
-      if (!integrationId) missing.push("state");
+      if (!state) missing.push("state");
       toast.warning(`Missing required fields: ${missing.join(", ")}`);
       return;
     }
 
-    // Find and validate request
-    const request = this.#authRequests.get(integrationId);
+    // Correlate the callback to its request by the backend-issued state.
+    const request = [...this.#authRequests.values()].find((r) => r.state === state);
     if (!request) {
-      toast.error(`No auth request found for state ${integrationId}`);
+      toast.error(`No auth request found for state ${state}`);
       return;
     }
 
@@ -149,14 +151,15 @@ export class IntegrationAuthService {
     try {
       const updatedIntegration = await this.#intric.integrations.user.registerAuthCode({
         integration: request.integration,
-        code
+        code,
+        state
       });
       this.#onConnected({ success: true, integration: updatedIntegration });
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
       this.#onConnected({ success: false, error });
     } finally {
-      this.#authRequests.delete(integrationId);
+      this.#authRequests.delete(request.integration.tenant_integration_id!);
     }
   };
 
@@ -191,6 +194,8 @@ type AuthRequestContext = {
   integration: UserIntegration;
   popup: ReturnType<Window["open"]> | null;
   popupInspectInterval: ReturnType<typeof setInterval>;
+  /** Backend-issued CSRF state used to correlate the popup callback. */
+  state: string;
 };
 
 type IntegrationCallbackMessage = {
