@@ -1468,3 +1468,70 @@ class TestExtractTextFromCanvasLayout:
         result = _extract_text_from_canvas_layout(content)
         assert "First section" in result
         assert "Second section" in result
+
+
+class TestOutOfScopeFolderSubtreeCleanup:
+    """A folder leaving scope must take its descendant blobs with it."""
+
+    async def test_deletes_descendant_blobs_when_folder_leaves_scope(
+        self, service, mock_dependencies
+    ):
+        ik = MagicMock()
+        ik.id = uuid4()
+        ik.size = 0
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.delete_by_sharepoint_item_and_integration_knowledge.return_value = []
+        content_client = AsyncMock()
+        descendants = [
+            {"id": "child-1", "name": "a.docx"},
+            {"id": "child-2", "name": "b.pdf"},
+        ]
+
+        async def fake_collect(
+            *, content_client, site_id, drive_id, folder_id, all_files
+        ):
+            all_files.extend(descendants)
+
+        with patch.object(
+            service, "_collect_files_recursive", side_effect=fake_collect
+        ):
+            stats = service._initialize_stats()
+            await service._delete_out_of_scope_folder_subtree(
+                content_client=content_client,
+                site_id="site-1",
+                drive_id="drive-1",
+                folder_id="folder-1",
+                folder_name="Moved",
+                integration_knowledge=ik,
+                integration_knowledge_id=ik.id,
+                stats=stats,
+            )
+
+        assert repo.delete_by_sharepoint_item_and_integration_knowledge.await_count == 2
+        called_item_ids = {
+            call.kwargs["sharepoint_item_id"]
+            for call in repo.delete_by_sharepoint_item_and_integration_knowledge.await_args_list
+        }
+        assert called_item_ids == {"child-1", "child-2"}
+
+    async def test_degrades_safely_without_site_id(self, service, mock_dependencies):
+        ik = MagicMock()
+        ik.id = uuid4()
+        content_client = AsyncMock()
+        repo = mock_dependencies["info_blob_service"].repo
+
+        with patch.object(service, "_collect_files_recursive") as mock_collect:
+            stats = service._initialize_stats()
+            await service._delete_out_of_scope_folder_subtree(
+                content_client=content_client,
+                site_id=None,
+                drive_id="drive-1",
+                folder_id="folder-1",
+                folder_name="Moved",
+                integration_knowledge=ik,
+                integration_knowledge_id=ik.id,
+                stats=stats,
+            )
+
+        mock_collect.assert_not_called()
+        repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()

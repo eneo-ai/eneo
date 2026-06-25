@@ -777,6 +777,21 @@ class SharePointContentService:
                             stats=stats,
                             reason="out-of-scope",
                         )
+                        # A folder that left scope still exists in SharePoint, but Graph
+                        # does not re-emit its (unchanged) children — deleting only the
+                        # folder id would orphan every descendant blob. Enumerate the
+                        # folder's current descendants and remove them too.
+                        if is_folder:
+                            await self._delete_out_of_scope_folder_subtree(
+                                content_client=content_client,
+                                site_id=resolved_site_id,
+                                drive_id=actual_drive_id,
+                                folder_id=item_id,
+                                folder_name=item_name,
+                                integration_knowledge=integration_knowledge,
+                                integration_knowledge_id=resolved_integration_knowledge_id,
+                                stats=stats,
+                            )
                         continue
 
                     if (
@@ -1364,6 +1379,67 @@ class SharePointContentService:
                 {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
             )
             return 0
+
+    async def _delete_out_of_scope_folder_subtree(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        site_id: Optional[str],
+        drive_id: Optional[str],
+        folder_id: str,
+        folder_name: str,
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+    ) -> None:
+        """Remove indexed blobs for every descendant of a folder that left scope.
+
+        SharePoint/OneDrive delta only re-emits the moved folder, not its
+        unchanged children, so deleting just the folder id would orphan the whole
+        subtree (stale RAG hits). The folder still exists at its new location, so
+        enumerate its current descendants via Graph and delete their blobs.
+        Enumeration over drive items needs a site_id; OneDrive folder
+        integrations fall back to the next full sync.
+        """
+        if not site_id or not drive_id:
+            logger.warning(
+                "Cannot clean up out-of-scope subtree for folder %s (%s): no "
+                "site_id/drive_id; descendants reconcile on next full sync",
+                folder_name,
+                folder_id,
+            )
+            return
+
+        try:
+            descendants: list[SharePointItem] = []
+            await self._collect_files_recursive(
+                content_client=content_client,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id,
+                all_files=descendants,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to enumerate out-of-scope subtree for folder %s (%s): %s",
+                folder_name,
+                folder_id,
+                exc,
+            )
+            return
+
+        for descendant in descendants:
+            descendant_id = descendant.get("id")
+            if not descendant_id:
+                continue
+            await self._delete_local_sharepoint_item(
+                item_id=descendant_id,
+                item_name=descendant.get("name", ""),
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=integration_knowledge_id,
+                stats=stats,
+                reason="out-of-scope-subtree",
+            )
 
     def _schedule_post_commit_change_keys(
         self, pending: list[tuple[UUID, str, str]]
