@@ -15,7 +15,7 @@ class SharePointItem(TypedDict, total=False):
     name: str
     webUrl: str
     cTag: str
-    deleted: bool
+    deleted: bool | dict[str, Any]
     folder: dict[str, Any]
     file: dict[str, Any]
     parentReference: GraphParentReference

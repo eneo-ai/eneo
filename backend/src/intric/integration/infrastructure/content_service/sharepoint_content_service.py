@@ -93,6 +93,14 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _has_graph_facet(item: SharePointItem, facet: str) -> bool:
+    """Return True for Microsoft Graph facets represented as true or an object."""
+    value = cast(dict[str, object], item).get(facet)
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, dict)
+
+
 def _require_text(value: Optional[str], field_name: str) -> str:
     if not value:
         raise ValueError(f"{field_name} is required")
@@ -691,8 +699,8 @@ class SharePointContentService:
                 for item in changes:
                     item_name = item.get("name", "")
                     item_id = item.get("id")
-                    is_deleted = item.get("deleted", False)
-                    is_folder = item.get("folder", False)
+                    is_deleted = _has_graph_facet(item, "deleted")
+                    is_folder = _has_graph_facet(item, "folder")
                     change_key = item.get("cTag")
 
                     logger.debug(
@@ -722,6 +730,14 @@ class SharePointContentService:
                         logger.debug(
                             f"  - Skipping item {item_name}: not in folder scope"
                         )
+                        await self._delete_local_sharepoint_item(
+                            item_id=item_id,
+                            item_name=item_name,
+                            integration_knowledge=integration_knowledge,
+                            integration_knowledge_id=resolved_integration_knowledge_id,
+                            stats=stats,
+                            reason="out-of-scope",
+                        )
                         continue
 
                     if (
@@ -733,64 +749,17 @@ class SharePointContentService:
 
                     if is_deleted:
                         # Delete the corresponding info_blob if it exists
-                        try:
-                            if item_id:
-                                deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
-                                    sharepoint_item_id=item_id,
-                                    integration_knowledge_id=resolved_integration_knowledge_id,
-                                )
-                            else:
-                                deleted_blobs = await self.info_blob_service.repo.delete_by_title_and_integration_knowledge(
-                                    title=item_name,
-                                    integration_knowledge_id=resolved_integration_knowledge_id,
-                                )
-
-                            # Update integration knowledge size to reflect deletion
-                            # Filter out None values before accessing blob.size
-                            valid_deleted_blobs = [
-                                blob
-                                for blob in deleted_blobs
-                                if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
-                            ]
-                            if valid_deleted_blobs:
-                                current_size = _safe_int(
-                                    getattr(integration_knowledge, "size", 0)
-                                )
-                                deleted_size = sum(
-                                    _safe_int(getattr(blob, "size", 0))
-                                    for blob in valid_deleted_blobs
-                                )
-                                integration_knowledge.size = max(
-                                    0, current_size - deleted_size
-                                )
-
-                            logger.info(
-                                "Deleted %s info_blob(s) for removed SharePoint file: %s (item_id=%s)",
-                                len(valid_deleted_blobs),
-                                item_name,
-                                item_id,
-                            )
-                            stats["files_deleted"] = stats.get(
-                                "files_deleted", 0
-                            ) + len(valid_deleted_blobs)
-
-                            # Invalidate ChangeKey cache for deleted item
-                            if self.change_key_service and item_id:
-                                await self.change_key_service.invalidate_change_key(
-                                    integration_knowledge_id=resolved_integration_knowledge_id,
-                                    item_id=item_id,
-                                )
-                        except Exception as e:
-                            logger.warning(
-                                f"Could not delete info_blob for {item_name}: {e}"
-                            )
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {"file": item_name, "reason": f"Could not remove: {e}"}
-                            )
+                        await self._delete_local_sharepoint_item(
+                            item_id=item_id,
+                            item_name=item_name,
+                            integration_knowledge=integration_knowledge,
+                            integration_knowledge_id=resolved_integration_knowledge_id,
+                            stats=stats,
+                            reason="removed",
+                        )
                         continue
 
-                    if item.get("folder"):
+                    if is_folder:
                         stats["folders_processed"] += 1
                         continue
 
@@ -1285,6 +1254,74 @@ class SharePointContentService:
         if size_delta:
             integration_knowledge.size = max(0, current_size + size_delta)
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
+
+    async def _delete_local_sharepoint_item(
+        self,
+        *,
+        item_id: str,
+        item_name: str,
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+        reason: str,
+    ) -> int:
+        """Remove a locally indexed SharePoint item from one integration knowledge."""
+        try:
+            deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
+                sharepoint_item_id=item_id,
+                integration_knowledge_id=integration_knowledge_id,
+            )
+
+            valid_deleted_blobs = [
+                blob
+                for blob in deleted_blobs
+                if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
+            ]
+            if valid_deleted_blobs:
+                current_size = _safe_int(getattr(integration_knowledge, "size", 0))
+                deleted_size = sum(
+                    _safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
+                )
+                integration_knowledge.size = max(0, current_size - deleted_size)
+
+            deleted_count = len(valid_deleted_blobs)
+            if deleted_count:
+                logger.info(
+                    "Deleted %s info_blob(s) for %s SharePoint file: %s (item_id=%s)",
+                    deleted_count,
+                    reason,
+                    item_name,
+                    item_id,
+                )
+                stats["files_deleted"] = stats.get("files_deleted", 0) + deleted_count
+            else:
+                logger.debug(
+                    "No local info_blob found for %s SharePoint item: %s (item_id=%s)",
+                    reason,
+                    item_name,
+                    item_id,
+                )
+
+            if self.change_key_service and item_id:
+                await self.change_key_service.invalidate_change_key(
+                    integration_knowledge_id=integration_knowledge_id,
+                    item_id=item_id,
+                )
+
+            return deleted_count
+
+        except Exception as e:
+            logger.warning(
+                "Could not delete %s SharePoint info_blob for %s: %s",
+                reason,
+                item_name,
+                e,
+            )
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
+            )
+            return 0
 
     async def _fetch_and_process_content(
         self,

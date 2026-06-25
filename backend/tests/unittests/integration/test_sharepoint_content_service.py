@@ -921,6 +921,58 @@ class TestDeltaChangesProcessing:
             "info_blob_service"
         ].repo.delete_by_title_and_integration_knowledge.assert_not_called()
 
+    async def test_deleted_delta_accepts_graph_deleted_facet_object(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """Graph deleted facets are objects, not always booleans."""
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_integration_knowledge.selected_item_type = "site_root"
+        mock_integration_knowledge.folder_id = None
+
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_delta_changes.return_value = (
+                [
+                    {
+                        "id": "item-123",
+                        "name": "deleted.docx",
+                        "deleted": {},
+                    }
+                ],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+                drive_id="drive-123",
+            )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_called_once_with(
+            sharepoint_item_id="item-123",
+            integration_knowledge_id=mock_integration_knowledge.id,
+        )
+        mock_client.get_file_content_by_id.assert_not_called()
+
     async def test_deleted_delta_size_never_goes_below_zero(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
     ):
@@ -974,6 +1026,68 @@ class TestDeltaChangesProcessing:
             )
 
         assert mock_integration_knowledge.size == 0
+
+    async def test_out_of_scope_delta_deletes_existing_local_blob(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """Moved files outside the selected folder scope are removed locally."""
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_integration_knowledge.selected_item_type = "folder"
+        mock_integration_knowledge.folder_id = "folder-a"
+        mock_integration_knowledge.folder_path = "/Documents/A"
+        mock_integration_knowledge.size = 100
+
+        deleted_blob = MagicMock()
+        deleted_blob.size = 40
+
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[deleted_blob]
+        )
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_delta_changes.return_value = (
+                [
+                    {
+                        "id": "item-123",
+                        "name": "moved.docx",
+                        "parentReference": {
+                            "id": "folder-b",
+                            "path": "/drives/drive-123/root:/Documents/B",
+                        },
+                    }
+                ],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+                drive_id="drive-123",
+            )
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_called_once_with(
+            sharepoint_item_id="item-123",
+            integration_knowledge_id=mock_integration_knowledge.id,
+        )
+        mock_client.get_file_content_by_id.assert_not_called()
+        assert mock_integration_knowledge.size == 60
+        assert "1 deleted file" in result
 
 
 class TestOneDriveFolderTraversal:
