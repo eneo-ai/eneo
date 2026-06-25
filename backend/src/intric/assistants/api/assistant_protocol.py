@@ -240,11 +240,10 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         tool_calls = cast(
             Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
         )
-        # `result` is intentionally omitted from the SSE payload — tool
-        # outputs can be large and only a niche view ("Visa svar") needs
-        # them. Frontend lazy-fetches via the tool-call-result endpoint
-        # when the user expands the panel; conversation history likewise
-        # omits the result and uses the same endpoint.
+        # `result` is intentionally omitted from the SSE payload because tool
+        # outputs can be large. Conversation history likewise omits the raw
+        # upstream result; API callers that need it can use the dedicated
+        # tool-call-result endpoint.
         data = SSEToolCall(
             session_id=session_id,
             tools=[

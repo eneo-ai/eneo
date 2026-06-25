@@ -144,9 +144,8 @@ class SSEToolCall(SSEBase):
 class ToolCallResultPublic(BaseModel):
     """Lazy-loaded payload for a single tool call's upstream response.
 
-    Only the niche "Visa svar" view fetches this — keeping it out of the
-    streaming hot path lets the SSE payload stay small even when a tool
-    returns several KB of text.
+    Keeping this out of the streaming hot path lets the SSE payload stay small
+    even when a tool returns several KB of text.
     """
 
     tool_call_id: str

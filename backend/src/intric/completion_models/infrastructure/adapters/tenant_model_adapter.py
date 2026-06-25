@@ -124,10 +124,9 @@ def _build_tool_result_with_references(
       only an 8-char ``source_id`` line so the model can cite, mirroring the
       knowledge-base source format in ``context_builder``. ``_meta`` is not
       forwarded: per MCP it is implementation metadata, not model-facing.
-    - ``display_text`` (persisted on ``ToolCallInfo.result`` for the chat UI's
-      "view tool response" affordance): upstream text blocks plus each
-      resource's own text, exactly what a vanilla MCP client would render. No
-      source_id markers.
+    - ``display_text`` (persisted on ``ToolCallInfo.result`` for raw-result
+      API consumers): upstream text blocks plus each resource's own text,
+      exactly what a vanilla MCP client would render. No source_id markers.
 
     Resource blocks are captured as ``McpToolReference`` rows for separate
     persistence (the structured channel the frontend renders, where ``uri`` and

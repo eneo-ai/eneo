@@ -2,15 +2,13 @@
   Copyright (c) 2026 Sundsvalls Kommun
 
   A single tool call rendered as a self-contained card on the reasoning trace:
-  header (icon + name + server + status badge), collapsible parameters, and a
-  lazy-loaded result dialog. Approval handling stays in MessageAnswer.svelte.
+  header (icon + name + server + status badge) over collapsible parameters.
+  Approval handling stays in MessageAnswer.svelte.
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { Button, Dialog } from "@intric/ui";
   import { Check, X, Loader2, ChevronRight, Wrench } from "lucide-svelte";
-  import { writable } from "svelte/store";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -19,29 +17,28 @@
     serverName,
     args,
     toolCallId,
-    status = "complete",
-    onLoadResult
+    onLoadResult,
+    status = "complete"
   }: {
     toolName: string;
     serverName: string;
     args?: Record<string, unknown>;
     toolCallId?: string;
-    status?: Status;
     onLoadResult?: () => Promise<string | null>;
+    status?: Status;
   } = $props();
 
   let argsOpen = $state(false);
   let result = $state<string | null>(null);
   let resultLoaded = $state(false);
   let resultLoading = $state(false);
-  const resultDialogOpen = writable(false);
   const hasArgs = $derived(args != null && Object.keys(args).length > 0);
   const canViewResult = $derived(
     !!toolCallId && !!onLoadResult && (status === "complete" || status === "failed")
   );
+  const canExpand = $derived(hasArgs || canViewResult);
 
-  async function showResult() {
-    resultDialogOpen.set(true);
+  async function loadResult() {
     if (resultLoaded || resultLoading || !onLoadResult) return;
 
     resultLoading = true;
@@ -49,12 +46,25 @@
       result = await onLoadResult();
       resultLoaded = true;
     } catch (error) {
-      resultDialogOpen.set(false);
       toastError(error, m.mcp_tool_response_load_error());
     } finally {
       resultLoading = false;
     }
   }
+
+  function toggleOpen() {
+    if (!canExpand) return;
+    argsOpen = !argsOpen;
+    if (argsOpen && canViewResult) {
+      void loadResult();
+    }
+  }
+
+  $effect(() => {
+    if (argsOpen && canViewResult) {
+      void loadResult();
+    }
+  });
 
   // Visuals per status: icon colour, badge label, and badge tone. Kept in one
   // map so the header and badge never drift out of sync.
@@ -92,11 +102,11 @@
 <div class="border-dimmer bg-secondary/40 overflow-hidden rounded-lg border">
   <button
     type="button"
-    class="flex w-full items-center gap-2.5 px-3 py-2 text-left {hasArgs
+    class="flex w-full items-center gap-2.5 px-3 py-2 text-left {canExpand
       ? 'cursor-pointer'
       : 'cursor-default'}"
-    onclick={() => hasArgs && (argsOpen = !argsOpen)}
-    disabled={!hasArgs}
+    onclick={toggleOpen}
+    disabled={!canExpand}
   >
     <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border {ui.ring}">
       {#if status === "running" || status === "preparing"}
@@ -120,55 +130,43 @@
       <span class="text-muted truncate text-xs">{serverName}</span>
     </div>
 
-    {#if hasArgs}
+    {#if canExpand}
       <ChevronRight
         class="text-muted h-4 w-4 shrink-0 transition-transform {argsOpen ? 'rotate-90' : ''}"
       />
     {/if}
   </button>
 
-  {#if hasArgs && argsOpen}
+  {#if argsOpen}
     <div class="border-dimmer border-t px-3 py-2.5">
-      <div class="text-muted mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
-        <Wrench class="h-3 w-3 shrink-0" />
-        <span>{m.chat_reasoning_parameters()}</span>
-      </div>
-      <pre
-        class="bg-primary/60 text-secondary overflow-x-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
-          args,
-          null,
-          2
-        )}</pre>
-    </div>
-  {/if}
+      {#if hasArgs}
+        <div class="text-muted mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
+          <Wrench class="h-3 w-3 shrink-0" />
+          <span>{m.chat_reasoning_parameters()}</span>
+        </div>
+        <pre
+          class="bg-primary/60 text-secondary overflow-x-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
+            args,
+            null,
+            2
+          )}</pre>
+      {/if}
 
-  {#if canViewResult}
-    <div class="border-dimmer border-t px-3 py-2">
-      <Button unstyled class="text-accent-default text-xs font-medium" onclick={showResult}>
-        {m.mcp_tool_response_view()}
-      </Button>
+      {#if canViewResult}
+        <div class={hasArgs ? "border-dimmer mt-2.5 border-t pt-2.5" : ""}>
+          <div class="text-muted mb-1.5 text-xs font-semibold">
+            {m.mcp_tool_response_title({ toolName })}
+          </div>
+          {#if resultLoading}
+            <p class="text-muted text-xs">{m.loading_ellipsis()}</p>
+          {:else if resultLoaded && result}
+            <pre
+              class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{result}</pre>
+          {:else if resultLoaded}
+            <p class="text-muted text-xs italic">{m.mcp_tool_response_empty()}</p>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
-
-<Dialog.Root openController={resultDialogOpen}>
-  <Dialog.Content width="medium">
-    <Dialog.Title>{m.mcp_tool_response_title({ toolName })}</Dialog.Title>
-    <Dialog.Description>{m.mcp_tool_response_description()}</Dialog.Description>
-    <Dialog.Section scrollable>
-      <div class="p-4">
-        {#if resultLoading}
-          <p class="text-muted">{m.loading_ellipsis()}</p>
-        {:else if result}
-          <pre
-            class="bg-primary/60 text-secondary overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">{result}</pre>
-        {:else}
-          <p class="text-muted italic">{m.mcp_tool_response_empty()}</p>
-        {/if}
-      </div>
-    </Dialog.Section>
-    <Dialog.Controls let:close>
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
