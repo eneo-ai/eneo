@@ -3,7 +3,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
-    _normalize_compiled_spec_for_session,
     prepare_compiled_spec_for_session,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -88,15 +87,6 @@ def test_create_mode_rejects_any_existing_step_ref() -> None:
 
     assert not result.valid
     assert result.errors[0].code == "invalid_existing_step_ref"
-
-
-def test_create_mode_normalization_strips_existing_step_ref() -> None:
-    normalized = _normalize_compiled_spec_for_session(
-        _make_existing_ref_spec("step_a"),
-        target_kind=TargetKind.CREATE,
-    )
-
-    assert normalized.steps[0].existing_step_ref is None
 
 
 def test_edit_mode_rejects_non_existing_step_alias_format() -> None:
@@ -424,10 +414,6 @@ def test_prepare_compiled_spec_for_session_merges_session_validation_errors() ->
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
         ),
@@ -457,10 +443,6 @@ def test_prepare_compiled_spec_for_session_merges_session_validation_errors() ->
 
 def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
@@ -519,10 +501,6 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
     )
 
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
@@ -669,10 +647,6 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
             side_effect=lambda spec, **_kwargs: (spec, []),
         ),
@@ -700,10 +674,6 @@ def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contr
     None
 ):
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
@@ -750,10 +720,6 @@ def test_prepared_pdf_helper_spec_is_apply_normalization_fixed_point() -> None:
 def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_prepared_flow_authoring_spec",
             return_value=MagicMock(errors=[]),
         ),
@@ -790,10 +756,6 @@ def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_termina
     None
 ):
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
@@ -843,10 +805,6 @@ def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_termin
 ):
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),
         ),
@@ -879,10 +837,6 @@ def test_prepare_compiled_spec_for_session_rejects_unfoldable_json_text_terminal
     None
 ):
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation._normalize_compiled_spec_for_session",
-            side_effect=lambda spec, target_kind: spec,
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
             return_value=SpecValidationResult(),

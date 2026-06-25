@@ -46,12 +46,8 @@ def prepare_compiled_spec_for_session(
     valid_existing_step_refs: list[str] | None,
     terminal_output_type: OutputType | None = None,
 ) -> PreparedCompiledSpecResult:
-    prepared_spec = _normalize_compiled_spec_for_session(
-        spec,
-        target_kind=target_kind,
-    )
     prepared_spec, normalization_changes = normalize_ai_builder_spec(
-        prepared_spec,
+        spec,
         terminal_output_type=terminal_output_type,
         disambiguate_duplicate_step_names=target_kind == TargetKind.EDIT,
     )
@@ -107,29 +103,6 @@ def prepare_compiled_spec_for_session(
         spec=prepared_spec,
         validation=validation,
     )
-
-
-def _normalize_compiled_spec_for_session(
-    spec: FlowDraftSpecCore,
-    *,
-    target_kind: TargetKind,
-) -> FlowDraftSpecCore:
-    if target_kind != TargetKind.CREATE:
-        return spec
-
-    normalized_steps: list[StepSpec] = []
-    changed = False
-    for step in spec.steps:
-        if step.existing_step_ref is None:
-            normalized_steps.append(step)
-            continue
-        normalized_steps.append(step.model_copy(update={"existing_step_ref": None}))
-        changed = True
-
-    if not changed:
-        return spec
-
-    return spec.model_copy(update={"steps": normalized_steps})
 
 
 def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
