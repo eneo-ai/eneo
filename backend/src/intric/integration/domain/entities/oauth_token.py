@@ -5,12 +5,11 @@ from uuid import UUID
 from typing_extensions import override
 
 from intric.base.base_entity import Entity
-from intric.integration.infrastructure.content_service.types import OAuthResource
+from intric.integration.domain.value_objects import IntegrationType, OAuthResource
 from intric.main.exceptions import InternalServerException
 
 if TYPE_CHECKING:
     from intric.integration.domain.entities.user_integration import UserIntegration
-    from intric.integration.presentation.models import IntegrationType
 
 
 class OauthToken(Entity):

@@ -8,8 +8,7 @@ from intric.integration.domain.entities.oauth_token import (
 from intric.integration.domain.factories.user_integration_factory import (
     UserIntegrationFactory,
 )
-from intric.integration.infrastructure.content_service.types import OAuthResource
-from intric.integration.presentation.models import IntegrationType
+from intric.integration.domain.value_objects import IntegrationType, OAuthResource
 
 if TYPE_CHECKING:
     from intric.database.tables.integration_table import (
