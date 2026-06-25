@@ -28,6 +28,7 @@ from intric.integration.infrastructure.content_service.types import (
 )
 from intric.integration.infrastructure.content_service.utils import (
     file_extension_to_type,
+    is_unextractable_content,
 )
 from intric.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
@@ -851,7 +852,7 @@ class SharePointContentService:
                             item_id=item_id,
                         )
 
-                        if content:
+                        if content and not is_unextractable_content(content):
                             await self._process_info_blob(
                                 title=item_name,
                                 text=content,
@@ -1073,7 +1074,7 @@ class SharePointContentService:
                             )
                             return stats
 
-                        if content:
+                        if content and not is_unextractable_content(content):
                             await self._process_info_blob(
                                 title=item_name,
                                 text=content,
@@ -1187,7 +1188,7 @@ class SharePointContentService:
                     )
                     continue
 
-                if content:
+                if content and not is_unextractable_content(content):
                     await self._process_info_blob(
                         title=doc_name,
                         text=content,
@@ -1604,7 +1605,7 @@ class SharePointContentService:
 
             content, skip_reason = await self._get_file_content(client, item)
 
-            if content:
+            if content and not is_unextractable_content(content):
                 await self._process_info_blob(
                     title=item_name,
                     text=content,

@@ -1535,3 +1535,40 @@ class TestOutOfScopeFolderSubtreeCleanup:
 
         mock_collect.assert_not_called()
         repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+
+
+class TestIsUnextractableContent:
+    """Extraction sentinels must not be treated as real document content."""
+
+    def test_empty_and_whitespace_are_unextractable(self):
+        from intric.integration.infrastructure.content_service.utils import (
+            is_unextractable_content,
+        )
+
+        assert is_unextractable_content("") is True
+        assert is_unextractable_content("   \n\t ") is True
+        assert is_unextractable_content(None) is True
+
+    def test_sentinel_strings_are_unextractable(self):
+        from intric.integration.infrastructure.content_service.utils import (
+            is_unextractable_content,
+        )
+
+        assert is_unextractable_content("[No readable text found]") is True
+        assert (
+            is_unextractable_content(
+                "  [Could not extract text from PowerPoint presentation]  "
+            )
+            is True
+        )
+        assert (
+            is_unextractable_content("[Could not extract text from Excel spreadsheet]")
+            is True
+        )
+
+    def test_real_text_is_extractable(self):
+        from intric.integration.infrastructure.content_service.utils import (
+            is_unextractable_content,
+        )
+
+        assert is_unextractable_content("Real document content here.") is False
