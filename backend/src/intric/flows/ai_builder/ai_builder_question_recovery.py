@@ -6,6 +6,7 @@ from typing import Any, AsyncGenerator, TypeAlias
 from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
     persist_backend_question,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import RuntimeToolCall
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
 )
@@ -63,12 +64,12 @@ _QUESTION_RECOVERY_REQUEST_ID = "question-recovery"
 @dataclass(frozen=True)
 class StructuredQuestionRecoveryRequest:
     ctx: ProposalTurnContext
-    tool_call: Any
+    tool_call: RuntimeToolCall
 
 
 @dataclass(frozen=True)
 class RecoveredToolDispatchRequest:
-    tool_calls: list[Any]
+    tool_calls: list[RuntimeToolCall]
     text_content: str | None
     llm_messages: list[dict[str, Any]]
     tool_schemas: list[dict[str, Any]]

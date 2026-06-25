@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     record_proposal_architecture_failure,
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    RuntimeToolCall,
     provider_safe_tool_call_id,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import TargetKind
@@ -65,7 +66,7 @@ class ForcedToolRetryOutcome:
 class ProposalSelfCorrectionRequest:
     ctx: ProposalTurnContext
     error_message: str
-    tool_call: Any
+    tool_call: RuntimeToolCall
     self_correction_temperature: float
     self_correction_bumped_temperature: float
     max_self_correction_retries: int
@@ -229,7 +230,7 @@ def _build_tool_retry_invocation(
 def build_tool_retry_messages(
     *,
     llm_messages: list[dict[str, Any]],
-    tool_call: Any,
+    tool_call: RuntimeToolCall,
     tool_feedback: str,
     assistant_content: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -308,7 +309,7 @@ def build_proposal_self_correction_request(
     *,
     ctx: ProposalTurnContext,
     error_message: str,
-    tool_call: Any,
+    tool_call: RuntimeToolCall,
     retry_config: ToolRetryConfig,
     self_correction_temperature: float,
     self_correction_bumped_temperature: float,

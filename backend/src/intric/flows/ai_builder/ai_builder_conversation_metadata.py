@@ -270,6 +270,9 @@ class RuntimeToolFunction(Protocol):
     @property
     def name(self) -> str: ...
 
+    @property
+    def arguments(self) -> str: ...
+
 
 class RuntimeToolCall(Protocol):
     @property

@@ -176,7 +176,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: Any,
+        tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[dict[str, str], None] | None:
         tool_name = tool_call.function.name
         if tool_name != PROPOSE_FLOW_TOOL_NAME:
@@ -513,7 +513,7 @@ class ProposalSubmissionOwner:
         *,
         ctx: ProposalTurnContext,
         error_message: str,
-        tool_call: Any,
+        tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
     ) -> ProposalSelfCorrectionRequest:
         return build_proposal_self_correction_request(
@@ -556,7 +556,7 @@ class ProposalSubmissionOwner:
         *,
         ctx: ProposalTurnContext,
         error_message: str,
-        tool_call: Any,
+        tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
         reason: ProposalRepairReason,
     ) -> AsyncGenerator[dict[str, str], None]:
@@ -628,7 +628,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: LLMCompletionToolCall,
+        tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[dict[str, str], None]:
         target_kind = TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT
         is_create = target_kind == TargetKind.CREATE
@@ -775,7 +775,7 @@ def _initial_submission_invocation(
     ctx: ProposalTurnContext,
     arguments: dict[str, Any],
     assistant_content: str,
-    tool_call: LLMCompletionToolCall,
+    tool_call: RuntimeToolCall,
 ) -> ToolRetryInvocation:
     return ToolRetryInvocation(
         turn=ctx.turn,

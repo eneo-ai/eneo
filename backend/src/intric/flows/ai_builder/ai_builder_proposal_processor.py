@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncGenerator,
 )
 
 from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_confirm_requirements import (
     build_confirm_requirements_retry_config,
     process_confirm_requirements,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import RuntimeToolCall
 from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -128,7 +129,7 @@ class AIBuilderProposalProcessor:
         turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        tool_calls: list[Any],
+        tool_calls: Sequence[RuntimeToolCall],
         text_content: str | None,
         llm_messages: list[dict[str, Any]],
         tool_schemas: list[dict[str, Any]],
@@ -254,7 +255,7 @@ class AIBuilderProposalProcessor:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: Any,
+        tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[dict[str, str], None] | None:
         tool_name = tool_call.function.name
         if tool_name == ASK_STRUCTURED_QUESTION_TOOL_NAME:
@@ -277,7 +278,7 @@ class AIBuilderProposalProcessor:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: Any,
+        tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[dict[str, str], None]:
         request = StructuredQuestionRecoveryRequest(
             ctx=ctx,
@@ -376,7 +377,7 @@ class AIBuilderProposalProcessor:
         self,
         *,
         ctx: ProposalTurnContext,
-        tool_call: Any,
+        tool_call: RuntimeToolCall,
     ) -> AsyncGenerator[dict[str, str], None]:
         retry_config = build_confirm_requirements_retry_config(
             ConfirmRequirementsRetryConfigRequest(
