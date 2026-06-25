@@ -5,8 +5,42 @@
 1. Phase 4 source work is complete: the custom Builder LLM runtime has one typed planner turn owner and a narrower proposal completion boundary.
 2. The source delta from `61facd8a3` to `13ecf2bae` deleted 2 Builder production files, 793 Builder production LOC, 31 `dict[str, Any]` occurrences, and 40 `Any` tokens.
 3. Remaining retry loops are deliberately kept because each owns product-visible stream, validation, or recovery behavior with focused tests.
-4. Phase 5A is a **conditional go for design and red tests only**, not implementation.
+4. Phase 5A now has one Assistant-owned update command boundary; MCP/capability adapters remain out of scope.
 5. Do not cherry-pick PR #480 broadly; reuse only the ideas that help create one typed Assistant command owner.
+
+## Current Phase 5A Status
+
+This document originally ended Phase 4 with a **conditional go for Phase 5A
+design and red tests only**. A later explicit Phase 5A goal implemented the
+small command-owner slice described by that gate. The historical gate remains
+below for decision context, but its "do not implement under this Phase 4 goal"
+wording is no longer the current state.
+
+| Concept | Current owner | Evidence |
+| --- | --- | --- |
+| Assistant update command shape | `AssistantUpdateCommand` in `intric.assistants` | `backend/src/intric/assistants/assistant_update.py` |
+| Standalone and Flow request conversion | Assistant API adapter with two thin wrappers over one shared extractor | `backend/src/intric/assistants/api/assistant_update_adapter.py` |
+| Assistant update execution | `AssistantService.update_assistant(...)` accepts one command and explicit caller mode | `backend/src/intric/assistants/assistant_service.py` |
+| Flow-managed ownership | `FlowService.update_flow_assistant(...)` keeps Flow ownership checks and forwards `AssistantUpdateCaller.FLOW_MANAGED` | `backend/src/intric/flows/application/flow_service.py` |
+| Deleted duplicate owner | Former Flow-owned update command and adapter removed | `backend/src/intric/flows/application/flow_assistant_update.py`, `backend/src/intric/flows/api/flow_assistant_update_adapter.py` |
+
+```mermaid
+flowchart LR
+  Standalone["Standalone Assistant HTTP"]
+  FlowHTTP["Flow Assistant HTTP"]
+  Adapter["Assistant update adapter"]
+  Command["AssistantUpdateCommand"]
+  AssistantService["AssistantService.update_assistant"]
+  FlowService["FlowService.update_flow_assistant"]
+
+  Standalone --> Adapter --> Command --> AssistantService
+  FlowHTTP --> Adapter --> Command --> FlowService --> AssistantService
+```
+
+Phase 5A deliberately did **not** add MCP adapters, capability registries,
+internal Builder-to-MCP calls, PR #480 code, public API shape changes, or DB
+migrations. It only made the existing Assistant mutation semantics explicit and
+reusable.
 
 ## Verdict
 
@@ -175,7 +209,7 @@ The source slices were validated before this packet:
 This packet changes documentation only. Source validation should be rerun before
 pushing if new source files change after `13ecf2bae`.
 
-## Phase 5A Go / No-Go Packet
+## Historical Phase 5A Go / No-Go Packet
 
 ### Verdict
 

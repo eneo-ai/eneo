@@ -13,6 +13,9 @@ from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantUpdatePublic,
 )
+from intric.assistants.api.assistant_update_adapter import (
+    to_standalone_assistant_update_command,
+)
 from intric.assistants.assistant import AssistantOrigin
 
 # Audit logging - module level imports for consistency
@@ -40,7 +43,6 @@ from intric.database.database import AsyncSession
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.models import (
-    NOT_PROVIDED,
     CursorPaginatedResponse,
     PaginatedResponse,
     is_provided,
@@ -633,81 +635,10 @@ async def update_assistant(
         result = await service.repo.session.execute(stmt)
         old_mcp_tool_overrides = {str(row[0]): row[1] for row in result.all()}
 
-    attachment_ids = None
-    if assistant.attachments is not None:
-        attachment_ids = [attachment.id for attachment in assistant.attachments]
-
-    groups = None
-    if assistant.groups is not None:
-        groups = [g.id for g in assistant.groups]
-
-    websites = None
-    if assistant.websites is not None:
-        websites = [w.id for w in assistant.websites]
-
-    integration_knowledge_ids = None
-    if assistant.integration_knowledge_list is not None:
-        integration_knowledge_ids = [i.id for i in assistant.integration_knowledge_list]
-
-    mcp_server_ids = None
-    if assistant.mcp_servers is not None:
-        mcp_server_ids = [m.id for m in assistant.mcp_servers]
-
-    mcp_tool_settings = None
-    if assistant.mcp_tools is not None:
-        mcp_tool_settings = [
-            (tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools
-        ]
-
-    # `completion_model` is a deprecated request field on this route. Keep the
-    # service sentinel so omitted, null, and non-null deprecated input all
-    # preserve the existing assistant model.
-    completion_model_id = NOT_PROVIDED
-
-    completion_model_kwargs = None
-    if assistant.completion_model_kwargs is not None:
-        completion_model_kwargs = assistant.completion_model_kwargs
-
-    # get original request dict to check if description was actually provided
-    # (@partial_model overrides NOT_PROVIDED with None)
-    request_dict = assistant.model_dump(exclude_unset=True)
-    description = assistant.description
-    metadata_json = assistant.metadata_json
-
-    # if description wasn't in the original request, use NOT_PROVIDED
-    if "description" not in request_dict:
-        description = NOT_PROVIDED
-
-    if "metadata_json" not in request_dict:
-        metadata_json = NOT_PROVIDED
-
-    data_retention_days = assistant.data_retention_days
-    if "data_retention_days" not in request_dict:
-        data_retention_days = NOT_PROVIDED
-
-    # Handle icon_id: check if it was provided in the request
-    icon_id = NOT_PROVIDED
-    if "icon_id" in request_dict:
-        icon_id = assistant.icon_id
-
+    update = to_standalone_assistant_update_command(assistant)
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
-        name=assistant.name,
-        prompt=assistant.prompt,
-        completion_model_id=completion_model_id,
-        completion_model_kwargs=completion_model_kwargs,
-        logging_enabled=assistant.logging_enabled,
-        attachment_ids=attachment_ids,
-        groups=groups,
-        websites=websites,
-        integration_knowledge_ids=integration_knowledge_ids,
-        mcp_server_ids=mcp_server_ids,
-        mcp_tools=mcp_tool_settings,
-        description=description,
-        insight_enabled=assistant.insight_enabled,
-        data_retention_days=data_retention_days,
-        metadata_json=metadata_json,
-        icon_id=icon_id,
+        update=update,
     )
 
     changes, change_summary = _build_assistant_update_changes(
@@ -715,7 +646,7 @@ async def update_assistant(
         old_assistant=old_assistant,
         updated_assistant=updated_assistant,
         completion_model_id=None,
-        description=description,
+        description=update.description,
         old_mcp_tool_overrides=old_mcp_tool_overrides,
     )
 

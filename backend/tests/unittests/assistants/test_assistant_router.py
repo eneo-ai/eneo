@@ -363,10 +363,9 @@ class TestUpdateAssistant:
             container=mock_container,
         )
 
-        assert (
-            service.update_assistant.await_args.kwargs["completion_model_id"]
-            is NOT_PROVIDED
-        )
+        update = service.update_assistant.await_args.kwargs["update"]
+        assert update.completion_model_id is NOT_PROVIDED
+        assert not update.is_set("completion_model_id")
 
     async def test_preserves_completion_model_when_deprecated_field_is_null(
         self,
@@ -386,10 +385,9 @@ class TestUpdateAssistant:
             container=mock_container,
         )
 
-        assert (
-            service.update_assistant.await_args.kwargs["completion_model_id"]
-            is NOT_PROVIDED
-        )
+        update = service.update_assistant.await_args.kwargs["update"]
+        assert update.completion_model_id is NOT_PROVIDED
+        assert not update.is_set("completion_model_id")
 
     async def test_preserves_completion_model_when_deprecated_field_is_non_null(
         self,
@@ -412,10 +410,9 @@ class TestUpdateAssistant:
             container=mock_container,
         )
 
-        assert (
-            service.update_assistant.await_args.kwargs["completion_model_id"]
-            is NOT_PROVIDED
-        )
+        update = service.update_assistant.await_args.kwargs["update"]
+        assert update.completion_model_id is NOT_PROVIDED
+        assert not update.is_set("completion_model_id")
 
 
 class TestAssistantResponseStructure:

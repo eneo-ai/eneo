@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from intric.assistants.assistant_service import AssistantService
+from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED
 from intric.services.service import DatastoreResult
@@ -47,6 +48,18 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         effective_config_service=effective_config_service,
+    )
+
+
+async def _update_assistant(
+    service: AssistantService,
+    *,
+    assistant_id,
+    **fields: object,
+):
+    return await service.update_assistant(
+        assistant_id=assistant_id,
+        update=AssistantUpdateCommand.model_validate(fields),
     )
 
 
@@ -436,7 +449,7 @@ async def test_update_assistant_omitted_model_is_not_a_model_change():
         )
     )
 
-    await service.update_assistant(assistant_id=assistant.id)
+    await _update_assistant(service, assistant_id=assistant.id)
 
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
@@ -457,7 +470,8 @@ async def test_update_assistant_allows_allowed_model_change():
     )
     space.get_completion_model.return_value = TEST_MODEL_GPT4
 
-    await service.update_assistant(
+    await _update_assistant(
+        service,
         assistant_id=assistant.id,
         completion_model_id=TEST_MODEL_GPT4.id,
     )
@@ -486,7 +500,8 @@ async def test_update_assistant_rejects_disallowed_model_change():
         BadRequestException,
         match="Model not allowed by personal assistant governance policy",
     ):
-        await service.update_assistant(
+        await _update_assistant(
+            service,
             assistant_id=assistant.id,
             completion_model_id=disallowed_model_id,
         )
@@ -509,7 +524,8 @@ async def test_update_assistant_explicit_none_clears_model_without_policy_lookup
         )
     )
 
-    await service.update_assistant(
+    await _update_assistant(
+        service,
         assistant_id=assistant.id,
         completion_model_id=None,
     )

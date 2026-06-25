@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate,
     FlowDraftAssistantToDelete,
@@ -309,8 +309,8 @@ async def test_slot_refs_configure_model_knowledge_and_mcp() -> None:
     first_update, second_update = service.update_flow_assistant.await_args_list
     first_command = first_update.kwargs["update"]
     second_command = second_update.kwargs["update"]
-    assert isinstance(first_command, FlowAssistantUpdateCommand)
-    assert isinstance(second_command, FlowAssistantUpdateCommand)
+    assert isinstance(first_command, AssistantUpdateCommand)
+    assert isinstance(second_command, AssistantUpdateCommand)
     assert first_command.completion_model_id == model_id
     assert first_command.groups == [collection_id]
     assert first_command.mcp_server_ids == []
@@ -384,7 +384,7 @@ async def test_knowledge_bindings_are_materialized_by_local_kind() -> None:
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
-    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert isinstance(command, AssistantUpdateCommand)
     assert command.groups == [collection_id]
     assert command.websites == [website_id]
     assert command.integration_knowledge_ids == [integration_knowledge_id]
@@ -418,7 +418,7 @@ async def test_step_without_knowledge_or_mcp_clears_resource_lists() -> None:
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
-    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert isinstance(command, AssistantUpdateCommand)
     assert command.groups == []
     assert command.websites == []
     assert command.integration_knowledge_ids == []
@@ -466,7 +466,7 @@ async def test_materializer_clears_completion_model_for_transcribe_only_create_c
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
-    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert isinstance(command, AssistantUpdateCommand)
     assert command.completion_model_id is None
     assert "completion_model_id" in command.model_fields_set
 
@@ -508,7 +508,7 @@ async def test_materializer_clears_completion_model_for_transcribe_only_update_c
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
-    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert isinstance(command, AssistantUpdateCommand)
     assert command.completion_model_id is None
     assert "completion_model_id" in command.model_fields_set
 

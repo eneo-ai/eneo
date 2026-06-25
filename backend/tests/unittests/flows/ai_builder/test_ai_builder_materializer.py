@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.flows.ai_builder.ai_builder_authoring_projection import (
     AddStep,
     AssistantSpecPatch,
@@ -19,7 +20,6 @@ from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate as AssistantToCreate,
 )
@@ -110,9 +110,9 @@ def _make_spec(
     )
 
 
-def _update_command_from_call(call) -> FlowAssistantUpdateCommand:
+def _update_command_from_call(call) -> AssistantUpdateCommand:
     command = call.kwargs["update"]
-    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert isinstance(command, AssistantUpdateCommand)
     return command
 
 

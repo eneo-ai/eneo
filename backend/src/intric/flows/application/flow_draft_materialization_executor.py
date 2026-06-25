@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import assert_never
 from uuid import UUID, uuid4
 
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToDelete,
     FlowDraftChangeSet,
@@ -414,7 +414,7 @@ async def _configure_assistant(
     await flow_service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant_id,
-        update=FlowAssistantUpdateCommand.model_validate(command_fields),
+        update=AssistantUpdateCommand.model_validate(command_fields),
     )
 
 

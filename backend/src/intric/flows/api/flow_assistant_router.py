@@ -9,14 +9,14 @@ from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantUpdatePublic,
 )
+from intric.assistants.api.assistant_update_adapter import (
+    to_flow_assistant_update_command,
+)
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.flows.api import flow_access_context
 from intric.flows.api.flow_api_common import error_response
-from intric.flows.api.flow_assistant_update_adapter import (
-    to_flow_assistant_update_command,
-)
 from intric.flows.api.flow_models import FlowAssistantCreateRequest
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.main.container.container import Container

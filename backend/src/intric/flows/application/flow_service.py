@@ -6,9 +6,12 @@ from uuid import UUID
 
 from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
+from intric.assistants.assistant_update import (
+    AssistantUpdateCaller,
+    AssistantUpdateCommand,
+)
 from intric.files.file_models import File
 from intric.files.file_repo import FileRepository
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
@@ -306,7 +309,7 @@ class FlowService:
         *,
         flow_id: UUID,
         assistant_id: UUID,
-        update: FlowAssistantUpdateCommand,
+        update: AssistantUpdateCommand,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         flow = await self.get_flow(flow_id)
         self._ensure_flow_is_mutable(flow)
@@ -319,27 +322,9 @@ class FlowService:
         )
         return await self.assistant_service.update_assistant(
             assistant_id=assistant_id,
+            update=update,
+            caller=AssistantUpdateCaller.FLOW_MANAGED,
             include_hidden=True,
-            name=update.name,
-            prompt=update.prompt,
-            completion_model_id=(
-                update.completion_model_id
-                if update.is_set("completion_model_id")
-                else NOT_PROVIDED
-            ),
-            completion_model_kwargs=update.completion_model_kwargs,
-            logging_enabled=update.logging_enabled,
-            groups=update.groups,
-            websites=update.websites,
-            integration_knowledge_ids=update.integration_knowledge_ids,
-            mcp_server_ids=update.mcp_server_ids,
-            mcp_tools=update.mcp_tools,
-            attachment_ids=update.attachment_ids,
-            description=update.description,
-            insight_enabled=update.insight_enabled,
-            data_retention_days=update.data_retention_days,
-            metadata_json=update.metadata_json,
-            icon_id=update.icon_id,
         )
 
     async def delete_flow_assistant(
@@ -562,7 +547,7 @@ class FlowService:
         *,
         flow: Flow,
         assistant: Assistant,
-        update: FlowAssistantUpdateCommand,
+        update: AssistantUpdateCommand,
     ) -> None:
         if self.space_service is None:
             return
@@ -601,7 +586,7 @@ class FlowService:
         *,
         assistant: Assistant,
         space: Any,
-        update: FlowAssistantUpdateCommand,
+        update: AssistantUpdateCommand,
     ) -> Any:
         completion_model = assistant.completion_model
         if update.is_set("completion_model_id"):

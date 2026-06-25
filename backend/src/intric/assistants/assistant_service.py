@@ -2,7 +2,7 @@ import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Optional, TypeVar, cast
 from uuid import UUID
 
 from intric.ai_models.completion_models.completion_model import (
@@ -16,6 +16,10 @@ from intric.assistants.api.assistant_models import AssistantResponse
 from intric.assistants.assistant import Assistant, AssistantOrigin
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.assistants.assistant_repo import AssistantRepository
+from intric.assistants.assistant_update import (
+    AssistantUpdateCaller,
+    AssistantUpdateCommand,
+)
 from intric.assistants.reference_tags import extract_inline_reference_ids
 from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
@@ -48,7 +52,6 @@ from intric.main.models import (
     ResourcePermission,
     is_provided,
 )
-from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_service import PromptService
 from intric.questions.question import ToolAssistant, ToolCallInfo, UseTools
@@ -488,25 +491,29 @@ class AssistantService:
 
     async def update_assistant(
         self,
+        *,
         assistant_id: UUID,
-        name: str | None = None,
-        prompt: PromptCreate | None = None,
-        completion_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-        completion_model_kwargs: ModelKwargs | None = None,
-        logging_enabled: bool | None = None,
-        groups: list[UUID] | None = None,
-        websites: list[UUID] | None = None,
-        integration_knowledge_ids: list[UUID] | None = None,
-        mcp_server_ids: list[UUID] | None = None,
-        mcp_tools: list[tuple[UUID, bool]] | None = None,
-        attachment_ids: list[UUID] | None = None,
-        description: Union[str, None, NotProvided] = NOT_PROVIDED,
-        insight_enabled: Optional[bool] = None,
-        data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
-        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
-        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        update: AssistantUpdateCommand,
+        caller: AssistantUpdateCaller = AssistantUpdateCaller.STANDALONE,
         include_hidden: bool = False,
     ) -> tuple[Assistant, list[ResourcePermission]]:
+        name = update.name
+        prompt = update.prompt
+        completion_model_id = update.completion_model_id
+        completion_model_kwargs = update.completion_model_kwargs
+        logging_enabled = update.logging_enabled
+        groups = update.groups
+        websites = update.websites
+        integration_knowledge_ids = update.integration_knowledge_ids
+        mcp_server_ids = update.mcp_server_ids
+        mcp_tools = update.mcp_tools
+        attachment_ids = update.attachment_ids
+        description = update.description
+        insight_enabled = update.insight_enabled
+        data_retention_days = update.data_retention_days
+        metadata_json = update.metadata_json
+        icon_id = update.icon_id
+
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
 
@@ -519,6 +526,20 @@ class AssistantService:
                 raise UnauthorizedException("Only admins can toggle insights")
 
         assistant = space.get_assistant(assistant_id=assistant_id)
+        if caller is AssistantUpdateCaller.STANDALONE:
+            _reject_direct_flow_managed_assistant_mutation(assistant, action="update")
+        elif (
+            caller is AssistantUpdateCaller.FLOW_MANAGED
+            and assistant.origin != AssistantOrigin.FLOW_MANAGED
+        ):
+            raise BadRequestException(
+                "Flow-managed update caller requires a flow-managed assistant.",
+                code="flow_managed_assistant",
+                context={
+                    "assistant_id": str(assistant.id),
+                    "action": "update",
+                },
+            )
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection only; broader configuration

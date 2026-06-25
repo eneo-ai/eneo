@@ -2,7 +2,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -10,9 +10,13 @@ from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
-    AssistantUpdatePublic,
 )
+from intric.assistants.assistant import AssistantOrigin
 from intric.assistants.assistant_service import AssistantService
+from intric.assistants.assistant_update import (
+    AssistantUpdateCaller,
+    AssistantUpdateCommand,
+)
 from intric.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
@@ -101,6 +105,28 @@ def setup_fixture():
     return setup
 
 
+async def _update_assistant(
+    service: AssistantService,
+    assistant_id: UUID = TEST_UUID,
+    *,
+    update: AssistantUpdateCommand | None = None,
+    caller: AssistantUpdateCaller = AssistantUpdateCaller.STANDALONE,
+    include_hidden: bool = False,
+    **fields: object,
+):
+    if update is None:
+        update = AssistantUpdateCommand.model_validate(fields)
+    elif fields:
+        raise AssertionError("pass either update or fields, not both")
+
+    return await service.update_assistant(
+        assistant_id=assistant_id,
+        update=update,
+        caller=caller,
+        include_hidden=include_hidden,
+    )
+
+
 @pytest.fixture
 async def assistant_service():
     return AssistantService(
@@ -135,20 +161,16 @@ def with_two_different_groups(setup: Setup, attr: str, value_1: Any, value_2: An
 
 
 async def test_update_space_assistant_not_member(setup: Setup):
-    assistant_update = AssistantUpdatePublic(name="new name!")
-
     actor = MagicMock()
     actor.can_edit_assistants.return_value = False
     setup.service.actor_manager.get_space_actor_from_space.return_value = actor
 
     with pytest.raises(UnauthorizedException):
-        await setup.service.update_assistant(assistant_update, TEST_UUID)
+        await _update_assistant(setup.service, name="new name!")
 
 
 async def test_update_space_assistant_member(setup: Setup):
-    assistant_update = AssistantUpdatePublic(name="new name!")
-
-    await setup.service.update_assistant(assistant_update, TEST_UUID)
+    await _update_assistant(setup.service, name="new name!")
 
 
 async def test_is_help_assistant_true_when_active_role_exists(setup: Setup):
@@ -190,8 +212,8 @@ async def test_update_assistant_completion_model_not_in_space(setup: Setup):
         BadRequestException,
         match="Completion model is not in space.",
     ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID, completion_model_id=uuid4()
+        await _update_assistant(
+            setup.service, assistant_id=TEST_UUID, completion_model_id=uuid4()
         )
 
 
@@ -202,7 +224,7 @@ async def test_partial_update_skips_completion_model_validation(setup: Setup):
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
     # Should NOT raise — we're only changing icon_id, not completion model
-    await setup.service.update_assistant(assistant_id=TEST_UUID, icon_id=uuid4())
+    await _update_assistant(setup.service, assistant_id=TEST_UUID, icon_id=uuid4())
 
     space.is_completion_model_in_space.assert_not_called()
 
@@ -210,14 +232,15 @@ async def test_partial_update_skips_completion_model_validation(setup: Setup):
 async def test_update_assistant_omitted_completion_model_preserves_existing_model(
     setup: Setup,
 ):
-    await setup.service.update_assistant(assistant_id=TEST_UUID, name="new name")
+    await _update_assistant(setup.service, assistant_id=TEST_UUID, name="new name")
 
     assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
     assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
 
 
 async def test_update_assistant_explicit_none_clears_completion_model(setup: Setup):
-    await setup.service.update_assistant(
+    await _update_assistant(
+        setup.service,
         assistant_id=TEST_UUID,
         completion_model_id=None,
     )
@@ -226,13 +249,172 @@ async def test_update_assistant_explicit_none_clears_completion_model(setup: Set
     assert assistant.update.call_args.kwargs["completion_model"] is None
 
 
+async def test_update_assistant_command_preserves_clears_and_sets_completion_model(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    space = setup.service.space_repo.get_space_by_assistant.return_value
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(name="preserve"),
+    )
+    assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(completion_model_id=None),
+    )
+    assert assistant.update.call_args.kwargs["completion_model"] is None
+
+    model_id = uuid4()
+    model = MagicMock(id=model_id)
+    space.get_completion_model.return_value = model
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(completion_model_id=model_id),
+    )
+    assert assistant.update.call_args.kwargs["completion_model"] == model
+
+
+async def test_update_assistant_command_translates_clearable_fields_to_domain(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    icon_id = uuid4()
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(name="preserve"),
+    )
+    preserve_kwargs = assistant.update.call_args.kwargs
+    assert preserve_kwargs["description"] is NOT_PROVIDED
+    assert preserve_kwargs["data_retention_days"] is NOT_PROVIDED
+    assert preserve_kwargs["metadata_json"] is NOT_PROVIDED
+    assert preserve_kwargs["icon_id"] is NOT_PROVIDED
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(
+            description=None,
+            data_retention_days=None,
+            metadata_json=None,
+            icon_id=None,
+        ),
+    )
+    clear_kwargs = assistant.update.call_args.kwargs
+    assert clear_kwargs["description"] is None
+    assert clear_kwargs["data_retention_days"] is None
+    assert clear_kwargs["metadata_json"] is None
+    assert clear_kwargs["icon_id"] is None
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(
+            description="Description",
+            data_retention_days=30,
+            metadata_json={"source": "test"},
+            icon_id=icon_id,
+        ),
+    )
+    set_kwargs = assistant.update.call_args.kwargs
+    assert set_kwargs["description"] == "Description"
+    assert set_kwargs["data_retention_days"] == 30
+    assert set_kwargs["metadata_json"] == {"source": "test"}
+    assert set_kwargs["icon_id"] == icon_id
+
+
+async def test_update_assistant_command_preserves_omitted_list_and_clears_empty_list(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(name="preserve"),
+    )
+    assert assistant.update.call_args.kwargs["collections"] is None
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(groups=[]),
+    )
+    assert assistant.update.call_args.kwargs["collections"] == []
+
+
+async def test_update_assistant_rejects_standalone_flow_managed_before_side_effects(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.id = TEST_UUID
+    assistant.origin = AssistantOrigin.FLOW_MANAGED
+    assistant.managing_flow_id = uuid4()
+    setup.service.effective_config_service = AsyncMock()
+
+    with pytest.raises(BadRequestException, match="Flow-managed assistants"):
+        await _update_assistant(
+            setup.service,
+            assistant_id=TEST_UUID,
+            update=AssistantUpdateCommand(
+                prompt=PromptCreate(text="new prompt"),
+                completion_model_id=uuid4(),
+            ),
+        )
+
+    setup.service.prompt_service.create_prompt.assert_not_awaited()
+    setup.service.effective_config_service.resolve_for.assert_not_awaited()
+    setup.service.space_repo.update.assert_not_awaited()
+    assistant.update.assert_not_called()
+
+
+async def test_update_assistant_allows_flow_managed_caller(setup: Setup):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.origin = AssistantOrigin.FLOW_MANAGED
+    assistant.managing_flow_id = uuid4()
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(name="Renamed"),
+        caller=AssistantUpdateCaller.FLOW_MANAGED,
+    )
+
+    assert assistant.update.call_args.kwargs["name"] == "Renamed"
+
+
+async def test_update_assistant_flow_managed_caller_rejects_regular_assistant(
+    setup: Setup,
+):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.id = TEST_UUID
+    assistant.origin = AssistantOrigin.USER
+
+    with pytest.raises(BadRequestException, match="Flow-managed update caller"):
+        await _update_assistant(
+            setup.service,
+            assistant_id=TEST_UUID,
+            update=AssistantUpdateCommand(name="Renamed"),
+            caller=AssistantUpdateCaller.FLOW_MANAGED,
+        )
+
+    assistant.update.assert_not_called()
+
+
 async def test_update_assistant_completion_model_in_space(setup: Setup):
     space = MagicMock()
     space.is_completion_model_in_space.return_value = True
     setup.service.space_service.get_space.return_value = space
     setup.service.repo.update.return_value = MagicMock(prompt="new prompt!", id=uuid4())
 
-    await setup.service.update_assistant(TEST_UUID)
+    await _update_assistant(setup.service, TEST_UUID)
 
 
 async def test_update_assistant_persists_empty_prompt_to_clear_it(setup: Setup):
@@ -242,7 +424,8 @@ async def test_update_assistant_persists_empty_prompt_to_clear_it(setup: Setup):
     # empty string here is a deliberate "clear the prompt" action, so the
     # service must call create_prompt with the empty string just like it
     # would for any other value.
-    await setup.service.update_assistant(
+    await _update_assistant(
+        setup.service,
         assistant_id=TEST_UUID,
         prompt=PromptCreate(text="", description=""),
     )
@@ -260,7 +443,7 @@ async def test_update_assistant_skips_prompt_creation_when_field_omitted(setup: 
     # (``prompt=None``, the field's default) must NOT create a new prompt
     # version, otherwise every unrelated edit (e.g. just renaming the
     # assistant) would pollute the prompt history.
-    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+    await _update_assistant(setup.service, assistant_id=TEST_UUID, name="renamed")
 
     setup.service.prompt_service.create_prompt.assert_not_awaited()
 
@@ -298,7 +481,8 @@ async def test_personal_chat_can_change_personal_default_completion_model(setup:
     completion_model = MagicMock(id=completion_model_id)
     space.get_completion_model.return_value = completion_model
 
-    await setup.service.update_assistant(
+    await _update_assistant(
+        setup.service,
         assistant_id=TEST_UUID,
         completion_model_id=completion_model_id,
     )
@@ -336,7 +520,7 @@ async def test_personal_chat_cannot_change_extended_default_assistant_fields(
         UnauthorizedException,
         match="only allows changing the personal assistant's completion model",
     ):
-        await setup.service.update_assistant(assistant_id=TEST_UUID, **update)
+        await _update_assistant(setup.service, assistant_id=TEST_UUID, **update)
 
     assistant.update.assert_not_called()
 
@@ -348,7 +532,8 @@ async def test_assistant_managers_can_edit_extended_personal_default_fields(
         setup, can_manage_assistants=True
     )
 
-    await setup.service.update_assistant(
+    await _update_assistant(
+        setup.service,
         assistant_id=TEST_UUID,
         name="Renamed",
     )
@@ -464,7 +649,8 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     with pytest.raises(
         BadRequestException, match="Knowledge and MCP servers cannot both be active"
     ):
-        await setup.service.update_assistant(
+        await _update_assistant(
+            setup.service,
             assistant_id=TEST_UUID,
             mcp_server_ids=[mcp_id],
         )
@@ -489,7 +675,8 @@ async def test_update_rejects_adding_knowledge_when_mcp_exists(setup: Setup):
     with pytest.raises(
         BadRequestException, match="Knowledge and MCP servers cannot both be active"
     ):
-        await setup.service.update_assistant(
+        await _update_assistant(
+            setup.service,
             assistant_id=TEST_UUID,
             groups=[uuid4()],
         )
@@ -514,7 +701,8 @@ async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
     with pytest.raises(
         BadRequestException, match="Knowledge and MCP servers cannot both be active"
     ):
-        await setup.service.update_assistant(
+        await _update_assistant(
+            setup.service,
             assistant_id=TEST_UUID,
             mcp_server_ids=[mcp_id],
         )
@@ -531,7 +719,8 @@ async def test_update_allows_removing_mcp_when_both_exist(setup: Setup):
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
     # Removing all MCP servers should succeed
-    await setup.service.update_assistant(
+    await _update_assistant(
+        setup.service,
         assistant_id=TEST_UUID,
         mcp_server_ids=[],
     )
@@ -551,7 +740,8 @@ async def test_update_allows_removing_knowledge_when_both_exist(setup: Setup):
     assistant.update.side_effect = lambda **kwargs: setattr(
         assistant, "has_knowledge", MagicMock(return_value=False)
     )
-    await setup.service.update_assistant(
+    await _update_assistant(
+        setup.service,
         assistant_id=TEST_UUID,
         groups=[],
         websites=[],

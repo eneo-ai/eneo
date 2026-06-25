@@ -2,15 +2,21 @@
 
 ## Five-line TL;DR
 
-1. Finish Phase 4 Flow AI Builder runtime deletion before platform capability implementation.
+1. Phase 4 Flow AI Builder runtime deletion is complete; Phase 5A Assistant update command ownership is now complete.
 2. Keep this document as the phase-order and merge-gate packet; do not duplicate detailed slice design here.
 3. Treat PR #480 and Dify as references, not architectures to copy.
 4. Every implementation slice must delete a named duplicate owner or remove a named wrong-layer dependency in the same migration.
-5. Stop after Phase 4 with the Phase 5A go/no-go packet; do not implement Assistant configuration, shared descriptors, or MCP in this goal.
+5. Stop after Phase 5A; do not implement shared descriptors, MCP adapters, or platform capability registries without a new explicit goal.
 
 ## Document Precedence
 
 This packet owns **implementation order, gates, and stop conditions**.
+
+Current status: Phase 5A implemented only the Assistant-owned update command
+boundary. It did not start shared descriptors, MCP adapters, internal
+Builder-to-MCP calls, PR #480 cherry-picks, or generated-client-visible API
+changes. The detailed evidence lives in
+[Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
 
 Related docs keep their existing ownership:
 
@@ -20,7 +26,7 @@ Related docs keep their existing ownership:
   owns the detailed question-recovery completion slice and its failure-mode-to-test mapping.
 - [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md)
   owns final Phase 4 completion evidence, retry-loop disposition, and the Phase 5A go/no-go packet.
-- This document owns the active goal sequence: Phase 4 completion, then a Phase 5A go/no-go packet, then stop.
+- This document owns the active goal sequence: Phase 4 completion, Phase 5A command ownership, then stop.
 
 If a later decision record supersedes any of these, it should explicitly say so and delete or shrink stale guidance in the same change.
 
@@ -69,16 +75,16 @@ Do not repeat those decisions in implementation slices. Each slice should name t
 ```mermaid
 flowchart LR
   P4["Phase 4"]
-  Packet["Phase 5A go/no-go packet"]
+  P5A["Phase 5A command owner"]
   Stop["STOP"]
   Future["Future goal selected separately"]
 
-  P4 --> Packet --> Stop
-  Packet -. recommendation only .-> Future
+  P4 --> P5A --> Stop
+  P5A -. recommendation only .-> Future
 ```
 
 This document must not declare the order of future implementation phases.
-The Phase 5A packet owns the next go/no-go recommendation.
+The Phase 5A completion packet owns the next go/no-go recommendation.
 
 ## Phase 4 Scope
 
@@ -174,7 +180,7 @@ do not reuse this historical question-recovery baseline for Phase 5A.
 ## Phase 4 Acceptance Gates
 
 - No Flow runtime/API/persistence/XYFlow changes.
-- No Phase 5A Assistant configuration implementation.
+- No Phase 5A Assistant configuration implementation under the Phase 4 goal.
 - No shared descriptor layer.
 - No MCP adapter, MCP Apps, internal Builder-to-MCP calls, tool search, AI SDK, LangGraph, Dify/Graphon runtime, loops, or branching.
 - Every code slice names:
@@ -257,18 +263,12 @@ consolidation: removing a wrong-layer dependency can justify a narrow cleanup
 slice, but a new capability abstraction must delete or consolidate an existing
 duplicate owner in the same migration.
 
-## Next Step After This Slice
+## Next Step After Phase 5A
 
-Do not start Phase 5A.
+Do not start Phase 5B, shared descriptors, MCP adapters, platform capability
+registries, or Builder-to-MCP execution without a new explicit goal.
 
-The Phase 5A go/no-go packet is now
+The Phase 5A completion record is
 [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md).
-It recommends a conditional go for Phase 5A planning and red tests only:
-
-- no implementation in Phase 4;
-- no broad PR #480 cherry-pick;
-- no MCP adapter before one Assistant command owner exists;
-- red tests first for omission, clearing, Flow-managed ownership, governance,
-  audit, and any explicit revision/idempotency policy.
-
-Any Phase 5A source work requires a new explicit goal.
+It records that the Assistant command owner now exists and that MCP/capability
+adapter work remains intentionally unstarted.

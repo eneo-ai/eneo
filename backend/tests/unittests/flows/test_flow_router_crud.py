@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 import intric.flows.api.flow_http_test_router as flow_http_test_router_module
 from intric.actors.actors.space_actor import SpaceRole
 from intric.assistants.api.assistant_models import AssistantUpdatePublic
+from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.audit.domain.action_types import ActionType
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.flows.api import flow_access_context as flow_access_context_module
@@ -50,7 +51,6 @@ from intric.flows.api.flow_models import (
     FlowStepUpdateRequest,
     FlowUpdateRequest,
 )
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.flows.http_transport import SECRET_SENTINEL
 from intric.flows.http_transport.request_preview import HttpRequestPreview
@@ -631,7 +631,7 @@ async def test_update_flow_assistant_forwards_payload():
     assert kwargs["flow_id"] == flow_id
     assert kwargs["assistant_id"] == assistant_id
     update = kwargs["update"]
-    assert isinstance(update, FlowAssistantUpdateCommand)
+    assert isinstance(update, AssistantUpdateCommand)
     assert update.name == "Updated assistant"
     assert update.attachment_ids == [attachment_id]
     assert update.websites == [website_id]

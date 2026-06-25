@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.flow_tables import BuilderSessions, Flows
 from intric.database.tables.model_providers_table import ModelProviders
@@ -57,7 +58,6 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.application.flow_authoring_command import FlowAuthoringCommandService
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_spec import (
@@ -3954,7 +3954,7 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
         await flow_service.update_flow_assistant(
             flow_id=flow.id,
             assistant_id=assistant.id,
-            update=FlowAssistantUpdateCommand(
+            update=AssistantUpdateCommand(
                 prompt=PromptCreate(text="Skriv ett kort beslutsunderlag i textformat.")
             ),
         )

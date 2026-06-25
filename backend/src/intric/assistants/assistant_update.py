@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal, TypeAlias
 from uuid import UUID
 
@@ -9,7 +10,7 @@ from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.prompts.api.prompt_models import PromptCreate
 
-FlowAssistantUpdateField: TypeAlias = Literal[
+AssistantUpdateField: TypeAlias = Literal[
     "name",
     "prompt",
     "completion_model_id",
@@ -28,7 +29,7 @@ FlowAssistantUpdateField: TypeAlias = Literal[
     "icon_id",
 ]
 
-_SECURITY_RELEVANT_FIELDS: frozenset[FlowAssistantUpdateField] = frozenset(
+_SECURITY_RELEVANT_FIELDS: frozenset[AssistantUpdateField] = frozenset(
     {
         "completion_model_id",
         "groups",
@@ -39,14 +40,19 @@ _SECURITY_RELEVANT_FIELDS: frozenset[FlowAssistantUpdateField] = frozenset(
 )
 
 
-class FlowAssistantUpdateCommand(BaseModel):
-    """Typed Flow assistant update payload with field-set tracking."""
+class AssistantUpdateCaller(StrEnum):
+    STANDALONE = "standalone"
+    FLOW_MANAGED = "flow_managed"
+
+
+class AssistantUpdateCommand(BaseModel):
+    """Typed assistant update payload with field-set tracking."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str | None = None
     prompt: PromptCreate | None = None
-    completion_model_id: UUID | None = None
+    completion_model_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)
     completion_model_kwargs: ModelKwargs | None = None
     logging_enabled: bool | None = None
     groups: list[UUID] | None = None
@@ -61,10 +67,12 @@ class FlowAssistantUpdateCommand(BaseModel):
     metadata_json: dict[str, object] | None | NotProvided = Field(default=NOT_PROVIDED)
     icon_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)
 
-    def is_set(self, field_name: FlowAssistantUpdateField) -> bool:
+    def is_set(self, field_name: AssistantUpdateField) -> bool:
         return field_name in self.model_fields_set
 
-    def changed_security_field_names(self) -> frozenset[FlowAssistantUpdateField]:
+    def changed_security_field_names(self) -> frozenset[AssistantUpdateField]:
         return frozenset(
-            field for field in _SECURITY_RELEVANT_FIELDS if field in self.model_fields_set
+            field
+            for field in _SECURITY_RELEVANT_FIELDS
+            if field in self.model_fields_set
         )

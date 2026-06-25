@@ -9,7 +9,10 @@ import pytest
 
 from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.assistant import Assistant, AssistantOrigin
-from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.assistants.assistant_update import (
+    AssistantUpdateCaller,
+    AssistantUpdateCommand,
+)
 from intric.flows.application.flow_service import FlowService
 from intric.flows.assistant_execution_snapshot import stable_hash
 from intric.flows.domain.flow import Flow, FlowStep, FlowVersion
@@ -1979,7 +1982,7 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=uuid4(),
-            update=FlowAssistantUpdateCommand(name="Updated"),
+            update=AssistantUpdateCommand(name="Updated"),
         )
 
 
@@ -2157,31 +2160,18 @@ async def test_update_flow_assistant_passes_include_hidden(user):
     assistant_service.get_assistant.return_value = (owned_assistant, [])
     assistant_service.update_assistant.return_value = (owned_assistant, [])
 
+    update = AssistantUpdateCommand(name="Updated")
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=owned_assistant.id,
-        update=FlowAssistantUpdateCommand(name="Updated"),
+        update=update,
     )
 
     assistant_service.update_assistant.assert_awaited_once_with(
         assistant_id=owned_assistant.id,
+        update=update,
+        caller=AssistantUpdateCaller.FLOW_MANAGED,
         include_hidden=True,
-        name="Updated",
-        prompt=None,
-        completion_model_id=NOT_PROVIDED,
-        completion_model_kwargs=None,
-        logging_enabled=None,
-        groups=None,
-        websites=None,
-        integration_knowledge_ids=None,
-        mcp_server_ids=None,
-        mcp_tools=None,
-        attachment_ids=None,
-        description=NOT_PROVIDED,
-        insight_enabled=None,
-        data_retention_days=NOT_PROVIDED,
-        metadata_json=NOT_PROVIDED,
-        icon_id=NOT_PROVIDED,
     )
 
 
@@ -2226,16 +2216,21 @@ async def test_update_flow_assistant_explicit_none_forwards_completion_model_cle
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=owned_assistant.id,
-        update=FlowAssistantUpdateCommand(completion_model_id=None),
+        update=AssistantUpdateCommand(completion_model_id=None),
     )
 
     assert (
         "completion_model_id"
-        in FlowAssistantUpdateCommand(completion_model_id=None).model_fields_set
+        in AssistantUpdateCommand(completion_model_id=None).model_fields_set
+    )
+    update = assistant_service.update_assistant.await_args.kwargs["update"]
+    assert update.completion_model_id is None
+    assert (
+        assistant_service.update_assistant.await_args.kwargs["caller"]
+        is AssistantUpdateCaller.FLOW_MANAGED
     )
     assert (
-        assistant_service.update_assistant.await_args.kwargs["completion_model_id"]
-        is None
+        assistant_service.update_assistant.await_args.kwargs["include_hidden"] is True
     )
 
 
@@ -2285,7 +2280,7 @@ async def test_update_flow_assistant_forwards_every_command_field(user):
     icon_id = uuid4()
     model_kwargs = ModelKwargs(reasoning_effort="low")
 
-    update = FlowAssistantUpdateCommand(
+    update = AssistantUpdateCommand(
         name="Updated",
         prompt=PromptCreate(text="Updated prompt"),
         completion_model_id=model_id,
@@ -2312,23 +2307,9 @@ async def test_update_flow_assistant_forwards_every_command_field(user):
 
     assistant_service.update_assistant.assert_awaited_once_with(
         assistant_id=assistant.id,
+        update=update,
+        caller=AssistantUpdateCaller.FLOW_MANAGED,
         include_hidden=True,
-        name="Updated",
-        prompt=update.prompt,
-        completion_model_id=model_id,
-        completion_model_kwargs=model_kwargs,
-        logging_enabled=True,
-        groups=[group_id],
-        websites=[website_id],
-        integration_knowledge_ids=[integration_id],
-        mcp_server_ids=[server_id],
-        mcp_tools=[(tool_id, False)],
-        attachment_ids=[attachment_id],
-        description=None,
-        insight_enabled=True,
-        data_retention_days=30,
-        metadata_json={"source": "test"},
-        icon_id=icon_id,
     )
 
 
@@ -2376,7 +2357,7 @@ async def test_update_flow_assistant_skips_security_validation_without_security_
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant.id,
-        update=FlowAssistantUpdateCommand(name="Renamed"),
+        update=AssistantUpdateCommand(name="Renamed"),
     )
 
     space_service.get_space.assert_not_awaited()
@@ -2431,7 +2412,7 @@ async def test_update_flow_assistant_validates_explicit_security_field_set_to_no
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant.id,
-        update=FlowAssistantUpdateCommand(groups=None),
+        update=AssistantUpdateCommand(groups=None),
     )
 
     space_service.get_space.assert_awaited_once_with(flow.space_id)
@@ -2484,7 +2465,7 @@ async def test_update_flow_assistant_security_validation_accepts_model_clear(use
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant.id,
-        update=FlowAssistantUpdateCommand(completion_model_id=None),
+        update=AssistantUpdateCommand(completion_model_id=None),
     )
 
     space_service.get_space.assert_awaited_once_with(flow.space_id)
@@ -2558,7 +2539,7 @@ async def test_update_flow_assistant_rejects_step_incompatible_mcp_server(user):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=second_assistant.id,
-            update=FlowAssistantUpdateCommand(mcp_server_ids=[low_server.id]),
+            update=AssistantUpdateCommand(mcp_server_ids=[low_server.id]),
         )
 
     assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
@@ -2616,7 +2597,7 @@ async def test_update_flow_assistant_rejects_unavailable_mcp_server(user):
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=assistant.id,
-            update=FlowAssistantUpdateCommand(mcp_server_ids=unavailable_server_ids),
+            update=AssistantUpdateCommand(mcp_server_ids=unavailable_server_ids),
         )
 
     assert exc_info.value.code == "flow_mcp_server_not_available"
@@ -2699,7 +2680,7 @@ async def test_update_flow_assistant_rejects_changes_that_invalidate_downstream_
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=first_assistant.id,
-            update=FlowAssistantUpdateCommand(mcp_server_ids=[high_server.id]),
+            update=AssistantUpdateCommand(mcp_server_ids=[high_server.id]),
         )
 
     assert exc_info.value.code == "flow_step_mcp_security_classification_mismatch"
@@ -2760,7 +2741,7 @@ async def test_update_flow_assistant_current_step_output_override_does_not_raise
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant.id,
-        update=FlowAssistantUpdateCommand(mcp_server_ids=[low_server.id]),
+        update=AssistantUpdateCommand(mcp_server_ids=[low_server.id]),
     )
 
     assistant_service.update_assistant.assert_awaited_once()
