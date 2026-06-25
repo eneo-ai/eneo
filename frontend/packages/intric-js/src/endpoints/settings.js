@@ -19,9 +19,8 @@ export function initSettings(client) {
     },
 
     /**
-    /**
      * Update user settings
-     * @param {import('../types/resources').Settings} settings
+     * @param {import('../types/resources').SettingsInput} settings
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').Settings>}
      */

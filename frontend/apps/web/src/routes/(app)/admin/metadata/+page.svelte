@@ -41,8 +41,8 @@
       id: field.id,
       name: field.name,
       field_type: field.field_type,
-      visible_on_assistants: field.visible_on_assistants,
-      visible_on_spaces: field.visible_on_spaces
+      visible_on_assistants: field.visible_on_assistants ?? true,
+      visible_on_spaces: field.visible_on_spaces ?? true
     };
   }
 

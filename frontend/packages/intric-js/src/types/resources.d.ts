@@ -69,17 +69,11 @@ export type ResourceMetadataEntry = {
 export type ResourceMetadataJson = {
   eneo?: Array<ResourceMetadataEntry | Record<string, unknown>>;
 } & Record<string, unknown>;
-export type TenantMetadataField = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  field_type: MetadataFieldType;
-  visible_on_assistants: boolean;
-  visible_on_spaces: boolean;
-  created_at?: string | null;
-  updated_at?: string | null;
+export type TenantMetadataField = components["schemas"]["TenantMetadataFieldPublic"];
+export type Settings = components["schemas"]["SettingsPublic-Output"] & {
+  metadata_fields?: TenantMetadataField[];
 };
-export type Settings = components["schemas"]["SettingsPublic"] & {
+export type SettingsInput = components["schemas"]["SettingsPublic-Input"] & {
   metadata_fields?: TenantMetadataField[];
 };
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];

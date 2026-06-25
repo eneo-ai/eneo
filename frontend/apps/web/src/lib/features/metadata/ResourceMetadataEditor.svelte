@@ -93,7 +93,10 @@
   function buildRows() {
     const current = metadataJson ?? {};
     const applicableTenantFields = tenantFields.filter(visibleForResource);
-    const tenantFieldsByName = new Map(applicableTenantFields.map((field) => [field.name, field]));
+    const allTenantFieldsByName = new Map(tenantFields.map((field) => [field.name, field]));
+    const visibleTenantFieldsByName = new Map(
+      applicableTenantFields.map((field) => [field.name, field])
+    );
     const usedKeys = new SvelteSet<string>();
 
     const nextEditableRows: EditableRow[] = [];
@@ -113,7 +116,7 @@
         continue;
       }
 
-      const tenantField = tenantFieldsByName.get(rawEntry.key);
+      const tenantField = visibleTenantFieldsByName.get(rawEntry.key);
       if (
         tenantField &&
         rawEntry.type === tenantField.field_type &&
@@ -126,7 +129,7 @@
           value: rawEntry.value as string | number | boolean
         });
         usedKeys.add(rawEntry.key);
-      } else {
+      } else if (!allTenantFieldsByName.has(rawEntry.key)) {
         nextPreservedEneoEntries.push(rawEntry);
       }
     }
