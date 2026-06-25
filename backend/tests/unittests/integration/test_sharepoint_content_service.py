@@ -402,16 +402,19 @@ class TestProcessInfoBlobSizeAccounting:
 
         text = "Identical content"
         existing_blob = MagicMock()
+        existing_blob.id = uuid4()
         existing_blob.size = 100
+        existing_blob.title = "Doc"  # metadata unchanged too
+        existing_blob.url = "https://example.com"
         existing_blob.content_hash = hashlib.sha256(
             sanitize_text_for_db(text).encode("utf-8")
         ).digest()
 
-        mock_dependencies[
-            "info_blob_service"
-        ].repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=existing_blob
         )
+        repo.update = AsyncMock()
         mock_dependencies[
             "info_blob_service"
         ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock()
@@ -426,12 +429,57 @@ class TestProcessInfoBlobSizeAccounting:
             sharepoint_item_id="item-123",
         )
 
-        # Unchanged content: no upsert, no chunk delete, no embedding, no size update.
+        # Unchanged content + metadata: no upsert, no chunk delete, no embedding,
+        # no metadata update, no size update.
         mock_dependencies[
             "info_blob_service"
         ].upsert_info_blob_by_sharepoint_item_and_integration.assert_not_called()
+        repo.update.assert_not_called()
         mock_dependencies["datastore"].add.assert_not_called()
         mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
+
+    async def test_refreshes_metadata_on_hash_match_when_renamed(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        """Hash match but title/url drifted (e.g. full-sync rename): refresh metadata
+        without re-embedding."""
+        import hashlib
+
+        from intric.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+            sanitize_text_for_db,
+        )
+
+        text = "Identical content"
+        existing_blob = MagicMock()
+        existing_blob.id = uuid4()
+        existing_blob.size = 100
+        existing_blob.title = "Old name.docx"
+        existing_blob.url = "https://example.com/old"
+        existing_blob.content_hash = hashlib.sha256(
+            sanitize_text_for_db(text).encode("utf-8")
+        ).digest()
+
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        repo.update = AsyncMock()
+        mock_dependencies["datastore"].add = AsyncMock()
+
+        await service._process_info_blob(
+            title="New name.docx",
+            text=text,
+            url="https://example.com/new",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        # Metadata refreshed, but NOT re-embedded.
+        repo.update.assert_awaited_once()
+        update_arg = repo.update.await_args.args[0]
+        assert update_arg.title == "New name.docx"
+        assert update_arg.url == "https://example.com/new"
+        mock_dependencies["datastore"].add.assert_not_called()
 
     async def test_reembeds_when_content_hash_differs(
         self, service, mock_dependencies, mock_integration_knowledge
@@ -1559,22 +1607,16 @@ class TestOutOfScopeFolderSubtreeCleanup:
         repo = mock_dependencies["info_blob_service"].repo
         repo.delete_by_sharepoint_item_and_integration_knowledge.return_value = []
         content_client = AsyncMock()
-        descendants = [
-            {"id": "child-1", "name": "a.docx"},
-            {"id": "child-2", "name": "b.pdf"},
-        ]
-
-        async def fake_collect(
-            *, content_client, site_id, drive_id, folder_id, all_files
-        ):
-            all_files.extend(descendants)
 
         with patch.object(
-            service, "_collect_files_recursive", side_effect=fake_collect
+            service,
+            "_enumerate_authoritative_item_ids",
+            AsyncMock(return_value={"child-1", "child-2"}),
         ):
             stats = service._initialize_stats()
             await service._delete_out_of_scope_folder_subtree(
                 content_client=content_client,
+                resource_type="site",
                 site_id="site-1",
                 drive_id="drive-1",
                 folder_id="folder-1",
@@ -1591,16 +1633,26 @@ class TestOutOfScopeFolderSubtreeCleanup:
         }
         assert called_item_ids == {"child-1", "child-2"}
 
-    async def test_degrades_safely_without_site_id(self, service, mock_dependencies):
+    async def test_cleans_onedrive_subtree_via_drive_enumeration(
+        self, service, mock_dependencies
+    ):
+        """OneDrive (no site_id) is now cleaned inline via drive enumeration."""
         ik = MagicMock()
         ik.id = uuid4()
-        content_client = AsyncMock()
+        ik.size = 0
         repo = mock_dependencies["info_blob_service"].repo
+        repo.delete_by_sharepoint_item_and_integration_knowledge.return_value = []
+        content_client = AsyncMock()
 
-        with patch.object(service, "_collect_files_recursive") as mock_collect:
+        with patch.object(
+            service,
+            "_enumerate_authoritative_item_ids",
+            AsyncMock(return_value={"od-child"}),
+        ) as mock_enum:
             stats = service._initialize_stats()
             await service._delete_out_of_scope_folder_subtree(
                 content_client=content_client,
+                resource_type="onedrive",
                 site_id=None,
                 drive_id="drive-1",
                 folder_id="folder-1",
@@ -1610,7 +1662,30 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 stats=stats,
             )
 
-        mock_collect.assert_not_called()
+        mock_enum.assert_awaited_once()
+        assert repo.delete_by_sharepoint_item_and_integration_knowledge.await_count == 1
+
+    async def test_degrades_safely_without_drive_id(self, service, mock_dependencies):
+        ik = MagicMock()
+        ik.id = uuid4()
+        content_client = AsyncMock()
+        repo = mock_dependencies["info_blob_service"].repo
+
+        with patch.object(service, "_enumerate_authoritative_item_ids") as mock_enum:
+            stats = service._initialize_stats()
+            await service._delete_out_of_scope_folder_subtree(
+                content_client=content_client,
+                resource_type="site",
+                site_id="site-1",
+                drive_id=None,
+                folder_id="folder-1",
+                folder_name="Moved",
+                integration_knowledge=ik,
+                integration_knowledge_id=ik.id,
+                stats=stats,
+            )
+
+        mock_enum.assert_not_called()
         repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
 
 
@@ -1775,3 +1850,57 @@ class TestFullSyncReconciliation:
                 )
 
         mock_delete.assert_not_called()
+
+
+class TestEnumerateAuthoritativeItemIds:
+    """Strict enumeration used by reconciliation + subtree cleanup (destructive path)."""
+
+    async def test_site_recurses_files_and_pages_excluding_folders(self, service):
+        client = AsyncMock()
+        client.get_documents_in_drive.return_value = [
+            {"id": "folder-1", "folder": {}},
+            {"id": "file-1", "file": {}},
+        ]
+        client.get_folder_items.return_value = [{"id": "file-2", "file": {}}]
+        client.get_site_pages.return_value = {"value": [{"id": "page-1"}]}
+
+        result = await service._enumerate_authoritative_item_ids(
+            client=client,
+            resource_type="site",
+            site_id="site-1",
+            drive_id="drive-1",
+            folder_id=None,
+        )
+
+        # Files (incl. nested) + pages, but NOT the folder id itself.
+        assert result == {"file-1", "file-2", "page-1"}
+
+    async def test_onedrive_uses_drive_listing_no_site_id(self, service):
+        client = AsyncMock()
+        client.get_drive_root_children.return_value = [{"id": "od-file", "file": {}}]
+
+        result = await service._enumerate_authoritative_item_ids(
+            client=client,
+            resource_type="onedrive",
+            site_id=None,
+            drive_id="drive-1",
+            folder_id=None,
+        )
+
+        assert result == {"od-file"}
+        client.get_drive_root_children.assert_awaited_once()
+
+    async def test_listing_error_propagates_not_swallowed(self, service):
+        """A failed listing must raise so reconciliation never treats a partial
+        enumeration as authoritative."""
+        client = AsyncMock()
+        client.get_documents_in_drive.side_effect = RuntimeError("graph throttled")
+
+        with pytest.raises(RuntimeError):
+            await service._enumerate_authoritative_item_ids(
+                client=client,
+                resource_type="site",
+                site_id="site-1",
+                drive_id="drive-1",
+                folder_id=None,
+            )

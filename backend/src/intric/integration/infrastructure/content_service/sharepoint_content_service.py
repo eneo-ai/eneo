@@ -11,7 +11,7 @@ from html2text import html2text
 
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
 from intric.embedding_models.infrastructure.datastore import Datastore
-from intric.info_blobs.info_blob import InfoBlobAdd
+from intric.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate
 from intric.integration.domain.entities.oauth_token import OauthToken
 from intric.integration.domain.entities.sync_log import SyncLog
 from intric.integration.domain.entities.tenant_sharepoint_app import (
@@ -146,11 +146,13 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Full-sync reconciliation safety guard: never delete more than this fraction of a
-# folder's indexed blobs in one pass (unless the total is tiny). A larger diff
-# almost always means an incomplete enumeration, not that many files really vanished.
+# Full-sync reconciliation safety guard: cap deletions at the LARGER of a fraction
+# of the indexed set and a small absolute floor. The floor only lets a tiny KB churn
+# fully; it is kept low so the fraction guard engages for medium KBs too (with the
+# old floor of 50 the fraction was inert below 100 blobs). A diff above the cap almost
+# always means a stale/incomplete enumeration, so we skip rather than mass-delete.
 _RECONCILE_MAX_DELETE_FRACTION = 0.5
-_RECONCILE_MIN_DELETE_FLOOR = 50
+_RECONCILE_MIN_DELETE_FLOOR = 10
 
 # File extensions that cannot produce useful text content.
 # These are skipped before download to save bandwidth and avoid database pollution.
@@ -792,6 +794,8 @@ class SharePointContentService:
                         if is_folder:
                             await self._delete_out_of_scope_folder_subtree(
                                 content_client=content_client,
+                                resource_type=integration_knowledge.resource_type
+                                or "site",
                                 site_id=resolved_site_id,
                                 drive_id=actual_drive_id,
                                 folder_id=item_id,
@@ -1299,6 +1303,19 @@ class SharePointContentService:
             and existing_blob.content_hash is not None
             and existing_blob.content_hash == content_hash
         ):
+            # Content is byte-for-byte unchanged: skip the expensive re-chunk +
+            # re-embed. Still cheaply refresh title/url if they drifted (e.g. a
+            # rename/move surfaced by a full sync, which has no cTag dedup) so the
+            # displayed name and citation URL do not go stale.
+            if existing_blob.title != title or existing_blob.url != url:
+                await self.info_blob_service.repo.update(
+                    InfoBlobUpdate(
+                        id=existing_blob.id,
+                        user_id=self.user.id,
+                        title=title,
+                        url=url,
+                    )
+                )
             logger.debug(
                 "Skipping re-embed for unchanged SharePoint content: %s (item_id=%s)",
                 title,
@@ -1431,6 +1448,7 @@ class SharePointContentService:
         self,
         *,
         content_client: SharePointContentClient,
+        resource_type: str,
         site_id: Optional[str],
         drive_id: Optional[str],
         folder_id: str,
@@ -1444,44 +1462,36 @@ class SharePointContentService:
         SharePoint/OneDrive delta only re-emits the moved folder, not its
         unchanged children, so deleting just the folder id would orphan the whole
         subtree (stale RAG hits). The folder still exists at its new location, so
-        enumerate its current descendants via Graph and delete their blobs.
-        Enumeration over drive items needs a site_id; OneDrive folder
-        integrations fall back to the next full sync.
+        enumerate its current descendants via Graph and delete their blobs. Uses the
+        same strict enumeration as reconciliation, which handles both SharePoint
+        (needs site_id) and OneDrive (drive-only), so OneDrive subtrees are cleaned
+        inline rather than waiting for a full sync that may never come.
         """
-        if not site_id or not drive_id:
-            logger.warning(
-                "Cannot clean up out-of-scope subtree for folder %s (%s): no "
-                "site_id/drive_id; descendants reconcile on next full sync",
-                folder_name,
-                folder_id,
-            )
+        if not drive_id:
             return
 
         try:
-            descendants: list[SharePointItem] = []
-            await self._collect_files_recursive(
-                content_client=content_client,
+            descendant_ids = await self._enumerate_authoritative_item_ids(
+                client=content_client,
+                resource_type=resource_type,
                 site_id=site_id,
                 drive_id=drive_id,
                 folder_id=folder_id,
-                all_files=descendants,
             )
         except Exception as exc:
             logger.warning(
-                "Failed to enumerate out-of-scope subtree for folder %s (%s): %s",
+                "Failed to enumerate out-of-scope subtree for folder %s (%s): %s; "
+                "descendants will be reconciled on the next full sync",
                 folder_name,
                 folder_id,
                 exc,
             )
             return
 
-        for descendant in descendants:
-            descendant_id = descendant.get("id")
-            if not descendant_id:
-                continue
+        for descendant_id in descendant_ids:
             await self._delete_local_sharepoint_item(
                 item_id=descendant_id,
-                item_name=descendant.get("name", ""),
+                item_name=descendant_id,
                 integration_knowledge=integration_knowledge,
                 integration_knowledge_id=integration_knowledge_id,
                 stats=stats,
@@ -1612,6 +1622,12 @@ class SharePointContentService:
         cascade notifications leave permanent orphans. Reconcile against a strict
         authoritative enumeration, guarded so a partial enumeration can never
         mass-delete valid content.
+
+        Residual risk: Microsoft Graph listings are eventually consistent. A stale
+        but complete HTTP 200 (no error to trip the fail-closed guard) could mark a
+        recently-added item as an orphan and delete its blob. Within the safety cap
+        this is bounded and self-correcting — the next successful sync re-indexes it
+        — so we accept it rather than add a two-pass / tombstone-grace protocol.
         """
         if not drive_id:
             return
@@ -1636,7 +1652,10 @@ class SharePointContentService:
                 if item_id not in authoritative_ids
             ]
         except Exception as exc:
-            logger.warning(
+            # Escalated to error (matching the sibling cap guard): a persistent
+            # enumeration failure silently disables orphan cleanup for this
+            # integration_knowledge, so it must be operator-visible, not a quiet warning.
+            logger.error(
                 "Skipping reconciliation for integration_knowledge %s: could not build "
                 "an authoritative picture (not deleting from a partial list): %s",
                 integration_knowledge.id,
