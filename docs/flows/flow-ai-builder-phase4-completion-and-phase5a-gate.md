@@ -3,7 +3,7 @@
 ## Five-line TL;DR
 
 1. Phase 4 source work is complete: the custom Builder LLM runtime has one typed planner turn owner and a narrower proposal completion boundary.
-2. The source delta from `61facd8a3` to `13ecf2bae` deleted 2 Builder production files, 793 Builder production LOC, 31 `dict[str, Any]` occurrences, and 40 `Any` tokens.
+2. The source delta from `61facd8a3` to current source deleted 3 Builder production files, 873 Builder production LOC, 31 `dict[str, Any]` occurrences, and 59 `Any` tokens.
 3. Remaining retry loops are deliberately kept because each owns product-visible stream, validation, or recovery behavior with focused tests.
 4. Phase 5A now has one Assistant-owned update command boundary; MCP/capability adapters remain out of scope.
 5. Do not cherry-pick PR #480 broadly; reuse only the ideas that help create one typed Assistant command owner.
@@ -78,12 +78,12 @@ flowchart LR
 Metrics were measured for production Python files under
 `backend/src/intric/flows/ai_builder`.
 
-| Metric | Baseline `61facd8a3` | Source head `13ecf2bae` | Delta |
+| Metric | Baseline `61facd8a3` | Current source | Delta |
 | --- | ---: | ---: | ---: |
-| Production files | 139 | 137 | -2 |
-| Production LOC | 52,340 | 51,547 | -793 |
+| Production files | 139 | 136 | -3 |
+| Production LOC | 52,340 | 51,467 | -873 |
 | `dict[str, Any]` occurrences | 286 | 255 | -31 |
-| `Any` token occurrences | 558 | 518 | -40 |
+| `Any` token occurrences | 558 | 499 | -59 |
 | `acompletion(...)` calls under AI Builder | 4 | 4 | 0 |
 | `call_proposal_completion(...)` references | 6 | 3 | -3 |
 
@@ -120,11 +120,12 @@ Captured output:
 
 ```text
 61facd8a3 files=139 loc=52340 dict_str_any_occurrences=286 any_occurrences=558 acompletion_calls=4 proposal_completion_refs=6
-HEAD files=137 loc=51547 dict_str_any_occurrences=255 any_occurrences=518 acompletion_calls=4 proposal_completion_refs=3
+HEAD files=136 loc=51467 dict_str_any_occurrences=255 any_occurrences=499 acompletion_calls=4 proposal_completion_refs=3
 ```
 
-Name-status verification from `61facd8a3` to `13ecf2bae` shows four deleted
-Builder runtime files and two added runtime files, for net -2 production files:
+Name-status verification from `61facd8a3` to current source shows five deleted
+Builder runtime/capability files and two added runtime files, for net -3
+production files:
 
 ```text
 A backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py
@@ -132,6 +133,7 @@ D backend/src/intric/flows/ai_builder/ai_builder_planner_completion.py
 D backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py
 D backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py
 D backend/src/intric/flows/ai_builder/ai_builder_repair.py
+D backend/src/intric/flows/ai_builder/ai_builder_step_capabilities.py
 A backend/src/intric/flows/ai_builder/ai_builder_structured_turn.py
 ```
 
@@ -163,9 +165,9 @@ but it is not a safe Phase 4 fold because the product semantics differ by tool:
 - question recovery owns backend-owned follow-up questions and repeated-question exhaustion;
 - confirm requirements owns confirmation parsing and validation follow-up.
 
-Phase 5+ may replace that skeleton only if the same change deletes the untyped
-event and tool-call residuals listed below and leaves one typed streamed-repair
-contract.
+Phase 5+ may replace that skeleton only if the same change deletes the
+remaining event/message dictionary residuals listed below and leaves one typed
+streamed-repair contract that reuses the existing `RuntimeToolCall` boundary.
 
 ## Module Disposition
 
@@ -193,8 +195,15 @@ residuals are the Phase 5+ deletion target, not a reason to keep editing Phase
 | Provider message/tool schema bags | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:47`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:48`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:50` | Typed provider message/tool schema boundary, only if it deletes local `dict[str, Any]` construction. |
 | Dynamic tool choice shape | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:53` | Narrow value object or provider-owned schema wrapper. |
 | Stream event dictionaries | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:68`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:69`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:53`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:78` | One typed Builder event contract if it deletes all tuple/dict event variants. |
-| Tool call `Any` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:68`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:66` | A typed tool-call value object shared by proposal repair and question recovery. |
 | Repair message lists | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:80`, `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:73` | Typed repair transcript if it replaces provider-shaped message dicts. |
+
+Resolved after the original packet: proposal dispatch, proposal repair,
+proposal submission, and question recovery now share the existing
+`RuntimeToolCall` protocol. Evidence: `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
+`backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:126`,
+`backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:65`,
+`backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:175`,
+and `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:64`.
 
 ## Validation Record
 
@@ -205,9 +214,13 @@ The source slices were validated before this packet:
 | `docker exec -w /workspace/backend eneo-flows-clean_devcontainer-eneo-1 /home/vscode/.local/bin/uv run pytest tests/unittests/flows/ai_builder -q` | `2656 passed` |
 | Focused tests listed in the question-recovery boundary doc | Passed during the relevant source slice. |
 | Import ownership tests for completion boundary | Passed during the relevant source slice. |
+| `docker exec eneo-flows-clean_devcontainer-eneo-1 sh -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_proposal_repair.py src/intric/flows/ai_builder/ai_builder_proposal_submission.py src/intric/flows/ai_builder/ai_builder_question_recovery.py'` | Passed for the RuntimeToolCall cleanup. |
+| `docker exec eneo-flows-clean_devcontainer-eneo-1 sh -lc 'cd /workspace/backend && .venv/bin/python -m pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_service.py -q'` | `177 passed` for the RuntimeToolCall cleanup. |
 
-This packet changes documentation only. Source validation should be rerun before
-pushing if new source files change after `13ecf2bae`.
+Direct pyright on the RuntimeToolCall cleanup files still reports the existing
+strict-typing baseline around Pydantic model methods/decorators and older
+`ProposalTurnContext` optional-field unknown propagation. The cleanup removed
+the introduced `RuntimeToolCall`/`LLMCompletionToolCall` mismatch before commit.
 
 ## Historical Phase 5A Go / No-Go Packet
 
@@ -396,11 +409,13 @@ Phase 5A should be accepted only if it deletes or consolidates at least one of t
 
 ## Final Stop Condition
 
-Phase 4 is complete when this packet and the Phase 4 plan are committed with no
-source changes after `13ecf2bae`. The next goal should be either:
+Phase 4, Phase 5A command ownership, and the Flow capability mirror deletion are
+complete when this packet and the phase-order plan match the current source. The
+next goal should be either:
 
-1. Phase 5A design/red-test goal for canonical Assistant configuration commands; or
-2. a narrow Phase 4 follow-up only if a reviewer identifies a specific source deletion missed by this packet.
+1. a gated shared descriptor/MCP adapter design goal over existing command owners;
+2. a narrow follow-up only if a reviewer identifies a specific source deletion missed by this packet; or
+3. a strict-pyright baseline reduction slice for the remaining Flow AI Builder Pydantic/context typing errors.
 
 Confidence: high for Phase 4 stop; medium for Phase 5A scope because Assistant
 configuration is production-facing and must be proven with red tests before

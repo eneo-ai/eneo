@@ -15,7 +15,7 @@ This slice consolidated question-recovery completion ownership only:
 ```text
 StructuredQuestionRecoveryRequest:
   ctx: ProposalTurnContext
-  tool_call: Any
+  tool_call: RuntimeToolCall
 
 stream_structured_question_tool_call:
   receives the tracked completion callable as an explicit dependency
@@ -60,7 +60,8 @@ provider request objects itself.
 | `ProposalTurnContext.completion_request(...)` already builds typed completion requests from turn context. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144` |
 | LiteLLM completion normalization and usage tracking are owned by `call_proposal_completion`. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` |
 | `make_usage_tracked_proposal_completion(...)` already returns a tracked callable for repair paths. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:135` |
-| `StructuredQuestionRecoveryRequest` carries `ctx` and `tool_call` only. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:63` |
+| `RuntimeToolCall` is the shared structural tool-call contract for runtime metadata, proposal repair, proposal submission, and question recovery. | `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:269` |
+| `StructuredQuestionRecoveryRequest` carries `ctx` and `tool_call` only. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:64` |
 | Question recovery receives `repair_completion` explicitly. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:81` |
 | Question recovery builds retry completion requests through `ctx.completion_request(..., counts_as_repair=True)`. | `backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py:294` |
 | The processor owns tracked completion callable construction for question recovery. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:282` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py:289` |
@@ -136,7 +137,7 @@ This is the implemented shape:
 @dataclass(frozen=True)
 class StructuredQuestionRecoveryRequest:
     ctx: ProposalTurnContext
-    tool_call: Any
+    tool_call: RuntimeToolCall
 
 
 async def stream_structured_question_tool_call(
