@@ -143,17 +143,16 @@ OrphanWatchdog; sync does not.
 
 ---
 
-## P2 — Architecture / maintainability (safe subset)
+## P2 — Architecture / maintainability (safe subset) — branch `refactor/sharepoint-layering`
 
-### 13. Inverted DDD: domain imports from infrastructure AND presentation ⬜ `[medium]`
-- `backend/src/intric/integration/domain/entities/oauth_token.py:8,13`
-- `backend/src/intric/integration/domain/factories/oauth_token_factory.py:11-12`
-- `backend/src/intric/integration/domain/entities/sync_log.py:6`
-- **Plan:** relocate shared types (`OAuthResource`, `IntegrationType`) to `domain/value_objects`. (Assess ripple first — `IntegrationType` is widely imported from presentation.)
+### 13. Inverted DDD: domain imports from infrastructure AND presentation ✅ `[medium]`
+- **Done:** `IntegrationType`, `OAuthResource`, `SkippedDetail`, `SyncMetadata` now live in
+  `domain/value_objects.py`; domain entities/factories import from there. `presentation/models` and
+  `infrastructure/content_service/types` re-export them (object identity preserved; ~15 importers untouched).
 
-### 14. admin_sharepoint_router provisioning logic copy-pasted between two endpoints ⬜ `[small]`
-- `backend/src/intric/integration/presentation/admin_sharepoint_router.py` (~75 lines duplicated)
-- **Plan:** extract a shared provisioning helper.
+### 14. admin_sharepoint_router provisioning logic copy-pasted between two endpoints ✅ `[small]`
+- **Done:** extracted `_to_subscription_public` (expires_in_hours + model build); each endpoint keeps only
+  its own owner resolution (batch map vs single lookup).
 
 ---
 
