@@ -392,7 +392,7 @@ async def setup_database(test_settings: Settings):
     alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
 
     try:
-        command.upgrade(alembic_cfg, "head")
+        command.upgrade(alembic_cfg, "heads")
         print("Alembic migrations ran successfully.")
     except Exception as e:
         print(f"Error running alembic migrations: {e}")

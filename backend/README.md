@@ -27,7 +27,7 @@ The active database (`backend/.env`'s `POSTGRES_DB`, typically `postgres`) is ne
 
 ### Scripts
 
-- `./scripts/dev-db-init.sh` — bring the active DB to the right state for the current branch. Restores `eneo_<branch>` if a snapshot exists, otherwise clones from `eneo_develop`. Runs `alembic upgrade head` at the end. On first run it offers to bootstrap `eneo_develop` from the current active DB.
+- `./scripts/dev-db-init.sh` — bring the active DB to the right state for the current branch. Restores `eneo_<branch>` if a snapshot exists, otherwise clones from `eneo_develop`. Runs `alembic upgrade heads` at the end. On first run it offers to bootstrap `eneo_develop` from the current active DB.
 - `./scripts/dev-db-commit.sh` — save the current active DB as `eneo_<branch>`. Overwrites any prior snapshot for that branch. Run before switching away if you want to come back to this exact state.
 
 Both scripts kick the backend's Postgres connection during the clone/drop; restart the backend (and worker, if running) afterwards. The exact restart command is printed by `dev-db-init.sh`.

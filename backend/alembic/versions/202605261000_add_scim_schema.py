@@ -2,7 +2,7 @@
 
 Re-parented onto develop's latest migration (20260501_backfill_model_costs)
 after develop restructured its history into a linear chain from 202605061100.
-Keeping SCIM as the tip of the chain so `alembic upgrade head` runs cleanly.
+Keeping SCIM as the tip of its chain so `alembic upgrade heads` runs cleanly.
 
 Revision ID: 202605261000
 Revises: 20260501_backfill_model_costs
