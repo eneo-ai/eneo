@@ -26,7 +26,11 @@ Second batch landed with tests:
 - ✅ #10 typed exceptions from the folder-tree service (`ea88b7682`)
 - ✅ #11 reap SharePoint sync jobs stuck in IN_PROGRESS (`fd0938d27`)
 
-Remaining: #4 (cross-stack: backend + frontend + schema regen; OAuth flow not E2E-verifiable in dev — needs coordinated change + manual smoke test), #13/#14 + god-object splits (large).
+Third batch landed:
+- ✅ #4 CSRF state on per-user OAuth callback — backend + frontend + schema (`f960dacb8`)
+  ⚠️ **Needs a manual OAuth smoke test before merge** (popup connect flow not E2E-testable in dev).
+
+Remaining: #13/#14 + god-object splits (large, separate work).
 
 ---
 
@@ -73,20 +77,16 @@ Graph delta sends the folder item, not the unchanged children. Out-of-scope bran
 - **Tail not covered:** a *deleted* folder whose children Graph does not cascade-notify, and drift
   during a 410 token-invalid window — both need the full-sync reconciliation in #6.
 
-### 4. Per-user OAuth callback does not validate `state` (CSRF) ⬜ `[medium / security]` — NEEDS FRONTEND COORDINATION
-Callback never verifies `state`; default is the literal `"state"`. Admin flow does this correctly.
-- `backend/src/intric/integration/presentation/integration_auth_router.py:29-60`
-- `backend/src/intric/integration/infrastructure/auth_service/sharepoint_auth_service.py:~97`
-- `backend/src/intric/integration/application/oauth2_service.py` (`start_auth` / `auth_integration`)
-- **Why not done here:** the fix is cross-cutting. `AuthCallbackParams` does not carry `state` today,
-  so enforcing it server-side requires the frontend to (a) read `state` from the provider redirect and
-  (b) POST it back to `/callback/token/`. Enforcing without that change would break the connect flow.
-- **Plan (backend):** `start_auth` generates a random state, stores `{user_id, tenant_integration_id}`
-  in Redis (reuse the admin `_store_oauth_state`/`_pop_oauth_state` pattern); `auth_integration` requires
-  `state`, atomically pops it, and verifies it matches the session user + tenant_integration.
-- **Plan (frontend):** include `state` in `AuthCallbackParams` and pass the redirect's state through.
-- Severity is medium: the callback is already authenticated (`with_user=True`) and binds to the session
-  user — login-CSRF / auth-code-injection (RAG content injection), not account takeover.
+### 4. Per-user OAuth callback does not validate `state` (CSRF) ✅ `[medium / security]` (`f960dacb8`)
+Callback never verified `state` (frontend sent the predictable tenant_integration_id).
+- **Done (backend):** `start_auth` generates a single-use random state, binds it to
+  `{user_id, tenant_integration_id}` in Redis (10 min TTL); `auth_integration` requires the state,
+  atomically pops it, and rejects if it does not match the session user + tenant_integration.
+- **Done (frontend):** `IntegrationAuthService` keys the popup on the backend-issued state and forwards
+  it to the callback; intric-js `getAuthUrl` returns `{url, state}`, `registerAuthCode` sends `state`.
+- **Done (schema):** `state` added to `AuthUrlPublic` + `AuthCallbackParams` (surgical diff).
+- ⚠️ **Manual verification required before merge:** the OAuth popup flow can't be E2E-tested in dev —
+  smoke-test connecting a SharePoint/Confluence integration end to end.
 
 ### 5. clientState is the only webhook auth, but the check fails open ✅ `[medium+low / security]`
 Endpoint is `with_user=False`; the per-notification check was skipped entirely if the secret was falsy,
