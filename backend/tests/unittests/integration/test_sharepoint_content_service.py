@@ -391,6 +391,83 @@ class TestProcessInfoBlobSizeAccounting:
         assert mock_integration_knowledge.size == 500
         mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
 
+    async def test_skips_reembed_when_content_hash_unchanged(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        import hashlib
+
+        from intric.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+            sanitize_text_for_db,
+        )
+
+        text = "Identical content"
+        existing_blob = MagicMock()
+        existing_blob.size = 100
+        existing_blob.content_hash = hashlib.sha256(
+            sanitize_text_for_db(text).encode("utf-8")
+        ).digest()
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock()
+        mock_dependencies["datastore"].add = AsyncMock()
+        mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
+
+        await service._process_info_blob(
+            title="Doc",
+            text=text,
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        # Unchanged content: no upsert, no chunk delete, no embedding, no size update.
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration.assert_not_called()
+        mock_dependencies["datastore"].add.assert_not_called()
+        mock_dependencies["integration_knowledge_repo"].update.assert_not_called()
+
+    async def test_reembeds_when_content_hash_differs(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        existing_blob = MagicMock()
+        existing_blob.size = 100
+        existing_blob.content_hash = b"a-different-old-hash"
+
+        updated_blob = MagicMock()
+        updated_blob.id = uuid4()
+        updated_blob.size = 100
+
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
+            return_value=updated_blob
+        )
+        mock_dependencies["datastore"].add = AsyncMock()
+        mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
+        mock_dependencies["info_blob_service"].repo.session.execute = AsyncMock()
+
+        await service._process_info_blob(
+            title="Doc",
+            text="Brand new content",
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        mock_dependencies["datastore"].add.assert_called_once()
+
 
 class TestBuildSummaryStats:
     """Tests for _build_summary_stats method."""

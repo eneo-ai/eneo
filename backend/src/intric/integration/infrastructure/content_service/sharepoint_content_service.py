@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import unicodedata
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -1261,16 +1262,36 @@ class SharePointContentService:
 
         previous_blob_size = _safe_int(existing_blob.size) if existing_blob else 0
 
+        sanitized_text = sanitize_text_for_db(text)
+        content_hash = hashlib.sha256(sanitized_text.encode("utf-8")).digest()
+
+        # Skip the (expensive) re-chunk + re-embed when the content is byte-for-byte
+        # unchanged. SharePoint emits delta changes for metadata edits, moves and
+        # co-author saves that do not alter the extracted text; re-embedding those
+        # wastes embedding cost for no retrieval benefit.
+        if (
+            existing_blob is not None
+            and existing_blob.content_hash is not None
+            and existing_blob.content_hash == content_hash
+        ):
+            logger.debug(
+                "Skipping re-embed for unchanged SharePoint content: %s (item_id=%s)",
+                title,
+                sharepoint_item_id,
+            )
+            return
+
         info_blob_add = InfoBlobAdd(
             title=title,
             user_id=self.user.id,
-            text=sanitize_text_for_db(text),
+            text=sanitized_text,
             group_id=None,
             url=url,
             website_id=None,
             tenant_id=self.user.tenant_id,
             integration_knowledge_id=integration_knowledge.id,
             sharepoint_item_id=sharepoint_item_id,
+            content_hash=content_hash,
         )
 
         if sharepoint_item_id:

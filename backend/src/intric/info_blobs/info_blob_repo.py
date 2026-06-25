@@ -124,6 +124,7 @@ class InfoBlobRepository:
                     title=info_blob.title,
                     url=info_blob.url,
                     size=info_blob.size,  # Update size as well
+                    content_hash=info_blob.content_hash,
                     updated_at=sa.func.now(),
                 )
                 .returning(InfoBlobs)
@@ -171,6 +172,7 @@ class InfoBlobRepository:
                     url=info_blob.url,
                     size=info_blob.size,
                     sharepoint_item_id=info_blob.sharepoint_item_id,
+                    content_hash=info_blob.content_hash,
                     updated_at=sa.func.now(),
                 )
                 .returning(InfoBlobs)
