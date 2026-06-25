@@ -20,7 +20,13 @@ Landed with tests (324 integration unit tests green):
 - ✅ #7 do not index extraction-failure sentinels (`10c74613e`)
 - ✅ #12 subscription health fields plumbed end-to-end (WIP `bc329a9a6`) + frontend admin UI (parallel work)
 
-Remaining: #4 (needs coordinated frontend change), #6/#8/#10/#11 (optional, see below), #13/#14 + god-object splits (large).
+Second batch landed with tests:
+- ✅ #6 full-sync reconciliation, safety-capped (`231868f44`)
+- ✅ #8 skip re-embedding when content hash unchanged (`ca68fea3b`)
+- ✅ #10 typed exceptions from the folder-tree service (`ea88b7682`)
+- ✅ #11 reap SharePoint sync jobs stuck in IN_PROGRESS (`fd0938d27`)
+
+Remaining: #4 (cross-stack: backend + frontend + schema regen; OAuth flow not E2E-verifiable in dev — needs coordinated change + manual smoke test), #13/#14 + god-object splits (large).
 
 ---
 
@@ -82,17 +88,17 @@ Callback never verifies `state`; default is the literal `"state"`. Admin flow do
 - Severity is medium: the callback is already authenticated (`with_user=True`) and binds to the session
   user — login-CSRF / auth-code-injection (RAG content injection), not account takeover.
 
-### 5. clientState is the only webhook auth, but the check fails open ⬜ `[medium+low / security]`
-Endpoint is `with_user=False`; the per-notification check is skipped entirely if the secret is falsy,
-and uses `!=` instead of constant-time compare.
-- `backend/src/intric/integration/infrastructure/sharepoint_webhook_service.py:82-96`
-- **Plan:** fail-closed gate at the top of `handle_notifications`; `hmac.compare_digest` for the compare.
+### 5. clientState is the only webhook auth, but the check fails open ✅ `[medium+low / security]`
+Endpoint is `with_user=False`; the per-notification check was skipped entirely if the secret was falsy,
+and used `!=` instead of constant-time compare.
+- `backend/src/intric/integration/infrastructure/sharepoint_webhook_service.py`
+- **Done (`72840fda2`):** fail-closed gate at the top of `handle_notifications`; `hmac.compare_digest`.
 
 ---
 
 ## P1 — Robustness & correctness (fix soon)
 
-### 6. Full sync never deletes orphans; reconciliation 🟡 `[medium]` — GH 189874542
+### 6. Full sync never deletes orphans; reconciliation ✅ `[medium]` — GH 189874542
 `_collect_files_recursive` is now USED by #3's subtree deletion. Full sync (`_pull_content`) is still
 add-only, so the 410-recovery tail (expired delta token does not replay missed deletions) and
 deleted-folder-without-cascade drift remain.
@@ -109,7 +115,7 @@ DOCX/PPTX via raw regex over XML bytes; PDF falls through to `binary_to_text`; s
   unreadable; the file-content sites skip them (a transient failure keeps the existing good blob).
 - **Not done (optional):** switch DOCX/PPTX to `python-docx`/`python-pptx` for higher-fidelity extraction.
 
-### 8. Unconditional re-embedding ignores `content_hash` ⬜ `[medium / perf]`
+### 8. Unconditional re-embedding ignores `content_hash` ✅ `[medium / perf]`
 `content_hash` column exists (crawler uses it) but SharePoint never sets/reads it → metadata edits and
 co-author saves pay full embedding cost.
 - `backend/src/intric/integration/infrastructure/content_service/sharepoint_content_service.py` (`_process_info_blob`)
@@ -119,12 +125,12 @@ co-author saves pay full embedding cost.
 - `backend/src/intric/integration/infrastructure/oauth_token_service.py`
 - **Done (`bd895d922`):** keep the existing refresh_token when the refresh response omits it.
 
-### 10. Tree-endpoint maps errors by matching exception message strings ⬜ `[low / robustness]`
+### 10. Tree-endpoint maps errors by matching exception message strings ✅ `[low / robustness]`
 Rewording a message silently changes the HTTP status.
 - `backend/src/intric/integration/presentation/integration_router.py:388-412`
 - **Plan:** raise typed domain exceptions and map those.
 
-### 11. No stuck-job detection for SharePoint sync ⬜ `[medium / robustness]`
+### 11. No stuck-job detection for SharePoint sync ✅ `[medium / robustness]`
 Hard crash mid-sync: arq does not retry, the Job row stays `IN_PROGRESS` forever. Crawl has an
 OrphanWatchdog; sync does not.
 - **Plan:** sweeper mirroring the crawl OrphanWatchdog.
