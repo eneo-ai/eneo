@@ -58,9 +58,9 @@
     }
 
     const skipReason = website.latest_crawl?.result_location;
-    const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
+    const skipTooltip: string | undefined = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
       ? m.crawl_skipped_duplicate()
-      : skipReason;
+      : (skipReason ?? undefined);
 
     // Check if there are failures in the latest crawl
     const pagesFailed = website.latest_crawl?.pages_failed ?? 0;

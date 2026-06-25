@@ -409,20 +409,14 @@ class WebsiteIntegrationService:
             .where(TenantIntegration.tenant_id == self.user.tenant_id)
             .where(IntegrationDB.integration_type == IntegrationType.Website.value)
         )
-        result = (await self.session.execute(stmt)).scalars().first()
+        result = await self.session.scalar(stmt)
         if result is not None:
             return result
 
-        integration = (
-            (
-                await self.session.execute(
-                    sa.select(IntegrationDB).where(
-                        IntegrationDB.integration_type == IntegrationType.Website.value
-                    )
-                )
+        integration = await self.session.scalar(
+            sa.select(IntegrationDB).where(
+                IntegrationDB.integration_type == IntegrationType.Website.value
             )
-            .scalars()
-            .first()
         )
         if integration is None:
             raise BadRequestException("Sitemap webhook integration is not available")

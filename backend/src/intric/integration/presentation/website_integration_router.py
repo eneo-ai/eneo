@@ -55,7 +55,7 @@ async def _queue_website_sync_with_token(
     "/websites/{config_id}/sync/",
     response_model=JobPublic,
     status_code=202,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 401, 404]),
     summary="Queue sitemap webhook integration sync",
     description="""
     Queue a sitemap webhook integration sync using the integration-specific webhook token.
