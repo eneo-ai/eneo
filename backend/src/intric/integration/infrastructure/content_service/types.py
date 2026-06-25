@@ -42,6 +42,7 @@ class SkippedDetail(TypedDict):
 class SyncStats(TypedDict):
     files_processed: int
     files_deleted: int
+    out_of_scope_deleted: int
     folders_processed: int
     pages_processed: int
     skipped_items: int
@@ -51,10 +52,14 @@ class SyncStats(TypedDict):
 class SyncMetadata(TypedDict, total=False):
     files_processed: int
     files_deleted: int
+    out_of_scope_deleted: int
     pages_processed: int
     folders_processed: int
     skipped_items: int
     skipped_details: list[SkippedDetail]
+    trigger: str
+    recovery: str
+    changes_detected: int
 
 
 class SharePointTokenProtocol(Protocol):

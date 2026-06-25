@@ -4,12 +4,17 @@ Tests the content pulling, delta change processing, and token handling
 for SharePoint integrations.
 """
 
+import asyncio
 import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
+from intric.integration.infrastructure.clients.sharepoint_content_client import (
+    DeltaTokenExpiredException,
+)
 from intric.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
     SimpleSharePointToken,
@@ -292,6 +297,7 @@ class TestInitializeStats:
 
         assert "files_processed" in stats
         assert "files_deleted" in stats
+        assert "out_of_scope_deleted" in stats
         assert "folders_processed" in stats
         assert "pages_processed" in stats
         assert "skipped_items" in stats
@@ -302,6 +308,7 @@ class TestInitializeStats:
 
         assert stats["files_processed"] == 0
         assert stats["files_deleted"] == 0
+        assert stats["out_of_scope_deleted"] == 0
         assert stats["folders_processed"] == 0
         assert stats["pages_processed"] == 0
         assert stats["skipped_items"] == 0
@@ -393,6 +400,7 @@ class TestBuildSummaryStats:
         stats = {
             "files_processed": 5,
             "files_deleted": 2,
+            "out_of_scope_deleted": 1,
             "folders_processed": 3,
             "pages_processed": 1,
             "skipped_items": 4,
@@ -402,6 +410,7 @@ class TestBuildSummaryStats:
 
         assert summary["files_processed"] == 5
         assert summary["files_deleted"] == 2
+        assert summary["out_of_scope_deleted"] == 1
         assert summary["folders_processed"] == 3
         assert summary["pages_processed"] == 1
         assert summary["skipped_items"] == 4
@@ -414,6 +423,7 @@ class TestBuildSummaryStats:
 
         assert summary["files_processed"] == 10
         assert summary["files_deleted"] == 0
+        assert summary["out_of_scope_deleted"] == 0
         assert summary["folders_processed"] == 0
 
 
@@ -801,6 +811,50 @@ class TestDeltaChangesProcessing:
             )
 
         mock_pull.assert_called_once()
+        kwargs = mock_pull.call_args.kwargs
+        assert kwargs["sync_trigger"] == "webhook"
+        assert kwargs["recovery"] == "missing_delta_token"
+        assert "Imported" in result
+
+    async def test_falls_back_to_full_sync_when_delta_token_expired(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """Falls back to full sync when Microsoft Graph rejects the delta token."""
+        mock_integration_knowledge.delta_token = "expired-delta-token"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+
+        with (
+            patch.object(service, "pull_content", new_callable=AsyncMock) as mock_pull,
+            patch(
+                "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_delta_changes.side_effect = DeltaTokenExpiredException()
+            mock_client_class.return_value = mock_client
+            mock_pull.return_value = "Imported 5 files"
+
+            result = await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+                drive_id="drive-123",
+            )
+
+        assert mock_integration_knowledge.delta_token is None
+        mock_dependencies["integration_knowledge_repo"].update.assert_called_with(
+            obj=mock_integration_knowledge
+        )
+        mock_pull.assert_called_once()
+        kwargs = mock_pull.call_args.kwargs
+        assert kwargs["sync_trigger"] == "webhook"
+        assert kwargs["recovery"] == "delta_token_expired"
         assert "Imported" in result
 
     async def test_processes_delta_changes_with_existing_token(
@@ -1087,6 +1141,10 @@ class TestDeltaChangesProcessing:
         )
         mock_client.get_file_content_by_id.assert_not_called()
         assert mock_integration_knowledge.size == 60
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["trigger"] == "webhook"
+        assert sync_log.metadata["changes_detected"] == 1
+        assert sync_log.metadata["out_of_scope_deleted"] == 1
         assert "1 deleted file" in result
 
 
@@ -1121,6 +1179,91 @@ class TestOneDriveFolderTraversal:
         mock_client.get_folder_items.assert_not_called()
 
 
+class TestPostCommitChangeKeys:
+    """Tests for deferred ChangeKey cache writes."""
+
+    async def test_flushes_change_keys_after_commit(self, service, mock_dependencies):
+        """ChangeKeys are written after the SQLAlchemy transaction commits."""
+        sync_session = Session()
+        mock_dependencies["session"].sync_session = sync_session
+        integration_knowledge_id = uuid4()
+
+        try:
+            service._schedule_post_commit_change_keys(
+                [(integration_knowledge_id, "item-123", "etag-123")]
+            )
+
+            mock_dependencies[
+                "change_key_service"
+            ].update_change_key.assert_not_called()
+
+            sync_session.commit()
+            if service._pending_change_key_tasks:
+                await asyncio.gather(*service._pending_change_key_tasks)
+
+            mock_dependencies[
+                "change_key_service"
+            ].update_change_key.assert_awaited_once_with(
+                integration_knowledge_id=integration_knowledge_id,
+                item_id="item-123",
+                change_key="etag-123",
+            )
+        finally:
+            sync_session.close()
+
+    async def test_does_not_flush_change_keys_after_rollback(
+        self, service, mock_dependencies
+    ):
+        """Rolled-back syncs must not mark a ChangeKey as processed."""
+        sync_session = Session()
+        mock_dependencies["session"].sync_session = sync_session
+
+        try:
+            service._schedule_post_commit_change_keys(
+                [(uuid4(), "item-123", "etag-123")]
+            )
+
+            sync_session.rollback()
+            await asyncio.sleep(0)
+
+            mock_dependencies[
+                "change_key_service"
+            ].update_change_key.assert_not_called()
+        finally:
+            sync_session.close()
+
+    async def test_flush_change_keys_writes_each_pending_entry(
+        self, service, mock_dependencies
+    ):
+        """Every accumulated (item_id, change_key) pair is written on flush."""
+        ik_id = uuid4()
+        pending = [
+            (ik_id, "item-1", "ck-1"),
+            (ik_id, "item-2", "ck-2"),
+        ]
+
+        await service._flush_change_keys(pending)
+
+        change_key_service = mock_dependencies["change_key_service"]
+        assert change_key_service.update_change_key.await_count == 2
+        change_key_service.update_change_key.assert_any_await(
+            integration_knowledge_id=ik_id, item_id="item-1", change_key="ck-1"
+        )
+        change_key_service.update_change_key.assert_any_await(
+            integration_knowledge_id=ik_id, item_id="item-2", change_key="ck-2"
+        )
+
+    def test_schedule_is_noop_for_empty_pending(self, service):
+        """No event listener is registered when there is nothing to flush."""
+        with patch(
+            "intric.integration.infrastructure.content_service."
+            "sharepoint_content_service.sa.event.listen"
+        ) as mock_listen:
+            service._schedule_post_commit_change_keys([])
+
+        mock_listen.assert_not_called()
+
+
 class TestSyncLogging:
     """Tests for sync log creation."""
 
@@ -1145,6 +1288,10 @@ class TestSyncLogging:
                     "id": "file-1",
                     "name": "doc.txt",
                     "webUrl": "https://example.com/doc.txt",
+                    "parentReference": {
+                        "driveId": "drive-123",
+                        "siteId": "site-123",
+                    },
                 }
             ]
             mock_client.get_site_pages.return_value = {"value": []}
@@ -1161,11 +1308,12 @@ class TestSyncLogging:
                 site_id="site-123",
             )
 
-        # Sync log should be created when files are processed
-        if mock_dependencies["sync_log_repo"].add.called:
-            sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-            assert sync_log.status == "success"
-            assert sync_log.sync_type == "full"
+        mock_dependencies["sync_log_repo"].add.assert_called_once()
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.status == "success"
+        assert sync_log.sync_type == "full"
+        assert sync_log.metadata["trigger"] == "manual"
+        assert sync_log.metadata["files_processed"] == 1
 
     async def test_creates_error_sync_log_on_exception(
         self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
@@ -1188,6 +1336,7 @@ class TestSyncLogging:
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
         assert sync_log.status == "error"
         assert "Test error" in sync_log.error_message
+        assert sync_log.metadata["trigger"] == "manual"
 
 
 class TestTokenRefreshCallback:

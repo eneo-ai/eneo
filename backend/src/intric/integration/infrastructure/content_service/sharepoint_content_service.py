@@ -1,3 +1,4 @@
+import asyncio
 import unicodedata
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -271,6 +272,31 @@ def _summary_counts(stats: SyncStats) -> dict[str, int]:
     }
 
 
+def _sync_metadata(
+    stats: SyncStats | None = None,
+    *,
+    trigger: str,
+    recovery: str | None = None,
+    changes_detected: int | None = None,
+) -> SyncMetadata:
+    metadata: SyncMetadata = {"trigger": trigger}
+
+    if stats is not None:
+        metadata["files_processed"] = stats.get("files_processed", 0)
+        metadata["files_deleted"] = stats.get("files_deleted", 0)
+        metadata["out_of_scope_deleted"] = stats.get("out_of_scope_deleted", 0)
+        metadata["pages_processed"] = stats.get("pages_processed", 0)
+        metadata["folders_processed"] = stats.get("folders_processed", 0)
+        metadata["skipped_items"] = stats.get("skipped_items", 0)
+        metadata["skipped_details"] = stats.get("skipped_details", [])
+    if recovery:
+        metadata["recovery"] = recovery
+    if changes_detected is not None:
+        metadata["changes_detected"] = changes_detected
+
+    return metadata
+
+
 class SharePointContentService:
     def __init__(
         self,
@@ -304,6 +330,9 @@ class SharePointContentService:
         self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
         self.change_key_service = change_key_service
+        # Strong refs to in-flight post-commit ChangeKey flush tasks so the event
+        # loop does not GC them before they run.
+        self._pending_change_key_tasks: set["asyncio.Task[None]"] = set()
 
     async def _refresh_service_account_access_token(
         self, tenant_app: TenantSharePointApp
@@ -341,6 +370,8 @@ class SharePointContentService:
         folder_id: Optional[str] = None,
         folder_path: Optional[str] = None,
         resource_type: str = "site",
+        sync_trigger: str = "manual",
+        recovery: str | None = None,
     ) -> str:
         sync_log = None
         started_at = datetime.now(timezone.utc)
@@ -464,13 +495,10 @@ class SharePointContentService:
                         status="success",
                         started_at=started_at,
                         completed_at=datetime.now(timezone.utc),
-                        metadata=SyncMetadata(
-                            files_processed=summary_stats.get("files_processed", 0),
-                            files_deleted=summary_stats.get("files_deleted", 0),
-                            pages_processed=summary_stats.get("pages_processed", 0),
-                            folders_processed=summary_stats.get("folders_processed", 0),
-                            skipped_items=summary_stats.get("skipped_items", 0),
-                            skipped_details=summary_stats.get("skipped_details", []),
+                        metadata=_sync_metadata(
+                            summary_stats,
+                            trigger=sync_trigger,
+                            recovery=recovery,
                         ),
                     )
                     await self.sync_log_repo.add(sync_log)
@@ -492,6 +520,7 @@ class SharePointContentService:
                     started_at=started_at,
                     completed_at=datetime.now(timezone.utc),
                     error_message=str(e),
+                    metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
                 )
                 await self.sync_log_repo.add(sync_log)
 
@@ -506,6 +535,7 @@ class SharePointContentService:
         site_id: Optional[str] = None,
         drive_id: Optional[str] = None,
         resource_type: str = "site",
+        sync_trigger: str = "webhook",
     ) -> str:
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
@@ -564,6 +594,8 @@ class SharePointContentService:
                     resource_type=resource_type
                     or integration_knowledge.resource_type
                     or "site",
+                    sync_trigger=sync_trigger,
+                    recovery="missing_delta_token",
                 )
 
             stats = self._initialize_stats()
@@ -616,6 +648,8 @@ class SharePointContentService:
                         resource_type=resource_type
                         or integration_knowledge.resource_type
                         or "site",
+                        sync_trigger=sync_trigger,
+                        recovery="delta_token_expired",
                     )
                 logger.info(
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
@@ -679,6 +713,7 @@ class SharePointContentService:
                     summary_stats: SyncStats = {
                         "files_processed": 0,
                         "files_deleted": 0,
+                        "out_of_scope_deleted": 0,
                         "pages_processed": 0,
                         "folders_processed": 0,
                         "skipped_items": 0,
@@ -696,6 +731,10 @@ class SharePointContentService:
                     return self._format_summary_for_job(summary_stats)
 
                 logger.info(f"Processing {len(changes)} changed items from delta query")
+                # Accumulate processed (item_id, change_key) pairs and write them to
+                # the Redis ChangeKey cache only after the DB transaction commits.
+                # See _schedule_post_commit_change_keys for why.
+                pending_change_keys: list[tuple[UUID, str, str]] = []
                 for item in changes:
                     item_name = item.get("name", "")
                     item_id = item.get("id")
@@ -807,12 +846,15 @@ class SharePointContentService:
                             )
                             stats["files_processed"] += 1
 
-                            # Update ChangeKey cache after successful processing
+                            # Defer the ChangeKey cache write until after commit so a
+                            # rolled-back sync re-processes the item instead of skipping it.
                             if self.change_key_service and item_id and change_key:
-                                await self.change_key_service.update_change_key(
-                                    integration_knowledge_id=resolved_integration_knowledge_id,
-                                    item_id=item_id,
-                                    change_key=change_key,
+                                pending_change_keys.append(
+                                    (
+                                        resolved_integration_knowledge_id,
+                                        item_id,
+                                        change_key,
+                                    )
                                 )
                         else:
                             stats["skipped_items"] += 1
@@ -854,6 +896,8 @@ class SharePointContentService:
 
                 await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
+                self._schedule_post_commit_change_keys(pending_change_keys)
+
                 logger.info(
                     f"Processed {len(changes)} delta changes for integration knowledge {resolved_integration_knowledge_id}"
                 )
@@ -870,17 +914,10 @@ class SharePointContentService:
                             status="success",
                             started_at=started_at,
                             completed_at=datetime.now(timezone.utc),
-                            metadata=SyncMetadata(
-                                files_processed=summary_stats.get("files_processed", 0),
-                                files_deleted=summary_stats.get("files_deleted", 0),
-                                pages_processed=summary_stats.get("pages_processed", 0),
-                                folders_processed=summary_stats.get(
-                                    "folders_processed", 0
-                                ),
-                                skipped_items=summary_stats.get("skipped_items", 0),
-                                skipped_details=summary_stats.get(
-                                    "skipped_details", []
-                                ),
+                            metadata=_sync_metadata(
+                                summary_stats,
+                                trigger=sync_trigger,
+                                changes_detected=len(changes),
                             ),
                         )
                         await self.sync_log_repo.add(sync_log)
@@ -902,6 +939,7 @@ class SharePointContentService:
                     started_at=started_at,
                     completed_at=datetime.now(timezone.utc),
                     error_message=str(e),
+                    metadata=_sync_metadata(trigger=sync_trigger),
                 )
                 await self.sync_log_repo.add(sync_log)
 
@@ -1294,6 +1332,10 @@ class SharePointContentService:
                     item_id,
                 )
                 stats["files_deleted"] = stats.get("files_deleted", 0) + deleted_count
+                if reason == "out-of-scope":
+                    stats["out_of_scope_deleted"] = (
+                        stats.get("out_of_scope_deleted", 0) + deleted_count
+                    )
             else:
                 logger.debug(
                     "No local info_blob found for %s SharePoint item: %s (item_id=%s)",
@@ -1322,6 +1364,57 @@ class SharePointContentService:
                 {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
             )
             return 0
+
+    def _schedule_post_commit_change_keys(
+        self, pending: list[tuple[UUID, str, str]]
+    ) -> None:
+        """Write the Redis ChangeKey cache only after the DB transaction commits.
+
+        Writing inline would let Redis claim an item is processed while its
+        info_blob write is still uncommitted; a rollback (e.g. a lease-loss
+        ``CancelledError`` that bypasses the per-item ``except``) would then skip
+        the item until the 7-day TTL or a 410 resync. Deferring to ``after_commit``
+        means a failed/rolled-back sync simply re-processes the item next time —
+        the safe direction. A flush that never runs (process killed mid-window)
+        also fails in that same safe direction.
+        """
+        if not pending or not self.change_key_service:
+            return
+
+        sync_session = getattr(self.session, "sync_session", None)
+        if sync_session is None:
+            return
+
+        def _on_after_commit(_sync_session: object) -> None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            task = loop.create_task(self._flush_change_keys(pending))
+            self._pending_change_key_tasks.add(task)
+            task.add_done_callback(self._pending_change_key_tasks.discard)
+
+        try:
+            sa.event.listen(sync_session, "after_commit", _on_after_commit, once=True)
+        except Exception as exc:
+            # Defensive: a non-ORM session (e.g. in unit tests) cannot register
+            # events. Skipping is the safe direction — the item re-processes next sync.
+            logger.warning("Could not register post-commit ChangeKey flush: %s", exc)
+
+    async def _flush_change_keys(self, pending: list[tuple[UUID, str, str]]) -> None:
+        if not self.change_key_service:
+            return
+        for integration_knowledge_id, item_id, change_key in pending:
+            try:
+                await self.change_key_service.update_change_key(
+                    integration_knowledge_id=integration_knowledge_id,
+                    item_id=item_id,
+                    change_key=change_key,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Deferred ChangeKey write failed for item %s: %s", item_id, exc
+                )
 
     async def _fetch_and_process_content(
         self,
@@ -1455,6 +1548,7 @@ class SharePointContentService:
         return {
             "files_processed": 0,
             "files_deleted": 0,
+            "out_of_scope_deleted": 0,
             "folders_processed": 0,
             "pages_processed": 0,
             "skipped_items": 0,
@@ -1465,6 +1559,7 @@ class SharePointContentService:
         summary: SyncStats = {
             "files_processed": stats.get("files_processed", 0),
             "files_deleted": stats.get("files_deleted", 0),
+            "out_of_scope_deleted": stats.get("out_of_scope_deleted", 0),
             "pages_processed": stats.get("pages_processed", 0),
             "folders_processed": stats.get("folders_processed", 0),
             "skipped_items": stats.get("skipped_items", 0),
