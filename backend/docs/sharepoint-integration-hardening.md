@@ -158,7 +158,10 @@ OrphanWatchdog; sync does not.
 
 ## ⏭️ Deferred (large / low value — separate focused work)
 
-- Full god-object split of `sharepoint_content_service.py` (1745 lines) and `admin_sharepoint_router.py` (1201 lines). Refactor opportunistically, not as a bundled change.
+- God-object split of `sharepoint_content_service.py` and `admin_sharepoint_router.py`. Per the review,
+  done **opportunistically, not as a bundled rewrite** (pure relocation, high churn, no correctness value).
+  - First safe step taken on `refactor/sharepoint-layering`: pure parsing helpers extracted to
+    `content_service/parsing.py`. Further extraction only when a section is touched anyway.
 - Cross-process refresh-token lock (`asyncio.Lock` is process-local; backend/worker are separate containers). Narrow window, Entra grace period, recoverable.
 - Webhook ACK-202-then-process-async. Current handler already enqueues arq jobs rather than syncing inline, so risk is lower; revisit if Graph delivery timeouts appear.
 - Subscription create check-then-act race (orphan Graph subscription, self-heals in ~29 days).
