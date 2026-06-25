@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_STRUCTURED_FIELD_DEPTH,
+)
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 
@@ -64,7 +67,7 @@ def build_structured_reference_payload(*, is_edit_mode: bool) -> dict[str, Any]:
         "do not emit input_source in create mode; backend derives step topology",
         "input_fields are secondary runtime parameters only, not the primary material being processed",
         "output_fields are only for json output",
-        "output_fields max nesting depth is 3",
+        f"output_fields max nesting depth is {MAX_STRUCTURED_FIELD_DEPTH}",
         "template_fill requires docx output",
     ]
     return payload

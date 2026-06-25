@@ -6,6 +6,9 @@ from intric.flows.ai_builder.ai_builder_flow_capability_reference import (
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_source_values,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_STRUCTURED_FIELD_DEPTH,
+)
 
 
 def test_create_reference_keeps_flow_topology_backend_owned() -> None:
@@ -17,6 +20,10 @@ def test_create_reference_keeps_flow_topology_backend_owned() -> None:
         "backend derives step topology" in rule for rule in payload["hard_rules"]
     )
     assert any("secondary runtime parameters" in rule for rule in payload["hard_rules"])
+    assert (
+        f"output_fields max nesting depth is {MAX_STRUCTURED_FIELD_DEPTH}"
+        in payload["hard_rules"]
+    )
 
 
 def test_edit_reference_exposes_flow_input_sources() -> None:
