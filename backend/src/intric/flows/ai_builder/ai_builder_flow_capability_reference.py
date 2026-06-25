@@ -43,9 +43,10 @@ def build_structured_reference_payload(*, is_edit_mode: bool) -> dict[str, Any]:
         payload["output_mode"] = builder_output_mode_values()
         payload["hard_rules"] = [
             "only describe changes to existing flow state",
-            "use add/modify/remove operations",
-            "use existing_step refs only when targeting an existing step",
-            "use typed add_payload drafts for new steps instead of raw StepSpec fields",
+            "return the complete ordered steps list with kind=modify for existing steps and kind=add for new steps",
+            "use existing_step refs only on kind=modify items targeting existing steps",
+            "use typed step drafts on kind=add items instead of raw StepSpec fields",
+            "list intentionally deleted existing steps in removed_existing_step_refs; omission is never deletion",
             "template_fill requires docx output",
         ]
         return payload

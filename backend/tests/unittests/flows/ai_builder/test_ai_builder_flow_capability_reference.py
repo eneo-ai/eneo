@@ -31,3 +31,15 @@ def test_edit_reference_exposes_flow_input_sources() -> None:
 
     assert payload["input_source"] == builder_input_source_values()
     assert "semantic_input_strategy" not in payload
+
+
+def test_edit_reference_uses_ordered_edit_contract_terms() -> None:
+    payload = build_structured_reference_payload(is_edit_mode=True)
+    hard_rules = "\n".join(payload["hard_rules"])
+
+    assert "operations" not in hard_rules
+    assert "add_payload" not in hard_rules
+    assert "kind=modify" in hard_rules
+    assert "kind=add" in hard_rules
+    assert "removed_existing_step_refs" in hard_rules
+    assert "omission is never deletion" in hard_rules
