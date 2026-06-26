@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from intric.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_json_schema_paths import (
-    top_level_schema_property_names,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     canonicalize_flow_spec_resources,
@@ -21,7 +18,6 @@ from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
-    StepSpec,
 )
 from intric.main.logging import get_logger
 
@@ -53,7 +49,6 @@ def prepare_compiled_spec_for_session(
         terminal_output_type=terminal_output_type,
         disambiguate_duplicate_step_names=target_kind == TargetKind.EDIT,
     )
-    prepared_spec = _normalize_output_contract_steps(prepared_spec)
     terminal_contract_changes = [
         {
             "step_ref": step.plan_step_ref,
@@ -94,67 +89,7 @@ def prepare_compiled_spec_for_session(
         spec=prepared_spec,
         terminal_output_type=terminal_output_type,
     )
-    return PreparedCompiledSpecResult(
-        spec=prepared_spec,
-        validation=validation,
-    )
-
-
-def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
-    updated_steps: list[StepSpec] = []
-    changed = False
-
-    for step in spec.steps:
-        updated_step = step
-        if step.existing_step_ref is not None:
-            updated_steps.append(updated_step)
-            continue
-        contract = step.output_contract
-        if isinstance(contract, dict):
-            property_names = top_level_schema_property_names(contract)
-            if property_names:
-                updates: dict[str, object] = {}
-
-                instructions = _instructions_with_contract_fields(
-                    step.assistant_spec.instructions,
-                    property_names=property_names,
-                )
-                if instructions != step.assistant_spec.instructions:
-                    updates["assistant_spec"] = step.assistant_spec.model_copy(
-                        update={"instructions": instructions}
-                    )
-
-                if updates:
-                    updated_step = step.model_copy(update=updates)
-                    changed = True
-
-        updated_steps.append(updated_step)
-
-    if not changed:
-        return spec
-    return spec.model_copy(update={"steps": updated_steps})
-
-
-def _instructions_with_contract_fields(
-    instructions: str,
-    *,
-    property_names: list[str],
-) -> str:
-    normalized = instructions.casefold()
-    missing_names = [
-        field_name
-        for field_name in property_names
-        if field_name.casefold() not in normalized
-    ]
-    if not missing_names:
-        return instructions
-
-    field_list = ", ".join(property_names)
-    instruction_line = f"Required output fields: {field_list}."
-    stripped = instructions.rstrip()
-    if not stripped:
-        return instruction_line
-    return f"{stripped}\n\n{instruction_line}"
+    return PreparedCompiledSpecResult(spec=prepared_spec, validation=validation)
 
 
 def _add_terminal_output_alignment_error(
