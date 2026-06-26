@@ -21,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     AIBuilderRequirementsSummaryEvent,
     AIBuilderStatusEvent,
     AIBuilderStatusEventData,
+    AIBuilderStreamEvent,
     AIBuilderTextEvent,
     AIBuilderTextEventData,
     AIBuilderUsageEvent,
@@ -32,59 +33,52 @@ from intric.flows.ai_builder.ai_builder_telemetry_models import (
 )
 
 
-def _to_wire_event(event: BaseModel) -> dict[str, str]:
-    event_name = getattr(event, "event")
-    payload = getattr(event, "data")
-    if not isinstance(event_name, str):
-        raise TypeError(f"{event.__class__.__name__}.event must be a string")
+def encode_ai_builder_stream_event(event: AIBuilderStreamEvent) -> dict[str, str]:
+    payload = event.data
     if isinstance(payload, BaseModel):
         data = payload.model_dump_json(exclude_none=True)
-    elif isinstance(payload, str):
-        data = payload
     else:
-        raise TypeError(f"{event.__class__.__name__}.data must be a model or string")
-    return {"event": event_name, "data": data}
+        data = payload
+    return {"event": event.event, "data": data}
 
 
-def build_text_event(text: str) -> dict[str, str]:
-    return _to_wire_event(AIBuilderTextEvent(data=AIBuilderTextEventData(text=text)))
+def build_text_event(text: str) -> AIBuilderTextEvent:
+    return AIBuilderTextEvent(data=AIBuilderTextEventData(text=text))
 
 
-def build_status_event(status: str) -> dict[str, str]:
-    return _to_wire_event(
-        AIBuilderStatusEvent(data=AIBuilderStatusEventData(status=status))
-    )
+def build_status_event(status: str) -> AIBuilderStatusEvent:
+    return AIBuilderStatusEvent(data=AIBuilderStatusEventData(status=status))
 
 
-def build_usage_event(telemetry: SessionTelemetrySummary) -> dict[str, str]:
-    return _to_wire_event(AIBuilderUsageEvent(data=telemetry))
+def build_usage_event(telemetry: SessionTelemetrySummary) -> AIBuilderUsageEvent:
+    return AIBuilderUsageEvent(data=telemetry)
 
 
-def build_done_event() -> dict[str, str]:
-    return _to_wire_event(AIBuilderDoneEvent())
+def build_done_event() -> AIBuilderDoneEvent:
+    return AIBuilderDoneEvent()
 
 
-def build_question_event(question_data: StructuredQuestionPayload) -> dict[str, str]:
-    return _to_wire_event(AIBuilderQuestionEvent(data=question_data))
+def build_question_event(
+    question_data: StructuredQuestionPayload,
+) -> AIBuilderQuestionEvent:
+    return AIBuilderQuestionEvent(data=question_data)
 
 
 def build_requirements_summary_event(
     data: RequirementsSummaryPayload,
-) -> dict[str, str]:
-    return _to_wire_event(AIBuilderRequirementsSummaryEvent(data=data))
+) -> AIBuilderRequirementsSummaryEvent:
+    return AIBuilderRequirementsSummaryEvent(data=data)
 
 
 def build_plan_event(
     *,
     plan_id: UUID,
     proposal: FlowBuilderProposalContent,
-) -> dict[str, str]:
-    return _to_wire_event(
-        AIBuilderPlanEvent(
-            data=AIBuilderPlanEventData(
-                plan_id=plan_id,
-                proposal=proposal,
-            )
+) -> AIBuilderPlanEvent:
+    return AIBuilderPlanEvent(
+        data=AIBuilderPlanEventData(
+            plan_id=plan_id,
+            proposal=proposal,
         )
     )
 
@@ -105,4 +99,5 @@ __all__ = [
     "build_status_event",
     "build_text_event",
     "build_usage_event",
+    "encode_ai_builder_stream_event",
 ]

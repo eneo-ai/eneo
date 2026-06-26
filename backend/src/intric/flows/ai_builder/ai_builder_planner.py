@@ -26,9 +26,8 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from intric.flows.ai_builder.ai_builder_events import (
-    SSE_EVENT_DONE,
-)
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from intric.flows.ai_builder.ai_builder_events import build_done_event
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
     latest_pending_structured_question,
@@ -264,7 +263,7 @@ class AIBuilderPlanner:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         _ = structured_output_decision
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
@@ -449,7 +448,7 @@ class AIBuilderPlanner:
                         ),
                     ):
                         yield event
-                    yield {"event": SSE_EVENT_DONE, "data": ""}
+                    yield build_done_event()
                     return
                 case ServerOutputPrepared() as planner_turn_request:
                     try:
@@ -478,7 +477,7 @@ class AIBuilderPlanner:
                             yield build_session_send_lease_lost_event(
                                 request_id=request_id
                             )
-                            yield {"event": SSE_EVENT_DONE, "data": ""}
+                            yield build_done_event()
                             return
                         raise
                     except Exception as error:
@@ -490,19 +489,19 @@ class AIBuilderPlanner:
                         yield build_planner_upstream_error_event(
                             request_id=request_id
                         )
-                        yield {"event": SSE_EVENT_DONE, "data": ""}
+                        yield build_done_event()
                         return
 
                     if lease_lost_event.is_set():
                         yield build_session_send_lease_lost_event(
                             request_id=request_id
                         )
-                        yield {"event": SSE_EVENT_DONE, "data": ""}
+                        yield build_done_event()
                         return
 
                     for event in dispatch_result.events:
                         yield event
-                    yield {"event": SSE_EVENT_DONE, "data": ""}
+                    yield build_done_event()
                     return
                 case _:
                     assert_never(prepared_request)

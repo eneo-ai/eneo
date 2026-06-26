@@ -1226,6 +1226,47 @@ def test_proposal_repair_has_typed_result_projection() -> None:
     assert violations == []
 
 
+def test_stream_events_have_single_wire_encoder_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    source_root = backend_root / Path("src/intric/flows/ai_builder")
+    encoder_path = source_root / "ai_builder_events.py"
+    violations: list[str] = []
+    raw_event_literals: list[str] = []
+    banned_internal_event_shapes = {
+        "ToolProcessingResult(event=",
+        "EventBatch",
+        "AsyncGenerator[dict[str, str], None]",
+        "events: list[dict[str, str]]",
+        "tuple[dict[str, str], ...]",
+        "iter_events(",
+        "has_events",
+    }
+
+    for path in sorted(source_root.glob("*.py")):
+        text = path.read_text()
+        for banned_shape in sorted(banned_internal_event_shapes):
+            if banned_shape in text:
+                violations.append(f"{path}: contains {banned_shape}")
+
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            compact_line = line.replace(" ", "")
+            if '{"event":' in compact_line or "{'event':" in compact_line:
+                raw_event_literals.append(f"{path}:{line_number}")
+
+    if len(raw_event_literals) != 1:
+        violations.append(
+            "expected exactly one raw stream-event dict literal, found "
+            f"{raw_event_literals}"
+        )
+    elif not raw_event_literals[0].startswith(str(encoder_path)):
+        violations.append(
+            "raw stream-event dict literal must live in ai_builder_events.py, found "
+            f"{raw_event_literals[0]}"
+        )
+
+    assert violations == []
+
+
 def test_proposal_repair_wrapper_stays_deleted_and_repair_owns_runtime_helpers() -> (
     None
 ):

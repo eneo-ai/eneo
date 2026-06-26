@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorEvent,
     AIBuilderErrorPhase,
     build_ai_builder_error_event,
     coerce_ai_builder_error_code,
@@ -69,7 +70,7 @@ def build_proposal_architecture_error_event(
     *,
     request_id: str | None,
     tool_name: str,
-) -> dict[str, str]:
+) -> AIBuilderErrorEvent:
     log_extra = error.log_extra()
     log_extra["tool_name"] = tool_name
     if request_id is not None:

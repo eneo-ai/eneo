@@ -14,7 +14,10 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from intric.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStreamEvent,
+    StructuredQuestionPayload,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     build_question_event,
     build_text_event,
@@ -29,7 +32,7 @@ from intric.flows.domain.flow import Flow, FlowPersistedJsonObject
 
 @dataclass(frozen=True, slots=True)
 class BackendQuestionPersistenceResult:
-    events: list[dict[str, str]]
+    events: tuple[AIBuilderStreamEvent, ...]
     new_planning_state_version: int
 
 
@@ -87,10 +90,10 @@ async def persist_backend_question(
     )
 
     return BackendQuestionPersistenceResult(
-        events=[
+        events=(
             build_text_event(question.assistant_text),
             build_question_event(question.question_data),
-        ],
+        ),
         new_planning_state_version=new_version,
     )
 

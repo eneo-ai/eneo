@@ -748,7 +748,7 @@ def build_ai_builder_error_event(
     request_id: str | None = None,
     diagnostic_context: Mapping[str, object] | AIBuilderDiagnosticContext | None = None,
     details: Mapping[str, object] | None = None,
-) -> dict[str, str]:
+) -> AIBuilderErrorEvent:
     payload = build_ai_builder_error(
         message=message,
         code=code,
@@ -757,11 +757,7 @@ def build_ai_builder_error_event(
         diagnostic_context=diagnostic_context,
         details=details,
     )
-    event = AIBuilderErrorEvent(data=payload)
-    return {
-        "event": event.event,
-        "data": event.data.model_dump_json(exclude_none=True),
-    }
+    return AIBuilderErrorEvent(data=payload)
 
 
 def ai_builder_error_example(

@@ -13,11 +13,15 @@ from intric.flows.ai_builder.ai_builder_events import (
     build_question_event,
     build_requirements_summary_event,
     build_usage_event,
+    encode_ai_builder_stream_event,
 )
 
 
 def test_done_event_preserves_empty_data_frame() -> None:
-    assert build_done_event() == {"event": "done", "data": ""}
+    assert encode_ai_builder_stream_event(build_done_event()) == {
+        "event": "done",
+        "data": "",
+    }
 
 
 def test_usage_event_serializes_typed_telemetry() -> None:
@@ -30,7 +34,7 @@ def test_usage_event_serializes_typed_telemetry() -> None:
         last_model="gpt-5.4",
     )
 
-    event = build_usage_event(telemetry)
+    event = encode_ai_builder_stream_event(build_usage_event(telemetry))
 
     assert event["event"] == "usage"
     data = json.loads(event["data"])
@@ -54,7 +58,7 @@ def test_question_event_serializes_typed_payload_without_none_options() -> None:
         }
     )
 
-    event = build_question_event(question)
+    event = encode_ai_builder_stream_event(build_question_event(question))
 
     assert event["event"] == "question"
     assert json.loads(event["data"]) == {
@@ -79,7 +83,7 @@ def test_requirements_summary_event_serializes_typed_payload() -> None:
         output_description="DOCX meeting report.",
     )
 
-    event = build_requirements_summary_event(payload)
+    event = encode_ai_builder_stream_event(build_requirements_summary_event(payload))
 
     assert event["event"] == "requirements_summary"
     assert json.loads(event["data"]) == {

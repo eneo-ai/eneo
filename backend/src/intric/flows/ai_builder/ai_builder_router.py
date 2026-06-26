@@ -61,15 +61,18 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     split_ai_builder_error_context,
 )
 from intric.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderDoneEvent,
+    AIBuilderStreamEvent,
+    AIBuilderUsageEvent,
     ai_builder_stream_event_schema,
 )
 from intric.flows.ai_builder.ai_builder_events import (
-    SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_STATUS,
     SSE_EVENT_USAGE,
     build_done_event,
     build_usage_event,
+    encode_ai_builder_stream_event,
 )
 from intric.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
@@ -189,7 +192,7 @@ router = APIRouter(
 )
 
 
-EventStream = AsyncGenerator[dict[str, str], None]
+EventStream = AsyncGenerator[AIBuilderStreamEvent, None]
 ContainerWithUserDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 
@@ -211,7 +214,7 @@ async def _current_usage_event(
     *,
     service: "AIBuilderService",
     session_id: UUID,
-) -> dict[str, str] | None:
+) -> AIBuilderUsageEvent | None:
     session = await service.get_session(session_id)
     telemetry = summarize_session_telemetry(session.conversation)
     if telemetry is None:
@@ -672,20 +675,20 @@ async def send_message(
             stream_error_seen = False
             # Keep DONE terminal. Usage can become available only after the
             # planner stream has committed its final conversation metadata.
-            done_event: dict[str, str] | None = None
+            done_event: AIBuilderDoneEvent | None = None
             async for event in stream:
-                event_name = event["event"]
-                if event_name == SSE_EVENT_DONE:
+                if isinstance(event, AIBuilderDoneEvent):
                     done_event = event
                     continue
 
+                event_name = event.event
+                wire_event = encode_ai_builder_stream_event(event)
                 yield ServerSentEvent(
-                    data=event["data"],
-                    event=event_name,
+                    data=wire_event["data"],
+                    event=wire_event["event"],
                 )
 
                 if event_name not in {
-                    SSE_EVENT_DONE,
                     SSE_EVENT_ERROR,
                     SSE_EVENT_STATUS,
                     SSE_EVENT_USAGE,
@@ -706,14 +709,16 @@ async def send_message(
                     session_id=session_id,
                 )
                 if usage_event is not None:
+                    wire_usage_event = encode_ai_builder_stream_event(usage_event)
                     yield ServerSentEvent(
-                        data=usage_event["data"],
-                        event=usage_event["event"],
+                        data=wire_usage_event["data"],
+                        event=wire_usage_event["event"],
                     )
             if done_event is not None:
+                wire_done_event = encode_ai_builder_stream_event(done_event)
                 yield ServerSentEvent(
-                    data=done_event["data"],
-                    event=done_event["event"],
+                    data=wire_done_event["data"],
+                    event=wire_done_event["event"],
                 )
         except BadRequestException as error:
             message = str(error) or "The AI Builder request could not be processed."
@@ -747,9 +752,17 @@ async def send_message(
                 details=details,
                 request_id=request_id,
             )
-            yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
+            wire_error_event = encode_ai_builder_stream_event(error_event)
+            yield ServerSentEvent(
+                data=wire_error_event["data"],
+                event=wire_error_event["event"],
+            )
             done_event = build_done_event()
-            yield ServerSentEvent(data=done_event["data"], event=done_event["event"])
+            wire_done_event = encode_ai_builder_stream_event(done_event)
+            yield ServerSentEvent(
+                data=wire_done_event["data"],
+                event=wire_done_event["event"],
+            )
         except Exception as error:
             request_id = extract_request_id(request)
             logger.error(
@@ -771,9 +784,17 @@ async def send_message(
                 },
                 request_id=request_id,
             )
-            yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
+            wire_error_event = encode_ai_builder_stream_event(error_event)
+            yield ServerSentEvent(
+                data=wire_error_event["data"],
+                event=wire_error_event["event"],
+            )
             done_event = build_done_event()
-            yield ServerSentEvent(data=done_event["data"], event=done_event["event"])
+            wire_done_event = encode_ai_builder_stream_event(done_event)
+            yield ServerSentEvent(
+                data=wire_done_event["data"],
+                event=wire_done_event["event"],
+            )
 
     return EventSourceResponse(event_stream(), ping=15)
 

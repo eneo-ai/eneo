@@ -24,6 +24,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
+from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
@@ -2843,7 +2844,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             )
         )
 
-        assert [event["event"] for event in result.events] == ["text"]
+        assert [event.event for event in result.events] == ["text"]
         repo.commit_turn.assert_awaited_once()
         commit_kwargs = repo.commit_turn.await_args.kwargs
         assert commit_kwargs["new_messages"][0].role == "user"
@@ -2889,7 +2890,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 max_input_tokens=128000,
                 max_output_tokens=4096,
             ):
-                events.append(event)
+                events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
         assert planner.litellm_client.acompletion.await_count == 1
@@ -2938,7 +2939,7 @@ class TestPlannerDiscoveryQuestionDispatch:
                 max_input_tokens=128000,
                 max_output_tokens=4096,
             ):
-                events.append(event)
+                events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["status", "done"]
         repo.commit_turn.assert_awaited_once()

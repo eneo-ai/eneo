@@ -19,6 +19,8 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from intric.flows.ai_builder.ai_builder_proposal_intent import (
     parse_create_flow_intent_arguments,
 )
@@ -52,7 +54,16 @@ from tests.unittests.flows.ai_builder.ai_builder_intent_diagnostic_payloads impo
     expected_step_assumption_strings,
     self_correction_intent_with_step_assumptions_payload,
 )
-from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_context
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (
+    _make_context,
+    _plan_stream_event,
+)
+
+
+def _wire_events(
+    events: list[AIBuilderStreamEvent] | tuple[AIBuilderStreamEvent, ...],
+) -> list[dict[str, str]]:
+    return [encode_ai_builder_stream_event(event) for event in events]
 
 
 def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNamespace:
@@ -286,7 +297,7 @@ async def test_run_forced_tool_retry_after_text_builds_typed_invocation() -> Non
         nonlocal captured_invocation
         captured_invocation = invocation
         return ToolProcessingResult(
-            event={"event": "plan", "data": "{}"},
+            events=(_plan_stream_event(),),
         )
 
     result = await run_forced_tool_retry_after_text(
@@ -310,7 +321,8 @@ async def test_run_forced_tool_retry_after_text_builds_typed_invocation() -> Non
         )
     )
 
-    assert result.events == ({"event": "plan", "data": "{}"},)
+    assert result.events is not None
+    assert [event.event for event in result.events] == ["plan"]
     assert captured_invocation is not None
     assert captured_invocation.turn is turn
     assert captured_invocation.arguments["flow_name"] == "Test"
@@ -349,12 +361,13 @@ async def test_run_forced_tool_retry_after_text_surfaces_tool_user_message() -> 
         )
     )
 
-    assert result.events == (
+    assert result.events is not None
+    assert _wire_events(result.events) == [
         {
             "event": "text",
             "data": '{"text":"Det markerade steget använder ingen chattmodell."}',
         },
-    )
+    ]
 
 
 @pytest.mark.asyncio
@@ -371,7 +384,7 @@ async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_wit
     ) -> ToolProcessingResult:
         outline = parse_create_flow_intent_arguments(invocation.arguments)
         observed_assumptions.extend(outline.assumptions)
-        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return ToolProcessingResult(events=(_plan_stream_event(),))
 
     result = await run_forced_tool_retry_after_text(
         _make_forced_tool_after_text_request(
@@ -383,7 +396,8 @@ async def test_run_forced_tool_retry_after_text_accepts_diagnostic_json_text_wit
         )
     )
 
-    assert result.events == ({"event": "plan", "data": "{}"},)
+    assert result.events is not None
+    assert [event.event for event in result.events] == ["plan"]
     assert result.feedback is None
     assert observed_assumptions == [
         *expected_root_assumption_strings(),
@@ -404,7 +418,7 @@ async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_
         invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
         processed_arguments.update(invocation.arguments)
-        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return ToolProcessingResult(events=(_plan_stream_event(),))
 
     result = await run_forced_tool_retry_after_text(
         _make_forced_tool_after_text_request(
@@ -423,7 +437,8 @@ async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_
         )
     )
 
-    assert result.events == ({"event": "plan", "data": "{}"},)
+    assert result.events is not None
+    assert [event.event for event in result.events] == ["plan"]
     assert processed_arguments["flow_name"] == "Text JSON outline"
     call_proposal_completion.assert_not_awaited()
 
@@ -624,7 +639,7 @@ async def _run_repair_capturing(
             target_kind=TargetKind.CREATE,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     return observed_temperatures, observed_retry_feedback, events
 
@@ -734,7 +749,7 @@ async def test_run_tool_self_correction_emits_error_event_when_planner_bails_to_
             target_kind=TargetKind.CREATE,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     text_events = [event for event in events if event.get("event") == "text"]
     error_events = [event for event in events if event.get("event") == "error"]
@@ -809,7 +824,7 @@ async def test_run_tool_self_correction_uses_request_id_on_forced_retry_validati
             target_kind=TargetKind.CREATE,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
@@ -840,7 +855,7 @@ async def test_run_tool_self_correction_handles_empty_completion_choices() -> No
             target_kind=TargetKind.CREATE,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
@@ -885,7 +900,7 @@ async def test_run_tool_self_correction_rejects_malformed_correction_tool_argume
             target_kind=TargetKind.CREATE,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
@@ -947,7 +962,7 @@ async def test_run_tool_self_correction_retries_forced_retry_validation_feedback
                 ),
                 failure_kind="validation",
             )
-        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return ToolProcessingResult(events=(_plan_stream_event(),))
 
     events: list[dict[str, str]] = []
     async for event in run_tool_self_correction(
@@ -963,9 +978,9 @@ async def test_run_tool_self_correction_retries_forced_retry_validation_feedback
             target_kind=TargetKind.EDIT,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
-    assert events[-1] == {"event": "plan", "data": "{}"}
+    assert events[-1]["event"] == "plan"
     assert len(observed_messages) == 3
     retry_feedback = observed_messages[2][-1]
     assert retry_feedback["role"] == "user"
@@ -1032,7 +1047,7 @@ async def test_run_tool_self_correction_limits_text_feedback_retry_budget() -> N
             target_kind=TargetKind.EDIT,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     assert events[-1]["event"] == "error"
     payload = json.loads(events[-1]["data"])
@@ -1085,7 +1100,7 @@ async def test_run_tool_self_correction_still_yields_text_for_legitimate_info_re
             target_kind=TargetKind.CREATE,
         )
     ):
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
 
     text_events = [event for event in events if event.get("event") == "text"]
     assert text_events, (
@@ -1157,8 +1172,9 @@ async def test_forced_tool_repair_architecture_error_uses_sanitized_event_and_te
     )
 
     assert result.events is not None
-    assert [event["event"] for event in result.events] == ["error"]
-    payload = json.loads(result.events[0]["data"])
+    wire_events = _wire_events(result.events)
+    assert [event["event"] for event in wire_events] == ["error"]
+    payload = json.loads(wire_events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
@@ -1212,7 +1228,7 @@ async def test_self_correction_forced_text_architecture_error_uses_sanitized_eve
         usage_tracker=tracker,
     )
 
-    events = [event async for event in run_tool_self_correction(request)]
+    events = _wire_events([event async for event in run_tool_self_correction(request)])
 
     assert [event["event"] for event in events] == ["status", "error"]
     payload = json.loads(events[1]["data"])
@@ -1267,7 +1283,7 @@ async def test_self_correction_repair_architecture_error_uses_sanitized_event_an
         usage_tracker=tracker,
     )
 
-    events = [event async for event in run_tool_self_correction(request)]
+    events = _wire_events([event async for event in run_tool_self_correction(request)])
 
     assert [event["event"] for event in events] == ["status", "error"]
     payload = json.loads(events[1]["data"])

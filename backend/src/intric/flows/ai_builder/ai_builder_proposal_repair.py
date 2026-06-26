@@ -18,9 +18,11 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_domain_models import TargetKind
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
+    AIBuilderErrorEvent,
     AIBuilderErrorPhase,
     build_ai_builder_error_event,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_events import (
     build_status_event,
     build_text_event,
@@ -53,13 +55,12 @@ from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
-EventBatch = tuple[dict[str, str], ...]
 MAX_SELF_CORRECTION_RETRIES = 3
 
 
 @dataclass(frozen=True, slots=True)
 class ForcedToolRetryOutcome:
-    events: EventBatch | None = None
+    events: tuple[AIBuilderStreamEvent, ...] | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
 
@@ -136,7 +137,7 @@ def build_self_correction_error_event(
     feedback: str | None,
     failure_kind: ToolProcessingFailureKind | None,
     request_id: str | None = None,
-) -> dict[str, str]:
+) -> AIBuilderErrorEvent:
     message = _self_correction_user_message(
         feedback=feedback,
         failure_kind=failure_kind,
@@ -192,15 +193,15 @@ def _self_correction_user_message(
     )
 
 
-def _repair_terminal_events(result: ToolProcessingResult) -> EventBatch:
+def _repair_terminal_events(
+    result: ToolProcessingResult,
+) -> tuple[AIBuilderStreamEvent, ...]:
     user_message_events = (
         (build_text_event(result.user_message),)
         if result.user_message is not None
         else tuple()
     )
-    if result.event is None:
-        return (*result.events, *user_message_events)
-    return (result.event, *result.events, *user_message_events)
+    return (*result.events, *user_message_events)
 
 
 def _build_tool_retry_invocation(
@@ -335,7 +336,7 @@ def build_proposal_self_correction_request(
 
 async def run_tool_self_correction(
     request: ProposalSelfCorrectionRequest,
-) -> AsyncGenerator[dict[str, str], None]:
+) -> AsyncGenerator[AIBuilderStreamEvent, None]:
     try:
         async for event in _request_self_correction_events(request):
             yield event
@@ -355,7 +356,7 @@ def _architecture_error_events(
     usage_tracker: ProposalTurnTelemetry | None,
     request_id: str | None,
     tool_name: str,
-) -> EventBatch:
+) -> tuple[AIBuilderStreamEvent, ...]:
     record_proposal_architecture_failure(
         usage_tracker,
         request_id=request_id,
@@ -372,7 +373,7 @@ def _architecture_error_events(
 
 async def _request_self_correction_events(
     request: ProposalSelfCorrectionRequest,
-) -> AsyncGenerator[dict[str, str], None]:
+) -> AsyncGenerator[AIBuilderStreamEvent, None]:
     ctx = request.ctx
     retry_config = request.retry_config
     yield build_status_event("repairing")

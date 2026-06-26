@@ -20,6 +20,11 @@ from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from intric.flows.ai_builder.ai_builder_events import (
+    build_question_event,
+    build_text_event,
+)
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
@@ -217,8 +222,7 @@ async def test_finalize_compiled_proposal_records_success_once_when_persisted() 
             )
         )
 
-    assert result.event is not None
-    assert result.event["event"] == "plan"
+    assert [event.event for event in result.events] == ["plan"]
     assert tracker.proposal_first_attempt_success is True
     assert tracker.proposal_first_attempt_tool == PROPOSE_FLOW_TOOL_NAME
     assert captured_metadata[0] is not None
@@ -255,7 +259,7 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
             )
         )
 
-    assert result.event is None
+    assert result.events == ()
     assert result.failure_kind == "quality"
     assert tracker.proposal_first_attempt_success is None
     store_plan.assert_not_awaited()
@@ -319,8 +323,7 @@ async def test_finalize_compiled_proposal_accepts_retry_metadata_without_recorde
             )
         )
 
-    assert result.event is not None
-    assert result.event["event"] == "plan"
+    assert [event.event for event in result.events] == ["plan"]
     assert tracker.proposal_first_attempt_success is None
     assert captured_metadata == [retry_metadata]
 
@@ -345,8 +348,7 @@ async def test_finalize_compiled_proposal_allows_missing_usage_tracker() -> None
             )
         )
 
-    assert result.event is not None
-    assert result.event["event"] == "plan"
+    assert [event.event for event in result.events] == ["plan"]
     assert captured_metadata[0] == {"existing": True}
 
 
@@ -363,10 +365,18 @@ async def test_finalize_compiled_proposal_persists_mcp_clarification_without_pla
     )
     persist_backend_question = AsyncMock(
         return_value=BackendQuestionPersistenceResult(
-            events=[
-                {"event": "message", "data": "Choose an MCP resource."},
-                {"event": "question", "data": "{}"},
-            ],
+            events=(
+                build_text_event("Choose an MCP resource."),
+                build_question_event(
+                    StructuredQuestionPayload(
+                        question_id="mcp_resource_selection",
+                        question="Choose an MCP resource.",
+                        options=[],
+                        selection_mode="single",
+                        allow_custom=False,
+                    )
+                ),
+            ),
             new_planning_state_version=4,
         )
     )
@@ -394,8 +404,7 @@ async def test_finalize_compiled_proposal_persists_mcp_clarification_without_pla
             _make_request(resource_catalog=MagicMock())
         )
 
-    assert result.event == {"event": "message", "data": "Choose an MCP resource."}
-    assert result.events == ({"event": "question", "data": "{}"},)
+    assert [event.event for event in result.events] == ["text", "question"]
     assert result.new_planning_state_version == 4
     store_plan.assert_not_awaited()
     persisted_metadata = persist_backend_question.await_args.kwargs[
@@ -435,7 +444,7 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
             )
         )
 
-    assert result.event is not None
+    assert result.events
     captured = captured_compiled[0]
     assert captured.content.spec.flow_description == original_spec.flow_description
     captured_edit = captured.content.edit

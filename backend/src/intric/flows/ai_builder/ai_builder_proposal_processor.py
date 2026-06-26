@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     build_mcp_resource_selection_question,
     find_named_mcp_request_issue,
@@ -107,7 +108,7 @@ class AIBuilderProposalProcessor:
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         discovery_runtime: DiscoveryRuntimeResult | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         """Run the server-selected plan proposal task.
 
         This is deliberately narrower than the planner contract: the

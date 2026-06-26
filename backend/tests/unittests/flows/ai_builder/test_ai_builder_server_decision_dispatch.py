@@ -119,7 +119,7 @@ async def test_fallback_text_question_persists_user_and_assistant_turn() -> None
         _request(repo=repo, decision=decision, conversation=conversation)
     )
 
-    assert [event["event"] for event in result.events] == ["text"]
+    assert [event.event for event in result.events] == ["text"]
     repo.commit_turn.assert_awaited_once()
     new_messages = repo.commit_turn.await_args.kwargs["new_messages"]
     assert [message.role for message in new_messages] == ["user", "assistant"]
@@ -151,7 +151,7 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
         _request(repo=repo, decision=decision, conversation=conversation)
     )
 
-    assert [event["event"] for event in result.events] == [
+    assert [event.event for event in result.events] == [
         "status",
         "requirements_summary",
     ]

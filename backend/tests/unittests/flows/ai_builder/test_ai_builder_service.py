@@ -58,6 +58,10 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
+from intric.flows.ai_builder.ai_builder_events import (
+    build_done_event,
+    encode_ai_builder_stream_event,
+)
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
@@ -515,10 +519,9 @@ class _CompletionServiceWithStructuredOutput:
 
 
 async def _collect_events(gen) -> list[dict[str, str]]:
-    """Collect all events from an async generator."""
     events = []
     async for event in gen:
-        events.append(event)
+        events.append(encode_ai_builder_stream_event(event))
     return events
 
 
@@ -887,7 +890,7 @@ class TestServiceComposition:
         service = _make_service()
 
         async def planner_events():
-            yield {"event": SSE_EVENT_DONE, "data": ""}
+            yield build_done_event()
 
         with patch.object(
             AIBuilderPlanner,
@@ -2102,7 +2105,10 @@ class TestReasoningLeakRegression:
 
     def test_plan_event_strips_reasoning(self):
         """Plan SSE events must not include reasoning."""
-        from intric.flows.ai_builder.ai_builder_events import build_plan_event
+        from intric.flows.ai_builder.ai_builder_events import (
+            build_plan_event,
+            encode_ai_builder_stream_event,
+        )
 
         spec = FlowDraftSpecCore(
             flow_name="Test",
@@ -2121,8 +2127,9 @@ class TestReasoningLeakRegression:
         )
 
         event = build_plan_event(plan_id=uuid4(), proposal=proposal.content)
-        assert "SECRET REASONING" not in event["data"]
-        parsed = json.loads(event["data"])
+        wire_event = encode_ai_builder_stream_event(event)
+        assert "SECRET REASONING" not in wire_event["data"]
+        parsed = json.loads(wire_event["data"])
         assert "reasoning" not in parsed["proposal"]
 
     def test_append_plan_messages_strips_reasoning_from_conversation(self):

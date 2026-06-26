@@ -41,6 +41,7 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE as _SSE_EVENT_DONE,
 )
@@ -477,7 +478,7 @@ class AIBuilderService:
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         planner = self._build_planner()
         async for event in planner.send_message(
             session_id=session_id,

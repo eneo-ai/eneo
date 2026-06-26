@@ -18,7 +18,10 @@ from intric.flows.ai_builder.ai_builder_discovery import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
+from intric.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStreamEvent,
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     build_requirements_summary_event,
     build_status_event,
@@ -86,7 +89,7 @@ class ServerDecisionDispatchRequest:
 @dataclass(frozen=True, slots=True)
 class ServerDecisionDispatchResult:
     action_kind: ServerDecisionKind
-    events: list[dict[str, str]]
+    events: tuple[AIBuilderStreamEvent, ...]
     new_planning_state_version: int
 
 
@@ -187,7 +190,7 @@ async def _dispatch_question(
     )
     return ServerDecisionDispatchResult(
         action_kind="ask_question",
-        events=[build_text_event(decision.prompt)],
+        events=(build_text_event(decision.prompt),),
         new_planning_state_version=new_version,
     )
 
@@ -202,7 +205,7 @@ async def _dispatch_architecture_commit(
         flow=request.flow,
         architecture_commit=finalize_architecture_commit(decision.architecture_commit),
     )
-    events = [build_status_event("architecture_committed")]
+    events: list[AIBuilderStreamEvent] = [build_status_event("architecture_committed")]
 
     chained_turn = replace(
         request.turn,
@@ -242,7 +245,7 @@ async def _dispatch_architecture_commit(
 
     return ServerDecisionDispatchResult(
         action_kind="commit_architecture",
-        events=events,
+        events=tuple(events),
         new_planning_state_version=new_version,
     )
 
@@ -280,7 +283,7 @@ async def _dispatch_requirements_confirmation(
     )
     return ServerDecisionDispatchResult(
         action_kind="confirm_requirements",
-        events=[build_requirements_summary_event(requirements_payload)],
+        events=(build_requirements_summary_event(requirements_payload),),
         new_planning_state_version=new_version,
     )
 

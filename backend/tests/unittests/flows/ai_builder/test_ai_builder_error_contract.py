@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
     split_ai_builder_error_context,
 )
+from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from intric.main.exceptions import ErrorCodes
 
 
@@ -45,13 +46,15 @@ def test_typed_public_exceptions_store_enum_error_code() -> None:
 
 
 def test_error_event_serializes_to_public_v2_schema() -> None:
-    event = build_ai_builder_error_event(
-        message="The AI planner failed. Please try again.",
-        code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
-        phase=AIBuilderErrorPhase.PLANNER,
-        request_id="req-ai-builder-1",
-        diagnostic_context={"model": "gpt-5.4"},
-        details={"retryable": True},
+    event = encode_ai_builder_stream_event(
+        build_ai_builder_error_event(
+            message="The AI planner failed. Please try again.",
+            code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+            phase=AIBuilderErrorPhase.PLANNER,
+            request_id="req-ai-builder-1",
+            diagnostic_context={"model": "gpt-5.4"},
+            details={"retryable": True},
+        )
     )
 
     assert event["event"] == "error"

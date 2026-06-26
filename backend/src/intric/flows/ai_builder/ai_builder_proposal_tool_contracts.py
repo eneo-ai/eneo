@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderProposalContent,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -113,23 +114,13 @@ class CompiledProposal:
 
 @dataclass(frozen=True)
 class ToolProcessingResult:
-    event: dict[str, str] | None = None
-    events: tuple[dict[str, str], ...] = ()
+    events: tuple[AIBuilderStreamEvent, ...] = ()
     compiled_proposal: CompiledProposal | None = None
     user_message: str | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
     failure_codes: frozenset[str] = frozenset()
     new_planning_state_version: int | None = None
-
-    @property
-    def has_events(self) -> bool:
-        return self.event is not None or bool(self.events)
-
-    def iter_events(self) -> tuple[dict[str, str], ...]:
-        if self.event is None:
-            return self.events
-        return (self.event, *self.events)
 
 
 @dataclass(frozen=True)

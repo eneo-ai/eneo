@@ -44,6 +44,13 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderNotFoundException,
     AIBuilderUnauthorizedException,
 )
+from intric.flows.ai_builder.ai_builder_events import (
+    build_done_event,
+    build_plan_event,
+    build_status_event,
+    build_text_event,
+    build_usage_event,
+)
 from intric.flows.ai_builder.ai_builder_router import (
     AIBuilderPublicErrorRoute,
     _authorize_ai_builder_request,
@@ -63,6 +70,7 @@ from intric.flows.ai_builder.ai_builder_router import (
 from intric.flows.ai_builder.ai_builder_router import (
     router as ai_builder_router,
 )
+from intric.flows.ai_builder.ai_builder_telemetry_models import SessionTelemetrySummary
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.main.exceptions import (
     BadRequestException,
@@ -485,6 +493,11 @@ def _make_plan_domain(
         status=status,
         proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec)),
     )
+
+
+def _make_plan_stream_event():
+    plan = _make_plan_domain()
+    return build_plan_event(plan_id=plan.id, proposal=plan.proposal.content)
 
 
 # ---------------------------------------------------------------------------
@@ -1314,8 +1327,8 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def mock_events(*args, **kwargs):
-            yield {"event": "text", "data": '{"text": "Hello"}'}
-            yield {"event": "done", "data": ""}
+            yield build_text_event("Hello")
+            yield build_done_event()
 
         service.send_message.return_value = mock_events()
 
@@ -1338,7 +1351,7 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def mock_events(*args, **kwargs):
-            yield {"event": "done", "data": ""}
+            yield build_done_event()
 
         service.send_message.return_value = mock_events()
         file_id = uuid4()
@@ -1394,8 +1407,8 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def mock_events(*args, **kwargs):
-            yield {"event": "plan", "data": '{"plan_id":"plan-1"}'}
-            yield {"event": "done", "data": ""}
+            yield _make_plan_stream_event()
+            yield build_done_event()
 
         service.send_message.return_value = mock_events()
 
@@ -1459,8 +1472,8 @@ class TestSendMessageEndpoint:
         service.get_session.side_effect = [session, telemetry_session]
 
         async def mock_events(*args, **kwargs):
-            yield {"event": "plan", "data": '{"plan_id":"plan-1"}'}
-            yield {"event": "done", "data": ""}
+            yield _make_plan_stream_event()
+            yield build_done_event()
 
         service.send_message.return_value = mock_events()
 
@@ -1486,12 +1499,9 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def mock_events(*args, **kwargs):
-            yield {"event": "plan", "data": '{"plan_id":"plan-1"}'}
-            yield {
-                "event": "usage",
-                "data": json.dumps({"total_tokens_total": 11}),
-            }
-            yield {"event": "done", "data": ""}
+            yield _make_plan_stream_event()
+            yield build_usage_event(SessionTelemetrySummary(total_tokens_total=11))
+            yield build_done_event()
 
         service.send_message.return_value = mock_events()
 
@@ -1504,7 +1514,7 @@ class TestSendMessageEndpoint:
 
         events = await _read_sse_events(result)
         assert [event["event"] for event in events] == ["plan", "usage", "done"]
-        assert events[1]["data"] == {"total_tokens_total": 11}
+        assert events[1]["data"]["total_tokens_total"] == 11
 
     @pytest.mark.anyio
     async def test_checks_flow_edit_permission(self):
@@ -1596,7 +1606,7 @@ class TestSendMessageEndpoint:
         )
 
         async def mock_events(*args, **kwargs):
-            yield {"event": "done", "data": ""}
+            yield build_done_event()
 
         service.send_message.return_value = mock_events()
 
@@ -1664,7 +1674,7 @@ class TestSendMessageEndpoint:
 
         async def mock_events(*args, **kwargs):
             captured.update(kwargs)
-            yield {"event": "done", "data": ""}
+            yield build_done_event()
 
         service.send_message.side_effect = mock_events
 
@@ -1703,7 +1713,7 @@ class TestSendMessageEndpoint:
 
         async def mock_events(*args, **kwargs):
             captured.update(kwargs)
-            yield {"event": "done", "data": ""}
+            yield build_done_event()
 
         service.send_message.side_effect = mock_events
 
@@ -1733,7 +1743,7 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def broken_events(*args, **kwargs):
-            yield {"event": "status", "data": '{"status":"thinking"}'}
+            yield build_status_event("thinking")
             raise RuntimeError("planner stream exploded")
 
         service.send_message.return_value = broken_events()

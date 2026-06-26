@@ -5,7 +5,10 @@ import json
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_events import build_question_event
+from intric.flows.ai_builder.ai_builder_events import (
+    build_question_event,
+    encode_ai_builder_stream_event,
+)
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     build_mcp_resource_selection_question,
@@ -442,7 +445,7 @@ def test_mcp_selection_question_event_preserves_explicit_confirm_flag() -> None:
     )
 
     event = build_question_event(question_data)
-    payload = json.loads(event["data"])
+    payload = json.loads(encode_ai_builder_stream_event(event)["data"])
 
     assert payload["requires_confirm"] is True
 

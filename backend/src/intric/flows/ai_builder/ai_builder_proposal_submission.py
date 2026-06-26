@@ -42,6 +42,7 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorPhase,
     build_ai_builder_error_event,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_events import build_text_event
 from intric.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
 from intric.flows.ai_builder.ai_builder_litellm_completion import (
@@ -109,8 +110,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-EventBatch = tuple[dict[str, str], ...]
-
 
 @dataclass(frozen=True)
 class ForcedSubmissionResponse:
@@ -177,7 +176,7 @@ class ProposalSubmissionOwner:
         *,
         ctx: ProposalTurnContext,
         tool_call: RuntimeToolCall,
-    ) -> AsyncGenerator[dict[str, str], None] | None:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None] | None:
         tool_name = tool_call.function.name
         if tool_name != PROPOSE_FLOW_TOOL_NAME:
             return None
@@ -211,7 +210,7 @@ class ProposalSubmissionOwner:
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         discovery_runtime: DiscoveryRuntimeResult | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
         tool_schemas = self._active_submission_tool_schemas(
             flow=flow,
@@ -251,8 +250,8 @@ class ProposalSubmissionOwner:
             if scoped_revision_preflight_result.user_message is not None:
                 yield build_text_event(scoped_revision_preflight_result.user_message)
                 return
-            if scoped_revision_preflight_result.has_events:
-                for event in scoped_revision_preflight_result.iter_events():
+            if scoped_revision_preflight_result.events:
+                for event in scoped_revision_preflight_result.events:
                     yield event
                 return
 
@@ -343,17 +342,19 @@ class ProposalSubmissionOwner:
         if result is None or result.compiled_proposal is None:
             if result is not None and result.feedback is not None:
                 return ToolProcessingResult(
-                    event=build_ai_builder_error_event(
-                        message=(
-                            "The selected step change could not be applied to "
-                            "the current plan. Refresh the plan and try again."
+                    events=(
+                        build_ai_builder_error_event(
+                            message=(
+                                "The selected step change could not be applied to "
+                                "the current plan. Refresh the plan and try again."
+                            ),
+                            code=AIBuilderErrorCode.BAD_REQUEST,
+                            phase=AIBuilderErrorPhase.PROPOSAL,
+                            request_id=ctx.request_id,
+                            details={
+                                "failure_kind": result.failure_kind or "unknown",
+                            },
                         ),
-                        code=AIBuilderErrorCode.BAD_REQUEST,
-                        phase=AIBuilderErrorPhase.PROPOSAL,
-                        request_id=ctx.request_id,
-                        details={
-                            "failure_kind": result.failure_kind or "unknown",
-                        },
                     )
                 )
             return result
@@ -554,7 +555,7 @@ class ProposalSubmissionOwner:
         tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
         reason: ProposalRepairReason,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         self._record_failed_proposal_attempt_repair(
             usage_tracker=ctx.usage_tracker,
             request_id=ctx.request_id,
@@ -575,10 +576,10 @@ class ProposalSubmissionOwner:
         *,
         ctx: ProposalTurnContext,
         requirements_not_confirmed_message: str,
-    ) -> tuple[bool, list[dict[str, str]]]:
+    ) -> tuple[bool, tuple[AIBuilderStreamEvent, ...]]:
         requirements_state = resolve_requirements_state(ctx.conversation)
         if requirements_state.confirmed:
-            return False, []
+            return False, ()
 
         discovery_runtime = (
             ctx.discovery_runtime
@@ -609,22 +610,22 @@ class ProposalSubmissionOwner:
             )
             return True, followup_result.events
         if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
-            return True, []
-        return True, [
+            return True, ()
+        return True, (
             build_ai_builder_error_event(
                 message=requirements_not_confirmed_message,
                 code=AIBuilderErrorCode.REQUIREMENTS_NOT_CONFIRMED,
                 phase=AIBuilderErrorPhase.REQUIREMENTS,
                 request_id=ctx.request_id,
-            )
-        ]
+            ),
+        )
 
     async def _handle_propose_flow_tool_call(
         self,
         *,
         ctx: ProposalTurnContext,
         tool_call: RuntimeToolCall,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         target_kind = TargetKind.CREATE if ctx.flow is None else TargetKind.EDIT
         is_create = target_kind == TargetKind.CREATE
         assistant_snapshots = None if is_create else ctx.assistant_snapshots
@@ -706,7 +707,7 @@ class ProposalSubmissionOwner:
         if is_create and result.user_message is not None:
             yield build_text_event(result.user_message)
             return
-        if not result.has_events:
+        if not result.events:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 result.failure_kind
             )
@@ -725,7 +726,7 @@ class ProposalSubmissionOwner:
                 yield event
             return
 
-        for event in result.iter_events():
+        for event in result.events:
             yield event
 
     async def _retry_forced_proposal_after_text(
@@ -734,7 +735,7 @@ class ProposalSubmissionOwner:
         ctx: ProposalTurnContext,
         correction_messages: list[LLMMessageParam],
         assistant_text: str,
-    ) -> EventBatch | None:
+    ) -> tuple[AIBuilderStreamEvent, ...] | None:
         self._record_failed_proposal_attempt_repair(
             usage_tracker=ctx.usage_tracker,
             request_id=ctx.request_id,

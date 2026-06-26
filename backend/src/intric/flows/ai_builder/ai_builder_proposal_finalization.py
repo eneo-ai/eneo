@@ -127,8 +127,7 @@ class CompiledProposalFinalizer:
         )
         if mcp_clarification_events:
             return ToolProcessingResult(
-                event=mcp_clarification_events.events[0],
-                events=tuple(mcp_clarification_events.events[1:]),
+                events=mcp_clarification_events.events,
                 new_planning_state_version=(
                     mcp_clarification_events.new_planning_state_version
                 ),
@@ -170,9 +169,11 @@ class CompiledProposalFinalizer:
             flow=request.flow,
         )
         return ToolProcessingResult(
-            event=build_plan_event(
-                plan_id=stored_plan.plan.id,
-                proposal=stored_plan.proposal.content,
+            events=(
+                build_plan_event(
+                    plan_id=stored_plan.plan.id,
+                    proposal=stored_plan.proposal.content,
+                ),
             ),
             new_planning_state_version=stored_plan.new_planning_state_version,
         )

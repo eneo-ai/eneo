@@ -17,6 +17,11 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from intric.flows.ai_builder.ai_builder_events import (
+    build_status_event,
+    encode_ai_builder_stream_event,
+)
 from intric.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionMessage,
     LLMCompletionToolCall,
@@ -34,6 +39,7 @@ from intric.flows.ai_builder.ai_builder_proposal_finalization import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
+    build_self_correction_error_event,
 )
 from intric.flows.ai_builder.ai_builder_proposal_submission import (
     _forced_submission_response,
@@ -59,6 +65,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_context,
     _make_flow_spec,
     _make_retry_invocation,
+    _plan_stream_event,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _flow_with_description,
@@ -83,6 +90,12 @@ def _normalized_tool_call(name: str) -> LLMCompletionToolCall:
         id=f"call-{name}",
         function=LLMCompletionToolCallFunction(name=name, arguments="{}"),
     )
+
+
+def _wire_events(
+    events: list[AIBuilderStreamEvent] | tuple[AIBuilderStreamEvent, ...],
+) -> list[dict[str, str]]:
+    return [encode_ai_builder_stream_event(event) for event in events]
 
 
 def _normalized_message(
@@ -158,7 +171,7 @@ async def test_create_propose_flow_is_blocked_until_requirements_are_confirmed()
 ):
     submission = _make_submission()
     process_create = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
@@ -203,7 +216,7 @@ async def test_create_propose_flow_is_blocked_until_requirements_are_confirmed()
             tool_call=tool_call,
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert [event["event"] for event in events] == ["error"]
     payload = json.loads(events[0]["data"])
@@ -242,11 +255,11 @@ async def test_scoped_revision_preflight_returns_error_event_for_deterministic_f
     ):
         result = await submission._preflight_scoped_step_revision_if_requested(
             ctx=ctx,
-        )
+    )
 
     assert result is not None
-    assert result.event is not None
-    payload = json.loads(result.event["data"])
+    assert len(result.events) == 1
+    payload = json.loads(encode_ai_builder_stream_event(result.events[0])["data"])
     assert payload["code"] == "bad_request"
     assert payload["phase"] == "proposal"
     assert payload["request_id"] == "req-deterministic-failure"
@@ -268,7 +281,8 @@ async def test_scoped_revision_preflight_uses_bounded_server_tool_call_id() -> N
         available_kbs=[],
         available_mcps=[],
     )
-    finalize = AsyncMock(return_value=({"event": "plan", "data": "{}"},))
+    plan_event = _plan_stream_event()
+    finalize = AsyncMock(return_value=ToolProcessingResult(events=(plan_event,)))
     ctx = _make_context(
         conversation=[
             ConversationMessage(role="user", content="byt modell till gpt 5.4 nano")
@@ -291,7 +305,8 @@ async def test_scoped_revision_preflight_uses_bounded_server_tool_call_id() -> N
             ctx=ctx,
         )
 
-    assert result == ({"event": "plan", "data": "{}"},)
+    assert result is not None
+    assert result.events == (plan_event,)
     request = finalize.await_args.args[0]
     assert request.tool_call_id != f"server_scoped_model_revision:{ctx.request_id}"
     assert "scoped_step_revision" in request.tool_call_id
@@ -312,7 +327,8 @@ async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision(
     submission = _make_submission()
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
-    finalize = AsyncMock(return_value=({"event": "plan", "data": "{}"},))
+    plan_event = _plan_stream_event()
+    finalize = AsyncMock(return_value=ToolProcessingResult(events=(plan_event,)))
     ctx = _make_context(
         conversation=[
             ConversationMessage(
@@ -336,7 +352,8 @@ async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision(
             ctx=ctx,
         )
 
-    assert result == ({"event": "plan", "data": "{}"},)
+    assert result is not None
+    assert result.events == (plan_event,)
     request = finalize.await_args.args[0]
     assert request.arguments["revision_kind"] == "scoped_step_direct"
     assert request.assistant_content == "Jag har uppdaterat det valda steget."
@@ -401,7 +418,7 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
     )
 
     async def _repair_events(_request):
-        yield {"event": "status", "data": '{"status":"repairing"}'}
+        yield build_status_event("repairing")
 
     with (
         patch(
@@ -418,7 +435,7 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     telemetry = tracker.build_planner_telemetry()
@@ -480,7 +497,7 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     repair.assert_not_called()
     process_outline.assert_awaited_once()
@@ -574,7 +591,7 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
             ctx=_make_context(), tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert len(events) == 1
     assert events[0]["event"] == "text"
@@ -593,10 +610,8 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
         },
         tool_call_id="call-create-events",
     )
-    expected_events = (
-        {"event": "status", "data": '{"status":"one"}'},
-        {"event": "plan", "data": "{}"},
-    )
+    expected_events = (build_status_event("one"), _plan_stream_event())
+    expected_wire_events = _wire_events(expected_events)
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(events=expected_events)
     )
@@ -615,9 +630,9 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
             ctx=_make_context(), tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
-    assert events == list(expected_events)
+    assert events == expected_wire_events
 
 
 @pytest.mark.asyncio
@@ -629,18 +644,13 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
         {"plan_rationale": "Edit", "operations": []},
         tool_call_id="call-edit-events",
     )
-    expected_events = (
-        {"event": "status", "data": '{"status":"one"}'},
-        {"event": "plan", "data": "{}"},
-    )
+    expected_events = (build_status_event("one"), _plan_stream_event())
+    expected_wire_events = _wire_events(expected_events)
     process_edit = AsyncMock(
         return_value=ToolProcessingResult(compiled_proposal=compiled)
     )
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(
-            event=expected_events[0],
-            events=expected_events[1:],
-        )
+        return_value=ToolProcessingResult(events=expected_events)
     )
 
     with (
@@ -657,9 +667,9 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
             tool_call=tool_call,
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
-    assert events == list(expected_events)
+    assert events == expected_wire_events
 
 
 @pytest.mark.asyncio
@@ -678,7 +688,7 @@ async def test_edit_propose_flow_user_message_routes_to_self_correction() -> Non
     )
 
     async def _repair_events(_request):
-        yield {"event": "status", "data": '{"status":"repairing"}'}
+        yield build_status_event("repairing")
 
     with (
         patch(
@@ -696,7 +706,7 @@ async def test_edit_propose_flow_user_message_routes_to_self_correction() -> Non
             tool_call=tool_call,
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     repair.assert_called_once()
@@ -709,7 +719,7 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
     submission = _make_submission()
     compiled = _compiled_outline_proposal()
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
     process_outline = AsyncMock(
         return_value=ToolProcessingResult(compiled_proposal=compiled)
@@ -746,9 +756,9 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
             tool_call=tool_call,
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     request = finalize.await_args.args[0]
     assert request.assistant_content == "Här är mitt förslag:"
     assert request.assistant_metadata is assistant_metadata
@@ -786,7 +796,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
     )
 
     async def _events():
-        yield {"event": "status", "data": '{"status":"repairing"}'}
+        yield build_status_event("repairing")
 
     with (
         patch(
@@ -807,7 +817,7 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     process_outline.assert_awaited_once()
@@ -830,7 +840,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
         return_value=ToolProcessingResult(compiled_proposal=compiled)
     )
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
     tracker = ProposalTurnTelemetry(
         request_id="req-outline-retry-finalize",
@@ -871,7 +881,7 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
     ):
         result = await config.process_tool_invocation(invocation)
 
-    assert result.event == {"event": "plan", "data": "{}"}
+    assert [event.event for event in result.events] == ["plan"]
     process_outline.assert_awaited_once()
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
@@ -923,7 +933,7 @@ async def test_create_propose_flow_self_correction_returns_typed_error_when_comp
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert [event["event"] for event in events] == ["status", "error"]
     error_payload = json.loads(events[1]["data"])
@@ -954,7 +964,7 @@ async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() 
     )
 
     async def _repair_events(_request):
-        yield {"event": "error", "data": "{}"}
+        yield build_self_correction_error_event(feedback=None, failure_kind=None)
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission."
@@ -965,9 +975,9 @@ async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() 
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
-    assert events == [{"event": "error", "data": "{}"}]
+    assert [event["event"] for event in events] == ["error"]
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_tool"] == PROPOSE_FLOW_TOOL_NAME
     assert telemetry["proposal_first_attempt_success"] is False
@@ -980,7 +990,7 @@ async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() 
 async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
     submission = _make_submission()
     process_edit = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
@@ -1006,9 +1016,9 @@ async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
             tool_call=tool_call,
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     requirements.assert_not_called()
     discovery.assert_not_awaited()
     process_edit.assert_awaited_once()
@@ -1043,7 +1053,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     assert "valid propose_flow tool call" in config.forced_tool_prompt
 
     process_edit = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
     invocation = _make_retry_invocation(
         flow=flow,
@@ -1058,7 +1068,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     ):
         result = await config.process_tool_invocation(invocation)
 
-    assert result.event == {"event": "plan", "data": "{}"}
+    assert [event.event for event in result.events] == ["plan"]
     process_edit.assert_awaited_once()
     assert process_edit.await_args.kwargs["turn"] is invocation.turn
     assert process_edit.await_args.kwargs["conversation"] is invocation.conversation
@@ -1111,7 +1121,7 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
         return_value=ToolProcessingResult(compiled_proposal=original)
     )
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
 
     with (
@@ -1125,7 +1135,7 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
     ):
         result = await config.process_tool_invocation(invocation)
 
-    assert result.event == {"event": "plan", "data": "{}"}
+    assert [event.event for event in result.events] == ["plan"]
     litellm_client.acompletion.assert_not_awaited()
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
@@ -1169,7 +1179,7 @@ async def test_edit_propose_flow_preserves_description_advisory_without_completi
         return_value=ToolProcessingResult(compiled_proposal=original)
     )
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
 
     with (
@@ -1185,9 +1195,9 @@ async def test_edit_propose_flow_preserves_description_advisory_without_completi
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     litellm_client.acompletion.assert_not_awaited()
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
@@ -1224,7 +1234,7 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
             return_value=ForcedToolRetryOutcome(
-                events=({"event": "plan", "data": "{}"},)
+                events=(_plan_stream_event(),)
             )
         ),
     ) as retry_forced_tool:
@@ -1234,7 +1244,8 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
             assistant_text="Här är planen.",
         )
 
-    assert result == ({"event": "plan", "data": "{}"},)
+    assert result is not None
+    assert [event.event for event in result] == ["plan"]
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_kind == TargetKind.CREATE
     assert request.ctx is ctx
@@ -1268,7 +1279,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
             return_value=ForcedToolRetryOutcome(
-                events=({"event": "plan", "data": "{}"},)
+                events=(_plan_stream_event(),)
             )
         ),
     ) as retry_forced_tool:
@@ -1278,7 +1289,8 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
             assistant_text="Här är planen.",
         )
 
-    assert result == ({"event": "plan", "data": "{}"},)
+    assert result is not None
+    assert [event.event for event in result] == ["plan"]
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_kind == TargetKind.EDIT
     assert request.ctx is ctx
@@ -1307,7 +1319,7 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
     ctx = _make_context(flow=MagicMock(steps=[MagicMock(step_order=1)]))
 
     async def _events():
-        yield {"event": "status", "data": '{"status":"repairing"}'}
+        yield build_status_event("repairing")
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission."
@@ -1318,7 +1330,7 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
             ctx=ctx, tool_call=tool_call
         )
         assert dispatched is not None
-        events = [event async for event in dispatched]
+        events = _wire_events([event async for event in dispatched])
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]

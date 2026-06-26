@@ -24,9 +24,14 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
 )
 from intric.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStreamEvent,
     KeyDecisionPayload,
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
+)
+from intric.flows.ai_builder.ai_builder_events import (
+    build_text_event,
+    encode_ai_builder_stream_event,
 )
 from intric.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
@@ -979,9 +984,9 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
 
     async def fake_propose_plan(
         **kwargs: object,
-    ) -> AsyncGenerator[dict[str, str], None]:
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         captured.update(kwargs)
-        yield {"event": "proposal", "data": "{}"}
+        yield build_text_event("proposal")
 
     monkeypatch.setattr(
         "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
@@ -1006,7 +1011,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
     monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
 
     events = [
-        event
+        encode_ai_builder_stream_event(event)
         async for event in planner.send_message(
             session_id=session_id,
             message="Revise the plan",

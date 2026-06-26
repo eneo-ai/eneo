@@ -17,6 +17,8 @@ from intric.flows.ai_builder.ai_builder_edit_preview_models import (
     FlowEditDiff,
     StepChange,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AIBuilderPlanEvent
+from intric.flows.ai_builder.ai_builder_events import build_plan_event
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ProposalTurnContext,
@@ -116,6 +118,18 @@ def _compiled_outline_proposal() -> CompiledProposal:
             plan_rationale="Classify incoming text.",
         ),
         validation=SpecValidationResult(),
+    )
+
+
+def _plan_stream_event(
+    *,
+    compiled: CompiledProposal | None = None,
+    plan_id: UUID | None = None,
+) -> AIBuilderPlanEvent:
+    proposal = compiled or _compiled_outline_proposal()
+    return build_plan_event(
+        plan_id=plan_id or uuid4(),
+        proposal=proposal.content,
     )
 
 

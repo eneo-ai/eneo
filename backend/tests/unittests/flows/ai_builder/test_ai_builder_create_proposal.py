@@ -261,7 +261,7 @@ async def test_outline_processing_returns_compiled_proposal_for_processor_finali
 
     assert result.compiled_proposal is not None
     assert result.feedback is None
-    assert result.has_events is False
+    assert result.events == ()
 
 
 @pytest.mark.asyncio
@@ -307,7 +307,7 @@ async def test_outline_processing_leaves_mcp_question_persistence_to_processor()
     )
 
     assert result.compiled_proposal is not None
-    assert result.has_events is False
+    assert result.events == ()
 
 
 @pytest.mark.asyncio

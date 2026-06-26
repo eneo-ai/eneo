@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
 )
+from intric.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_USE_SERVER_PREFIX,
@@ -65,6 +66,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_edit_compilation,
     _make_flow_spec,
     _make_turn,
+    _plan_stream_event,
 )
 
 
@@ -126,7 +128,7 @@ def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message
         failure_kind="validation",
     )
 
-    payload = json.loads(event["data"])
+    payload = json.loads(encode_ai_builder_stream_event(event)["data"])
     assert payload["code"] == "self_correction_invalid_plan"
     assert "did not contain any flow steps" in payload["message"]
     assert "Compiled edit spec" not in payload["message"]
@@ -139,14 +141,14 @@ def test_self_correction_parse_error_uses_actionable_user_message() -> None:
         failure_kind="parse",
     )
 
-    payload = json.loads(event["data"])
+    payload = json.loads(encode_ai_builder_stream_event(event)["data"])
     assert payload["code"] == "self_correction_invalid_payload"
     assert "incomplete plan configuration" in payload["message"]
     assert "operations.0" not in payload["message"]
 
 
 async def _single_plan_event(**_kwargs):
-    yield {"event": "plan", "data": "{}"}
+    yield _plan_stream_event()
 
 
 def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
@@ -212,7 +214,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         ) as call_completion,
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
@@ -252,7 +254,7 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
         new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
@@ -288,7 +290,7 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
         new=AsyncMock(return_value=SimpleNamespace(choices=())),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
@@ -371,7 +373,7 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
         ),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(
                     session_id=prior_plan.session_id,
@@ -448,7 +450,7 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
         new=AsyncMock(),
     ) as call_completion:
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(
                     session_id=prior_plan.session_id,
@@ -513,7 +515,7 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable()
     ]
 
     events = [
-        event
+        encode_ai_builder_stream_event(event)
         async for event in processor.propose_plan(
             turn=_make_turn(session_id=session_id),
             conversation=conversation,
@@ -567,7 +569,7 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> 
     ]
 
     events = [
-        event
+        encode_ai_builder_stream_event(event)
         async for event in processor.propose_plan(
             turn=_make_turn(),
             conversation=conversation,
@@ -636,7 +638,7 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
         return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
 
     finalize = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
     )
 
     with (
@@ -657,7 +659,7 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
         ),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=conversation,
@@ -675,7 +677,7 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
             )
         ]
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     processor.litellm_client.acompletion.assert_awaited_once()
     assert "response_format" not in (
         processor.litellm_client.acompletion.await_args.kwargs
@@ -721,7 +723,7 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
     ]
 
     events = [
-        event
+        encode_ai_builder_stream_event(event)
         async for event in processor.propose_plan(
             turn=_make_turn(),
             conversation=conversation,
@@ -795,7 +797,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         ),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=[
@@ -903,7 +905,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
         ),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=[
@@ -1010,7 +1012,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         ),
     ):
         events = [
-            event
+            encode_ai_builder_stream_event(event)
             async for event in processor.propose_plan(
                 turn=_make_turn(),
                 conversation=[
@@ -1241,7 +1243,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
         )
 
     assert result.compiled_proposal is not None
-    assert result.has_events is False
+    assert result.events == ()
 
 
 @pytest.mark.asyncio
@@ -1314,7 +1316,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
         )
 
     assert result.compiled_proposal is not None
-    assert result.has_events is False
+    assert result.events == ()
     assert prepare_spec.call_args.kwargs["resource_catalog"] is catalog
 
 
@@ -1392,7 +1394,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
         )
 
     assert result.compiled_proposal is not None
-    assert result.has_events is False
+    assert result.events == ()
 
 
 @pytest.mark.asyncio
