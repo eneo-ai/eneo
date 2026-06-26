@@ -85,6 +85,13 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("published_version", sa.Integer(), nullable=True),
+        sa.Column(
+            "draft_revision",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+            comment="Monotonic counter for optimistic locking on draft mutations.",
+        ),
         sa.Column("metadata_json", postgresql.JSONB(), nullable=True),
         sa.Column("data_retention_days", sa.Integer(), nullable=True),
         sa.Column("deleted_at", sa.TIMESTAMP(timezone=True), nullable=True),
@@ -213,54 +220,6 @@ def upgrade() -> None:
     )
     op.create_index("ix_flow_steps_flow_id", "flow_steps", ["flow_id"], unique=False)
     op.create_index("ix_flow_steps_tenant_id", "flow_steps", ["tenant_id"], unique=False)
-
-    op.create_table(
-        "flow_step_mcp_tools",
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "flow_step_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("flow_steps.id", ondelete="CASCADE"),
-            primary_key=True,
-            nullable=False,
-        ),
-        sa.Column(
-            "mcp_server_tool_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("mcp_server_tools.id", ondelete="CASCADE"),
-            primary_key=True,
-            nullable=False,
-        ),
-        sa.Column(
-            "tenant_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(
-            ["flow_step_id", "tenant_id"],
-            ["flow_steps.id", "flow_steps.tenant_id"],
-            name="fk_flow_step_mcp_tools_step_tenant",
-            ondelete="CASCADE",
-        ),
-    )
-    op.create_index(
-        "ix_flow_step_mcp_tools_tenant_id",
-        "flow_step_mcp_tools",
-        ["tenant_id"],
-        unique=False,
-    )
 
     op.create_table(
         "flow_step_dependencies",
@@ -402,22 +361,26 @@ def upgrade() -> None:
         ),
         sa.Column("flow_version", sa.Integer(), nullable=False),
         sa.Column(
-            "user_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-        sa.Column(
             "tenant_id",
             postgresql.UUID(as_uuid=True),
             sa.ForeignKey("tenants.id", ondelete="CASCADE"),
             nullable=False,
         ),
+        sa.Column(
+            "principal_type",
+            sa.String(length=32),
+            nullable=False,
+            server_default="user",
+        ),
+        sa.Column("principal_user_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("principal_api_key_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("idempotency_key", sa.String(length=255), nullable=True),
+        sa.Column("request_fingerprint", sa.String(length=64), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="queued"),
         sa.Column("cancelled_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("input_payload_json", postgresql.JSONB(), nullable=True),
         sa.Column("output_payload_json", postgresql.JSONB(), nullable=True),
-        sa.Column("error_message", sa.String(), nullable=True),
+        sa.Column("error_json", postgresql.JSONB(), nullable=True),
         sa.Column(
             "job_id",
             postgresql.UUID(as_uuid=True),
@@ -425,8 +388,39 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.CheckConstraint(
+            "principal_type IN ('user','service_key')",
+            name="ck_flow_runs_principal_type",
+        ),
+        sa.CheckConstraint(
             "status IN ('queued','running','completed','failed','cancelled')",
             name="ck_flow_runs_status",
+        ),
+        sa.CheckConstraint(
+            """
+            (
+                principal_type = 'user'
+                AND principal_user_id IS NOT NULL
+                AND principal_api_key_id IS NULL
+            )
+            OR (
+                principal_type = 'service_key'
+                AND principal_user_id IS NULL
+                AND principal_api_key_id IS NOT NULL
+            )
+            """,
+            name="ck_flow_runs_principal_identity",
+        ),
+        sa.ForeignKeyConstraint(
+            ["principal_user_id"],
+            ["users.id"],
+            name="fk_flow_runs_principal_user_id",
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["principal_api_key_id"],
+            ["api_keys_v2.id"],
+            name="fk_flow_runs_principal_api_key_id",
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["flow_id", "tenant_id"],
@@ -454,6 +448,22 @@ def upgrade() -> None:
         ["status", "updated_at"],
         unique=False,
         postgresql_where=sa.text("status = 'running'"),
+    )
+    op.create_index(
+        "uq_flow_runs_idempotency_user_key",
+        "flow_runs",
+        ["tenant_id", "flow_id", "principal_user_id", "idempotency_key"],
+        unique=True,
+        postgresql_where=sa.text("principal_type = 'user' AND idempotency_key IS NOT NULL"),
+    )
+    op.create_index(
+        "uq_flow_runs_idempotency_service_key",
+        "flow_runs",
+        ["tenant_id", "flow_id", "principal_api_key_id", "idempotency_key"],
+        unique=True,
+        postgresql_where=sa.text(
+            "principal_type = 'service_key' AND idempotency_key IS NOT NULL"
+        ),
     )
 
     op.create_table(
@@ -517,7 +527,6 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
         sa.Column("error_message", sa.String(), nullable=True),
         sa.Column("flow_step_execution_hash", sa.String(), nullable=True),
-        sa.Column("tool_calls_metadata", postgresql.JSONB(), nullable=True),
         sa.CheckConstraint(
             "status IN ('pending','running','completed','failed','cancelled')",
             name="ck_flow_step_results_status",
@@ -935,9 +944,6 @@ def downgrade() -> None:
 
     op.drop_index("ix_flow_step_dependencies_tenant_id", table_name="flow_step_dependencies")
     op.drop_table("flow_step_dependencies")
-
-    op.drop_index("ix_flow_step_mcp_tools_tenant_id", table_name="flow_step_mcp_tools")
-    op.drop_table("flow_step_mcp_tools")
 
     op.drop_index("ix_flow_steps_tenant_id", table_name="flow_steps")
     op.drop_index("ix_flow_steps_flow_id", table_name="flow_steps")

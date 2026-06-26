@@ -1,7 +1,7 @@
 """add flow package imports
 
 Revision ID: 20260519_flow_package_imports
-Revises: 20260518_plan_bindings_json
+Revises: 20260518_flow_resource_bindings
 Create Date: 2026-05-19 00:00:00.000000
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "20260519_flow_package_imports"
-down_revision = "20260518_plan_bindings_json"
+down_revision = "20260518_flow_resource_bindings"
 branch_labels = None
 depends_on = None
 

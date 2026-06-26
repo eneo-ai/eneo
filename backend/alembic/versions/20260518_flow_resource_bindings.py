@@ -1,7 +1,7 @@
 """add flow resource bindings
 
 Revision ID: 20260518_flow_resource_bindings
-Revises: 20260515_flow_run_error
+Revises: 20260514_review_expiry
 Create Date: 2026-05-18 00:00:00.000000
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "20260518_flow_resource_bindings"
-down_revision = "20260515_flow_run_error"
+down_revision = "20260514_review_expiry"
 branch_labels = None
 depends_on = None
 

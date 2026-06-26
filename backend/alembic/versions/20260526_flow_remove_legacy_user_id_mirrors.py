@@ -1,4 +1,4 @@
-"""remove legacy Flow user id mirrors
+"""remove legacy files.user_id mirror
 
 Revision ID: 20260526_flow_user_mirror_drop
 Revises: 20260526_flow_published_fk
@@ -17,7 +17,7 @@ branch_labels = None
 depends_on = None
 
 
-def _assert_typed_identity_is_canonical() -> None:
+def _assert_typed_file_owner_is_canonical() -> None:
     op.execute(
         sa.text(
             """
@@ -46,30 +46,6 @@ def _assert_typed_identity_is_canonical() -> None:
                 ) THEN
                     RAISE EXCEPTION 'Cannot drop files.user_id: typed file owner fields are missing or disagree with the legacy mirror.';
                 END IF;
-
-                IF EXISTS (
-                    SELECT 1
-                    FROM flow_runs
-                    WHERE principal_type NOT IN ('user', 'service_key')
-                       OR (
-                            principal_type = 'user'
-                            AND (
-                                principal_user_id IS NULL
-                                OR principal_api_key_id IS NOT NULL
-                                OR user_id IS DISTINCT FROM principal_user_id
-                            )
-                        )
-                       OR (
-                            principal_type = 'service_key'
-                            AND (
-                                principal_api_key_id IS NULL
-                                OR principal_user_id IS NOT NULL
-                                OR user_id IS NOT NULL
-                            )
-                        )
-                ) THEN
-                    RAISE EXCEPTION 'Cannot drop flow_runs.user_id: typed Flow run principal fields are missing or disagree with the legacy mirror.';
-                END IF;
             END $$;
             """
         )
@@ -77,13 +53,10 @@ def _assert_typed_identity_is_canonical() -> None:
 
 
 def upgrade() -> None:
-    _assert_typed_identity_is_canonical()
+    _assert_typed_file_owner_is_canonical()
 
     op.drop_constraint("files_users_fkey", "files", type_="foreignkey")
     op.drop_column("files", "user_id")
-
-    op.drop_constraint("flow_runs_user_id_fkey", "flow_runs", type_="foreignkey")
-    op.drop_column("flow_runs", "user_id")
 
 
 def downgrade() -> None:
@@ -103,28 +76,7 @@ def downgrade() -> None:
         "users",
         ["user_id"],
         ["id"],
-        ondelete="SET NULL",
+        ondelete="CASCADE",
         postgresql_not_valid=True,
     )
     op.execute("ALTER TABLE files VALIDATE CONSTRAINT files_users_fkey")
-
-    op.add_column("flow_runs", sa.Column("user_id", sa.UUID(), nullable=True))
-    op.execute(
-        sa.text(
-            """
-            UPDATE flow_runs
-            SET user_id = principal_user_id
-            WHERE principal_type = 'user'
-            """
-        )
-    )
-    op.create_foreign_key(
-        "flow_runs_user_id_fkey",
-        "flow_runs",
-        "users",
-        ["user_id"],
-        ["id"],
-        ondelete="SET NULL",
-        postgresql_not_valid=True,
-    )
-    op.execute("ALTER TABLE flow_runs VALIDATE CONSTRAINT flow_runs_user_id_fkey")

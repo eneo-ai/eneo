@@ -4,17 +4,17 @@ Add run-level trace correlation and attempt-level provenance fields to support
 enterprise flow evidence, export, and future observability adapters.
 
 Revision ID: 202603311430
-Revises: 202603191930
+Revises: 202603121400
 Create Date: 2026-03-31 14:30:00.000000
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 
 revision = "202603311430"
-down_revision = "202603191930"
+down_revision = "202603121400"
 branch_labels = None
 depends_on = None
 

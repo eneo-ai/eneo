@@ -1,9 +1,8 @@
-"""flow run identity and idempotency foundation
+"""file owner identity and audit API-key actor foundation
 
-Adds service-principal identity columns (principal_type, principal_user_id,
-principal_api_key_id) and idempotency columns (idempotency_key,
-request_fingerprint) to flow_runs in a single step, plus owner identity
-columns on files and actor_api_key_id on audit_logs.
+Adds typed owner identity columns on files and actor_api_key_id on audit_logs.
+Flow run principal/idempotency columns are created by the Flow foundation
+migration because flow_runs is branch-owned pre-production storage.
 
 Revision ID: 20260411_flow_run_identity
 Revises: 202603311430
@@ -39,91 +38,6 @@ def _add_constraint_if_missing(name: str, ddl: str) -> None:
 
 
 def upgrade() -> None:
-    # flow_runs: identity + idempotency columns
-    op.add_column(
-        "flow_runs",
-        sa.Column(
-            "principal_type",
-            sa.String(length=32),
-            nullable=False,
-            server_default="user",
-        ),
-    )
-    op.add_column("flow_runs", sa.Column("principal_user_id", sa.UUID(), nullable=True))
-    op.add_column("flow_runs", sa.Column("principal_api_key_id", sa.UUID(), nullable=True))
-    op.add_column(
-        "flow_runs",
-        sa.Column("idempotency_key", sa.String(length=255), nullable=True),
-    )
-    op.add_column(
-        "flow_runs",
-        sa.Column("request_fingerprint", sa.String(length=64), nullable=True),
-    )
-    op.execute("UPDATE flow_runs SET principal_user_id = user_id WHERE user_id IS NOT NULL")
-
-    _add_constraint_if_missing(
-        "fk_flow_runs_principal_user_id",
-        """
-        ALTER TABLE flow_runs
-        ADD CONSTRAINT fk_flow_runs_principal_user_id
-        FOREIGN KEY (principal_user_id)
-        REFERENCES users(id)
-        ON DELETE RESTRICT
-        """,
-    )
-    _add_constraint_if_missing(
-        "fk_flow_runs_principal_api_key_id",
-        """
-        ALTER TABLE flow_runs
-        ADD CONSTRAINT fk_flow_runs_principal_api_key_id
-        FOREIGN KEY (principal_api_key_id)
-        REFERENCES api_keys_v2(id)
-        ON DELETE RESTRICT
-        """,
-    )
-    _add_constraint_if_missing(
-        "ck_flow_runs_principal_type",
-        """
-        ALTER TABLE flow_runs
-        ADD CONSTRAINT ck_flow_runs_principal_type
-        CHECK (principal_type IN ('user','service_key'))
-        """,
-    )
-    _add_constraint_if_missing(
-        "ck_flow_runs_principal_identity",
-        """
-        ALTER TABLE flow_runs
-        ADD CONSTRAINT ck_flow_runs_principal_identity
-        CHECK (
-            (
-                principal_type = 'user'
-                AND principal_user_id IS NOT NULL
-                AND principal_api_key_id IS NULL
-            )
-            OR (
-                principal_type = 'service_key'
-                AND principal_user_id IS NULL
-                AND principal_api_key_id IS NOT NULL
-            )
-        )
-        """,
-    )
-    op.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_flow_runs_idempotency_user_key
-        ON flow_runs (tenant_id, flow_id, principal_user_id, idempotency_key)
-        WHERE principal_type = 'user' AND idempotency_key IS NOT NULL
-        """,
-    )
-    op.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_flow_runs_idempotency_service_key
-        ON flow_runs (tenant_id, flow_id, principal_api_key_id, idempotency_key)
-        WHERE principal_type = 'service_key' AND idempotency_key IS NOT NULL
-        """,
-    )
-
-    # files: owner identity columns
     op.add_column(
         "files",
         sa.Column(
@@ -185,7 +99,6 @@ def upgrade() -> None:
         """,
     )
 
-    # audit_logs: service-key actor
     op.add_column("audit_logs", sa.Column("actor_api_key_id", sa.UUID(), nullable=True))
     _add_constraint_if_missing(
         "fk_audit_logs_actor_api_key_id",
@@ -218,15 +131,3 @@ def downgrade() -> None:
     op.drop_column("files", "owner_api_key_id")
     op.drop_column("files", "owner_user_id")
     op.drop_column("files", "owner_type")
-
-    op.drop_index("uq_flow_runs_idempotency_service_key", table_name="flow_runs")
-    op.drop_index("uq_flow_runs_idempotency_user_key", table_name="flow_runs")
-    op.drop_constraint("ck_flow_runs_principal_identity", "flow_runs", type_="check")
-    op.drop_constraint("ck_flow_runs_principal_type", "flow_runs", type_="check")
-    op.drop_constraint("fk_flow_runs_principal_api_key_id", "flow_runs", type_="foreignkey")
-    op.drop_constraint("fk_flow_runs_principal_user_id", "flow_runs", type_="foreignkey")
-    op.drop_column("flow_runs", "request_fingerprint")
-    op.drop_column("flow_runs", "idempotency_key")
-    op.drop_column("flow_runs", "principal_api_key_id")
-    op.drop_column("flow_runs", "principal_user_id")
-    op.drop_column("flow_runs", "principal_type")

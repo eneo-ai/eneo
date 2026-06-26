@@ -19,12 +19,12 @@ After running the migration, we verify:
 - No orphaned references remain
 
 NOTE: These tests use a special approach where we:
-1. Downgrade to a state BEFORE the migration
+1. Reset the test schema and upgrade to a state BEFORE the migration
 2. Create legacy data (global models with FK relations)
 3. Run the migration (upgrade)
 4. Verify results
 
-IMPORTANT: These tests use their own isolated PostgreSQL container to avoid
+IMPORTANT: These tests reset their PostgreSQL test schema to avoid
 interference with other integration tests. This is necessary because:
 - Migration tests need to downgrade/upgrade the database schema
 - Other tests expect the database to be at the latest migration
@@ -32,15 +32,16 @@ interference with other integration tests. This is necessary because:
 """
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg2
 import pytest
+
 from alembic import command
 from alembic.config import Config
-from datetime import datetime, timezone
-from uuid import uuid4
-
+from tests.integration.migrations.alembic_test_utils import reset_public_schema
 
 # Mark tests to run only when explicitly selected (not as part of larger suite)
 # These tests downgrade/upgrade the database schema and must run in isolation.
@@ -60,6 +61,58 @@ def get_alembic_config(database_url: str) -> Config:
     alembic_cfg = Config(str(alembic_ini_path))
     alembic_cfg.set_main_option("sqlalchemy.url", database_url)
     return alembic_cfg
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name = %s
+            )
+            """,
+            (table_name,),
+        )
+        return cur.fetchone()[0]
+
+
+def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = %s
+                  AND column_name = %s
+            )
+            """,
+            (table_name, column_name),
+        )
+        return cur.fetchone()[0]
+
+
+def _assert_pre_migration_schema(conn) -> None:
+    assert _table_exists(conn, "completion_model_settings")
+    assert _table_exists(conn, "embedding_model_settings")
+    assert _table_exists(conn, "transcription_model_settings")
+    assert not _column_exists(conn, "completion_models", "tenant_id")
+    assert not _column_exists(conn, "completion_models", "provider_id")
+
+
+def _clear_migration_seeded_models(conn) -> None:
+    """Keep this fixture's legacy global model set as the only migrated model data."""
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM completion_model_settings")
+        cur.execute("DELETE FROM embedding_model_settings")
+        cur.execute("DELETE FROM transcription_model_settings")
+        cur.execute("DELETE FROM completion_models")
+        cur.execute("DELETE FROM embedding_models")
+        cur.execute("DELETE FROM transcription_models")
 
 
 def create_legacy_database_state(cur, now: datetime) -> dict:
@@ -686,14 +739,13 @@ def migration_test_db(test_settings):
     Special database setup for migration tests.
 
     This fixture tests BOTH migrations in sequence:
-    1. Downgrade stepwise to BEFORE migrate_global_to_tenant_models
-       (this runs consolidate_model_settings downgrade which recreates settings tables)
+    1. Reset the test schema and upgrade to BEFORE migrate_global_to_tenant_models
     2. Creates legacy data (global models + settings in separate tables)
     3. Runs migrate_global_to_tenant_models (updates FK references)
     4. Runs consolidate_model_settings (moves settings to model columns)
     5. Returns connection info for tests to verify results
 
-    NOTE: These tests must be run in isolation:
+    NOTE: These tests control their schema state:
         pytest tests/integration/migrations/test_global_to_tenant_models_migration.py -v
 
     Using module scope so all tests in this module share the same migrated state.
@@ -716,53 +768,15 @@ def migration_test_db(test_settings):
     pre_migration_revision = "20260116_update_audit_actor_fk"
 
     try:
-        # Stepwise downgrade to restore settings tables:
-        # 1. First downgrade to migrate_global_to_tenant_models
-        #    (this runs consolidate_model_settings downgrade, recreating settings tables)
-        # 2. Then downgrade to pre_migration_revision (before f7f7647d5327)
-        try:
-            print("Downgrading stepwise to restore settings tables...")
-            # This triggers consolidate_model_settings downgrade which recreates settings tables
-            command.downgrade(alembic_cfg, "migrate_global_to_tenant_models")
-            print(
-                "Downgraded past consolidate_model_settings (settings tables recreated)"
-            )
-
-            # Now downgrade to before f7f7647d5327 (which adds model_providers)
-            command.downgrade(alembic_cfg, pre_migration_revision)
-            print(
-                f"Downgraded to {pre_migration_revision} (before model_providers migration)"
-            )
-        except Exception as e:
-            print(f"Downgrade not possible (may already be at base): {e}")
-            # If downgrade fails, upgrade to that revision instead
-            command.upgrade(alembic_cfg, pre_migration_revision)
-            print(f"Upgraded to {pre_migration_revision}")
+        reset_public_schema(conn)
+        command.upgrade(alembic_cfg, pre_migration_revision)
+        print(f"Upgraded to {pre_migration_revision}")
+        _assert_pre_migration_schema(conn)
+        _clear_migration_seeded_models(conn)
 
         # Create legacy data
         now = datetime.now(timezone.utc)
         with conn.cursor() as cur:
-            # Clear any existing data first (in case of rerun)
-            # Note: Before f7f7647d5327, model_providers table doesn't exist yet
-            # (it's created by that migration)
-            cur.execute("DELETE FROM completion_model_settings")
-            cur.execute("DELETE FROM embedding_model_settings")
-            cur.execute("DELETE FROM spaces_completion_models")
-            cur.execute("DELETE FROM spaces_embedding_models")
-            cur.execute("DELETE FROM spaces_transcription_models")
-            cur.execute("DELETE FROM transcription_model_settings")
-            cur.execute("DELETE FROM assistants")
-            cur.execute("DELETE FROM apps")
-            cur.execute("DELETE FROM services")
-            cur.execute("DELETE FROM groups")
-            cur.execute("DELETE FROM spaces")
-            cur.execute("DELETE FROM users")
-            cur.execute("DELETE FROM tenants")
-            cur.execute("DELETE FROM completion_models")
-            cur.execute("DELETE FROM embedding_models")
-            cur.execute("DELETE FROM transcription_models")
-            # Don't delete from model_providers - it doesn't exist at this migration level
-
             legacy_data = create_legacy_database_state(cur, now)
             conn.commit()
 
@@ -805,6 +819,8 @@ def migration_test_db(test_settings):
         }
 
     finally:
+        reset_public_schema(conn)
+        command.upgrade(alembic_cfg, "head")
         conn.close()
 
 

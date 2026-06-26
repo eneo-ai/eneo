@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "20260506_flow_step_timeout"
-down_revision = "20260502_drop_result_tool_calls"
+down_revision = "20260502_flow_audit_delivery"
 branch_labels = None
 depends_on = None
 

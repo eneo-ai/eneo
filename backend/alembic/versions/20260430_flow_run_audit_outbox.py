@@ -1,7 +1,7 @@
 """add flow run audit outbox
 
 Revision ID: 20260430_flow_run_audit_outbox
-Revises: 20260426_drop_step_mcp_tools
+Revises: 20260426_latest_plan_fk
 Create Date: 2026-04-30 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "20260430_flow_run_audit_outbox"
-down_revision = "20260426_drop_step_mcp_tools"
+down_revision = "20260426_latest_plan_fk"
 branch_labels = None
 depends_on = None
 

@@ -13,6 +13,7 @@ from psycopg2.extras import Json
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import current_revisions
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -69,13 +70,6 @@ def _clear_seeded_rows(conn) -> None:
             "DELETE FROM flow_run_review_checkpoints WHERE step_label = %s",
             (_CHECKPOINT_STEP_LABEL,),
         )
-
-
-def _current_revision(conn) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT version_num FROM alembic_version")
-        row = cur.fetchone()
-    return row[0] if row else None
 
 
 def _column_nullable(conn, table_name: str, column_name: str) -> bool:
@@ -252,6 +246,6 @@ def test_upgrade_aborts_when_checkpoint_missing_snapshot_fields(
     with pytest.raises(Exception, match="review checkpoint snapshots"):
         command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in current_revisions(conn)
     assert _column_nullable(conn, "flow_run_review_checkpoints", "review_mode") is True
     assert _column_nullable(conn, "flow_run_review_checkpoints", "output_type") is True

@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from intric.database.tables.flow_tables import BuilderPlans
 from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowBuilderEditApproval,
     FlowBuilderProposal,
@@ -113,6 +114,20 @@ def test_plan_response_does_not_expose_resource_bindings() -> None:
     assert "resource_bindings_json" not in FlowBuilderProposalContent.model_fields
     assert "reasoning" not in FlowBuilderProposalContent.model_fields
     assert "edit_result" not in FlowBuilderProposalContent.model_fields
+
+
+def test_builder_plans_table_uses_single_proposal_json_storage() -> None:
+    column_names = set(BuilderPlans.__table__.columns.keys())
+
+    assert {"proposal_json", "spec_hash"}.issubset(column_names)
+    assert column_names.isdisjoint(
+        {
+            "spec_json",
+            "envelope_json",
+            "resource_bindings_json",
+            "edit_result_json",
+        }
+    )
 
 
 def test_plan_from_row_rehydrates_spec_from_proposal_json() -> None:

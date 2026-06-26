@@ -1,4 +1,4 @@
-"""Migration tests for deleting Flow legacy user id mirrors.
+"""Migration tests for deleting the legacy files.user_id mirror.
 
 Run explicitly:
     pytest -m migration_isolation tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py -q
@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import psycopg2
 import pytest
-from psycopg2.extras import Json
 
 from alembic import command
 from alembic.config import Config
@@ -19,7 +18,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRIOR_REVISION = "20260526_flow_published_fk"
 MIGRATION_REVISION = "20260526_flow_user_mirror_drop"
-_TENANT_NAME_PREFIX = "flow-user-mirror-migration-"
+_TENANT_NAME_PREFIX = "flow-file-user-mirror-migration-"
 
 
 def _alembic_cfg(database_url: str) -> Config:
@@ -71,11 +70,10 @@ def _clear_seeded_rows(conn) -> None:
         )
 
 
-def _current_revision(conn) -> str | None:
+def _current_revisions(conn) -> set[str]:
     with conn.cursor() as cur:
         cur.execute("SELECT version_num FROM alembic_version")
-        row = cur.fetchone()
-    return row[0] if row else None
+        return {row[0] for row in cur.fetchall()}
 
 
 def _column_exists(conn, table_name: str, column_name: str) -> bool:
@@ -108,13 +106,9 @@ def _fk_delete_rule(conn, table_name: str, constraint_name: str) -> str | None:
     return row[0] if row else None
 
 
-def _insert_user_owned_fixture(conn) -> dict[str, str]:
+def _insert_tenant_and_user(conn) -> dict[str, str]:
     tenant_id = uuid4()
     user_id = uuid4()
-    space_id = uuid4()
-    flow_id = uuid4()
-    flow_run_id = uuid4()
-    file_id = uuid4()
     tenant_name = f"{_TENANT_NAME_PREFIX}{tenant_id}"
 
     with conn.cursor() as cur:
@@ -156,73 +150,15 @@ def _insert_user_owned_fixture(conn) -> dict[str, str]:
             """,
             (user_id, f"user-{user_id}", f"{user_id}@example.test", tenant_id),
         )
-        cur.execute(
-            """
-            INSERT INTO spaces (
-                id,
-                name,
-                description,
-                data_retention_days,
-                tenant_id,
-                user_id
-            )
-            VALUES (%s, %s, NULL, NULL, %s, NULL)
-            """,
-            (space_id, "Flow user mirror migration space", tenant_id),
-        )
-        cur.execute(
-            """
-            INSERT INTO flows (
-                id,
-                name,
-                description,
-                tenant_id,
-                space_id,
-                created_by_user_id,
-                owner_user_id,
-                published_version,
-                metadata_json,
-                data_retention_days
-            )
-            VALUES (%s, %s, NULL, %s, %s, %s, %s, NULL, NULL, NULL)
-            """,
-            (
-                flow_id,
-                "Flow user mirror migration flow",
-                tenant_id,
-                space_id,
-                user_id,
-                user_id,
-            ),
-        )
-        cur.execute(
-            """
-            INSERT INTO flow_versions (
-                flow_id,
-                version,
-                tenant_id,
-                definition_checksum,
-                definition_json
-            )
-            VALUES (%s, 1, %s, 'checksum-user-mirror', %s)
-            """,
-            (
-                flow_id,
-                tenant_id,
-                Json(
-                    {
-                        "schema_version": 1,
-                        "flow_id": str(flow_id),
-                        "name": "Flow user mirror migration flow",
-                        "steps": [],
-                    }
-                ),
-            ),
-        )
-        cur.execute(
-            "UPDATE flows SET published_version = 1 WHERE id = %s",
-            (flow_id,),
-        )
+
+    return {"tenant_id": str(tenant_id), "user_id": str(user_id)}
+
+
+def _insert_user_owned_file(conn) -> dict[str, str]:
+    ids = _insert_tenant_and_user(conn)
+    file_id = uuid4()
+
+    with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO files (
@@ -243,84 +179,18 @@ def _insert_user_owned_fixture(conn) -> dict[str, str]:
             )
             VALUES (%s, 'source.pdf', 'text', NULL, 'checksum-file', 12, 'application/pdf', 'document', NULL, 'user', %s, NULL, %s, %s)
             """,
-            (file_id, user_id, user_id, tenant_id),
-        )
-        cur.execute(
-            """
-            INSERT INTO flow_runs (
-                id,
-                flow_id,
-                flow_version,
-                principal_type,
-                principal_user_id,
-                principal_api_key_id,
-                user_id,
-                tenant_id,
-                trace_id,
-                status,
-                input_payload_json
-            )
-            VALUES (%s, %s, 1, 'user', %s, NULL, %s, %s, %s, 'completed', '{}')
-            """,
-            (flow_run_id, flow_id, user_id, user_id, tenant_id, uuid4()),
+            (file_id, ids["user_id"], ids["user_id"], ids["tenant_id"]),
         )
 
-    return {
-        "file_id": str(file_id),
-        "flow_run_id": str(flow_run_id),
-        "user_id": str(user_id),
-    }
+    return {"file_id": str(file_id), **ids}
 
 
-def _insert_service_key_owned_fixture(conn) -> dict[str, str]:
-    tenant_id = uuid4()
-    user_id = uuid4()
+def _insert_service_key_owned_file(conn) -> dict[str, str]:
+    ids = _insert_tenant_and_user(conn)
     api_key_id = uuid4()
-    space_id = uuid4()
-    flow_id = uuid4()
-    flow_run_id = uuid4()
     file_id = uuid4()
-    tenant_name = f"{_TENANT_NAME_PREFIX}{tenant_id}"
 
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO tenants (
-                id,
-                name,
-                display_name,
-                slug,
-                quota_limit,
-                privacy_policy,
-                domain,
-                zitadel_org_id,
-                provisioning,
-                security_enabled,
-                state
-            )
-            VALUES (%s, %s, %s, %s, %s, NULL, NULL, NULL, false, false, 'active')
-            """,
-            (tenant_id, tenant_name, tenant_name, tenant_name[:63], 100000),
-        )
-        cur.execute(
-            """
-            INSERT INTO users (
-                id,
-                username,
-                email,
-                email_verified,
-                salt,
-                password,
-                is_active,
-                state,
-                used_tokens,
-                tenant_id,
-                quota_limit
-            )
-            VALUES (%s, %s, %s, true, NULL, NULL, true, 'active', 0, %s, NULL)
-            """,
-            (user_id, f"user-{user_id}", f"{user_id}@example.test", tenant_id),
-        )
         cur.execute(
             """
             INSERT INTO api_keys_v2 (
@@ -364,78 +234,11 @@ def _insert_service_key_owned_fixture(conn) -> dict[str, str]:
             """,
             (
                 api_key_id,
-                tenant_id,
-                user_id,
+                ids["tenant_id"],
+                ids["user_id"],
                 f"hash-{api_key_id}",
-                user_id,
+                ids["user_id"],
             ),
-        )
-        cur.execute(
-            """
-            INSERT INTO spaces (
-                id,
-                name,
-                description,
-                data_retention_days,
-                tenant_id,
-                user_id
-            )
-            VALUES (%s, %s, NULL, NULL, %s, NULL)
-            """,
-            (space_id, "Flow service-key migration space", tenant_id),
-        )
-        cur.execute(
-            """
-            INSERT INTO flows (
-                id,
-                name,
-                description,
-                tenant_id,
-                space_id,
-                created_by_user_id,
-                owner_user_id,
-                published_version,
-                metadata_json,
-                data_retention_days
-            )
-            VALUES (%s, %s, NULL, %s, %s, %s, %s, NULL, NULL, NULL)
-            """,
-            (
-                flow_id,
-                "Flow service-key migration flow",
-                tenant_id,
-                space_id,
-                user_id,
-                user_id,
-            ),
-        )
-        cur.execute(
-            """
-            INSERT INTO flow_versions (
-                flow_id,
-                version,
-                tenant_id,
-                definition_checksum,
-                definition_json
-            )
-            VALUES (%s, 1, %s, 'checksum-service-key-mirror', %s)
-            """,
-            (
-                flow_id,
-                tenant_id,
-                Json(
-                    {
-                        "schema_version": 1,
-                        "flow_id": str(flow_id),
-                        "name": "Flow service-key migration flow",
-                        "steps": [],
-                    }
-                ),
-            ),
-        )
-        cur.execute(
-            "UPDATE flows SET published_version = 1 WHERE id = %s",
-            (flow_id,),
         )
         cur.execute(
             """
@@ -457,55 +260,28 @@ def _insert_service_key_owned_fixture(conn) -> dict[str, str]:
             )
             VALUES (%s, 'service-key-source.pdf', 'text', NULL, 'checksum-service-key-file', 12, 'application/pdf', 'document', NULL, 'service_key', NULL, %s, NULL, %s)
             """,
-            (file_id, api_key_id, tenant_id),
-        )
-        cur.execute(
-            """
-            INSERT INTO flow_runs (
-                id,
-                flow_id,
-                flow_version,
-                principal_type,
-                principal_user_id,
-                principal_api_key_id,
-                user_id,
-                tenant_id,
-                trace_id,
-                status,
-                input_payload_json
-            )
-            VALUES (%s, %s, 1, 'service_key', NULL, %s, NULL, %s, %s, 'completed', '{}')
-            """,
-            (flow_run_id, flow_id, api_key_id, tenant_id, uuid4()),
+            (file_id, api_key_id, ids["tenant_id"]),
         )
 
-    return {
-        "file_id": str(file_id),
-        "flow_run_id": str(flow_run_id),
-        "user_id": str(user_id),
-    }
+    return {"file_id": str(file_id), "api_key_id": str(api_key_id), **ids}
 
 
-def _legacy_user_values(conn, ids: dict[str, str]) -> tuple[str | None, str | None]:
+def _legacy_file_user_id(conn, file_id: str) -> str | None:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT user_id::text FROM files WHERE id = %s",
-            (ids["file_id"],),
+            (file_id,),
         )
-        file_user_id = cur.fetchone()[0]
-        cur.execute(
-            "SELECT user_id::text FROM flow_runs WHERE id = %s",
-            (ids["flow_run_id"],),
-        )
-        run_user_id = cur.fetchone()[0]
-    return file_user_id, run_user_id
+        return cur.fetchone()[0]
 
 
-def test_upgrade_drops_legacy_mirrors_and_downgrade_rebuilds_them(migration_db):
+def test_upgrade_drops_file_user_id_and_downgrade_rebuilds_it(migration_db):
     conn = migration_db["conn"]
     cfg = migration_db["cfg"]
-    user_ids = _insert_user_owned_fixture(conn)
-    service_key_ids = _insert_service_key_owned_fixture(conn)
+    user_ids = _insert_user_owned_file(conn)
+    service_key_ids = _insert_service_key_owned_file(conn)
+
+    assert _column_exists(conn, "flow_runs", "user_id") is False
 
     command.upgrade(cfg, MIGRATION_REVISION)
 
@@ -515,24 +291,20 @@ def test_upgrade_drops_legacy_mirrors_and_downgrade_rebuilds_them(migration_db):
     command.downgrade(cfg, PRIOR_REVISION)
 
     assert _column_exists(conn, "files", "user_id") is True
-    assert _column_exists(conn, "flow_runs", "user_id") is True
-    assert _legacy_user_values(conn, user_ids) == (
-        user_ids["user_id"],
-        user_ids["user_id"],
-    )
-    assert _legacy_user_values(conn, service_key_ids) == (None, None)
-    assert _fk_delete_rule(conn, "files", "files_users_fkey") == "n"
-    assert _fk_delete_rule(conn, "flow_runs", "flow_runs_user_id_fkey") == "n"
+    assert _column_exists(conn, "flow_runs", "user_id") is False
+    assert _legacy_file_user_id(conn, user_ids["file_id"]) == user_ids["user_id"]
+    assert _legacy_file_user_id(conn, service_key_ids["file_id"]) is None
+    assert _fk_delete_rule(conn, "files", "files_users_fkey") == "c"
 
     command.upgrade(cfg, MIGRATION_REVISION)
     assert _column_exists(conn, "files", "user_id") is False
     assert _column_exists(conn, "flow_runs", "user_id") is False
 
 
-def test_upgrade_aborts_when_legacy_mirrors_disagree_with_typed_identity(migration_db):
+def test_upgrade_aborts_when_user_owned_file_mirror_disagrees(migration_db):
     conn = migration_db["conn"]
     cfg = migration_db["cfg"]
-    ids = _insert_user_owned_fixture(conn)
+    ids = _insert_user_owned_file(conn)
 
     with conn.cursor() as cur:
         cur.execute("UPDATE files SET user_id = NULL WHERE id = %s", (ids["file_id"],))
@@ -541,9 +313,9 @@ def test_upgrade_aborts_when_legacy_mirrors_disagree_with_typed_identity(migrati
         command.upgrade(cfg, MIGRATION_REVISION)
 
     assert "Cannot drop files.user_id" in str(exc_info.value)
-    assert _current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _current_revisions(conn)
     assert _column_exists(conn, "files", "user_id") is True
-    assert _column_exists(conn, "flow_runs", "user_id") is True
+    assert _column_exists(conn, "flow_runs", "user_id") is False
 
 
 def test_upgrade_aborts_when_service_key_file_uses_legacy_user_mirror(
@@ -551,7 +323,7 @@ def test_upgrade_aborts_when_service_key_file_uses_legacy_user_mirror(
 ):
     conn = migration_db["conn"]
     cfg = migration_db["cfg"]
-    ids = _insert_service_key_owned_fixture(conn)
+    ids = _insert_service_key_owned_file(conn)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -563,26 +335,6 @@ def test_upgrade_aborts_when_service_key_file_uses_legacy_user_mirror(
         command.upgrade(cfg, MIGRATION_REVISION)
 
     assert "Cannot drop files.user_id" in str(exc_info.value)
-    assert _current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _current_revisions(conn)
     assert _column_exists(conn, "files", "user_id") is True
-    assert _column_exists(conn, "flow_runs", "user_id") is True
-
-
-def test_upgrade_aborts_when_service_key_run_uses_legacy_user_mirror(migration_db):
-    conn = migration_db["conn"]
-    cfg = migration_db["cfg"]
-    ids = _insert_service_key_owned_fixture(conn)
-
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE flow_runs SET user_id = %s WHERE id = %s",
-            (ids["user_id"], ids["flow_run_id"]),
-        )
-
-    with pytest.raises(Exception) as exc_info:
-        command.upgrade(cfg, MIGRATION_REVISION)
-
-    assert "Cannot drop flow_runs.user_id" in str(exc_info.value)
-    assert _current_revision(conn) == PRIOR_REVISION
-    assert _column_exists(conn, "files", "user_id") is True
-    assert _column_exists(conn, "flow_runs", "user_id") is True
+    assert _column_exists(conn, "flow_runs", "user_id") is False

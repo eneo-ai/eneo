@@ -1,7 +1,7 @@
 """bound Flow data retention window
 
 Revision ID: 20260610_flow_retention_range
-Revises: 20260608_rerun_input_flag
+Revises: 20260608_result_file_no_default
 Create Date: 2026-06-10 20:58:00.000000
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260610_flow_retention_range"
-down_revision = "20260608_rerun_input_flag"
+down_revision = "20260608_result_file_no_default"
 branch_labels = None
 depends_on = None
 

@@ -1,7 +1,7 @@
 """add Flow step-result error codes
 
 Revision ID: 20260612_step_result_err_code
-Revises: 20260611_drop_rerun_step_inputs
+Revises: 20260611_flow_class_retention
 Create Date: 2026-06-12 13:55:00.000000
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260612_step_result_err_code"
-down_revision = "20260611_drop_rerun_step_inputs"
+down_revision = "20260611_flow_class_retention"
 branch_labels = None
 depends_on = None
 

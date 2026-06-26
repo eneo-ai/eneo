@@ -1,7 +1,6 @@
 """add AI builder tables
 
-Add draft_revision counter to flows table, and create
-builder_sessions + builder_plans tables for the AI flow builder.
+Create builder_sessions and builder_plans tables for the AI flow builder.
 
 Revision ID: 202603121400
 Revises: 579199d395dd
@@ -39,19 +38,6 @@ BUILDER_TARGET_KIND_VALUES = ("create", "edit")
 
 
 def upgrade() -> None:
-    # 1. Add draft_revision counter to flows table
-    op.add_column(
-        "flows",
-        sa.Column(
-            "draft_revision",
-            sa.Integer(),
-            nullable=False,
-            server_default="0",
-            comment="Monotonic counter incremented on every draft mutation. Used for optimistic locking.",
-        ),
-    )
-
-    # 2. Create builder_sessions table
     op.create_table(
         "builder_sessions",
         sa.Column(
@@ -163,7 +149,6 @@ def upgrade() -> None:
         ["actor_user_id"],
     )
 
-    # 3. Create builder_plans table
     op.create_table(
         "builder_plans",
         sa.Column(
@@ -189,22 +174,16 @@ def upgrade() -> None:
             server_default="proposed",
         ),
         sa.Column(
-            "spec_json",
+            "proposal_json",
             postgresql.JSONB(),
             nullable=False,
-            comment="Serialized FlowDraftSpecCore.",
+            comment="Serialized FlowBuilderProposal.",
         ),
         sa.Column(
             "spec_hash",
             sa.String(64),
             nullable=False,
             comment="SHA-256 hash of the spec for integrity verification.",
-        ),
-        sa.Column(
-            "envelope_json",
-            postgresql.JSONB(),
-            nullable=False,
-            comment="Plan proposal metadata including assumptions and lint warnings.",
         ),
         sa.Column(
             "created_at",
@@ -246,8 +225,6 @@ def upgrade() -> None:
         ["tenant_id"],
     )
 
-    # 4. Add FK from builder_sessions.latest_plan_id to builder_plans.id
-    # (deferred since builder_plans didn't exist when builder_sessions was created)
     op.create_foreign_key(
         "fk_builder_sessions_latest_plan",
         "builder_sessions",
@@ -262,4 +239,3 @@ def downgrade() -> None:
     op.drop_constraint("fk_builder_sessions_latest_plan", "builder_sessions", type_="foreignkey")
     op.drop_table("builder_plans")
     op.drop_table("builder_sessions")
-    op.drop_column("flows", "draft_revision")

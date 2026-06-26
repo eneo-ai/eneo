@@ -75,7 +75,7 @@ def upgrade() -> None:
         sa.Column("accepted_run_revision", sa.Integer(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("input_payload_json", postgresql.JSONB(), nullable=True),
-        sa.Column("step_inputs_json", postgresql.JSONB(), nullable=True),
+        sa.Column("root_step_input_override_requested", sa.Boolean(), nullable=False),
         sa.Column(
             "requested_by_principal_type",
             sa.String(length=32),

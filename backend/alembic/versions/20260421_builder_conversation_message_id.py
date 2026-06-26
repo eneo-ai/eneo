@@ -1,7 +1,7 @@
 """backfill stable message_id on every builder_sessions.conversation entry
 
 Revision ID: 20260421_builder_conv_msg_id
-Revises: 20260421_builder_envelope_slim
+Revises: 20260419_builder_tenant_guard
 Create Date: 2026-04-21 00:10:00.000000
 
 Downstream consumers reference conversation messages by stable id instead
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260421_builder_conv_msg_id"
-down_revision = "20260421_builder_envelope_slim"
+down_revision = "20260419_builder_tenant_guard"
 branch_labels = None
 depends_on = None
 

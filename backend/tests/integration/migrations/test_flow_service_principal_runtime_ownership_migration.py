@@ -489,7 +489,7 @@ def _insert_runtime_fixture(conn) -> dict[str, UUID]:
                 accepted_run_revision,
                 reason,
                 input_payload_json,
-                step_inputs_json,
+                root_step_input_override_requested,
                 requested_by_principal_type,
                 requested_by_user_id
             )
@@ -508,7 +508,7 @@ def _insert_runtime_fixture(conn) -> dict[str, UUID]:
                 1,
                 'User requested rerun',
                 NULL,
-                NULL,
+                false,
                 'user',
                 %s
             )

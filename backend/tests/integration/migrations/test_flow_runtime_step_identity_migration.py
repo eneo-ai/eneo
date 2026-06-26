@@ -71,11 +71,10 @@ def _clear_seeded_rows(conn) -> None:
         )
 
 
-def _get_current_revision(conn) -> str | None:
+def _get_current_revisions(conn) -> set[str]:
     with conn.cursor() as cur:
         cur.execute("SELECT version_num FROM alembic_version")
-        row = cur.fetchone()
-    return row[0] if row else None
+        return {row[0] for row in cur.fetchall()}
 
 
 def _column_nullable(conn, table_name: str, column_name: str) -> bool:
@@ -292,15 +291,14 @@ def _insert_runtime_fixture(
                 principal_type,
                 principal_user_id,
                 principal_api_key_id,
-                user_id,
                 tenant_id,
                 trace_id,
                 status,
                 input_payload_json
             )
-            VALUES (%s, %s, 1, 'user', %s, NULL, %s, %s, %s, 'completed', '{}')
+            VALUES (%s, %s, 1, 'user', %s, NULL, %s, %s, 'completed', '{}')
             """,
-            (run_id, flow_id, user_id, user_id, tenant_id, trace_id),
+            (run_id, flow_id, user_id, tenant_id, trace_id),
         )
         for row in result_rows:
             cur.execute(
@@ -385,7 +383,7 @@ def test_upgrade_backfills_snapshot_ids_without_draft_step_fk(migration_db):
 
     command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _get_current_revision(conn) == MIGRATION_REVISION
+    assert MIGRATION_REVISION in _get_current_revisions(conn)
     assert _column_nullable(conn, "flow_step_results", "step_id") is False
     assert _column_nullable(conn, "flow_step_attempts", "step_id") is False
     assert not _constraint_exists(
@@ -504,7 +502,7 @@ def test_upgrade_aborts_when_null_step_id_cannot_be_recovered(migration_db):
     with pytest.raises(Exception, match="not recoverable"):
         command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _get_current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _get_current_revisions(conn)
     assert _column_nullable(conn, "flow_step_results", "step_id") is True
     assert _constraint_exists(
         conn, "flow_step_results", "flow_step_results_step_id_fkey"
@@ -537,7 +535,7 @@ def test_upgrade_rejects_duplicate_recovered_result_step_ids(migration_db):
     with pytest.raises(Exception, match="uq_flow_step_results_run_step"):
         command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _get_current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _get_current_revisions(conn)
     assert _constraint_exists(
         conn, "flow_step_results", "flow_step_results_step_id_fkey"
     )
@@ -572,7 +570,7 @@ def test_upgrade_rejects_duplicate_recovered_attempt_step_ids(migration_db):
     with pytest.raises(Exception, match="uq_flow_step_attempts_run_step_attempt"):
         command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _get_current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _get_current_revisions(conn)
     assert _constraint_exists(
         conn, "flow_step_attempts", "flow_step_attempts_step_id_fkey"
     )
@@ -603,7 +601,7 @@ def test_upgrade_rejects_ambiguous_snapshot_step_order_mapping(migration_db):
     with pytest.raises(Exception, match="multiple step_id values"):
         command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _get_current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _get_current_revisions(conn)
     assert _constraint_exists(
         conn, "flow_step_results", "flow_step_results_step_id_fkey"
     )
@@ -635,7 +633,7 @@ def test_upgrade_does_not_recover_from_other_tenant_snapshot(migration_db):
     with pytest.raises(Exception, match="not recoverable"):
         command.upgrade(cfg, MIGRATION_REVISION)
 
-    assert _get_current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _get_current_revisions(conn)
     assert _constraint_exists(
         conn, "flow_step_results", "flow_step_results_step_id_fkey"
     )
@@ -671,7 +669,7 @@ def test_downgrade_nulls_orphan_ids_before_restoring_draft_fk(migration_db):
 
     command.downgrade(cfg, PRIOR_REVISION)
 
-    assert _get_current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in _get_current_revisions(conn)
     assert _column_nullable(conn, "flow_step_results", "step_id") is True
     assert _column_nullable(conn, "flow_step_attempts", "step_id") is True
     assert _constraint_exists(

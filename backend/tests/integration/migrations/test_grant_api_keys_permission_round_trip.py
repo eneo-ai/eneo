@@ -19,11 +19,16 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import (
+    current_revisions,
+    reset_public_schema,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRE_REVISION = "202604231400"
 GRANT_REVISION = "202604281200"
+_TENANT_NAME_PREFIX = "round-trip-"
 
 
 def _alembic_cfg(database_url: str) -> Config:
@@ -47,6 +52,26 @@ def seed_default_models():
     yield
 
 
+@pytest.fixture(scope="module", autouse=True)
+def restore_schema_after_module(test_settings):
+    yield
+
+    cfg = _alembic_cfg(test_settings.sync_database_url)
+    conn = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+    conn.autocommit = True
+    try:
+        reset_public_schema(conn)
+        command.upgrade(cfg, "head")
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 def round_trip_db(test_settings):
     cfg = _alembic_cfg(test_settings.sync_database_url)
@@ -59,6 +84,7 @@ def round_trip_db(test_settings):
     )
     conn.autocommit = True
 
+    reset_public_schema(conn)
     command.upgrade(cfg, GRANT_REVISION)
 
     try:
@@ -75,7 +101,7 @@ def _insert_tenant(conn, suffix: str) -> str:
             VALUES (gen_random_uuid(), %s, 1000000, 'active')
             RETURNING id
             """,
-            (f"round-trip-{suffix}-{uuid4().hex[:8]}",),
+            (f"{_TENANT_NAME_PREFIX}{suffix}-{uuid4().hex[:8]}",),
         )
         return cur.fetchone()[0]
 
@@ -108,13 +134,6 @@ def _get_permissions(conn, role_id: str) -> list[str]:
         cur.execute("SELECT permissions FROM roles WHERE id = %s", (role_id,))
         row = cur.fetchone()
         return list(row[0]) if row else []
-
-
-def _get_current_revision(conn) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT version_num FROM alembic_version")
-        row = cur.fetchone()
-        return row[0] if row else None
 
 
 class TestGrantApiKeysRoundTrip:
@@ -157,7 +176,7 @@ class TestGrantApiKeysRoundTrip:
 
         command.upgrade(cfg, GRANT_REVISION)
 
-        assert _get_current_revision(conn) == GRANT_REVISION
+        assert GRANT_REVISION in current_revisions(conn)
         assert "api_keys" in _get_permissions(conn, owner_id)
         assert "api_keys" not in _get_permissions(conn, ai_id)
         assert "api_keys" not in _get_permissions(conn, user_id)
@@ -214,7 +233,7 @@ class TestGrantApiKeysRoundTrip:
 
         command.downgrade(cfg, PRE_REVISION)
 
-        assert _get_current_revision(conn) == PRE_REVISION
+        assert PRE_REVISION in current_revisions(conn)
         assert "api_keys" not in _get_permissions(conn, owner_id)
         assert "api_keys" in _get_permissions(conn, ai_with_grant_id)
         assert "api_keys" in _get_permissions(conn, custom_with_grant_id)

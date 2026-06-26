@@ -13,6 +13,7 @@ from psycopg2.extras import Json
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import current_revisions
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -76,13 +77,6 @@ def _clear_seeded_rows(conn) -> None:
     finally:
         with conn.cursor() as cur:
             cur.execute("SET session_replication_role = DEFAULT")
-
-
-def _current_revision(conn) -> str | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT version_num FROM alembic_version")
-        row = cur.fetchone()
-    return row[0] if row else None
 
 
 def _constraint_definition(conn, constraint_name: str) -> str | None:
@@ -179,7 +173,7 @@ def test_upgrade_aborts_when_checkpoint_has_no_attempt(migration_db):
     assert f"id={checkpoint_id}" in message
     assert "attempt_no=7" in message
     assert "Delete or repair orphan checkpoints" in message
-    assert _current_revision(conn) == PRIOR_REVISION
+    assert PRIOR_REVISION in current_revisions(conn)
     assert _constraint_definition(conn, CONSTRAINT_NAME) is None
 
 
