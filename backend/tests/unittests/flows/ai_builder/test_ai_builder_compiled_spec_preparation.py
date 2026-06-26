@@ -501,6 +501,7 @@ def test_prepare_compiled_spec_normalizes_output_contract_prompt_metadata() -> N
     instructions = prepared_step.assistant_spec.instructions
     assert "meeting_context" in instructions
     assert "participants" in instructions
+    assert "Required output fields: meeting_context, participants." in instructions
     contract = prepared_step.output_contract
     assert contract is not None
     properties = contract["properties"]

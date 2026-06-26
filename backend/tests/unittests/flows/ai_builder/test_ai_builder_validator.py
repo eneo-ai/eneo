@@ -1005,6 +1005,36 @@ class TestContractInstructionLint:
         assert result.valid
         assert any(w.code == "contract_instruction_mismatch" for w in result.warnings)
 
+    def test_warns_when_only_nested_output_contract_fields_are_in_instructions(
+        self,
+    ) -> None:
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        ref="step_a",
+                        name="Extract JSON",
+                        instructions="Return JSON with rubrik.",
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "type": "object",
+                            "properties": {
+                                "risker": {
+                                    "type": "object",
+                                    "properties": {
+                                        "rubrik": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    )
+                ]
+            )
+        )
+
+        assert result.valid
+        assert any(w.code == "contract_instruction_mismatch" for w in result.warnings)
+
     def test_json_incompatible_with_all_previous_steps(self) -> None:
         result = validate_spec(
             _spec(

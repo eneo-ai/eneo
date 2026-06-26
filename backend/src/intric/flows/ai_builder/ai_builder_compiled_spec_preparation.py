@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_json_schema_paths import (
+    top_level_schema_property_names,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -116,7 +118,7 @@ def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCo
             continue
         contract = step.output_contract
         if isinstance(contract, dict):
-            property_names = _contract_property_names(contract)
+            property_names = top_level_schema_property_names(contract)
             if property_names:
                 updates: dict[str, object] = {}
 
@@ -138,20 +140,6 @@ def _normalize_output_contract_steps(spec: FlowDraftSpecCore) -> FlowDraftSpecCo
     if not changed:
         return spec
     return spec.model_copy(update={"steps": updated_steps})
-
-
-def _contract_property_names(contract: dict[str, Any]) -> list[str]:
-    properties = contract.get("properties")
-    if not isinstance(properties, dict):
-        return []
-
-    property_map = cast(dict[str, object], properties)
-    names: list[str] = []
-    for raw_name in property_map:
-        name = str(raw_name).strip()
-        if name:
-            names.append(name)
-    return names
 
 
 def _instructions_with_contract_fields(

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
-from typing import cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     LintSeverity,
 )
 from intric.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
+)
+from intric.flows.ai_builder.ai_builder_json_schema_paths import (
+    top_level_schema_property_names,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
@@ -193,13 +195,8 @@ def lint_contract_instruction_alignment(
         contract = step.output_contract
         if not isinstance(contract, dict):
             continue
-        properties = cast(dict[str, object], contract).get("properties")
-        if not isinstance(properties, dict) or not properties:
-            continue
-        property_map = cast(dict[str, object], properties)
-
+        property_names = top_level_schema_property_names(contract)
         instructions = step.assistant_spec.instructions.casefold()
-        property_names = list(property_map.keys())
         if not property_names:
             continue
         missing = [

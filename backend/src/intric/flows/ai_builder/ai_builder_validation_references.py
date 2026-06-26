@@ -4,7 +4,7 @@ import json
 from difflib import get_close_matches
 from typing import Any
 
-from intric.flows.ai_builder.ai_builder_structured_field_paths import (
+from intric.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
     schema_property_names,
 )
