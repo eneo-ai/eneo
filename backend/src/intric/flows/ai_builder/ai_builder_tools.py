@@ -1,4 +1,4 @@
-"""Active proposal tool schema and persisted AI Builder tool names."""
+"""Active proposal tool schema."""
 
 from __future__ import annotations
 
@@ -23,9 +23,7 @@ from intric.flows.ai_builder.ai_builder_tool_parsing import (
 if TYPE_CHECKING:
     from intric.flows.domain.flow import FlowStep
 
-ASK_STRUCTURED_QUESTION_TOOL_NAME = "ask_structured_question"
 PROPOSE_FLOW_TOOL_NAME = "propose_flow"
-CONFIRM_REQUIREMENTS_TOOL_NAME = "confirm_requirements"
 
 
 def build_propose_flow_tool_schema(
@@ -46,8 +44,6 @@ def build_propose_flow_tool_schema(
 
 
 __all__ = [
-    "ASK_STRUCTURED_QUESTION_TOOL_NAME",
-    "CONFIRM_REQUIREMENTS_TOOL_NAME",
     "PROPOSE_FLOW_TOOL_NAME",
     "build_propose_flow_tool_schema",
     "extract_assumptions",

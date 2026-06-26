@@ -14,8 +14,6 @@ from intric.flows.ai_builder.ai_builder_tool_parsing import (
     parse_tool_call_arguments,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
-    ASK_STRUCTURED_QUESTION_TOOL_NAME,
-    CONFIRM_REQUIREMENTS_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
     build_propose_flow_tool_schema,
     extract_assumptions,
@@ -36,8 +34,8 @@ class TestBuildToolSchema:
     def test_single_active_submission_tool_name_is_canonical(self) -> None:
         assert PROPOSE_FLOW_TOOL_NAME == "propose_flow"
         assert "PROPOSE_FLOW_TOOL_NAME" in ai_builder_tools.__all__
-        assert ASK_STRUCTURED_QUESTION_TOOL_NAME == "ask_structured_question"
-        assert CONFIRM_REQUIREMENTS_TOOL_NAME == "confirm_requirements"
+        assert "ASK_STRUCTURED_QUESTION_TOOL_NAME" not in ai_builder_tools.__all__
+        assert "CONFIRM_REQUIREMENTS_TOOL_NAME" not in ai_builder_tools.__all__
         assert "active_submission_tool_name" not in ai_builder_tools.__all__
         assert "ActiveSubmissionToolName" not in ai_builder_tools.__all__
         assert "OUTLINE_FLOW_TOOL_NAME" not in ai_builder_tools.__all__

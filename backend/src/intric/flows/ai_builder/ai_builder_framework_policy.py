@@ -58,6 +58,9 @@ from intric.flows.ai_builder.ai_builder_keywords import (
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
 )
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 from intric.flows.domain.flow import Flow
 from intric.flows.flow_authoring_spec import (
     OutputType,
@@ -193,7 +196,7 @@ def latest_pending_structured_question(
         if role != "assistant":
             continue
         for tool_call in reversed(tool_calls_from_message(message)):
-            if tool_call.name != "ask_structured_question":
+            if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
                 continue
             payload = structured_question_payload_from_tool_arguments(
                 tool_call.arguments

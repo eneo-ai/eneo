@@ -21,7 +21,9 @@ from intric.flows.ai_builder.ai_builder_events import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from intric.flows.ai_builder.ai_builder_tools import ASK_STRUCTURED_QUESTION_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 from intric.flows.domain.flow import Flow, FlowPersistedJsonObject
 
 

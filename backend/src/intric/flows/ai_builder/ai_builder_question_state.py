@@ -25,6 +25,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +132,7 @@ def _question_id_from_legacy_tool_calls(
     message: ConversationMessage | Mapping[str, Any],
 ) -> str | None:
     for tool_call in reversed(tool_calls_from_message(message)):
-        if tool_call.name != "ask_structured_question":
+        if tool_call.name != ASK_STRUCTURED_QUESTION_TOOL_NAME:
             continue
         payload = structured_question_payload_from_tool_arguments(tool_call.arguments)
         if payload is None:

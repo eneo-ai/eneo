@@ -35,6 +35,9 @@ from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
     build_planner_telemetry,
 )
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 from intric.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     BuilderTurnDecision,
@@ -157,7 +160,7 @@ async def _dispatch_question(
             assistant_metadata=build_assistant_message_metadata(
                 request.conversation,
                 planner_telemetry=telemetry,
-                tool_calls=[{"name": "ask_structured_question"}],
+                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
         )
         return ServerDecisionDispatchResult(

@@ -155,7 +155,18 @@ PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
 LEGACY_SUBMISSION_TOOL_CONSTANTS = frozenset(
     {"EDIT_FLOW_TOOL_NAME", "OUTLINE_FLOW_TOOL_NAME"}
 )
-PROPOSE_FLOW_TOOL_NAME_OWNER = Path("src/intric/flows/ai_builder/ai_builder_tools.py")
+AI_BUILDER_TOOL_NAME_OWNERS = {
+    "ASK_STRUCTURED_QUESTION_TOOL_NAME": Path(
+        "src/intric/flows/ai_builder/ai_builder_tool_names.py"
+    ),
+    "CONFIRM_REQUIREMENTS_TOOL_NAME": Path(
+        "src/intric/flows/ai_builder/ai_builder_tool_names.py"
+    ),
+    "PROPOSE_FLOW_TOOL_NAME": Path("src/intric/flows/ai_builder/ai_builder_tools.py"),
+}
+PRIVATE_TOOL_NAME_DUPLICATES = frozenset(
+    f"_{name}" for name in AI_BUILDER_TOOL_NAME_OWNERS
+)
 PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES = frozenset(
     {
         "arguments",
@@ -807,11 +818,13 @@ def _assignment_target_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
     return [target.id for target in targets if isinstance(target, ast.Name)]
 
 
-def test_propose_flow_tool_name_has_single_owner() -> None:
+def test_ai_builder_tool_names_have_single_owners() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     src_root = backend_root / Path("src/intric/flows/ai_builder")
     violations: list[str] = []
-    owner_definitions: list[str] = []
+    owner_definitions: dict[str, list[str]] = {
+        name: [] for name in AI_BUILDER_TOOL_NAME_OWNERS
+    }
 
     for path in src_root.rglob("*.py"):
         rel_path = path.relative_to(backend_root)
@@ -832,22 +845,24 @@ def test_propose_flow_tool_name_has_single_owner() -> None:
             target_names = set(_assignment_target_names(node))
             for legacy_name in sorted(target_names & LEGACY_SUBMISSION_TOOL_CONSTANTS):
                 violations.append(f"{rel_path}:{node.lineno} defines {legacy_name}")
-
-            if "PROPOSE_FLOW_TOOL_NAME" not in target_names:
-                continue
-
-            definition = f"{rel_path}:{node.lineno}:PROPOSE_FLOW_TOOL_NAME"
-            owner_definitions.append(definition)
-            if rel_path != PROPOSE_FLOW_TOOL_NAME_OWNER:
+            for private_name in sorted(target_names & PRIVATE_TOOL_NAME_DUPLICATES):
                 violations.append(
-                    f"{rel_path}:{node.lineno} defines PROPOSE_FLOW_TOOL_NAME"
+                    f"{rel_path}:{node.lineno} defines duplicate {private_name}"
                 )
 
-    if len(owner_definitions) != 1:
-        violations.append(
-            "PROPOSE_FLOW_TOOL_NAME must have exactly one owner definition; "
-            f"found {owner_definitions}"
-        )
+            for name, owner in AI_BUILDER_TOOL_NAME_OWNERS.items():
+                if name not in target_names:
+                    continue
+                definition = f"{rel_path}:{node.lineno}:{name}"
+                owner_definitions[name].append(definition)
+                if rel_path != owner:
+                    violations.append(f"{rel_path}:{node.lineno} defines {name}")
+
+    for name, definitions in owner_definitions.items():
+        if len(definitions) != 1:
+            violations.append(
+                f"{name} must have exactly one owner definition; found {definitions}"
+            )
 
     assert violations == []
 

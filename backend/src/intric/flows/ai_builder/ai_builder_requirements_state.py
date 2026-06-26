@@ -18,6 +18,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    CONFIRM_REQUIREMENTS_TOOL_NAME,
+)
 
 
 def _normalize_requirement_text(text: str) -> str:
@@ -124,7 +127,7 @@ def resolve_requirements_state(
     for index, message in enumerate(conversation):
         if message.role == "assistant":
             for tool_call in tool_calls_from_message(message):
-                if tool_call.name != "confirm_requirements":
+                if tool_call.name != CONFIRM_REQUIREMENTS_TOOL_NAME:
                     continue
                 arguments = tool_call.arguments
                 try:

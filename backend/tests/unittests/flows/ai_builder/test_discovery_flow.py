@@ -46,7 +46,9 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.ai_builder_tools import CONFIRM_REQUIREMENTS_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    CONFIRM_REQUIREMENTS_TOOL_NAME,
+)
 from intric.flows.ai_builder.ai_builder_turn_controller import AskCanonicalQuestion
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,

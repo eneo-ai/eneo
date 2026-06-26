@@ -89,12 +89,14 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 from intric.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
-    ASK_STRUCTURED_QUESTION_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
     build_propose_flow_tool_schema,
 )

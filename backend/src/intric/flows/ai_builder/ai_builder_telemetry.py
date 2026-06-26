@@ -13,10 +13,12 @@ from typing import Any, cast
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
+)
 
 PLANNER_TELEMETRY_KEY = "planner_telemetry"
 SESSION_TELEMETRY_KEY = "session_telemetry"
-_ASK_STRUCTURED_QUESTION_TOOL_NAME = "ask_structured_question"
 
 
 def build_planner_telemetry(
@@ -326,7 +328,7 @@ def _clarification_question_count(tool_calls: Sequence[object] | None) -> int:
         else:
             tool_call_map = cast(Mapping[str, Any], tool_call)
             name = tool_call_map.get("name")
-        if name == _ASK_STRUCTURED_QUESTION_TOOL_NAME:
+        if name == ASK_STRUCTURED_QUESTION_TOOL_NAME:
             count += 1
     return count
 
