@@ -649,13 +649,10 @@ class TestAIBuilderPlanLifecycle:
             await lifecycle.apply_plan(plan_id=plan.id)
 
         assert exc_info.value.code == "invalid_existing_step_ref"
-        errors = exc_info.value.context["errors"]
-        assert len(errors) == 1
-        assert errors[0]["code"] == "invalid_existing_step_ref"
-        assert errors[0]["step_ref"] == "step_a"
-        assert "cannot set existing_step_ref 'existing_step_1' in create mode" in (
-            errors[0]["message"]
-        )
+        assert exc_info.value.context == {
+            "reason": "create_cannot_use_existing_step_ref",
+            "existing_step_ref": "existing_step_1",
+        }
         repo.update_plan_status.assert_not_awaited()
 
     @pytest.mark.anyio

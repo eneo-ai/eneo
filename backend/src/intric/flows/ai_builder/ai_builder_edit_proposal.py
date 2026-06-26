@@ -40,7 +40,6 @@ from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.flow_authoring_spec import InputType
-from intric.flows.step_lineage import existing_step_ref_for_order
 from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 
@@ -82,8 +81,6 @@ async def process_edit_arguments(
             feedback=f"Invalid propose_flow arguments: {exc}",
             failure_kind="parse",
         )
-    valid_step_refs = [existing_step_ref_for_order(step.step_order) for step in flow.steps]
-
     try:
         edit_result = compile_edit_proposal(
             proposal,
@@ -132,7 +129,6 @@ async def process_edit_arguments(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
-        valid_existing_step_refs=valid_step_refs,
         terminal_output_type=terminal_output_type_for_conversation(
             conversation,
             plan_edit_context=plan_edit_context,

@@ -12,10 +12,6 @@ from intric.flows.application.flow_authoring_origin_policy import (
     FlowAuthoringOriginPolicy,
     NoopFlowAuthoringOriginPolicy,
 )
-from intric.flows.application.flow_authoring_preparation import (
-    FlowAuthoringPreparationResult,
-    validate_prepared_flow_authoring_spec,
-)
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftMaterializationProgress,
@@ -35,7 +31,6 @@ from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
 )
-from intric.flows.step_lineage import existing_step_ref_for_order
 from intric.main.exceptions import BadRequestException
 
 
@@ -149,13 +144,6 @@ class FlowAuthoringCommandService:
         spec = policy.effective_spec(
             spec=command.spec,
             current_flow=current_flow,
-        )
-        _raise_preparation_validation_error(
-            validate_prepared_flow_authoring_spec(
-                spec=spec,
-                target_kind=command.kind,
-                valid_existing_step_refs=_valid_existing_step_refs(current_flow),
-            )
         )
         changeset = compile_flow_draft_changeset(
             spec,
@@ -341,35 +329,6 @@ def _expected_revision(command: FlowAuthoringCommand) -> int | None:
     if command.kind == "create":
         return None
     return command.expected_revision
-
-
-def _valid_existing_step_refs(current_flow: Flow | None) -> tuple[str, ...] | None:
-    if current_flow is None:
-        return None
-    return tuple(existing_step_ref_for_order(step.step_order) for step in current_flow.steps)
-
-
-def _raise_preparation_validation_error(
-    validation: FlowAuthoringPreparationResult,
-) -> None:
-    if validation.valid:
-        return
-
-    first = validation.errors[0]
-    raise BadRequestException(
-        first.message,
-        code=first.code,
-        context={
-            "errors": [
-                {
-                    "step_ref": error.step_ref,
-                    "code": error.code,
-                    "message": error.message,
-                }
-                for error in validation.errors
-            ],
-        },
-    )
 
 
 def _binding_source_for_origin(

@@ -18,9 +18,6 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
-from intric.flows.application.flow_authoring_preparation import (
-    validate_prepared_flow_authoring_spec,
-)
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputType,
@@ -29,6 +26,10 @@ from intric.flows.flow_authoring_spec import (
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+_STRICT_TERMINAL_OUTPUT_TYPES = frozenset(
+    {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
+)
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,6 @@ def prepare_compiled_spec_for_session(
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     resource_catalog: AIBuilderResourceCatalog | None,
-    valid_existing_step_refs: list[str] | None,
     terminal_output_type: OutputType | None = None,
 ) -> PreparedCompiledSpecResult:
     prepared_spec, normalization_changes = normalize_ai_builder_spec(
@@ -89,18 +89,11 @@ def prepare_compiled_spec_for_session(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
     )
-    session_validation = validate_prepared_flow_authoring_spec(
+    _add_terminal_output_alignment_error(
+        validation=validation,
         spec=prepared_spec,
-        target_kind=target_kind.value,
-        valid_existing_step_refs=valid_existing_step_refs,
         terminal_output_type=terminal_output_type,
     )
-    for error in session_validation.errors:
-        validation.add_error(
-            step_ref=error.step_ref,
-            code=error.code,
-            message=error.message,
-        )
     return PreparedCompiledSpecResult(
         spec=prepared_spec,
         validation=validation,
@@ -162,3 +155,32 @@ def _instructions_with_contract_fields(
     if not stripped:
         return instruction_line
     return f"{stripped}\n\n{instruction_line}"
+
+
+def _add_terminal_output_alignment_error(
+    *,
+    validation: SpecValidationResult,
+    spec: FlowDraftSpecCore,
+    terminal_output_type: OutputType | None,
+) -> None:
+    if (
+        terminal_output_type is None
+        or terminal_output_type not in _STRICT_TERMINAL_OUTPUT_TYPES
+        or not spec.steps
+    ):
+        return
+
+    terminal_step = spec.steps[-1]
+    if terminal_step.output_type == terminal_output_type:
+        return
+
+    validation.add_error(
+        step_ref=terminal_step.plan_step_ref,
+        code="terminal_output_type_mismatch",
+        message=(
+            "The final step output_type must match the requested terminal output "
+            f"'{terminal_output_type.value}', but the compiled plan ends with "
+            f"'{terminal_step.output_type.value}'. Update the final step instead of "
+            "adding or preserving a trailing text step."
+        ),
+    )

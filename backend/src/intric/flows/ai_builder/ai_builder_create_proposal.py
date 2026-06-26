@@ -115,7 +115,6 @@ def process_scoped_step_revision_if_requested(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
-        valid_existing_step_refs=None,
         terminal_output_type=requested_terminal_output_type,
     )
     if prepared.failure_feedback is not None:
@@ -311,7 +310,6 @@ async def _process_create_spec(
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
-        valid_existing_step_refs=None,
         terminal_output_type=terminal_output_type_for_conversation(
             conversation,
             plan_edit_context=plan_edit_context,

@@ -248,6 +248,30 @@ def test_shared_compile_rejects_unknown_removed_existing_step_ref() -> None:
     }
 
 
+def test_shared_compile_rejects_unknown_preserved_existing_step_ref() -> None:
+    current_flow = _flow(_flow_step(step_order=1))
+    spec = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=[
+            _step_spec(plan_step_ref="step_a", existing_step_ref="existing_step_99"),
+        ],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        compile_flow_draft_changeset(
+            spec,
+            current_flow=current_flow,
+            removed_existing_step_refs=frozenset({"existing_step_1"}),
+        )
+
+    assert exc_info.value.code == "invalid_existing_step_ref"
+    assert exc_info.value.context == {
+        "reason": "unknown_existing_step_ref",
+        "unknown_refs": ["existing_step_99"],
+        "valid_refs": ["existing_step_1"],
+    }
+
+
 def test_shared_compile_rejects_preserved_and_removed_existing_ref_overlap() -> None:
     current_flow = _flow(_flow_step(step_order=1))
     spec = FlowDraftSpecCore(

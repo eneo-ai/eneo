@@ -312,7 +312,6 @@ def _prepare_valid_spec(
     *,
     target_kind: TargetKind = TargetKind.CREATE,
     terminal_output_type: OutputType | None = None,
-    valid_existing_step_refs: list[str] | None = None,
 ) -> FlowDraftSpecCore:
     result = prepare_compiled_spec_for_session(
         spec=spec,
@@ -320,7 +319,6 @@ def _prepare_valid_spec(
         available_model_refs=None,
         available_kb_refs=None,
         resource_catalog=None,
-        valid_existing_step_refs=valid_existing_step_refs,
         terminal_output_type=terminal_output_type,
     )
 
@@ -328,47 +326,6 @@ def _prepare_valid_spec(
     assert result.validation is not None
     assert result.validation.valid
     return result.spec
-
-
-def test_prepare_compiled_spec_for_session_merges_session_validation_errors() -> None:
-    validation = SpecValidationResult()
-    session_validation = MagicMock(
-        errors=[
-            MagicMock(
-                step_ref="step_a",
-                code="session_error",
-                message="Session-only validation failed.",
-            )
-        ]
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.normalize_ai_builder_spec",
-            side_effect=lambda spec, **_kwargs: (spec, []),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_spec",
-            return_value=validation,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_prepared_flow_authoring_spec",
-            return_value=session_validation,
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=_make_spec(),
-            target_kind=TargetKind.CREATE,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            valid_existing_step_refs=None,
-        )
-
-    assert result.failure_feedback is None
-    assert result.spec is not None
-    assert result.validation is validation
-    assert any(error.code == "session_error" for error in validation.errors)
 
 
 def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -> None:
@@ -392,7 +349,6 @@ def test_prepare_compiled_spec_for_session_returns_resource_failure_feedback() -
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=MagicMock(),
-            valid_existing_step_refs=None,
         )
 
     assert result.spec is None
@@ -446,7 +402,6 @@ def test_prepare_compiled_spec_for_session_expands_mcp_server_refs_to_tools() ->
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=catalog,
-            valid_existing_step_refs=None,
         )
 
     assert result.spec is not None
@@ -492,7 +447,6 @@ def test_prepare_compiled_spec_normalizes_output_contract_prompt_metadata() -> N
         available_model_refs=None,
         available_kb_refs=None,
         resource_catalog=None,
-        valid_existing_step_refs=None,
     )
 
     assert result.spec is not None
@@ -549,7 +503,6 @@ def test_prepare_compiled_spec_preserves_existing_edit_prompt_metadata() -> None
         available_model_refs=None,
         available_kb_refs=None,
         resource_catalog=None,
-        valid_existing_step_refs=["existing_step_1"],
     )
 
     assert result.spec is not None
@@ -592,7 +545,6 @@ def test_prepare_compiled_spec_for_session_rejects_terminal_output_type_drift() 
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
-            valid_existing_step_refs=None,
             terminal_output_type=OutputType.PDF,
         )
 
@@ -616,7 +568,6 @@ def test_prepare_compiled_spec_for_session_promotes_terminal_text_artifact_contr
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
-            valid_existing_step_refs=None,
             terminal_output_type=OutputType.DOCX,
         )
 
@@ -649,20 +600,13 @@ def test_prepared_pdf_helper_spec_is_apply_normalization_fixed_point() -> None:
 
 
 def test_prepare_compiled_spec_for_session_disambiguates_duplicate_step_names() -> None:
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_compiled_spec_preparation.validate_prepared_flow_authoring_spec",
-            return_value=MagicMock(errors=[]),
-        ),
-    ):
-        result = prepare_compiled_spec_for_session(
-            spec=_duplicate_step_name_spec(),
-            target_kind=TargetKind.EDIT,
-            available_model_refs=None,
-            available_kb_refs=None,
-            resource_catalog=None,
-            valid_existing_step_refs=[],
-        )
+    result = prepare_compiled_spec_for_session(
+        spec=_duplicate_step_name_spec(),
+        target_kind=TargetKind.EDIT,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+    )
 
     assert result.spec is not None
     assert result.validation is not None
@@ -677,7 +621,6 @@ def test_prepared_edit_duplicate_names_are_apply_compile_stable() -> None:
     spec = _prepare_valid_spec(
         _duplicate_step_name_spec(),
         target_kind=TargetKind.EDIT,
-        valid_existing_step_refs=[],
     )
 
     _assert_prepared_spec_is_apply_normalization_fixed_point(spec)
@@ -698,7 +641,6 @@ def test_prepare_compiled_spec_for_session_folds_json_helper_before_text_termina
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
-            valid_existing_step_refs=None,
             terminal_output_type=OutputType.JSON,
         )
 
@@ -748,7 +690,6 @@ def test_prepare_compiled_spec_for_session_rejects_json_all_previous_text_termin
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
-            valid_existing_step_refs=None,
             terminal_output_type=OutputType.JSON,
         )
 
@@ -783,7 +724,6 @@ def test_prepare_compiled_spec_for_session_rejects_unfoldable_json_text_terminal
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
-            valid_existing_step_refs=None,
             terminal_output_type=OutputType.JSON,
         )
 
