@@ -1208,26 +1208,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/assistants/{id}/prompts/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get Prompts
-     * @description List the prompt history for an assistant.
-     */
-    get: operations["get_prompts_api_v1_assistants__id__prompts__get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/assistants/{id}/publish/": {
     parameters: {
       query?: never;
@@ -23237,46 +23217,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  get_prompts_api_v1_assistants__id__prompts__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PaginatedResponse_PromptSparse_"];
         };
       };
       /** @description Not Found */
