@@ -12,6 +12,9 @@ services:
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
+    ports:
+      - "3000:3000"
+      - "8123:8123"
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it

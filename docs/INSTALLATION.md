@@ -95,6 +95,10 @@ cd backend
 uv run flow-beat
 ```
 
+Use the `flow-worker` and `flow-beat` entry points instead of raw `uv run celery`
+commands. They point Celery at the registered Flow app and queue used by the
+runtime.
+
 ## Verify Installation
 
 1. **Access the Application**
