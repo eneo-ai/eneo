@@ -215,7 +215,8 @@ proposal submission share the existing `RuntimeToolCall` protocol. Evidence:
 `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:65`, and
 `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:175`.
 Resolved after the proposal request boundary packet: proposal messages use
-`LLMMessageParam`, forced tool choice has one owner, and
+`LLMMessageParam`, prompt trimming preserves typed provider messages without
+provider-boundary casts, forced tool choice has one owner, and
 `ToolRetryConfig.target_tool_name` was deleted.
 
 ## Validation Record

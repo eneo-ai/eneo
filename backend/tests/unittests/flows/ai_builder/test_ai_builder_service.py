@@ -61,7 +61,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
-    conversation_message_to_llm_dict,
+    conversation_message_to_llm_message,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
@@ -1391,7 +1391,7 @@ class TestSendMessageToolCall:
         ]
 
         messages = [
-            conversation_message_to_llm_dict(message) for message in prior_conversation
+            conversation_message_to_llm_message(message) for message in prior_conversation
         ]
         assistant_msgs = [
             m for m in messages if m["role"] == "assistant" and m.get("tool_calls")
@@ -1428,7 +1428,7 @@ class TestSendMessageToolCall:
         ]
 
         messages = [
-            conversation_message_to_llm_dict(message) for message in prior_conversation
+            conversation_message_to_llm_message(message) for message in prior_conversation
         ]
 
         assistant_id = messages[0]["tool_calls"][0]["id"]

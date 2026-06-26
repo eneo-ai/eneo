@@ -12,10 +12,10 @@
 
 | Concept | Canonical owner | Evidence | Deleted / consolidated |
 | --- | --- | --- | --- |
-| Proposal provider message shape | `ai_builder_proposal_tool_contracts.py` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:38` defines tool-call params, `:49` defines message roles, and `:52` defines `LLMMessageParam`. | Proposal request, turn context, repair retry messages, and request preparation now share `LLMMessageParam`. |
-| Forced tool choice for `propose_flow` | `forced_tool_choice(...)` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:71`. | Inline `tool_choice={"type": "function", ...}` construction was removed from submission and repair. |
+| Proposal provider message shape | `ai_builder_proposal_tool_contracts.py` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:46` defines tool-call params, `:57` defines message roles, and `:60` defines `LLMMessageParam`. | Proposal request, turn context, repair retry messages, and request preparation now share `LLMMessageParam`. |
+| Forced tool choice for `propose_flow` | `forced_tool_choice(...)` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:79`. | Inline `tool_choice={"type": "function", ...}` construction was removed from submission and repair. |
 | Active proposal submission tool | `PROPOSE_FLOW_TOOL_NAME` | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:127` and `:263`. | `_forced_submission_response(...)` no longer accepts a configurable submission tool name. |
-| Proposal retry target | Proposal repair itself | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:142` shows `ToolRetryConfig` only carries target kind, prompt, and invocation processor. | `ToolRetryConfig.target_tool_name` was deleted. |
+| Proposal retry target | Proposal repair itself | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:150` shows `ToolRetryConfig` only carries target kind, prompt, and invocation processor. | `ToolRetryConfig.target_tool_name` was deleted. |
 | Provider adapter | `ai_builder_litellm_completion.py` | Existing completion boundary remains the only LiteLLM caller for proposal completions. | No framework or new runtime wrapper was added. |
 
 ## Behavior Proof
@@ -60,9 +60,11 @@ flowchart LR
 Claude was initially blocked by the account monthly spend limit, then returned
 `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 7` on verification because
 request preparation had a redundant `LLMMessage` alias and a silent role cast.
-Those issues were addressed by using `LLMMessageParam` directly and validating
-conversation roles before building provider messages. Claude final verification
-returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`.
+Those issues were addressed by using `LLMMessageParam` directly, validating
+conversation roles before building provider messages, making conversation
+trimming preserve the typed message shape, and tightening optional message keys.
+Claude final verification returned `VERDICT: green`, `GREEN_LIGHT: yes`,
+`MIN_SCORE: 8`.
 
 Antigravity reviewed the plan and returned `changes_required`,
 `GREEN_LIGHT: no`, `MIN_SCORE: 6` because runtime wrapper classes would be
@@ -81,7 +83,7 @@ Artifact:
 | --- | --- |
 | Tool schemas remain complex provider dictionaries. | Leave them at the schema-generation owner unless a later slice can type them without wrapping JSON Schema in fake classes. |
 | Stream events still use `dict[str, str]`. | Candidate next deletion/typing slice only if it replaces all event tuple/dict variants in one owner. |
-| Conversation trimming still accepts raw dict messages. | Kept out of scope because `ai_builder_prompts.py` is generic prompt assembly; request preparation casts at the provider boundary. |
+| Conversation trimming remains generic prompt assembly. | `trim_conversation_for_context(...)` now preserves the caller's message type, so request preparation no longer casts typed provider messages through raw dicts. |
 
 ## Next Recommendation
 

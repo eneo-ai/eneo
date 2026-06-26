@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypedDict
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    NotRequired,
+    Protocol,
+    TypeAlias,
+    TypedDict,
+)
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -49,11 +57,11 @@ class LLMToolCallParam(TypedDict):
 LLMMessageRole: TypeAlias = Literal["system", "user", "assistant", "tool"]
 
 
-class LLMMessageParam(TypedDict, total=False):
+class LLMMessageParam(TypedDict):
     role: LLMMessageRole
     content: str | None
-    tool_calls: list[LLMToolCallParam]
-    tool_call_id: str
+    tool_calls: NotRequired[list[LLMToolCallParam]]
+    tool_call_id: NotRequired[str]
 
 
 class ForcedToolChoiceFunctionParam(TypedDict):

@@ -26,7 +26,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
-    conversation_message_to_llm_dict,
+    conversation_message_to_llm_message,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
     has_confirmed_requirements,
@@ -2778,7 +2778,7 @@ class TestExtendedClarificationHints:
 
 class TestPlannerConversationEncoding:
     def test_structured_answer_metadata_is_included_for_llm_context(self) -> None:
-        payload = conversation_message_to_llm_dict(
+        payload = conversation_message_to_llm_message(
             ConversationMessage(
                 role="user",
                 content="Documents",
@@ -2798,7 +2798,7 @@ class TestPlannerConversationEncoding:
 
     def test_unexpected_conversation_role_fails_loud_for_llm_context(self) -> None:
         with pytest.raises(ValueError, match="Unsupported AI Builder conversation role"):
-            conversation_message_to_llm_dict(
+            conversation_message_to_llm_message(
                 ConversationMessage(role="invalid", content="Bad role")
             )
 

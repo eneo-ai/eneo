@@ -292,7 +292,7 @@ PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
         "PreparedPromptMessages",
         "ProposalPrepared",
         "ServerOutputPrepared",
-        "conversation_message_to_llm_dict",
+        "conversation_message_to_llm_message",
         "prepare_planner_request",
     }
 )

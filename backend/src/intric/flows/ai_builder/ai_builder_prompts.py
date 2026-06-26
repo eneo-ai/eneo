@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeVar, cast
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -26,6 +27,8 @@ __all__ = [
     "has_confirmed_requirements",
     "trim_conversation_for_context",
 ]
+
+_MessageT = TypeVar("_MessageT", bound=Mapping[str, Any])
 
 
 def compute_conversation_token_budget(
@@ -66,10 +69,10 @@ def compute_conversation_token_budget(
 
 
 def trim_conversation_for_context(
-    messages: list[dict[str, Any]],
+    messages: list[_MessageT],
     *,
     max_tokens: int,
-) -> list[dict[str, Any]]:
+) -> list[_MessageT]:
     """Trim conversation history to fit within the provided token budget.
 
     The budget should come from compute_conversation_token_budget() which
@@ -78,7 +81,7 @@ def trim_conversation_for_context(
     if max_tokens >= _estimate_group_tokens(messages):
         return list(messages)
 
-    groups: list[list[dict[str, Any]]] = []
+    groups: list[list[_MessageT]] = []
     index = 0
     while index < len(messages):
         message = messages[index]
@@ -96,7 +99,7 @@ def trim_conversation_for_context(
             index += 1
         groups.append(group)
 
-    kept_groups: list[list[dict[str, Any]]] = []
+    kept_groups: list[list[_MessageT]] = []
     consumed_tokens = 0
     for group in reversed(groups):
         group_tokens = _estimate_group_tokens(group)
@@ -106,17 +109,17 @@ def trim_conversation_for_context(
         consumed_tokens += group_tokens
 
     kept_groups.reverse()
-    trimmed: list[dict[str, Any]] = []
+    trimmed: list[_MessageT] = []
     for group in kept_groups:
         trimmed.extend(group)
     return trimmed
 
 
-def _estimate_group_tokens(group: list[dict[str, Any]]) -> int:
+def _estimate_group_tokens(group: Sequence[Mapping[str, Any]]) -> int:
     return sum(_estimate_message_tokens(message) for message in group)
 
 
-def _estimate_message_tokens(message: dict[str, Any]) -> int:
+def _estimate_message_tokens(message: Mapping[str, Any]) -> int:
     chunks: list[str] = []
     content = message.get("content")
     if isinstance(content, str):

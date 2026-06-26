@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
 from intric.files.file_models import File
@@ -323,16 +323,12 @@ def _prepare_prompt_messages(
             budget_policy.unknown_model_context_window_tokens
         ),
     )
-    raw_messages = cast(
-        list[dict[str, Any]],
-        [conversation_message_to_llm_dict(message) for message in conversation],
-    )
-    trimmed = cast(
-        list[LLMMessageParam],
-        trim_conversation_for_context(
-            raw_messages,
-            max_tokens=conversation_budget,
-        ),
+    raw_messages = [
+        conversation_message_to_llm_message(message) for message in conversation
+    ]
+    trimmed = trim_conversation_for_context(
+        raw_messages,
+        max_tokens=conversation_budget,
     )
     return PreparedPromptMessages(
         llm_messages=[{"role": "system", "content": system_prompt}, *trimmed],
@@ -343,7 +339,7 @@ def _prepare_prompt_messages(
     )
 
 
-def conversation_message_to_llm_dict(msg: ConversationMessage) -> LLMMessageParam:
+def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageParam:
     content = msg.content
     question_answer = question_answer_from_metadata(msg.metadata)
     if msg.role == "user" and question_answer is not None:
