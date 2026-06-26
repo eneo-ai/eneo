@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -216,7 +216,11 @@ async def test_create_config_auto_creates_tenant_integration_when_missing():
         None,
         SimpleNamespace(id=integration_id),
     ]
+    service.session.add = MagicMock(
+        side_effect=lambda obj: setattr(obj, "id", getattr(obj, "id", None) or uuid4())
+    )
     service._resolve_owner = AsyncMock(return_value=(owner_space_id, service.user.id))  # type: ignore[method-assign]
+    service._queue_sitemap_webhook_sync_for_config = AsyncMock()  # type: ignore[method-assign]
 
     await service.create_config(
         owner_type="user",

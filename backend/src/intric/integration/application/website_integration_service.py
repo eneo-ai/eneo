@@ -150,7 +150,7 @@ class WebsiteIntegrationService:
         )
         self.session.add(config)
         await self.session.flush()
-        await self.queue_sync(config_id=config.id, owner_type=owner_type)
+        await self._queue_sitemap_webhook_sync_for_config(config)
         await self.session.refresh(config)
         return self._to_public(config)
 
