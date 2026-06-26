@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 from intric.audit.domain.actor_types import ActorType
 from intric.authentication.principal_types import PrincipalType
-from intric.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from intric.users.user import UserInDB
 
 
 class FlowAuditActorFields(TypedDict):
