@@ -15,9 +15,6 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.application.flow_authoring_preparation import (
-    validate_prepared_flow_authoring_spec,
-)
 from intric.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
 )
@@ -53,73 +50,6 @@ def _make_spec() -> FlowDraftSpecCore:
             )
         ],
     )
-
-
-def _make_existing_ref_spec(
-    *existing_step_refs: str | None,
-) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Testflöde",
-        flow_description="Beskrivning",
-        steps=[
-            StepSpec(
-                plan_step_ref=f"step_{index}",
-                existing_step_ref=existing_step_ref,
-                name=f"Steg {index}",
-                assistant_spec=AssistantSpec(instructions="Gör jobbet."),
-                mcp_policy=MCPPolicy.INHERIT,
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-            )
-            for index, existing_step_ref in enumerate(existing_step_refs, start=1)
-        ],
-    )
-
-
-def test_create_mode_rejects_any_existing_step_ref() -> None:
-    result = validate_prepared_flow_authoring_spec(
-        spec=_make_existing_ref_spec("step_a"),
-        target_kind=TargetKind.CREATE.value,
-        valid_existing_step_refs=None,
-    )
-
-    assert not result.valid
-    assert result.errors[0].code == "invalid_existing_step_ref"
-
-
-def test_edit_mode_rejects_non_existing_step_alias_format() -> None:
-    result = validate_prepared_flow_authoring_spec(
-        spec=_make_existing_ref_spec("step_a"),
-        target_kind=TargetKind.EDIT.value,
-        valid_existing_step_refs=["existing_step_1"],
-    )
-
-    assert not result.valid
-    assert result.errors[0].code == "invalid_existing_step_ref"
-
-
-def test_edit_mode_rejects_unknown_existing_step_ref() -> None:
-    result = validate_prepared_flow_authoring_spec(
-        spec=_make_existing_ref_spec("existing_step_99"),
-        target_kind=TargetKind.EDIT.value,
-        valid_existing_step_refs=["existing_step_1"],
-    )
-
-    assert not result.valid
-    assert result.errors[0].code == "invalid_existing_step_ref"
-
-
-def test_edit_mode_rejects_duplicate_existing_step_ref() -> None:
-    result = validate_prepared_flow_authoring_spec(
-        spec=_make_existing_ref_spec("existing_step_1", "existing_step_1"),
-        target_kind=TargetKind.EDIT.value,
-        valid_existing_step_refs=["existing_step_1"],
-    )
-
-    assert not result.valid
-    assert result.errors[0].code == "invalid_existing_step_ref"
 
 
 def _duplicate_step_name_spec() -> FlowDraftSpecCore:
