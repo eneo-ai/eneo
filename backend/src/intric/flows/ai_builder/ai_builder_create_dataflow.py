@@ -923,12 +923,21 @@ def _underlag_marker_tokens(value: str) -> tuple[str, ...]:
 def _select_broad_underlag_field_refs(
     ordered_priors: list[tuple[int, list[StructuredFieldDraft]]],
 ) -> list[PreviousFieldRef]:
-    total_available = sum(len(fields) for _, fields in ordered_priors)
-    effective_total_cap = min(TARGETED_UNDERLAG_BROAD_FIELD_CAP, total_available)
+    return _round_robin_underlag_field_refs(
+        ordered_priors,
+        cap=TARGETED_UNDERLAG_BROAD_FIELD_CAP,
+    )
+
+
+def _round_robin_underlag_field_refs(
+    ordered_priors: list[tuple[int, list[StructuredFieldDraft]]],
+    *,
+    cap: int,
+) -> list[PreviousFieldRef]:
     selected: list[PreviousFieldRef] = []
     positions = [0 for _ in ordered_priors]
 
-    while len(selected) < effective_total_cap:
+    while len(selected) < cap:
         advanced = False
         for prior_position, (predecessor_index, fields) in enumerate(ordered_priors):
             field_position = positions[prior_position]
@@ -942,7 +951,7 @@ def _select_broad_underlag_field_refs(
             )
             positions[prior_position] += 1
             advanced = True
-            if len(selected) >= effective_total_cap:
+            if len(selected) >= cap:
                 break
         if not advanced:
             break
@@ -991,39 +1000,13 @@ def _select_source_floor_underlag_field_refs(
 def _select_priority_fallback_underlag_field_refs(
     ordered_priors: list[tuple[int, list[StructuredFieldDraft]]],
 ) -> list[PreviousFieldRef]:
-    effective_total_cap = max(
-        TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
-        len(ordered_priors),
+    return _round_robin_underlag_field_refs(
+        ordered_priors,
+        cap=max(
+            TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
+            len(ordered_priors),
+        ),
     )
-    selected: list[PreviousFieldRef] = []
-    positions = [0 for _ in ordered_priors]
-
-    for prior_position, (predecessor_index, fields) in enumerate(ordered_priors):
-        selected.append(_field_ref_from_draft_field(predecessor_index, fields[0]))
-        positions[prior_position] = 1
-        if len(selected) >= effective_total_cap:
-            return selected
-
-    while len(selected) < effective_total_cap:
-        advanced = False
-        for prior_position, (predecessor_index, fields) in enumerate(ordered_priors):
-            field_position = positions[prior_position]
-            if field_position >= len(fields):
-                continue
-            selected.append(
-                _field_ref_from_draft_field(
-                    predecessor_index,
-                    fields[field_position],
-                )
-            )
-            positions[prior_position] += 1
-            advanced = True
-            if len(selected) >= effective_total_cap:
-                break
-        if not advanced:
-            break
-
-    return selected
 
 
 def _select_semantic_underlag_field_refs(
