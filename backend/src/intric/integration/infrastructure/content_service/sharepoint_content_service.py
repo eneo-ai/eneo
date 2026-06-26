@@ -747,12 +747,12 @@ class SharePointContentService:
                                     )
                                 )
                         else:
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {
-                                    "file": item_name,
-                                    "reason": "Empty or unreadable content",
-                                }
+                            await self._delete_local_blob_for_unextractable_item(
+                                item_id=item_id,
+                                item_name=item_name,
+                                integration_knowledge=integration_knowledge,
+                                integration_knowledge_id=resolved_integration_knowledge_id,
+                                stats=stats,
                             )
 
                     except ValueError as e:
@@ -987,12 +987,12 @@ class SharePointContentService:
                             )
                             stats["files_processed"] += 1
                         else:
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {
-                                    "file": item_name,
-                                    "reason": "Empty or unreadable content",
-                                }
+                            await self._delete_local_blob_for_unextractable_item(
+                                item_id=folder_id_value,
+                                item_name=item_name,
+                                integration_knowledge=integration_knowledge,
+                                integration_knowledge_id=integration_knowledge_id,
+                                stats=stats,
                             )
 
                         return stats
@@ -1111,9 +1111,12 @@ class SharePointContentService:
                     )
                     stats["files_processed"] += 1
                 else:
-                    stats["skipped_items"] += 1
-                    stats["skipped_details"].append(
-                        {"file": doc_name, "reason": "Empty or unreadable content"}
+                    await self._delete_local_blob_for_unextractable_item(
+                        item_id=item_id,
+                        item_name=doc_name,
+                        integration_knowledge=integration_knowledge,
+                        integration_knowledge_id=integration_knowledge.id,
+                        stats=stats,
                     )
 
     async def _process_pages(
@@ -1331,6 +1334,35 @@ class SharePointContentService:
                 {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
             )
             return 0
+
+    async def _delete_local_blob_for_unextractable_item(
+        self,
+        *,
+        item_id: str,
+        item_name: str,
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+    ) -> None:
+        reason = "Empty or unreadable content"
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append({"file": item_name, "reason": reason})
+        await self._delete_local_sharepoint_item(
+            item_id=item_id,
+            item_name=item_name,
+            integration_knowledge=integration_knowledge,
+            integration_knowledge_id=integration_knowledge_id,
+            stats=stats,
+            reason="unextractable",
+        )
+
+    @staticmethod
+    def _is_positive_unextractable_result(
+        content: Optional[str], skip_reason: Optional[str]
+    ) -> bool:
+        if content is not None:
+            return is_unextractable_content(content)
+        return skip_reason == "Empty or unreadable content"
 
     async def _delete_out_of_scope_folder_subtree(
         self,
@@ -1714,6 +1746,16 @@ class SharePointContentService:
                     sharepoint_item_id=item_id,
                 )
                 stats["files_processed"] += 1
+            elif item_id and self._is_positive_unextractable_result(
+                content, skip_reason
+            ):
+                await self._delete_local_blob_for_unextractable_item(
+                    item_id=item_id,
+                    item_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                )
             else:
                 stats["skipped_items"] += 1
                 if skip_reason:
