@@ -24,6 +24,7 @@ from intric.flows.flow_authoring_variable_rewriting import (
     rewrite_step_spec_variables,
 )
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
+from intric.flows.step_lineage import existing_step_ref_for_order
 from intric.main.exceptions import BadRequestException
 
 
@@ -146,7 +147,7 @@ def compile_flow_draft_changeset(
     existing_by_ref: dict[str, FlowStep] = {}
     if current_flow:
         for step in current_flow.steps:
-            existing_by_ref[f"existing_step_{step.step_order}"] = step
+            existing_by_ref[existing_step_ref_for_order(step.step_order)] = step
     _validate_existing_step_ref_coverage(
         spec=spec,
         existing_by_ref=existing_by_ref,

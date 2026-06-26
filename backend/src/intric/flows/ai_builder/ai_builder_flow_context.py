@@ -15,6 +15,7 @@ from intric.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
+from intric.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_edit_scope import EditScopeResolution
@@ -61,7 +62,7 @@ def _build_detailed_flow_context(
     if sorted_steps:
         lines.append("\nSteg:")
         for step in sorted_steps:
-            ref = f"existing_step_{step.step_order}"
+            ref = existing_step_ref_for_order(step.step_order)
             lines.append(
                 f"  {step.step_order}. {step.user_description or '(namnlöst)'} "
                 f"[ref={ref}] "
@@ -138,7 +139,7 @@ def _build_detailed_flow_context(
         lines.append("  Ref                 | Namn                | IO-typ")
         lines.append("  --------------------|---------------------|-------")
         for step in sorted_steps:
-            ref = f"existing_step_{step.step_order}"
+            ref = existing_step_ref_for_order(step.step_order)
             name = (step.user_description or "(namnlöst)")[:20]
             io = f"{step.input_type} → {step.output_type}"
             lines.append(f"  {ref:<20}| {name:<20}| {io}")
@@ -212,7 +213,7 @@ def _build_edit_mode_flow_context(
             ]
         )
         for step in steps:
-            ref = f"existing_step_{step.step_order}"
+            ref = existing_step_ref_for_order(step.step_order)
             name = step.user_description or "(namnlöst)"
             io = (
                 f"{getattr(step.input_source, 'value', step.input_source)} -> "
@@ -230,7 +231,7 @@ def build_step_ref_mapping(flow: Flow) -> dict[str, UUID]:
     mapping: dict[str, UUID] = {}
     for step in flow.steps:
         if step.id is not None:
-            mapping[f"existing_step_{step.step_order}"] = step.id
+            mapping[existing_step_ref_for_order(step.step_order)] = step.id
     return mapping
 
 

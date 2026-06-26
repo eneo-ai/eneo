@@ -18,6 +18,28 @@ class _StepReferenceFields(Protocol):
 
 
 _StepReferenceSource: TypeAlias = Mapping[str, object] | _StepReferenceFields
+_EXISTING_STEP_REF_PREFIX = "existing_step_"
+
+
+def existing_step_ref_for_order(step_order: int) -> str:
+    if step_order < 1:
+        raise ValueError("Existing step refs are 1-based.")
+    return f"{_EXISTING_STEP_REF_PREFIX}{step_order}"
+
+
+def existing_step_order_from_ref(existing_step_ref: str | None) -> int | None:
+    if existing_step_ref is None or not existing_step_ref.startswith(
+        _EXISTING_STEP_REF_PREFIX
+    ):
+        return None
+    raw_order = existing_step_ref.removeprefix(_EXISTING_STEP_REF_PREFIX)
+    if not raw_order.isdigit():
+        return None
+    step_order = int(raw_order)
+    # Reject non-canonical aliases such as existing_step_01.
+    if raw_order != str(step_order):
+        return None
+    return step_order if step_order >= 1 else None
 
 
 def build_step_ref_mapping(steps: Iterable[_StepReferenceSource]) -> dict[str, int]:

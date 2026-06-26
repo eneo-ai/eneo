@@ -61,6 +61,10 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.flows.step_lineage import (
+    existing_step_order_from_ref,
+    existing_step_ref_for_order,
+)
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
@@ -337,7 +341,7 @@ def _repair_leading_audio_shape(
         return proposal
 
     current_by_ref = {
-        f"existing_step_{step.step_order}": step for step in current_steps
+        existing_step_ref_for_order(step.step_order): step for step in current_steps
     }
     first_item = proposal.steps[0]
     if not isinstance(first_item, ModifyExistingStep):
@@ -491,7 +495,10 @@ def _build_step_changes(
     existing_order_to_plan_ref = {
         existing_order: step.plan_step_ref
         for step in compiled_steps
-        if (existing_order := _existing_step_order(step.existing_step_ref)) is not None
+        if (
+            (existing_order := existing_step_order_from_ref(step.existing_step_ref))
+            is not None
+        )
     }
     removed_names: dict[str, str] = {}
     baseline_steps: list[StepSpec] = []
@@ -574,7 +581,7 @@ def _restamp_existing_step_plan_ref_for_diff(
     step: StepSpec,
     existing_order_to_plan_ref: dict[int, str],
 ) -> StepSpec:
-    existing_order = _existing_step_order(step.existing_step_ref)
+    existing_order = existing_step_order_from_ref(step.existing_step_ref)
     if existing_order is None:
         return step
     plan_ref = existing_order_to_plan_ref.get(existing_order)
@@ -744,7 +751,10 @@ def _canonicalize_existing_runtime_aliases(
     existing_order_to_plan_ref = {
         existing_order: step.plan_step_ref
         for step in step_specs
-        if (existing_order := _existing_step_order(step.existing_step_ref)) is not None
+        if (
+            (existing_order := existing_step_order_from_ref(step.existing_step_ref))
+            is not None
+        )
     }
     if not existing_order_to_plan_ref:
         return step_specs
@@ -753,13 +763,6 @@ def _canonicalize_existing_runtime_aliases(
         _rewrite_runtime_aliases_for_existing_step(step, existing_order_to_plan_ref)
         for step in step_specs
     ]
-
-
-def _existing_step_order(existing_step_ref: str | None) -> int | None:
-    if existing_step_ref is None or not existing_step_ref.startswith("existing_step_"):
-        return None
-    raw_order = existing_step_ref.removeprefix("existing_step_")
-    return int(raw_order) if raw_order.isdigit() else None
 
 
 def _rewrite_runtime_aliases_for_existing_step(

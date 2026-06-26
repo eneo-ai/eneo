@@ -34,6 +34,7 @@ from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
 )
+from intric.flows.step_lineage import existing_step_ref_for_order
 from intric.main.exceptions import BadRequestException
 
 
@@ -355,7 +356,7 @@ def _expected_revision(command: FlowAuthoringCommand) -> int | None:
 def _valid_existing_step_refs(current_flow: Flow | None) -> tuple[str, ...] | None:
     if current_flow is None:
         return None
-    return tuple(f"existing_step_{step.step_order}" for step in current_flow.steps)
+    return tuple(existing_step_ref_for_order(step.step_order) for step in current_flow.steps)
 
 
 def _raise_preparation_validation_error(

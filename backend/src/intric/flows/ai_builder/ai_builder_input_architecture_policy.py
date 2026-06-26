@@ -22,6 +22,7 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from intric.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
@@ -407,7 +408,7 @@ def degrades_document_entry_to_generic_file(
 
     first_spec = spec.steps[0]
     return (
-        first_spec.existing_step_ref == "existing_step_1"
+        first_spec.existing_step_ref == existing_step_ref_for_order(1)
         and first_spec.input_source == InputSource.FLOW_INPUT
         and first_spec.input_type == InputType.FILE
     )

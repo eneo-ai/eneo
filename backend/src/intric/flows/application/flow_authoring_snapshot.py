@@ -20,6 +20,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.flows.step_lineage import existing_step_ref_for_order
 
 AssistantSnapshotProjector = Callable[[AssistantAuthoringSnapshot], AssistantSpec]
 
@@ -78,7 +79,7 @@ def current_flow_authoring_spec(
         steps=[
             flow_step_to_authoring_spec(
                 step,
-                plan_ref=f"existing_step_{step.step_order}",
+                plan_ref=existing_step_ref_for_order(step.step_order),
                 assistant_snapshots=assistant_snapshots,
                 assistant_snapshot_projector=assistant_snapshot_projector,
             )
@@ -97,7 +98,7 @@ def flow_step_to_authoring_spec(
 ) -> StepSpec:
     return StepSpec(
         plan_step_ref=plan_ref,
-        existing_step_ref=f"existing_step_{step.step_order}",
+        existing_step_ref=existing_step_ref_for_order(step.step_order),
         name=step.user_description or f"Step {step.step_order}",
         assistant_spec=_resolve_existing_assistant_spec(
             step=step,

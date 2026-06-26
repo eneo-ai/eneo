@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
 from intric.flows.flow_authoring_spec import FlowDraftSpecCore, OutputType
+from intric.flows.step_lineage import existing_step_order_from_ref
 
 FlowAuthoringTargetKind = Literal["create", "edit"]
 
 _STRICT_TERMINAL_OUTPUT_TYPES = frozenset(
     {OutputType.JSON, OutputType.PDF, OutputType.DOCX}
 )
-_EXISTING_STEP_REF_RE = re.compile(r"^existing_step_[1-9]\d*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +84,7 @@ def _validate_existing_step_refs(
             )
             continue
 
-        if not _EXISTING_STEP_REF_RE.match(existing_step_ref):
+        if existing_step_order_from_ref(existing_step_ref) is None:
             errors.append(
                 FlowAuthoringPreparationError(
                     step_ref=step.plan_step_ref,

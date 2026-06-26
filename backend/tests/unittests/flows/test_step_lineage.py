@@ -3,8 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+import pytest
+
 from intric.flows.step_lineage import (
     build_step_ref_mapping,
+    existing_step_order_from_ref,
+    existing_step_ref_for_order,
     resolve_reference_step_orders,
     resolve_upstream_step_orders,
 )
@@ -64,6 +68,28 @@ def test_build_step_ref_mapping_reads_published_snapshot_mappings() -> None:
     mapping = build_step_ref_mapping(steps)
 
     assert mapping == {"draft_source": 1, "existing_source": 1}
+
+
+def test_existing_step_ref_for_order_pins_wire_format() -> None:
+    assert existing_step_ref_for_order(3) == "existing_step_3"
+
+
+def test_existing_step_ref_round_trips_order() -> None:
+    ref = existing_step_ref_for_order(12)
+
+    assert existing_step_order_from_ref(ref) == 12
+
+
+def test_existing_step_ref_rejects_invalid_order() -> None:
+    with pytest.raises(ValueError, match="Existing step refs are 1-based."):
+        existing_step_ref_for_order(0)
+
+
+def test_existing_step_order_from_ref_rejects_non_canonical_refs() -> None:
+    assert existing_step_order_from_ref(None) is None
+    assert existing_step_order_from_ref("existing_step_0") is None
+    assert existing_step_order_from_ref("existing_step_01") is None
+    assert existing_step_order_from_ref("step_1") is None
 
 
 def test_resolve_reference_step_orders_keeps_completed_prior_references() -> None:

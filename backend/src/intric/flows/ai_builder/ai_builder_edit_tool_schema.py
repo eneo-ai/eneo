@@ -25,6 +25,7 @@ from intric.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
 from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import FlowMcpPolicy
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
+from intric.flows.step_lineage import existing_step_ref_for_order
 
 
 def build_edit_flow_tool_schema(
@@ -33,7 +34,7 @@ def build_edit_flow_tool_schema(
     resource_catalog: AIBuilderResourceCatalog,
     tool_name: str,
 ) -> dict[str, Any]:
-    valid_refs = [f"existing_step_{s.step_order}" for s in current_steps]
+    valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
 
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
