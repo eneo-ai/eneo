@@ -8467,7 +8467,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Flow Runtime Health */
+    /**
+     * Flow Runtime Health
+     * @description Return Flow runtime readiness signals derived from persisted run, review, data-integrity, and audit-outbox state.
+     */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
     post?: never;
@@ -30526,6 +30529,22 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
         };
       };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_ai_builder_budget_settings_api_v1_settings_ai_builder_budget_patch: {
@@ -30548,6 +30567,38 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AIBuilderBudgetSettingsPublic"];
+        };
+      };
+      /** @description Invalid AI Builder budget settings payload. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "At least one AI Builder budget field must be provided.",
+           *       "intric_error_code": 9007,
+           *       "code": "flow_settings_invalid_payload"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "message": "Insufficient permissions.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_tenant_permission"
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -44427,12 +44478,67 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Attachment detached from the AI Builder session. */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Caller lacks space permission or API key scope for this session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "insufficient_scope",
+           *       "category": "unauthorized",
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "intric_error_code": 9001,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description AI Builder session not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "schema_version": 2,
+           *       "code": "not_found",
+           *       "category": "not_found",
+           *       "message": "AI Builder session not found.",
+           *       "phase": "router",
+           *       "intric_error_code": 9000,
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -55390,7 +55496,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Flow runtime health payload. Inspect the response status and flags for healthy, degraded, unhealthy, or unknown runtime signals. */
       200: {
         headers: {
           [name: string]: unknown;

@@ -567,6 +567,7 @@ async def list_sessions(
     "/sessions/{session_id}/messages",
     operation_id="send_ai_builder_message",
     response_class=EventSourceResponse,
+    response_model=None,
     summary="Send AI Builder Message",
     description=(
         "Send a user message to an AI Builder session and receive planner events as "
@@ -830,9 +831,24 @@ async def get_session(
 @router.delete(
     "/sessions/{session_id}/attachments/{file_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     operation_id="detach_ai_builder_attachment",
     summary="Detach AI Builder Attachment",
     description="Remove a previously attached reference file from an AI Builder session without deleting the underlying file globally.",
+    responses={
+        204: {"description": "Attachment detached from the AI Builder session."},
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this session.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+        404: _ai_builder_error_response(
+            description="AI Builder session not found.",
+            message="AI Builder session not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        ),
+    },
 )
 async def detach_session_attachment(
     request: Request,

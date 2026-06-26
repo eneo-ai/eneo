@@ -563,6 +563,7 @@ async def delete_flow_classification_retention_policy(
     response_model=AIBuilderBudgetSettingsPublic,
     summary="Get AI Builder budget settings",
     description="Return token budget settings used by the Flow AI Builder planner.",
+    responses={403: _flow_settings_admin_forbidden_response()},
 )
 async def get_ai_builder_budget_settings(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -577,6 +578,13 @@ async def get_ai_builder_budget_settings(
     response_model=AIBuilderBudgetSettingsPublic,
     summary="Update AI Builder budget settings",
     description="Update token budget settings used by the Flow AI Builder planner.",
+    responses={
+        400: _flow_settings_invalid_payload_response(
+            "Invalid AI Builder budget settings payload.",
+            "At least one AI Builder budget field must be provided.",
+        ),
+        403: _flow_settings_admin_forbidden_response(),
+    },
 )
 async def update_ai_builder_budget_settings(
     payload: AIBuilderBudgetSettingsUpdate,

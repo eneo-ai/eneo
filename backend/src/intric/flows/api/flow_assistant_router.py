@@ -290,6 +290,7 @@ async def update_flow_assistant(
 @router.delete(
     "/{id}/assistants/{assistant_id}/",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     operation_id="delete_flow_assistant",
     summary="Delete Flow Assistant",
     description=(

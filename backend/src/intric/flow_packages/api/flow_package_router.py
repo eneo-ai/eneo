@@ -354,6 +354,7 @@ async def import_flow_package_as_draft(
 @flow_router.post(
     "/package-exports/",
     response_class=Response,
+    response_model=None,
     status_code=status.HTTP_200_OK,
     operation_id="export_flow_package",
     summary="Export Flow Package",

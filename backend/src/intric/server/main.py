@@ -648,7 +648,22 @@ def get_application():
 
         return response_data
 
-    @app.get("/api/healthz/flows", response_model=FlowRuntimeHealthResponse)
+    @app.get(
+        "/api/healthz/flows",
+        response_model=FlowRuntimeHealthResponse,
+        description=(
+            "Return Flow runtime readiness signals derived from persisted run, review, "
+            "data-integrity, and audit-outbox state."
+        ),
+        responses={
+            200: {
+                "description": (
+                    "Flow runtime health payload. Inspect the response status and flags "
+                    "for healthy, degraded, unhealthy, or unknown runtime signals."
+                )
+            }
+        },
+    )
     async def flow_runtime_health() -> FlowRuntimeHealthResponse:
         from intric.server.dependencies.container import Container
 

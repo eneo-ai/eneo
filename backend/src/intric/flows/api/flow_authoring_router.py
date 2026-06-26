@@ -495,6 +495,7 @@ async def update_flow(
 @router.delete(
     "/{id}/",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     operation_id="delete_flow",
     summary="Delete Flow",
     description=(
