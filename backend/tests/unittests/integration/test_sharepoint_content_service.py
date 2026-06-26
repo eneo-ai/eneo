@@ -516,6 +516,102 @@ class TestProcessInfoBlobSizeAccounting:
 
         mock_dependencies["datastore"].add.assert_called_once()
 
+    async def test_persists_content_hash_after_embedding_succeeds(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        import hashlib
+
+        from intric.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+            sanitize_text_for_db,
+        )
+
+        existing_blob = MagicMock()
+        existing_blob.size = 100
+        existing_blob.content_hash = b"old-hash"
+
+        updated_blob = MagicMock()
+        updated_blob.id = uuid4()
+        updated_blob.size = 100
+
+        text = "Fresh content"
+        expected_hash = hashlib.sha256(
+            sanitize_text_for_db(text).encode("utf-8")
+        ).digest()
+        upserted: list = []
+
+        async def upsert(info_blob):
+            upserted.append(info_blob)
+            return updated_blob
+
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        repo.session.execute = AsyncMock()
+        repo.update_content_hash = AsyncMock(return_value=updated_blob)
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
+            side_effect=upsert
+        )
+        mock_dependencies["datastore"].add = AsyncMock()
+
+        await service._process_info_blob(
+            title="Doc",
+            text=text,
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        assert upserted[0].content_hash is None
+        repo.update_content_hash.assert_called_once_with(
+            info_blob_id=updated_blob.id,
+            content_hash=expected_hash,
+        )
+
+    async def test_embedding_failure_leaves_content_hash_unset_for_retry(
+        self, service, mock_dependencies, mock_integration_knowledge
+    ):
+        existing_blob = MagicMock()
+        existing_blob.size = 100
+        existing_blob.content_hash = b"old-hash"
+
+        updated_blob = MagicMock()
+        updated_blob.id = uuid4()
+        updated_blob.size = 100
+        upserted: list = []
+
+        async def upsert(info_blob):
+            upserted.append(info_blob)
+            return updated_blob
+
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=existing_blob
+        )
+        repo.session.execute = AsyncMock()
+        repo.update_content_hash = AsyncMock()
+        mock_dependencies[
+            "info_blob_service"
+        ].upsert_info_blob_by_sharepoint_item_and_integration = AsyncMock(
+            side_effect=upsert
+        )
+        mock_dependencies["datastore"].add = AsyncMock(
+            side_effect=Exception("embedding service unavailable")
+        )
+
+        await service._process_info_blob(
+            title="Doc",
+            text="Fresh content",
+            url="https://example.com",
+            integration_knowledge=mock_integration_knowledge,
+            sharepoint_item_id="item-123",
+        )
+
+        assert upserted[0].content_hash is None
+        repo.update_content_hash.assert_not_called()
+
 
 class TestBuildSummaryStats:
     """Tests for _build_summary_stats method."""
@@ -1345,6 +1441,67 @@ class TestDeltaChangesProcessing:
         mock_delete_subtree.assert_not_called()
         assert mock_integration_knowledge.folder_path == "/Documents/A renamed"
         assert "1 folder scanned" in result
+
+    async def test_unresolved_legacy_folder_path_skips_uncertain_deletion(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """Do not delete nested content when legacy folder scope cannot be resolved."""
+        mock_integration_knowledge.delta_token = "existing-delta-token-123"
+        mock_integration_knowledge.drive_id = "drive-123"
+        mock_integration_knowledge.selected_item_type = "folder"
+        mock_integration_knowledge.folder_id = "folder-a"
+        mock_integration_knowledge.folder_path = None
+
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies[
+            "integration_knowledge_repo"
+        ].one.return_value = mock_integration_knowledge
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[]
+        )
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_file_metadata.side_effect = Exception("Graph timeout")
+            mock_client.get_delta_changes.return_value = (
+                [
+                    {
+                        "id": "item-123",
+                        "name": "nested.docx",
+                        "parentReference": {"id": "nested-folder"},
+                    }
+                ],
+                "new-delta-token",
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await service.process_delta_changes(
+                token_id=mock_oauth_token.id,
+                integration_knowledge_id=mock_integration_knowledge.id,
+                site_id="site-123",
+                drive_id="drive-123",
+            )
+
+        mock_client.get_file_metadata.assert_called_once_with(
+            drive_id="drive-123",
+            item_id="folder-a",
+        )
+        mock_dependencies[
+            "info_blob_service"
+        ].repo.delete_by_sharepoint_item_and_integration_knowledge.assert_not_called()
+        mock_client.get_file_content_by_id.assert_not_called()
+        assert mock_integration_knowledge.folder_path is None
+        assert "1 item skipped" in result
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.metadata["skipped_details"] == [
+            {"file": "nested.docx", "reason": "Folder scope path unavailable"}
+        ]
 
 
 class TestOneDriveFolderTraversal:

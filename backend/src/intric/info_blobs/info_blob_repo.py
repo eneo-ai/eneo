@@ -187,6 +187,19 @@ class InfoBlobRepository:
         record = await self.delegate.update(info_blob)
         return InfoBlobInDB.model_validate(record)
 
+    async def update_content_hash(
+        self, *, info_blob_id: UUID, content_hash: bytes
+    ) -> InfoBlobInDB:
+        stmt = (
+            sa.update(InfoBlobs)
+            .where(InfoBlobs.id == info_blob_id)
+            .values(content_hash=content_hash, updated_at=sa.func.now())
+            .returning(InfoBlobs)
+        )
+        result = await self.session.execute(stmt)
+        record = result.scalar_one()
+        return InfoBlobInDB.model_validate(record)
+
     async def update_size(self, info_blob_id: UUID) -> InfoBlobInDB | None:
         chunks_size_subquery = (
             sa.select(sa.func.coalesce(sa.func.sum(InfoBlobChunks.size), 0))

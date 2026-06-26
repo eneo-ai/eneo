@@ -667,6 +667,7 @@ class SharePointContentService:
 
                 scope_folder_path = integration_knowledge.folder_path
                 known_subfolder_ids: set[str] = set()
+                folder_scope_path_unresolved = False
                 if (
                     integration_knowledge.selected_item_type == "folder"
                     and integration_knowledge.folder_id
@@ -689,6 +690,14 @@ class SharePointContentService:
                             await self.integration_knowledge_repo.update(
                                 obj=integration_knowledge
                             )
+                        else:
+                            logger.warning(
+                                "Could not derive folder_path for delta scope "
+                                "(integration_knowledge=%s, folder_id=%s)",
+                                resolved_integration_knowledge_id,
+                                integration_knowledge.folder_id,
+                            )
+                            folder_scope_path_unresolved = True
                     except Exception as exc:
                         logger.warning(
                             "Could not resolve folder_path for delta scope (integration_knowledge=%s, folder_id=%s): %s",
@@ -696,6 +705,7 @@ class SharePointContentService:
                             integration_knowledge.folder_id,
                             exc,
                         )
+                        folder_scope_path_unresolved = True
 
                 if len(changes) == 0:
                     logger.info(
@@ -762,6 +772,29 @@ class SharePointContentService:
                         known_subfolder_ids=known_subfolder_ids,
                         selected_item_type=integration_knowledge.selected_item_type,
                     ):
+                        if (
+                            folder_scope_path_unresolved
+                            and integration_knowledge.selected_item_type == "folder"
+                            and integration_knowledge.folder_id
+                            and not scope_folder_path
+                        ):
+                            logger.warning(
+                                "Skipping destructive out-of-scope cleanup for %s "
+                                "(item_id=%s) because folder_path could not be resolved "
+                                "for integration_knowledge %s",
+                                item_name,
+                                item_id,
+                                resolved_integration_knowledge_id,
+                            )
+                            stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {
+                                    "file": item_name or item_id,
+                                    "reason": "Folder scope path unavailable",
+                                }
+                            )
+                            continue
+
                         logger.debug(
                             f"  - Skipping item {item_name}: not in folder scope"
                         )
@@ -1324,7 +1357,7 @@ class SharePointContentService:
             tenant_id=self.user.tenant_id,
             integration_knowledge_id=integration_knowledge.id,
             sharepoint_item_id=sharepoint_item_id,
-            content_hash=content_hash,
+            content_hash=None,
         )
 
         if sharepoint_item_id:
@@ -1355,6 +1388,11 @@ class SharePointContentService:
             )
         except Exception as e:
             logger.debug(f"Could not add embedding for {title}: {e}")
+        else:
+            await self.info_blob_service.repo.update_content_hash(
+                info_blob_id=info_blob.id,
+                content_hash=content_hash,
+            )
 
         current_size = _safe_int(getattr(integration_knowledge, "size", 0))
         new_blob_size = _safe_int(getattr(info_blob, "size", 0))

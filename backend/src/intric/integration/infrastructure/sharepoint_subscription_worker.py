@@ -182,14 +182,17 @@ async def renew_expiring_subscriptions(container: Container):
 
     for subscription in expiring:
         try:
+            token = await get_token_for_subscription(subscription, container)
+            if not token:
+                raise RuntimeError(
+                    f"Could not get token for subscription {subscription.subscription_id}"
+                )
+
             # Isolate each renewal in a SAVEPOINT so one subscription's DB error
-            # cannot poison the shared cron transaction and drop the rest.
+            # cannot poison the shared cron transaction and drop the rest. Token
+            # refresh happens before this savepoint so a Graph renewal rollback
+            # cannot undo a rotated refresh token.
             async with session.begin_nested():
-                token = await get_token_for_subscription(subscription, container)
-                if not token:
-                    raise RuntimeError(
-                        f"Could not get token for subscription {subscription.subscription_id}"
-                    )
                 success = await sharepoint_subscription_service.renew_subscription(
                     subscription=subscription, token=token
                 )

@@ -526,6 +526,84 @@ class TestRenewExpiringSubscriptions:
             subscription
         )
 
+    @pytest.mark.asyncio
+    async def test_refreshes_token_before_renewal_savepoint(self, mock_container):
+        """Rotated refresh tokens must not roll back with Graph renewal failures."""
+        events: list[str] = []
+
+        @asynccontextmanager
+        async def recording_nested():
+            events.append("begin_nested")
+            try:
+                yield
+            finally:
+                events.append("end_nested")
+
+        subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="site-123,web-123,list-123",
+            subscription_id="sub-123",
+            drive_id="drive-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+
+        mock_container.session().begin_nested = MagicMock(
+            side_effect=lambda: recording_nested()
+        )
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
+        )
+
+        user_integration = MagicMock()
+        user_integration.auth_type = "user_oauth"
+        user_integration.tenant_app_id = None
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+
+        oauth_token = MagicMock()
+        oauth_token.id = uuid4()
+        oauth_token.access_token = "rotated-access-token"
+        oauth_token.token_type.is_sharepoint = True
+        mock_container.oauth_token_service().get_oauth_token_by_user_integration = (
+            AsyncMock(return_value=oauth_token)
+        )
+
+        async def refresh_token(*, token_id):
+            events.append("refresh_token")
+            return oauth_token
+
+        async def renew_subscription(*, subscription, token):
+            events.append("renew_subscription")
+            return False
+
+        mock_container.oauth_token_service().refresh_and_update_token = AsyncMock(
+            side_effect=refresh_token
+        )
+        mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
+            side_effect=renew_subscription
+        )
+        mock_container.sharepoint_subscription_repo().update = AsyncMock(
+            return_value=subscription
+        )
+
+        with patch(
+            "intric.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "intric.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await renew_expiring_subscriptions({})
+
+        assert result["renewed"] == 0
+        assert result["failed"] == 1
+        assert events.index("refresh_token") < events.index("begin_nested")
+        assert events.index("begin_nested") < events.index("renew_subscription")
+
 
 class TestFailStaleSharePointSyncJobs:
     """Tests for the stuck-job sweeper cron."""
