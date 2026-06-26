@@ -59,12 +59,10 @@ class FlowDraftMaterializer:
         is_create = flow_id is None
         progress = _MaterializationProgressAccumulator(callback=progress_callback)
 
-        try:
-            resource_bindings_by_slot_ref = index_local_resource_bindings(
-                resource_bindings
-            )
-        except FlowResourceBindingResolutionError as exc:
-            raise _slot_binding_bad_request(exc) from exc
+        resource_bindings_by_slot_ref = index_and_validate_changeset_resource_bindings(
+            changeset=changeset,
+            resource_bindings=resource_bindings,
+        )
 
         ref_to_assistant_id: dict[str, UUID] = {}
         completion_required_by_plan_ref = _completion_required_by_plan_ref(
@@ -222,6 +220,48 @@ class _MaterializationProgressAccumulator:
         )
 
 
+def index_and_validate_changeset_resource_bindings(
+    *,
+    changeset: FlowDraftChangeSet,
+    resource_bindings: tuple[LocalResourceBinding, ...],
+) -> dict[str, LocalResourceBinding]:
+    try:
+        resource_bindings_by_slot_ref = index_local_resource_bindings(resource_bindings)
+    except FlowResourceBindingResolutionError as exc:
+        raise _slot_binding_bad_request(exc) from exc
+
+    completion_required_by_plan_ref = _completion_required_by_plan_ref(
+        changeset.compiled_steps
+    )
+    completion_required_by_assistant_id = _completion_required_by_assistant_id(
+        changeset.compiled_steps
+    )
+
+    for assistant_to_create in changeset.assistants_to_create:
+        _resolve_assistant_resource_update_fields(
+            assistant_spec=assistant_to_create.assistant_spec,
+            requires_completion_model_for_step=_completion_required_for_plan_ref(
+                plan_step_ref=assistant_to_create.plan_step_ref,
+                completion_required_by_plan_ref=completion_required_by_plan_ref,
+            ),
+            resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+        )
+
+    for assistant_to_update in changeset.assistants_to_update:
+        if assistant_to_update.existing_assistant_id is None:
+            continue
+        _resolve_assistant_resource_update_fields(
+            assistant_spec=assistant_to_update.assistant_spec,
+            requires_completion_model_for_step=_completion_required_for_assistant_id(
+                assistant_id=assistant_to_update.existing_assistant_id,
+                completion_required_by_assistant_id=completion_required_by_assistant_id,
+            ),
+            resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+        )
+
+    return resource_bindings_by_slot_ref
+
+
 def _build_flow_steps(
     *,
     compiled_steps: list[FlowDraftCompiledStep],
@@ -340,6 +380,28 @@ async def _configure_assistant(
     command_fields: dict[str, object] = {
         "prompt": PromptCreate(text=assistant_spec.instructions)
     }
+    command_fields.update(
+        _resolve_assistant_resource_update_fields(
+            assistant_spec=assistant_spec,
+            requires_completion_model_for_step=requires_completion_model_for_step,
+            resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+        )
+    )
+
+    await flow_service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=assistant_id,
+        update=AssistantUpdateCommand.model_validate(command_fields),
+    )
+
+
+def _resolve_assistant_resource_update_fields(
+    *,
+    assistant_spec: AssistantSpec,
+    requires_completion_model_for_step: bool,
+    resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
+) -> dict[str, object]:
+    command_fields: dict[str, object] = {}
     if not requires_completion_model_for_step:
         command_fields["completion_model_id"] = None
     elif assistant_spec.model_ref is not None:
@@ -411,11 +473,7 @@ async def _configure_assistant(
     command_fields["mcp_server_ids"] = mcp_server_ids
     command_fields["mcp_tools"] = mcp_tools
 
-    await flow_service.update_flow_assistant(
-        flow_id=flow_id,
-        assistant_id=assistant_id,
-        update=AssistantUpdateCommand.model_validate(command_fields),
-    )
+    return command_fields
 
 
 def _resolve_knowledge_refs(

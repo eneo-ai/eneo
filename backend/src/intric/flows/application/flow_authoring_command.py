@@ -24,6 +24,7 @@ from intric.flows.application.flow_draft_materialization import (
 )
 from intric.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
+    index_and_validate_changeset_resource_bindings,
 )
 from intric.flows.application.flow_service import FlowService
 from intric.flows.domain.flow import Flow
@@ -133,21 +134,6 @@ class FlowAuthoringCommandService:
     def __init__(self, materializer: FlowDraftMaterializer | None = None) -> None:
         self._materializer = materializer or FlowDraftMaterializer()
 
-    async def preview(
-        self,
-        *,
-        command: FlowAuthoringCommand,
-        flow_service: FlowService,
-        origin_policy: FlowAuthoringOriginPolicy | None = None,
-    ) -> FlowAuthoringPreview:
-        return (
-            await self.prepare(
-                command=command,
-                flow_service=flow_service,
-                origin_policy=origin_policy,
-            )
-        ).preview
-
     async def prepare(
         self,
         *,
@@ -179,6 +165,10 @@ class FlowAuthoringCommandService:
         )
         changeset = policy.stamp_metadata(
             changeset=changeset,
+        )
+        index_and_validate_changeset_resource_bindings(
+            changeset=changeset,
+            resource_bindings=command.resource_bindings,
         )
         return PreparedFlowAuthoring(
             command=command,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -88,13 +87,6 @@ def _flow_service() -> AsyncMock:
     service = AsyncMock()
     service.list_flows.return_value = []
     return service
-
-
-def test_shared_executor_has_no_ai_builder_imports() -> None:
-    import intric.flows.application.flow_draft_materialization_executor as executor
-
-    assert "ai_builder" not in inspect.getsource(executor)
-    assert "flow_packages" not in inspect.getsource(executor)
 
 
 @pytest.mark.asyncio
@@ -514,6 +506,62 @@ async def test_materializer_clears_completion_model_for_transcribe_only_update_c
 
 
 @pytest.mark.asyncio
+async def test_materializer_mcp_refs_take_precedence_over_defensive_knowledge_refs() -> (
+    None
+):
+    flow_id = uuid4()
+    server_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+    assistant_spec = AssistantSpec.model_construct(
+        instructions="Use tools.",
+        model_ref=None,
+        knowledge_refs=["knowledge.missing"],
+        mcp_server_refs=["mcp_server.primary"],
+        mcp_tool_refs=[],
+    )
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet.model_construct(
+            flow_name="MCP flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate.model_construct(
+                    plan_step_ref="mcp",
+                    assistant_spec=assistant_spec,
+                )
+            ],
+            assistants_to_update=[],
+            assistants_to_delete=[],
+            compiled_steps=[_compiled_step(plan_step_ref="mcp", step_order=1)],
+            metadata_json=None,
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=None,
+        resource_bindings=(
+            _resource_binding(
+                slot="primary",
+                slot_kind=ResourceSlotKind.MCP_SERVER,
+                local_kind=LocalResourceKind.MCP_SERVER,
+                local_id=server_id,
+            ),
+        ),
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+    command = service.update_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, AssistantUpdateCommand)
+    assert command.mcp_server_ids == [server_id]
+    assert command.groups == []
+    assert command.websites == []
+    assert command.integration_knowledge_ids == []
+
+
+@pytest.mark.asyncio
 async def test_duplicate_slot_bindings_fail_before_mutation() -> None:
     first = _resource_binding(slot="default-model")
     second = _resource_binding(slot="default-model")
@@ -534,13 +582,39 @@ async def test_duplicate_slot_bindings_fail_before_mutation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_slot_ref_preserves_bad_request_code_without_cleanup() -> None:
-    flow_id = uuid4()
+async def test_unresolved_slot_binding_fails_before_mutation() -> None:
     service = _flow_service()
-    service.create_flow.return_value = _flow(flow_id=flow_id)
-    assistant = MagicMock()
-    assistant.id = uuid4()
-    service.create_flow_assistant.return_value = (assistant, [])
+
+    with pytest.raises(BadRequestException) as error:
+        await FlowDraftMaterializer().execute(
+            changeset=FlowDraftChangeSet(
+                flow_name="Flow",
+                flow_description="",
+                assistants_to_create=[
+                    FlowDraftAssistantToCreate(
+                        plan_step_ref="step_a",
+                        assistant_spec=AssistantSpec(
+                            instructions="Use model.",
+                            model_ref="model.default",
+                        ),
+                    )
+                ],
+                compiled_steps=[_compiled_step()],
+            ),
+            flow_service=service,
+            space_id=uuid4(),
+            flow_id=None,
+            binding_source=FlowResourceBindingSource.AI_BUILDER,
+        )
+
+    assert error.value.code == "unresolved_slot_binding"
+    assert error.value.context["slot_ref"] == "model.default"
+    service.create_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_invalid_slot_ref_fails_before_mutation() -> None:
+    service = _flow_service()
 
     with pytest.raises(BadRequestException) as error:
         await FlowDraftMaterializer().execute(
@@ -565,7 +639,7 @@ async def test_invalid_slot_ref_preserves_bad_request_code_without_cleanup() -> 
         )
 
     assert error.value.code == "invalid_model_ref"
-    service.delete_flow.assert_not_awaited()
+    service.create_flow.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -16,16 +16,27 @@ from intric.flows.application.flow_authoring_command import (
 )
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftMaterializationResult,
+    compile_flow_draft_changeset,
+)
+from intric.flows.application.flow_draft_materialization_executor import (
+    FlowDraftMaterializer,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    OutputMode,
     OutputType,
     StepSpec,
 )
-from intric.flows.flow_resource_bindings import FlowResourceBindingSource
+from intric.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
 from intric.main.exceptions import BadRequestException
 
 
@@ -113,6 +124,143 @@ async def test_prepare_rejects_create_command_with_existing_step_ref() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("assistant_spec", "expected_slot_ref"),
+    [
+        (AssistantSpec(instructions="Use model.", model_ref="model.default"), "model.default"),
+        (
+            AssistantSpec(
+                instructions="Use knowledge.",
+                knowledge_refs=["knowledge.policy"],
+            ),
+            "knowledge.policy",
+        ),
+        (
+            AssistantSpec(
+                instructions="Use MCP.",
+                mcp_server_refs=["mcp_server.primary"],
+            ),
+            "mcp_server.primary",
+        ),
+        (
+            AssistantSpec(
+                instructions="Use MCP tool.",
+                mcp_tool_refs=["mcp_tool.lookup"],
+            ),
+            "mcp_tool.lookup",
+        ),
+    ],
+)
+async def test_prepare_rejects_unresolved_canonical_resource_refs(
+    assistant_spec: AssistantSpec,
+    expected_slot_ref: str,
+) -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        await FlowAuthoringCommandService().prepare(
+            command=CreateFlowAuthoringCommand(
+                space_id=uuid4(),
+                spec=_spec(assistant_spec=assistant_spec),
+                origin=FlowPackageAuthoringOrigin(
+                    package_id="se.demo.flow",
+                    package_version="1.0.0",
+                    content_checksum="sha256:abc",
+                ),
+            ),
+            flow_service=SimpleNamespace(),
+        )
+
+    assert exc_info.value.code == "unresolved_slot_binding"
+    assert exc_info.value.context["slot_ref"] == expected_slot_ref
+
+
+@pytest.mark.anyio
+async def test_prepare_accepts_bound_canonical_resource_refs() -> None:
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=CreateFlowAuthoringCommand(
+            space_id=uuid4(),
+            spec=_spec(
+                assistant_spec=AssistantSpec(
+                    instructions="Use model.",
+                    model_ref="model.default",
+                )
+            ),
+            origin=FlowPackageAuthoringOrigin(
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="sha256:abc",
+            ),
+            resource_bindings=(_resource_binding(),),
+        ),
+        flow_service=SimpleNamespace(),
+    )
+
+    assert prepared.preview.resource_bindings_count == 1
+    assert prepared.preview.assistants_to_create == 1
+
+
+@pytest.mark.anyio
+async def test_prepare_allows_transcribe_only_after_model_ref_normalization() -> None:
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=CreateFlowAuthoringCommand(
+            space_id=uuid4(),
+            spec=_spec(
+                assistant_spec=AssistantSpec(
+                    instructions="Transcribe.",
+                    model_ref="model.default",
+                ),
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            origin=FlowPackageAuthoringOrigin(
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="sha256:abc",
+            ),
+        ),
+        flow_service=SimpleNamespace(),
+    )
+
+    assert prepared.spec.steps[0].assistant_spec.model_ref is None
+    assert prepared.preview.steps_created == 1
+
+
+@pytest.mark.anyio
+async def test_prepare_and_materializer_use_same_unresolved_resource_error() -> None:
+    command = CreateFlowAuthoringCommand(
+        space_id=uuid4(),
+        spec=_spec(
+            assistant_spec=AssistantSpec(
+                instructions="Use model.",
+                model_ref="model.default",
+            )
+        ),
+        origin=FlowPackageAuthoringOrigin(
+            package_id="se.demo.flow",
+            package_version="1.0.0",
+            content_checksum="sha256:abc",
+        ),
+    )
+
+    with pytest.raises(BadRequestException) as prepare_error:
+        await FlowAuthoringCommandService().prepare(
+            command=command,
+            flow_service=SimpleNamespace(),
+        )
+
+    with pytest.raises(BadRequestException) as materializer_error:
+        await FlowDraftMaterializer().execute(
+            changeset=compile_flow_draft_changeset(command.spec, None),
+            flow_service=SimpleNamespace(),
+            space_id=command.space_id,
+            flow_id=None,
+            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        )
+
+    assert prepare_error.value.code == materializer_error.value.code
+    assert prepare_error.value.context == materializer_error.value.context
+
+
+@pytest.mark.anyio
 async def test_apply_requires_active_transaction() -> None:
     with pytest.raises(RuntimeError, match="active transaction"):
         await FlowAuthoringCommandService(materializer=_RecordingMaterializer()).apply(
@@ -149,6 +297,9 @@ async def test_apply_requires_inspectable_transaction_owner() -> None:
 def _spec(
     *,
     flow_description: str = "",
+    assistant_spec: AssistantSpec | None = None,
+    input_type: InputType = InputType.TEXT,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
     output_type: OutputType = OutputType.TEXT,
     existing_step_ref: str | None = None,
 ) -> FlowDraftSpecCore:
@@ -160,12 +311,28 @@ def _spec(
                 plan_step_ref="step_a",
                 existing_step_ref=existing_step_ref,
                 name="Step A",
-                assistant_spec=AssistantSpec(instructions="Do something."),
+                assistant_spec=assistant_spec
+                or AssistantSpec(instructions="Do something."),
                 input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
+                input_type=input_type,
+                output_mode=output_mode,
                 output_type=output_type,
             )
         ],
+    )
+
+
+def _resource_binding(
+    *,
+    slot: str = "default",
+    slot_kind: ResourceSlotKind = ResourceSlotKind.MODEL,
+    local_kind: LocalResourceKind = LocalResourceKind.COMPLETION_MODEL,
+    local_id: UUID | None = None,
+) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(kind=slot_kind, slot=slot, label=slot),
+        local_kind=local_kind,
+        local_id=local_id or uuid4(),
     )
 
 
