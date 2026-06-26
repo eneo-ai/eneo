@@ -385,31 +385,10 @@ async def get_sharepoint_folder_tree(
             folder_path=folder_path,
         )
         return SharePointTreeResponse(**tree_data)
-    except ValueError as e:
-        # ValueError is raised by service for validation errors
-        # Convert to appropriate HTTP exceptions
-        error_msg = str(e)
-
-        if "not found" in error_msg.lower():
-            # Space or integration not found
-            raise NotFoundException(error_msg)
-        elif "not authenticated" in error_msg.lower():
-            # Integration not authenticated
-            raise BadRequestException(
-                f"Integration authentication required: {error_msg}"
-            )
-        elif "no oauth token" in error_msg.lower():
-            # Missing OAuth token for user integration
-            raise BadRequestException(
-                f"OAuth authentication required. Please connect your SharePoint account first. "
-                f"Details: {error_msg}"
-            )
-        elif "failed to acquire" in error_msg.lower():
-            # Token acquisition failed
-            raise BadRequestException(f"Authentication failed: {error_msg}")
-        else:
-            # Generic validation error
-            raise BadRequestException(error_msg)
+    except (NotFoundException, BadRequestException):
+        # The service raises typed domain exceptions with the correct HTTP status;
+        # let them propagate to the global handlers instead of remapping by string.
+        raise
     except Exception as e:
         # Unexpected errors
         logger.error(

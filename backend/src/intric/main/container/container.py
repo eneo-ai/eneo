@@ -606,7 +606,9 @@ class Container(containers.DeclarativeContainer):
     tenant_integration_mapper = providers.Factory(TenantIntegrationMapper)
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
-    confluence_token_mapper = providers.Factory(OauthTokenMapper)
+    confluence_token_mapper = providers.Factory(
+        OauthTokenMapper, encryption_service=encryption_service
+    )
     sync_log_mapper = providers.Factory(SyncLogMapper)
     sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
 
@@ -1353,6 +1355,7 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         oauth_token_repo=oauth_token_repo,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
     )
 
     oauth_token_service = providers.Factory(
@@ -1443,6 +1446,7 @@ class Container(containers.DeclarativeContainer):
         job_repo=job_repo,
         user_repo=user_repo,
         change_key_service=office_change_key_service,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,

@@ -33,6 +33,10 @@ class IntegrationKnowledgeFactory:
                 subscription_id=subscription.subscription_id,
                 drive_id=subscription.drive_id,
                 expires_at=subscription.expires_at,
+                consecutive_renewal_failures=subscription.consecutive_renewal_failures,
+                last_renewal_failed_at=subscription.last_renewal_failed_at,
+                last_renewal_error=subscription.last_renewal_error,
+                last_webhook_received_at=subscription.last_webhook_received_at,
                 created_at=subscription.created_at,
                 updated_at=subscription.updated_at,
             )

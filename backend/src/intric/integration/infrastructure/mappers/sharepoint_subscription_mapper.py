@@ -23,6 +23,10 @@ class SharePointSubscriptionMapper(
             "subscription_id": entity.subscription_id,
             "drive_id": entity.drive_id,
             "expires_at": entity.expires_at,
+            "consecutive_renewal_failures": entity.consecutive_renewal_failures,
+            "last_renewal_failed_at": entity.last_renewal_failed_at,
+            "last_renewal_error": entity.last_renewal_error,
+            "last_webhook_received_at": entity.last_webhook_received_at,
         }
         # Only include timestamps if they're set (not None)
         # This allows database defaults to apply for new entities
@@ -43,6 +47,10 @@ class SharePointSubscriptionMapper(
             subscription_id=db_model.subscription_id,
             drive_id=db_model.drive_id,
             expires_at=db_model.expires_at,
+            consecutive_renewal_failures=db_model.consecutive_renewal_failures,
+            last_renewal_failed_at=db_model.last_renewal_failed_at,
+            last_renewal_error=db_model.last_renewal_error,
+            last_webhook_received_at=db_model.last_webhook_received_at,
             created_at=db_model.created_at,
             updated_at=db_model.updated_at,
         )

@@ -3,7 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from intric.base.base_entity import Entity
-from intric.integration.infrastructure.content_service.types import SyncMetadata
+from intric.integration.domain.value_objects import SyncMetadata
 
 
 class SyncLog(Entity):

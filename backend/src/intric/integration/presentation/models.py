@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, computed_field
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
-from intric.integration.infrastructure.content_service.types import (
+from intric.integration.domain.value_objects import (
+    IntegrationType,
     SkippedDetail,
     SyncMetadata,
 )
@@ -28,19 +29,6 @@ class BaseListModel(BaseModel, Generic[T]):
     @computed_field
     def count(self) -> int:
         return len(self.items)
-
-
-class IntegrationType(str, Enum):
-    Confluence = "confluence"
-    Sharepoint = "sharepoint"
-
-    @property
-    def is_confluence(self) -> bool:
-        return self == IntegrationType.Confluence
-
-    @property
-    def is_sharepoint(self) -> bool:
-        return self == IntegrationType.Sharepoint
 
 
 class Integration(BaseModel):
@@ -93,11 +81,13 @@ class IntegrationCreate(BaseModel):
 
 class AuthUrlPublic(BaseModel):
     auth_url: str
+    state: str
 
 
 class AuthCallbackParams(BaseModel):
     auth_code: str
     tenant_integration_id: UUID
+    state: str
 
 
 class ConfluenceContentTaskParam(ResourceTaskParams):

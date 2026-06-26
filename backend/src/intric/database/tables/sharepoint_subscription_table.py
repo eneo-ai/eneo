@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.base_class import BasePublic
@@ -50,6 +50,27 @@ class SharePointSubscription(BasePublic):
         nullable=False,
         index=True,
         comment="When this subscription expires (Microsoft Graph enforces 24h max)",
+    )
+    consecutive_renewal_failures: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Consecutive failed renewal attempts for operator health checks",
+    )
+    last_renewal_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Most recent failed renewal attempt timestamp",
+    )
+    last_renewal_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Most recent renewal failure message",
+    )
+    last_webhook_received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Most recent valid webhook received for this subscription",
     )
 
     # Relationships

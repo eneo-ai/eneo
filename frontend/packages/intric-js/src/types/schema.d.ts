@@ -9147,11 +9147,15 @@ export interface components {
        * Format: uuid
        */
       tenant_integration_id: string;
+      /** State */
+      state: string;
     };
     /** AuthUrlPublic */
     AuthUrlPublic: {
       /** Auth Url */
       auth_url: string;
+      /** State */
+      state: string;
     };
     /**
      * AvailabilityResponse
@@ -15206,6 +15210,26 @@ export interface components {
        */
       expires_in_hours: number;
       /**
+       * Consecutive Renewal Failures
+       * @description Consecutive failed renewal attempts
+       */
+      consecutive_renewal_failures: number;
+      /**
+       * Last Renewal Failed At
+       * @description Most recent failed renewal attempt timestamp
+       */
+      last_renewal_failed_at?: string | null;
+      /**
+       * Last Renewal Error
+       * @description Most recent renewal failure message
+       */
+      last_renewal_error?: string | null;
+      /**
+       * Last Webhook Received At
+       * @description Most recent valid webhook received for this subscription
+       */
+      last_webhook_received_at?: string | null;
+      /**
        * Owner Email
        * @description Email of subscription owner (None for organization integrations)
        */
@@ -15687,6 +15711,8 @@ export interface components {
       files_processed?: number;
       /** Files Deleted */
       files_deleted?: number;
+      /** Out Of Scope Deleted */
+      out_of_scope_deleted?: number;
       /** Pages Processed */
       pages_processed?: number;
       /** Folders Processed */
@@ -15695,6 +15721,12 @@ export interface components {
       skipped_items?: number;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Trigger */
+      trigger?: string;
+      /** Recovery */
+      recovery?: string;
+      /** Changes Detected */
+      changes_detected?: number;
     };
     /**
      * Task
@@ -38817,9 +38849,7 @@ export interface operations {
   };
   gen_url_api_v1_integrations_auth__tenant_integration_id__url__get: {
     parameters: {
-      query?: {
-        state?: string | null;
-      };
+      query?: never;
       header?: never;
       path: {
         tenant_integration_id: string;

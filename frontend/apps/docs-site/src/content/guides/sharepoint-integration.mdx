@@ -16,9 +16,9 @@ There are two different use cases to consider:
 
 **Personal spaces** use OAuth login where each user authenticates with their own Microsoft account. This is suitable when users want to import from their personal OneDrive or SharePoint sites they have access to.
 
-**Shared and organization spaces** use centralized authentication configured by an administrator. This means no individual user needs to log in with their account for the integration to work, avoiding issues if someone leaves or changes roles.
+**Shared and organization spaces** (any space that is not personal) use centralized authentication configured by an administrator. This means no individual user needs to log in with their account for the integration to work, avoiding issues if someone leaves or changes roles. SharePoint behaves identically in shared and organization spaces.
 
-> **Important:** Both use cases require an administrator to first register an Microsoft Entra ID application and configure the integration in Eneo. The Microsoft Entra ID app handles authentication for all users. Without this setup, users cannot connect to SharePoint even in personal spaces.
+> **Important:** Both use cases require an administrator to first register a Microsoft Entra ID application and configure the integration in Eneo. The Microsoft Entra ID app handles authentication for all users. Without this setup, users cannot connect to SharePoint even in personal spaces. Each Eneo tenant supports exactly one SharePoint app registration — there is no multi-app or fallback configuration.
 
 ## Prerequisites
 
@@ -58,7 +58,7 @@ After setting these variables, restart the backend service.
 
 ---
 
-## Creating an Microsoft Entra ID Application
+## Creating a Microsoft Entra ID Application
 
 All communication between Eneo and SharePoint occurs via the Microsoft Graph API, which requires a registered application in Microsoft Entra ID.
 
@@ -122,6 +122,8 @@ Note the following values needed for configuration in Eneo:
 
 Eneo supports two methods for authenticating with SharePoint in shared spaces. The choice affects which permissions are required and how access control works.
 
+> **Quick rule:** Use **Service Account** (the default) to limit Eneo to specific sites with least privilege. Use **Tenant App** only for small organizations or test environments where exposing all SharePoint content to Eneo is acceptable.
+
 ### Service Account (Recommended)
 
 With the service account method, an administrator logs in with a dedicated Microsoft account during configuration. Eneo then uses that account's permissions to read files.
@@ -155,7 +157,7 @@ With the tenant app method, Eneo uses application permissions that grant access 
 **Disadvantages:**
 - **No granular access control** – the application can read all files across all SharePoint sites in the organization
 - Microsoft does not provide any mechanism to restrict which sites an application with application permissions can access – it's all or nothing
-- Requires an Microsoft Entra ID administrator to approve application permissions
+- Requires a Microsoft Entra ID administrator to approve application permissions
 - May not comply with data minimization requirements in some organizations
 
 **Requires:**
@@ -179,6 +181,8 @@ Fill in the form with the credentials from Microsoft Entra ID:
 - **Client ID**: Application (client) ID from Azure Portal
 - **Client Secret**: The client secret you created
 - **Tenant**: Your organization's domain (e.g., `contoso.onmicrosoft.com`) or Directory (tenant) ID (a GUID found on the app's overview page)
+
+> **Note:** The client secret and (for service accounts) the refresh token are encrypted at rest and are never displayed again after saving.
 
 ### Select Authentication Method
 
@@ -227,6 +231,8 @@ Because the import uses centralized credentials, the imported knowledge is not t
 
 This is the key difference from personal spaces, where the import is tied to the user's own OAuth token.
 
+> **Important:** This guarantee depends on the service account or tenant app being configured and active. If you import into a shared space before centralized authentication is configured — or after the tenant app is deactivated — Eneo falls back to the importing administrator's personal OAuth token, which re-introduces person-dependency. Always complete the integration setup before importing into shared spaces.
+
 ### Importing in Personal Spaces
 
 Personal spaces use OAuth authentication, allowing each user to import from their own OneDrive or SharePoint sites they have access to. This requires that an administrator has already configured the SharePoint integration at the organization level (the Microsoft Entra ID app credentials must be in place).
@@ -246,7 +252,7 @@ Eneo can process the following file types from SharePoint:
 
 - **Documents**: PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx)
 - **Text files**: Plain text, Markdown, CSV
-- **Web content**: SharePoint pages and OneNote notebooks (text content only)
+- **Web content**: SharePoint pages (text content only)
 
 Files that cannot be processed (images, videos, executables) are skipped during import.
 
@@ -255,6 +261,12 @@ Files that cannot be processed (images, videos, executables) are skipped during 
 Large SharePoint folders may take time to fully import. Eneo processes files in batches and shows progress in the **Jobs** panel. If you have quotas configured for your organization, imports count toward your storage usage.
 
 By default, files larger than **50 MB** are skipped during import/sync to protect worker memory usage. You can change this limit with `SHAREPOINT_MAX_DOWNLOAD_BYTES`.
+
+Transient throttling from Microsoft Graph (HTTP 429/503) during large imports is retried automatically with backoff; persistent failures appear in the **Jobs** panel.
+
+### Removing an Imported Folder
+
+To remove a single imported SharePoint folder or site without affecting the rest of the integration, open the item's actions menu in the space's **Knowledge** list and choose **Delete**. This removes only that imported item (and its webhook subscription if no other import still uses it) — the SharePoint integration and all other imports stay in place. Removing imported knowledge from a shared or organization space requires Eneo administrator permission.
 
 ---
 
@@ -284,8 +296,10 @@ If webhooks have stopped working, for example after an extended outage where the
 
 If your Eneo installation is behind an API gateway (such as WSO2, Kong, or nginx with auth), the webhook endpoints must be configured to allow unauthenticated access:
 
-- `GET /integrations/sharepoint/webhook/` - Subscription validation
-- `POST /integrations/sharepoint/webhook/` - Change notifications
+- `GET /api/v1/integrations/sharepoint/webhook/` - Subscription validation
+- `POST /api/v1/integrations/sharepoint/webhook/` - Change notifications
+
+> **Note:** The `/api/v1` prefix comes from the `API_PREFIX` setting (default `/api/v1`); the paths above are exactly what Eneo registers with Microsoft Graph. If your gateway rewrites or strips path prefixes, allowlist the path it actually forwards to Eneo.
 
 Microsoft cannot provide API keys or bearer tokens with webhook requests. Security is instead maintained via the `clientState` parameter, which is configured through the `SHAREPOINT_WEBHOOK_CLIENT_STATE` environment variable. Eneo validates that all incoming notifications contain this secret before processing them.
 
@@ -330,6 +344,10 @@ If administrators can authenticate but regular users receive errors like "AADSTS
 4. Ensure **"User assignment required?"** is set to **No**
 
 If "User assignment required" is set to Yes, only users explicitly added under **Users and groups** can authenticate with the application.
+
+### Service Account Sign-in Is Blocked
+
+If the interactive service-account sign-in fails with a Microsoft (AADSTS) error even though the credentials are correct, a tenant **Conditional Access** policy may be blocking it (for example device-compliance, trusted-location, or block rules). Ask your Microsoft Entra ID administrator to allow the service account to sign in to the Eneo application. This is unrelated to MFA — an account with MFA enabled can complete the sign-in normally.
 
 ### Files Don't Synchronize
 
@@ -394,6 +412,23 @@ To rotate the secret:
 If the secret has already expired, the integration won't be able to authenticate with Microsoft Graph. Existing webhooks won't receive notifications and new imports will fail.
 
 The solution is the same as above: create a new secret in Microsoft Entra ID and update it in Eneo. After the new secret is saved, normal function resumes automatically.
+
+---
+
+## Re-authenticating the Service Account
+
+This section only applies to the Service Account method. The service account stores a long-lived OAuth refresh token captured when the administrator signed in. Unlike the client secret, this token has no fixed expiration date shown in Azure Portal, but it can stop working if the service account's password is changed, a Conditional Access policy revokes it, or the account is inactive for an extended period (roughly 90 days).
+
+Eneo refreshes this token automatically as it is used, but there is no proactive renewal. If the refresh token becomes invalid, imports and background synchronization stop and the failures surface only as errors in the **Jobs** panel and in webhook status — there is no automatic re-authentication.
+
+To restore access, an administrator re-runs the sign-in:
+
+1. Navigate to **Admin** → **Integrations**
+2. Click **Configure** under SharePoint
+3. With **Service Account** selected, click **Sign in with Microsoft**
+4. Log in again with the service account
+
+Imported knowledge and existing webhook subscriptions are unaffected — only the authentication is renewed.
 
 ---
 

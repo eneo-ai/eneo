@@ -14,6 +14,23 @@ from intric.integration.infrastructure.content_service.types import SharePointIt
 
 logger = getLogger(__name__)
 
+# Sentinel strings the extractors return when they cannot pull real text. These
+# must never be stored/embedded as if they were document content.
+UNEXTRACTABLE_SENTINELS: frozenset[str] = frozenset(
+    {
+        "[No readable text found]",
+        "[Could not extract text from PowerPoint presentation]",
+        "[Could not extract text from Excel spreadsheet]",
+    }
+)
+
+
+def is_unextractable_content(text: Optional[str]) -> bool:
+    """True when extraction produced no usable text (empty or a sentinel)."""
+    if not text or not text.strip():
+        return True
+    return text.strip() in UNEXTRACTABLE_SENTINELS
+
 
 def binary_to_text(binary_data: bytes) -> str:
     """
