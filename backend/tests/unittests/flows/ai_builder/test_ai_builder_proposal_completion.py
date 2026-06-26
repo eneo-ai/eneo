@@ -15,6 +15,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest,
+    forced_tool_choice,
 )
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
 
@@ -41,6 +42,13 @@ def _make_response_with_text(
             total_tokens=total_tokens,
         )
     return response
+
+
+def test_forced_tool_choice_builds_provider_shape_once() -> None:
+    assert forced_tool_choice(PROPOSE_FLOW_TOOL_NAME) == {
+        "type": "function",
+        "function": {"name": PROPOSE_FLOW_TOOL_NAME},
+    }
 
 
 @pytest.mark.asyncio
@@ -114,6 +122,29 @@ async def test_call_proposal_completion_passes_string_tool_choice() -> None:
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert call_kwargs["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_call_proposal_completion_passes_forced_tool_choice() -> None:
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+    tool_choice = forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+            tool_choice=tool_choice,
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["tool_choice"] == tool_choice
 
 
 @pytest.mark.asyncio

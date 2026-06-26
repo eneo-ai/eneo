@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypedDict
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
@@ -35,6 +35,46 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
 
+class LLMToolCallFunctionParam(TypedDict):
+    name: str
+    arguments: str
+
+
+class LLMToolCallParam(TypedDict):
+    id: str
+    type: Literal["function"]
+    function: LLMToolCallFunctionParam
+
+
+LLMMessageRole: TypeAlias = Literal["system", "user", "assistant", "tool"]
+
+
+class LLMMessageParam(TypedDict, total=False):
+    role: LLMMessageRole
+    content: str | None
+    tool_calls: list[LLMToolCallParam]
+    tool_call_id: str
+
+
+class ForcedToolChoiceFunctionParam(TypedDict):
+    name: str
+
+
+class ForcedToolChoiceParam(TypedDict):
+    type: Literal["function"]
+    function: ForcedToolChoiceFunctionParam
+
+
+ToolChoiceParam: TypeAlias = Literal["auto", "none", "required"] | ForcedToolChoiceParam
+
+
+def forced_tool_choice(tool_name: str) -> ForcedToolChoiceParam:
+    return {
+        "type": "function",
+        "function": {"name": tool_name},
+    }
+
+
 class ProposalCompletionFn(Protocol):
     def __call__(
         self,
@@ -44,13 +84,13 @@ class ProposalCompletionFn(Protocol):
 
 @dataclass(frozen=True)
 class ProposalCompletionRequest:
-    messages: list[dict[str, Any]]
+    messages: list[LLMMessageParam]
     tool_schemas: list[dict[str, Any]]
     litellm_model: str
     litellm_kwargs: dict[str, Any]
     max_output_tokens: int
     temperature: float
-    tool_choice: dict[str, Any] | str | None = None
+    tool_choice: ToolChoiceParam | None = None
     counts_as_repair: bool = False
 
 
@@ -101,7 +141,6 @@ class ToolRetryInvocation:
 
 @dataclass(frozen=True)
 class ToolRetryConfig:
-    target_tool_name: str
     target_kind: TargetKind
     forced_tool_prompt: str
     process_tool_invocation: Callable[
@@ -114,7 +153,7 @@ class ProposalTurnContext:
     turn: SessionSendTurn
     conversation: list[ConversationMessage]
     new_messages_start: int
-    llm_messages: list[dict[str, Any]]
+    llm_messages: list[LLMMessageParam]
     tool_schemas: list[dict[str, Any]]
     litellm_model: str
     litellm_kwargs: dict[str, Any]
@@ -145,9 +184,9 @@ class ProposalTurnContext:
         self,
         *,
         temperature: float,
-        messages: list[dict[str, Any]] | None = None,
+        messages: list[LLMMessageParam] | None = None,
         tool_schemas: list[dict[str, Any]] | None = None,
-        tool_choice: dict[str, Any] | str | None = None,
+        tool_choice: ToolChoiceParam | None = None,
         counts_as_repair: bool = False,
     ) -> ProposalCompletionRequest:
         return ProposalCompletionRequest(

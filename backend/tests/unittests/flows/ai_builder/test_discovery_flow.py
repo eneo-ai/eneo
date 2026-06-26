@@ -2796,6 +2796,12 @@ class TestPlannerConversationEncoding:
         assert "Structured answer metadata" in payload["content"]
         assert "input_material_mode" in payload["content"]
 
+    def test_unexpected_conversation_role_fails_loud_for_llm_context(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported AI Builder conversation role"):
+            conversation_message_to_llm_dict(
+                ConversationMessage(role="invalid", content="Bad role")
+            )
+
 
 class TestPlannerDiscoveryQuestionDispatch:
     @pytest.mark.asyncio

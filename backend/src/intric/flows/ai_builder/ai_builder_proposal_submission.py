@@ -74,10 +74,12 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    LLMMessageParam,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
+    forced_tool_choice,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
@@ -117,17 +119,13 @@ class ForcedSubmissionResponse:
 def _forced_submission_response(
     *,
     message: LLMCompletionMessage,
-    submission_tool_name: str,
 ) -> ForcedSubmissionResponse | None:
-    if submission_tool_name != PROPOSE_FLOW_TOOL_NAME:
-        return None
-
     tool_calls = message.tool_calls
     if len(tool_calls) != 1:
         return None
 
     tool_call = tool_calls[0]
-    if tool_call.function.name != submission_tool_name:
+    if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
         return None
 
     return ForcedSubmissionResponse(
@@ -195,7 +193,7 @@ class ProposalSubmissionOwner:
         turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        llm_messages: list[dict[str, Any]],
+        llm_messages: list[LLMMessageParam],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         available_model_refs: set[str] | None,
@@ -213,7 +211,6 @@ class ProposalSubmissionOwner:
         discovery_runtime: DiscoveryRuntimeResult | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
-        submission_tool_name = PROPOSE_FLOW_TOOL_NAME
         tool_schemas = self._active_submission_tool_schemas(
             flow=flow,
             resource_catalog=resource_catalog,
@@ -263,10 +260,7 @@ class ProposalSubmissionOwner:
                 usage_tracker=usage_tracker,
                 request=ctx.completion_request(
                     temperature=proposal_temperature,
-                    tool_choice={
-                        "type": "function",
-                        "function": {"name": submission_tool_name},
-                    },
+                    tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 ),
             )
         except Exception as error:
@@ -294,7 +288,6 @@ class ProposalSubmissionOwner:
         message = response.choices[0].message
         forced_response = _forced_submission_response(
             message=message,
-            submission_tool_name=submission_tool_name,
         )
         if forced_response is not None:
             dispatch = self.dispatch_submission_tool_call(
@@ -416,7 +409,6 @@ class ProposalSubmissionOwner:
             )
 
         return ToolRetryConfig(
-            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
             target_kind=target_kind,
             forced_tool_prompt=(
                 PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT
@@ -738,7 +730,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        correction_messages: list[dict[str, Any]],
+        correction_messages: list[LLMMessageParam],
         assistant_text: str,
     ) -> EventBatch | None:
         self._record_failed_proposal_attempt_repair(

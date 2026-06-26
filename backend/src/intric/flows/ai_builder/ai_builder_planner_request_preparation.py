@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
 
 from intric.files.file_models import File
@@ -55,6 +55,10 @@ from intric.flows.ai_builder.ai_builder_prompts import (
     compute_conversation_token_budget,
     trim_conversation_for_context,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    LLMMessageParam,
+    LLMMessageRole,
+)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     latest_confirmed_requirements,
@@ -83,7 +87,6 @@ from intric.observability.failure_events import stable_hash
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
-LLMMessage: TypeAlias = dict[str, Any]
 logger = get_logger(__name__)
 
 
@@ -114,7 +117,7 @@ class PlannerRequestPreparationInput:
 
 @dataclass(frozen=True, slots=True)
 class PreparedPromptMessages:
-    llm_messages: list[LLMMessage]
+    llm_messages: list[LLMMessageParam]
     system_prompt_hash: str
     conversation_budget_tokens: int
     trimmed_message_count: int
@@ -136,7 +139,7 @@ class ServerOutputPrepared(_PreparedBase):
 
 @dataclass(frozen=True, slots=True)
 class ProposalPrepared(_PreparedBase):
-    llm_messages: list[LLMMessage]
+    llm_messages: list[LLMMessageParam]
     system_prompt_hash: str
     plan_edit_context: AIBuilderPlanEditContext | None
     prior_plan_for_revision: BuilderPlan | None
@@ -320,9 +323,16 @@ def _prepare_prompt_messages(
             budget_policy.unknown_model_context_window_tokens
         ),
     )
-    trimmed = trim_conversation_for_context(
+    raw_messages = cast(
+        list[dict[str, Any]],
         [conversation_message_to_llm_dict(message) for message in conversation],
-        max_tokens=conversation_budget,
+    )
+    trimmed = cast(
+        list[LLMMessageParam],
+        trim_conversation_for_context(
+            raw_messages,
+            max_tokens=conversation_budget,
+        ),
     )
     return PreparedPromptMessages(
         llm_messages=[{"role": "system", "content": system_prompt}, *trimmed],
@@ -333,7 +343,7 @@ def _prepare_prompt_messages(
     )
 
 
-def conversation_message_to_llm_dict(msg: ConversationMessage) -> dict[str, Any]:
+def conversation_message_to_llm_dict(msg: ConversationMessage) -> LLMMessageParam:
     content = msg.content
     question_answer = question_answer_from_metadata(msg.metadata)
     if msg.role == "user" and question_answer is not None:
@@ -365,7 +375,10 @@ def conversation_message_to_llm_dict(msg: ConversationMessage) -> dict[str, Any]
                 else f"[Structured answer metadata: {structured_note}]"
             )
 
-    payload: dict[str, Any] = {"role": msg.role, "content": content}
+    payload: LLMMessageParam = {
+        "role": _llm_message_role(msg.role),
+        "content": content,
+    }
     tool_calls = tool_calls_from_message(msg)
     if tool_calls:
         payload["tool_calls"] = [
@@ -382,6 +395,20 @@ def conversation_message_to_llm_dict(msg: ConversationMessage) -> dict[str, Any]
     if msg.tool_call_id:
         payload["tool_call_id"] = provider_safe_tool_call_id(msg.tool_call_id)
     return payload
+
+
+def _llm_message_role(role: str) -> LLMMessageRole:
+    match role:
+        case "system":
+            return "system"
+        case "user":
+            return "user"
+        case "assistant":
+            return "assistant"
+        case "tool":
+            return "tool"
+        case _:
+            raise ValueError(f"Unsupported AI Builder conversation role: {role!r}")
 
 
 def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:

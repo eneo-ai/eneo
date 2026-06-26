@@ -156,7 +156,6 @@ def _make_self_correction_request(
         max_self_correction_retries=max_self_correction_retries,
         repair_completion=repair_completion,
         retry_config=ToolRetryConfig(
-            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
             target_kind=target_kind,
             forced_tool_prompt=forced_tool_prompt,
             process_tool_invocation=process_tool_invocation,
@@ -218,7 +217,6 @@ def _make_forced_tool_after_text_request(
         ),
         assistant_text=assistant_text,
         retry_config=ToolRetryConfig(
-            target_tool_name=PROPOSE_FLOW_TOOL_NAME,
             target_kind=target_kind,
             forced_tool_prompt=forced_tool_prompt,
             process_tool_invocation=process_tool_invocation,
@@ -533,7 +531,6 @@ def test_max_self_correction_retries_budgets_three_retries() -> None:
 
 def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="missing field X",
         retry_count=1,
@@ -544,7 +541,6 @@ def test_build_retry_feedback_uses_standard_preamble_on_first_retry() -> None:
 
 def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="missing field X",
         retry_count=2,
@@ -555,7 +551,6 @@ def test_build_retry_feedback_escalates_to_stronger_preamble_on_second_retry() -
 
 def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
     feedback = _build_retry_feedback(
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="missing field X",
         retry_count=3,
@@ -565,13 +560,11 @@ def test_build_retry_feedback_keeps_stronger_preamble_on_third_retry() -> None:
 
 def test_build_retry_feedback_keeps_create_outline_rules_out_of_edit_mode() -> None:
     create_feedback = _build_retry_feedback(
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.CREATE,
         feedback="duplicate name",
         failure_codes=frozenset({"duplicate_step_name"}),
     )
     edit_feedback = _build_retry_feedback(
-        target_tool_name=PROPOSE_FLOW_TOOL_NAME,
         target_kind=TargetKind.EDIT,
         feedback="duplicate name",
         failure_codes=frozenset({"duplicate_step_name"}),

@@ -37,11 +37,13 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     assistant_metadata_with_usage,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    LLMMessageParam,
     ProposalCompletionFn,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
+    forced_tool_choice,
 )
 from intric.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
@@ -78,7 +80,7 @@ class ProposalSelfCorrectionRequest:
 @dataclass(frozen=True, slots=True)
 class ForcedToolAfterTextRequest:
     ctx: ProposalTurnContext
-    correction_messages: list[dict[str, Any]]
+    correction_messages: list[LLMMessageParam]
     assistant_text: str
     retry_config: ToolRetryConfig
     forced_proposal_temperature: float
@@ -229,11 +231,11 @@ def _build_tool_retry_invocation(
 
 def build_tool_retry_messages(
     *,
-    llm_messages: list[dict[str, Any]],
+    llm_messages: list[LLMMessageParam],
     tool_call: RuntimeToolCall,
     tool_feedback: str,
     assistant_content: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[LLMMessageParam]:
     tool_call_id = provider_safe_tool_call_id(tool_call.id)
     return list(llm_messages) + [
         {
@@ -260,10 +262,10 @@ def build_tool_retry_messages(
 
 def append_text_retry_feedback_turn(
     *,
-    llm_messages: list[dict[str, Any]],
+    llm_messages: list[LLMMessageParam],
     assistant_content: str,
     feedback: str,
-) -> list[dict[str, Any]]:
+) -> list[LLMMessageParam]:
     return list(llm_messages) + [
         {"role": "assistant", "content": assistant_content},
         {"role": "user", "content": feedback},
@@ -272,15 +274,16 @@ def append_text_retry_feedback_turn(
 
 def _build_retry_feedback(
     *,
-    target_tool_name: str,
     target_kind: TargetKind,
     feedback: str,
     failure_codes: frozenset[str] = frozenset(),
     retry_count: int = 1,
 ) -> str:
-    suffix = f"Keep valid parts and fix only the listed issues. Return one complete {target_tool_name} call."
-    # target_kind is session-scoped; create-intent repair rules only belong to propose_flow.
-    if target_tool_name == PROPOSE_FLOW_TOOL_NAME and target_kind == TargetKind.CREATE:
+    suffix = (
+        "Keep valid parts and fix only the listed issues. Return one complete "
+        f"{PROPOSE_FLOW_TOOL_NAME} call."
+    )
+    if target_kind == TargetKind.CREATE:
         intent_rules = [
             "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
             "Runtime form inputs belong in top-level input_fields[], and steps should reference them by name in uses_form_fields.",
@@ -292,7 +295,8 @@ def _build_retry_feedback(
             )
         suffix = (
             " ".join(intent_rules)
-            + f" Keep valid semantic parts and fix only the listed issues. Return one complete {target_tool_name} call."
+            + " Keep valid semantic parts and fix only the listed issues. "
+            f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call."
         )
     if retry_count >= 2:
         preamble = (
@@ -340,7 +344,7 @@ async def run_tool_self_correction(
             error=error,
             usage_tracker=request.ctx.usage_tracker,
             request_id=request.ctx.request_id,
-            tool_name=request.retry_config.target_tool_name,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
         ):
             yield event
 
@@ -422,7 +426,7 @@ async def _request_self_correction_events(
         if message.tool_calls:
             retry_feedback: tuple[LLMCompletionToolCall, str] | None = None
             for correction_tool_call in message.tool_calls:
-                if correction_tool_call.function.name != retry_config.target_tool_name:
+                if correction_tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
                     continue
                 try:
                     arguments = parse_tool_call_arguments(
@@ -433,7 +437,6 @@ async def _request_self_correction_events(
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
-                                target_tool_name=retry_config.target_tool_name,
                                 target_kind=retry_config.target_kind,
                                 feedback=_invalid_tool_arguments_message(error),
                                 failure_codes=frozenset(),
@@ -463,7 +466,6 @@ async def _request_self_correction_events(
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
-                                target_tool_name=retry_config.target_tool_name,
                                 target_kind=retry_config.target_kind,
                                 feedback=tool_result.feedback
                                 or "Invalid tool payload.",
@@ -519,7 +521,6 @@ async def _request_self_correction_events(
                 and retry_state.can_retry_text_feedback()
             ):
                 text_retry_feedback = _build_retry_feedback(
-                    target_tool_name=retry_config.target_tool_name,
                     target_kind=retry_config.target_kind,
                     feedback=forced_outcome.feedback,
                     retry_count=retry_state.next_retry_count,
@@ -584,10 +585,7 @@ async def _execute_forced_tool_retry(
             ctx.completion_request(
                 messages=forced_messages,
                 temperature=request.forced_proposal_temperature,
-                tool_choice={
-                    "type": "function",
-                    "function": {"name": request.retry_config.target_tool_name},
-                },
+                tool_choice=forced_tool_choice(PROPOSE_FLOW_TOOL_NAME),
                 counts_as_repair=True,
             )
         )
@@ -608,7 +606,7 @@ async def _execute_forced_tool_retry(
         return ForcedToolRetryOutcome()
 
     for tool_call in message.tool_calls:
-        if tool_call.function.name != request.retry_config.target_tool_name:
+        if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
             continue
         try:
             arguments = parse_tool_call_arguments(tool_call.function.arguments)
@@ -655,7 +653,7 @@ async def run_forced_tool_retry_after_text(
                 error=error,
                 usage_tracker=request.ctx.usage_tracker,
                 request_id=request.ctx.request_id,
-                tool_name=request.retry_config.target_tool_name,
+                tool_name=PROPOSE_FLOW_TOOL_NAME,
             )
         )
 
@@ -682,13 +680,13 @@ async def _try_process_json_text_as_tool_arguments(
     if terminal_events:
         logger.info(
             "Accepted %s arguments returned as JSON text during forced retry.",
-            retry_config.target_tool_name,
+            PROPOSE_FLOW_TOOL_NAME,
         )
         return ForcedToolRetryOutcome(events=terminal_events)
 
     logger.warning(
         "JSON text fallback for %s returned %s issue: %s",
-        retry_config.target_tool_name,
+        PROPOSE_FLOW_TOOL_NAME,
         tool_result.failure_kind or "unknown",
         tool_result.feedback or "missing feedback",
     )

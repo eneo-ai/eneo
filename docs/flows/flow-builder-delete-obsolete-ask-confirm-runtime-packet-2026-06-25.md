@@ -110,12 +110,13 @@ plan and returned green with `MIN_SCORE: 8`; artifact:
 | Risk | Mitigation |
 | --- | --- |
 | Historical conversation metadata can still contain ask/confirm tool names. | Constants remain for persisted metadata; live dispatch is deleted and guarded. |
-| Proposal repair still uses provider-shaped message dictionaries. | Out of scope for this deletion; candidate for the next proposal-language/preparation consolidation only if it deletes more code than it adds. |
+| Proposal repair still used provider-shaped message dictionaries. | Resolved by [Flow Builder Proposal Request Boundary Packet](./flow-builder-proposal-request-boundary-packet-2026-06-25.md): proposal messages and forced tool choice now share one typed boundary. |
 | Edit-mode primary input changes rely on server planning state reaching proposal materialization. | Covered by unit and API regression tests after the deletion exposed the issue. |
 
 ## Recommendation
 
-Go for a separate next goal only after review: consolidate proposal-language and
-request-preparation residuals. Do not start capability descriptors, MCP, AI SDK,
-Pydantic AI, LangGraph, Assistant configuration, or Flow runtime changes as a
-continuation of this deletion slice.
+The follow-up proposal-language/request-preparation slice is complete; see
+[Flow Builder Proposal Request Boundary Packet](./flow-builder-proposal-request-boundary-packet-2026-06-25.md).
+Do not start capability descriptors, MCP, AI SDK, Pydantic AI, LangGraph,
+Assistant configuration, or Flow runtime changes as a continuation of this
+deletion slice.

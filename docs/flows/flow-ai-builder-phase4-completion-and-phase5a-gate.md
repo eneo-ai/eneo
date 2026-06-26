@@ -176,9 +176,10 @@ proposal validation feedback into events. The former ask/confirm repair
 skeletons were deleted with the obsolete model-visible runtime, so there is no
 remaining cross-tool repair abstraction to preserve.
 
-Phase 5+ may replace the remaining proposal repair dictionaries only if the
-same change deletes the residual event/message dictionary construction and
-keeps the proposal failure modes explicit.
+The proposal message/tool-choice residual was resolved in
+[Flow Builder Proposal Request Boundary Packet](./flow-builder-proposal-request-boundary-packet-2026-06-25.md).
+Future cleanup should target only the residual event dictionaries or tool-schema
+bags if it deletes more code than it adds.
 
 ## Module Disposition
 
@@ -205,16 +206,17 @@ residuals are the Phase 5+ deletion target, not a reason to keep editing Phase
 
 | Residual | Evidence | Phase 5+ target |
 | --- | --- | --- |
-| Provider message/tool schema bags | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:47`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:48`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:50` | Typed provider message/tool schema boundary, only if it deletes local `dict[str, Any]` construction. |
-| Dynamic tool choice shape | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:53` | Narrow value object or provider-owned schema wrapper. |
-| Stream event dictionaries | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:68`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:69`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:53` | One typed Builder event contract if it deletes all tuple/dict event variants. |
-| Repair message lists | `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:80` | Typed repair transcript if it replaces provider-shaped message dicts. |
+| Tool schema bags | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:88` and `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:157` | Keep unless a later slice can type JSON Schema without custom wrapper classes. |
+| Stream event dictionaries | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:108`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:109`, `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:51` | One typed Builder event contract if it deletes all tuple/dict event variants. |
 
 Resolved after the original packet: proposal dispatch, proposal repair, and
 proposal submission share the existing `RuntimeToolCall` protocol. Evidence:
 `backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py:269`,
 `backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:65`, and
 `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:175`.
+Resolved after the proposal request boundary packet: proposal messages use
+`LLMMessageParam`, forced tool choice has one owner, and
+`ToolRetryConfig.target_tool_name` was deleted.
 
 ## Validation Record
 

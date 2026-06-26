@@ -117,42 +117,24 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
 
 
 @pytest.mark.parametrize(
-    ("message", "submission_tool_name"),
+    "message",
     [
-        (_normalized_message(tool_calls=()), PROPOSE_FLOW_TOOL_NAME),
-        (
-            _normalized_message(
-                tool_calls=(
-                    _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),
-                    _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),
-                ),
+        _normalized_message(tool_calls=()),
+        _normalized_message(
+            tool_calls=(
+                _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),
+                _normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),
             ),
-            PROPOSE_FLOW_TOOL_NAME,
         ),
-        (
-            _normalized_message(
-                tool_calls=(_normalized_tool_call(PROPOSE_FLOW_TOOL_NAME),),
-            ),
-            "confirm_requirements",
-        ),
-        (
-            _normalized_message(
-                tool_calls=(_normalized_tool_call("confirm_requirements"),),
-            ),
-            PROPOSE_FLOW_TOOL_NAME,
+        _normalized_message(
+            tool_calls=(_normalized_tool_call("confirm_requirements"),),
         ),
     ],
 )
-def test_forced_submission_response_rejects_missing_parallel_wrong_or_unsupported_tools(
-    message: LLMCompletionMessage, submission_tool_name: str
+def test_forced_submission_response_rejects_missing_parallel_or_wrong_tool(
+    message: LLMCompletionMessage,
 ) -> None:
-    assert (
-        _forced_submission_response(
-            message=message,
-            submission_tool_name=submission_tool_name,
-        )
-        is None
-    )
+    assert _forced_submission_response(message=message) is None
 
 
 def test_forced_submission_response_accepts_one_active_submission_tool() -> None:
@@ -163,7 +145,6 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
             tool_calls=(tool_call,),
             content="Här är planen.",
         ),
-        submission_tool_name=PROPOSE_FLOW_TOOL_NAME,
     )
 
     assert response is not None
@@ -833,7 +814,6 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
     retry_config = repair.call_args.args[0].retry_config
     assert isinstance(retry_config, ToolRetryConfig)
     assert set(ToolRetryConfig.__dataclass_fields__) == {
-        "target_tool_name",
         "target_kind",
         "forced_tool_prompt",
         "process_tool_invocation",
@@ -1054,10 +1034,8 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     )
 
     assert isinstance(config, ToolRetryConfig)
-    assert config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert config.target_kind == TargetKind.EDIT
     assert set(ToolRetryConfig.__dataclass_fields__) == {
-        "target_tool_name",
         "target_kind",
         "forced_tool_prompt",
         "process_tool_invocation",
@@ -1258,7 +1236,6 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = retry_forced_tool.await_args.args[0]
-    assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert request.retry_config.target_kind == TargetKind.CREATE
     assert request.ctx is ctx
     assert "Now call propose_flow" in request.retry_config.forced_tool_prompt
@@ -1303,7 +1280,6 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = retry_forced_tool.await_args.args[0]
-    assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
     assert request.retry_config.target_kind == TargetKind.EDIT
     assert request.ctx is ctx
     assert "propose_flow" in request.retry_config.forced_tool_prompt
@@ -1347,4 +1323,4 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
     assert "OrderedEditProposal" in request.error_message
-    assert request.retry_config.target_tool_name == PROPOSE_FLOW_TOOL_NAME
+    assert request.retry_config.target_kind == TargetKind.EDIT

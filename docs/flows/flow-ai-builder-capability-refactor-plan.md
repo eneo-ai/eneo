@@ -30,6 +30,8 @@ Related docs keep their existing ownership:
   owns the long-term capability/MCP rationale.
 - [Flow Builder Ask/Confirm Runtime Deletion Packet](./flow-builder-delete-obsolete-ask-confirm-runtime-packet-2026-06-25.md)
   owns the current ask/confirm runtime deletion evidence and next go/no-go recommendation.
+- [Flow Builder Proposal Request Boundary Packet](./flow-builder-proposal-request-boundary-packet-2026-06-25.md)
+  owns the proposal message/tool-choice boundary follow-up and remaining residuals.
 - [Flow AI Builder Phase 4 Completion And Phase 5A Gate](./flow-ai-builder-phase4-completion-and-phase5a-gate.md)
   owns final Phase 4 completion evidence, retry-loop disposition, and the Phase 5A go/no-go packet.
 - This document owns the active goal sequence: Phase 4 completion, Phase 5A command ownership, Flow capability mirror deletion, then stop.
@@ -52,7 +54,7 @@ MCP never becomes the owner.
 | Proposal completion already has a current provider boundary. | `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94` defines `call_proposal_completion`. |
 | The first Phase 4 slice was dependency inversion, not deletion of the executor. | `call_proposal_completion` survives at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:94`; active submission still calls it at `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:261`; the usage-tracked factory wraps it at `backend/src/intric/flows/ai_builder/ai_builder_litellm_completion.py:143`. |
 | `ProposalTurnContext.completion_request(...)` is the existing typed request builder. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:144`. |
-| Active proposal generation exposes only the `propose_flow` schema. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:162` builds the active schema list; `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:266` forces `tool_choice` to `propose_flow`. |
+| Active proposal generation exposes only the `propose_flow` schema. | `backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:160` builds the active schema list; `backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:71` owns forced `propose_flow` tool-choice construction. |
 | Obsolete ask/confirm model-visible tool runtime is deleted. | `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:89` lists the deleted runtime paths and `backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py:869` enforces they stay absent. |
 | Flow Capability Manifest already owns engine feature truth. | `backend/src/intric/flows/flow_capability_manifest.py:121` defines the runtime-input mapping, `backend/src/intric/flows/flow_capability_manifest.py:496` defines final-output artifact mapping, and `backend/src/intric/flows/flow_capability_manifest.py:511` onward owns step I/O, document generation, and citation predicates. |
 | Builder now consumes FCM facts directly instead of a Builder-local mirror. | `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:17` imports FCM constants/functions, and `backend/src/intric/flows/ai_builder/ai_builder_discovery_flow_defaults.py:101` stores typed Flow enums in the discovery signature. |

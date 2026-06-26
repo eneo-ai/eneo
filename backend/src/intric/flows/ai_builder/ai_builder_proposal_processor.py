@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
 from intric.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import LLMMessageParam
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -90,7 +91,7 @@ class AIBuilderProposalProcessor:
         turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        llm_messages: list[dict[str, Any]],
+        llm_messages: list[LLMMessageParam],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         available_model_refs: set[str] | None,

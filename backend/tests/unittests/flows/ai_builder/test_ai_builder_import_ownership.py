@@ -2109,6 +2109,64 @@ def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade(
     assert violations == []
 
 
+def test_forced_proposal_tool_choice_has_single_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    contracts_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+    )
+    ai_builder_source_root = backend_root / Path("src/intric/flows/ai_builder")
+    duplicate_paths = [
+        path
+        for path in ai_builder_source_root.rglob("*.py")
+        if path != contracts_path
+    ]
+    violations: list[str] = []
+
+    contracts_tree = ast.parse(
+        contracts_path.read_text(),
+        filename=str(contracts_path),
+    )
+    if "forced_tool_choice" not in _top_level_public_names(contracts_tree):
+        violations.append(f"{contracts_path}: missing forced_tool_choice owner")
+
+    for path in duplicate_paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if any(
+                keyword.arg == "tool_choice"
+                and _is_forced_tool_choice_literal(keyword.value)
+                for keyword in node.keywords
+            ):
+                violations.append(
+                    f"{path}:{node.lineno} builds forced tool_choice inline"
+                )
+
+    assert violations == []
+
+
+def _is_forced_tool_choice_literal(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Dict):
+        return False
+    literal_keys = {
+        key.value
+        for key in node.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+    if literal_keys != {"type", "function"}:
+        return False
+    for key, value in zip(node.keys, node.values, strict=True):
+        if (
+            isinstance(key, ast.Constant)
+            and key.value == "type"
+            and isinstance(value, ast.Constant)
+            and value.value == "function"
+        ):
+            return True
+    return False
+
+
 def test_tool_call_argument_json_parsing_has_single_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     source_root = backend_root / "src/intric/flows/ai_builder"
