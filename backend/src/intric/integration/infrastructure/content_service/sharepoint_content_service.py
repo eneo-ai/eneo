@@ -904,6 +904,26 @@ class SharePointContentService:
                             f"for integration knowledge {integration_knowledge_id}"
                         )
                         integration_knowledge.selected_item_type = "folder"
+                        # A full sync runs on delta recovery (expired/missing
+                        # token). If the selected folder was renamed or moved
+                        # while the token was invalid, the stored folder_path is
+                        # now stale and is never re-emitted as a delta change.
+                        # The next delta would then misclassify valid nested
+                        # descendants as out-of-scope and delete their blobs.
+                        # Refresh the scope path from the freshly fetched folder
+                        # metadata, mirroring the delta-path refresh.
+                        refreshed_folder_path = self._folder_path_from_item(
+                            cast(SharePointItem, item_info)
+                        )
+                        if (
+                            refreshed_folder_path
+                            and refreshed_folder_path
+                            != integration_knowledge.folder_path
+                        ):
+                            integration_knowledge.folder_path = refreshed_folder_path
+                            await self.integration_knowledge_repo.update(
+                                obj=integration_knowledge
+                            )
                         processed_items: set[str] = set()
                         await self._fetch_and_process_content(
                             site_id=site_id_value,

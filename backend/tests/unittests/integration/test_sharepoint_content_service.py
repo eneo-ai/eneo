@@ -2117,6 +2117,104 @@ class TestFullSyncReconciliation:
         mock_delete.assert_not_called()
 
 
+class TestFolderFullSyncRefreshesFolderPath:
+    """Full-sync recovery must refresh a stale folder scope path.
+
+    Regression: a folder-scoped integration recovers from an expired/missing
+    delta token via a full sync. If the selected folder was renamed or moved
+    during the token-invalid window, the stored folder_path is stale and is
+    never re-emitted as a delta change. Leaving it stale makes the next delta
+    misclassify valid nested descendants as out-of-scope and delete them.
+    """
+
+    def _folder_scoped_ik(self, mock_integration_knowledge):
+        ik = mock_integration_knowledge
+        ik.folder_id = "folder-a"
+        ik.folder_path = "/Documents/A"  # stale, pre-rename
+        ik.selected_item_type = "folder"
+        ik.delta_token = None
+        ik.drive_id = "drive-456"
+        ik.site_id = "site-123"
+        return ik
+
+    async def test_refreshes_stale_folder_path_on_recovery(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """A renamed selected folder updates the stored folder_path."""
+        ik = self._folder_scoped_ik(mock_integration_knowledge)
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.get_file_metadata.return_value = {
+                "id": "folder-a",
+                "name": "A renamed",
+                "folder": {},
+                "parentReference": {
+                    "id": "documents-folder",
+                    "path": "/drives/drive-456/root:/Documents",
+                },
+            }
+            mock_client.initialize_delta_token.return_value = "new-delta-token"
+            mock_client_class.return_value = mock_client
+
+            with (
+                patch.object(service, "_fetch_and_process_content", AsyncMock()),
+                patch.object(service, "_reconcile_indexed_blobs", AsyncMock()),
+            ):
+                await service.pull_content(
+                    token_id=mock_oauth_token.id,
+                    integration_knowledge_id=ik.id,
+                    site_id="site-123",
+                    drive_id="drive-456",
+                    recovery="delta_token_expired",
+                )
+
+        assert ik.folder_path == "/Documents/A renamed"
+        mock_dependencies["integration_knowledge_repo"].update.assert_any_await(obj=ik)
+
+    async def test_keeps_folder_path_when_metadata_has_no_resolvable_path(
+        self, service, mock_dependencies, mock_oauth_token, mock_integration_knowledge
+    ):
+        """A good stored path is never clobbered when metadata yields no path."""
+        ik = self._folder_scoped_ik(mock_integration_knowledge)
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+
+        with patch(
+            "intric.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            # No parentReference / name -> _folder_path_from_item returns None.
+            mock_client.get_file_metadata.return_value = {
+                "id": "folder-a",
+                "folder": {},
+            }
+            mock_client.initialize_delta_token.return_value = "new-delta-token"
+            mock_client_class.return_value = mock_client
+
+            with (
+                patch.object(service, "_fetch_and_process_content", AsyncMock()),
+                patch.object(service, "_reconcile_indexed_blobs", AsyncMock()),
+            ):
+                await service.pull_content(
+                    token_id=mock_oauth_token.id,
+                    integration_knowledge_id=ik.id,
+                    site_id="site-123",
+                    drive_id="drive-456",
+                    recovery="delta_token_expired",
+                )
+
+        assert ik.folder_path == "/Documents/A"
+
+
 class TestEnumerateAuthoritativeItemIds:
     """Strict enumeration used by reconciliation + subtree cleanup (destructive path)."""
 
