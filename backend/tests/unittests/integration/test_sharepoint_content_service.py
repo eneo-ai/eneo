@@ -18,7 +18,7 @@ from intric.integration.infrastructure.clients.sharepoint_content_client import 
 from intric.integration.infrastructure.content_service.sharepoint_content_service import (
     SharePointContentService,
     SimpleSharePointToken,
-    _extract_text_from_canvas_layout,
+    extract_text_from_canvas_layout,
 )
 
 
@@ -1738,7 +1738,7 @@ class TestExtractTextFromCanvasLayout:
                 ]
             }
         }
-        result = _extract_text_from_canvas_layout(content)
+        result = extract_text_from_canvas_layout(content)
         assert "Hello" in result
         assert "world" in result
 
@@ -1756,7 +1756,7 @@ class TestExtractTextFromCanvasLayout:
                 },
             }
         }
-        result = _extract_text_from_canvas_layout(content)
+        result = extract_text_from_canvas_layout(content)
         assert "Sidebar content" in result
 
     def test_ignores_non_text_webparts(self):
@@ -1782,13 +1782,13 @@ class TestExtractTextFromCanvasLayout:
                 ]
             }
         }
-        result = _extract_text_from_canvas_layout(content)
+        result = extract_text_from_canvas_layout(content)
         assert "Visible text" in result
         assert "data" not in result
 
     def test_returns_empty_string_when_no_canvas_layout(self):
-        assert _extract_text_from_canvas_layout({}) == ""
-        assert _extract_text_from_canvas_layout({"canvasLayout": None}) == ""
+        assert extract_text_from_canvas_layout({}) == ""
+        assert extract_text_from_canvas_layout({"canvasLayout": None}) == ""
 
     def test_combines_multiple_sections(self):
         content = {
@@ -1821,7 +1821,7 @@ class TestExtractTextFromCanvasLayout:
                 ],
             }
         }
-        result = _extract_text_from_canvas_layout(content)
+        result = extract_text_from_canvas_layout(content)
         assert "First section" in result
         assert "Second section" in result
 
