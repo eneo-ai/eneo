@@ -155,11 +155,6 @@ skip_covered = false
 # and run via `task deadcode` or directly. They surface candidates for a human
 # to triage — neither auto-removes anything.
 
-[tool.deptry]
-# example_mcp_server.py is a standalone copy-paste sample (imports fastmcp, which
-# is intentionally not a project dependency), so it is excluded from the scan.
-extend_exclude = ["src/intric/server/example_mcp_server.py"]
-
 # DEP003 (transitive): imported directly but only resolve via transitive deps.
 # Promoting them to direct dependencies is a separate cleanup; ignored here so
 # the signal stays readable.

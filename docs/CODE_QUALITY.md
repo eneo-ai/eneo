@@ -95,7 +95,7 @@ Codes: `DEP001` missing, `DEP002` declared-but-unused, `DEP003` transitive,
 runtime-only packages (DB drivers, server, migrations CLI, env loaders, async
 glue), plugin/CLI-resolved ones (`python-calamine`, `tiktoken`), the
 not-yet-wired `sentry-sdk`, and the directly-used-but-transitive `sqlalchemy`
-family. `example_mcp_server.py` is excluded (standalone `fastmcp` sample).
+family.
 
 ## Not yet enabled — future ratcheting
 

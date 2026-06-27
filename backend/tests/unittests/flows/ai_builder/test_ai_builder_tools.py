@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder import ai_builder_tools
+from intric.flows.ai_builder import ai_builder_tool_names, ai_builder_tools
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -40,6 +40,12 @@ class TestBuildToolSchema:
         assert "ActiveSubmissionToolName" not in ai_builder_tools.__all__
         assert "OUTLINE_FLOW_TOOL_NAME" not in ai_builder_tools.__all__
         assert "EDIT_FLOW_TOOL_NAME" not in ai_builder_tools.__all__
+        assert not hasattr(ai_builder_tools, "ASK_STRUCTURED_QUESTION_TOOL_NAME")
+        assert not hasattr(ai_builder_tools, "CONFIRM_REQUIREMENTS_TOOL_NAME")
+        assert not hasattr(ai_builder_tools, "VALIDATE_FLOW_DRAFT_TOOL_NAME")
+        assert not hasattr(ai_builder_tools, "OUTLINE_FLOW_TOOL_NAME")
+        assert not hasattr(ai_builder_tools, "EDIT_FLOW_TOOL_NAME")
+        assert not hasattr(ai_builder_tools, "active_submission_tool_name")
 
     def test_obsolete_question_and_confirm_tool_schemas_are_not_exported(self) -> None:
         assert not hasattr(ai_builder_tools, "build_all_tool_schemas")
@@ -47,6 +53,18 @@ class TestBuildToolSchema:
         assert not hasattr(ai_builder_tools, "build_confirm_requirements_tool_schema")
         assert not hasattr(ai_builder_tools, "build_discovery_complete_tool_schemas")
         assert not hasattr(ai_builder_tools, "build_free_discovery_tool_schemas")
+        assert not hasattr(ai_builder_tools, "build_validate_flow_draft_tool_schema")
+        assert not hasattr(ai_builder_tools, "parse_propose_flow_arguments")
+
+    def test_retired_persisted_tool_names_are_byte_locked(self) -> None:
+        assert (
+            ai_builder_tool_names.ASK_STRUCTURED_QUESTION_TOOL_NAME
+            == "ask_structured_question"
+        )
+        assert (
+            ai_builder_tool_names.CONFIRM_REQUIREMENTS_TOOL_NAME
+            == "confirm_requirements"
+        )
 
     def test_outline_schema_hides_backend_owned_mechanics(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())

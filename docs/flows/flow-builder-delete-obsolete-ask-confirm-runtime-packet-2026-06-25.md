@@ -41,7 +41,7 @@ production source does not import the obsolete modules.
 | --- | --- |
 | Server-owned canonical question dispatch and persistence | `tests/unittests/flows/ai_builder/test_ai_builder_server_decision_dispatch.py` |
 | Requirements confirmation gates create-mode proposals | `tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py` |
-| Active proposal generation uses only proposal tool schema | `tests/unittests/flows/ai_builder/test_ai_builder_active_tool_contracts.py` |
+| Active proposal generation uses only proposal tool schema | `tests/unittests/flows/ai_builder/test_ai_builder_tools.py` |
 | Unexpected non-proposal tools do not become live dispatch | `tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` |
 | MCP preflight question still persists before proposal | `tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py` |
 | Edit-mode server-planned primary input reaches backend materialization | `tests/unittests/flows/ai_builder/test_ai_builder_edit_proposal.py` and `tests/integration/flows/test_ai_builder_session_api_regressions.py` |
