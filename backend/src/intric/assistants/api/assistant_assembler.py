@@ -23,6 +23,7 @@ from intric.files.text import TextMimeTypes
 from intric.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
+from intric.main.config import get_settings
 from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
 )
@@ -75,13 +76,26 @@ class AssistantAssembler:
             for attachment in assistant.attachments
         ]
 
-    def _get_allowed_attachments(self):
+    def _get_allowed_attachments(self, completion_model: "CompletionModel | None"):
+        settings = get_settings()
+        # The binding limit is the token budget; it can only be computed once a
+        # model is selected. max_files is a secondary guardrail.
+        max_tokens = None
+        if completion_model is not None:
+            max_tokens = int(
+                settings.attachment_context_budget_ratio
+                * completion_model.max_input_tokens
+            )
         return FileRestrictions(
             accepted_file_types=[
                 AcceptedFileType(mimetype=mimetype, size_limit=26214400)
                 for mimetype in TextMimeTypes.values()
             ],
-            limit=Limit(max_files=3, max_size=26214400),
+            limit=Limit(
+                max_files=settings.attachment_max_files,
+                max_size=26214400,
+                max_tokens=max_tokens,
+            ),
         )
 
     def _build_effective_config_public(
@@ -140,7 +154,7 @@ class AssistantAssembler:
             model=assistant.completion_model
         )
         attachments = self._get_attachments(assistant)
-        allowed_attachments = self._get_allowed_attachments()
+        allowed_attachments = self._get_allowed_attachments(assistant.completion_model)
         tools = UseTools(
             assistants=[
                 ToolAssistant(id=tool_assistant.id, handle=tool_assistant.name)
