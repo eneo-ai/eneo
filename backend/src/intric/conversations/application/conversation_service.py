@@ -13,6 +13,7 @@ from intric.completion_models.infrastructure.static_prompts import (
 )
 from intric.conversations.conversation_models import PreflightResponse
 from intric.files.file_models import FileType
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.sessions.session import SessionUpdate
 
@@ -289,6 +290,7 @@ class ConversationService:
             excluded_file_count=excluded_file_count,
             model_name=model.name,
             context_window=model.token_limit,
+            context_reserve_tokens=get_settings().attachment_context_reserve_tokens,
             assistant_attachment_tokens=assistant_attachment_tokens,
             prompt_tokens=prompt_tokens,
         )

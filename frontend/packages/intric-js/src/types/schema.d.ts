@@ -7834,7 +7834,11 @@ export interface components {
      * @enum {string}
      */
     ApiKeySearchMatchReason:
-      "exact_secret" | "key_suffix" | "name_or_description" | "owner" | "creator";
+      | "exact_secret"
+      | "key_suffix"
+      | "name_or_description"
+      | "owner"
+      | "creator";
     /**
      * ApiKeyState
      * @enum {string}
@@ -11818,7 +11822,11 @@ export interface components {
      * @enum {string}
      */
     InputFieldType:
-      "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
+      | "text-field"
+      | "text-upload"
+      | "audio-upload"
+      | "audio-recorder"
+      | "image-upload";
     /** Integration */
     Integration: {
       /**
@@ -14205,6 +14213,11 @@ export interface components {
       model_name: string;
       /** Context Window */
       context_window: number;
+      /**
+       * Context Reserve Tokens
+       * @default 0
+       */
+      context_reserve_tokens?: number;
       /**
        * Assistant Attachment Tokens
        * @default 0
@@ -22366,7 +22379,8 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  components["schemas"]["SecurityClassificationPublic"] | null;
+                  | components["schemas"]["SecurityClassificationPublic"]
+                  | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -22782,7 +22796,8 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  components["schemas"]["SecurityClassificationPublic"] | null;
+                  | components["schemas"]["SecurityClassificationPublic"]
+                  | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */

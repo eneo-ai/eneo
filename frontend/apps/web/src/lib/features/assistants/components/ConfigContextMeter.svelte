@@ -14,7 +14,9 @@
 
   const intric = getIntric();
 
+  // used = system prompt + attachments — the context every question starts with.
   let used = $state(0);
+  let reserve = $state(0);
   let loaded = $state(false);
   // Generation counter drops stale responses when the model/attachments change
   // mid-flight (mirrors ChatService's preflight debounce).
@@ -22,9 +24,14 @@
   let debounce: ReturnType<typeof setTimeout> | null = null;
 
   const limit = $derived(model?.max_input_tokens ?? 0);
+  // Prompt + attachments must fit below the window minus a reserve for the live
+  // question; past the ceiling the save is rejected, so warn (amber) as it nears.
+  const ceiling = $derived(Math.max(limit - reserve, 0));
   const percent = $derived(limit > 0 ? (used / limit) * 100 : 0);
   const show = $derived(loaded && limit > 0 && attachments.length > 0 && used > 0);
-  const tone = $derived(percent >= 100 ? "over" : percent >= 80 ? "near" : "ok");
+  const tone = $derived(
+    ceiling > 0 && used > ceiling ? "over" : ceiling > 0 && used > ceiling * 0.8 ? "near" : "ok"
+  );
 
   const nf = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
 
@@ -52,7 +59,8 @@
           files: ids
         });
         if (current !== gen) return;
-        used = res.file_tokens;
+        used = res.file_tokens + (res.prompt_tokens ?? 0);
+        reserve = res.context_reserve_tokens ?? 0;
         loaded = true;
       } catch {
         // Advisory only — hide on failure rather than block editing.

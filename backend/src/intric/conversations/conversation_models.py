@@ -92,6 +92,10 @@ class PreflightResponse(BaseModel):
     excluded_file_count: int = 0
     model_name: str
     context_window: int
+    # Tokens kept free for the live question; persistent content (prompt +
+    # attachments) must fit within context_window - context_reserve_tokens. Lets
+    # a client draw the "won't fit" line without hardcoding the policy.
+    context_reserve_tokens: int = 0
     # Persistent baseline for an assistant target: the system prompt and the
     # attachments sent on EVERY question. 0 for session/group-chat targets.
     # Kept separate from input_tokens/file_tokens (the per-message delta) so a
