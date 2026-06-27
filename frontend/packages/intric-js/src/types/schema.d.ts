@@ -7834,11 +7834,7 @@ export interface components {
      * @enum {string}
      */
     ApiKeySearchMatchReason:
-      | "exact_secret"
-      | "key_suffix"
-      | "name_or_description"
-      | "owner"
-      | "creator";
+      "exact_secret" | "key_suffix" | "name_or_description" | "owner" | "creator";
     /**
      * ApiKeyState
      * @enum {string}
@@ -11822,11 +11818,7 @@ export interface components {
      * @enum {string}
      */
     InputFieldType:
-      | "text-field"
-      | "text-upload"
-      | "audio-upload"
-      | "audio-recorder"
-      | "image-upload";
+      "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
     /** Integration */
     Integration: {
       /**
@@ -12017,6 +12009,8 @@ export interface components {
       max_files: number;
       /** Max Size */
       max_size: number;
+      /** Max Tokens */
+      max_tokens?: number | null;
     };
     /** Limits */
     Limits: {
@@ -14211,6 +14205,16 @@ export interface components {
       model_name: string;
       /** Context Window */
       context_window: number;
+      /**
+       * Assistant Attachment Tokens
+       * @default 0
+       */
+      assistant_attachment_tokens?: number;
+      /**
+       * Prompt Tokens
+       * @default 0
+       */
+      prompt_tokens?: number;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -22362,8 +22366,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
@@ -22779,8 +22782,7 @@ export interface operations {
                 /** Credential Provider */
                 credential_provider?: string | null;
                 security_classification?:
-                  | components["schemas"]["SecurityClassificationPublic"]
-                  | null;
+                  components["schemas"]["SecurityClassificationPublic"] | null;
                 /** Provider Name */
                 provider_name?: string | null;
                 /** Deprecation Date */
