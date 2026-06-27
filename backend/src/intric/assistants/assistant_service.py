@@ -19,7 +19,10 @@ from intric.assistants.assistant_repo import AssistantRepository
 from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from intric.authentication.auth_service import AuthService
-from intric.completion_models.infrastructure.context_builder import count_tokens
+from intric.completion_models.infrastructure.context_builder import (
+    count_attachment_tokens,
+    count_tokens,
+)
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_models import FileType
 from intric.files.file_service import FileService
@@ -35,6 +38,7 @@ from intric.help_assistants.infrastructure.org_space_assistant_role_repo import 
 )
 from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
+from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -380,6 +384,9 @@ class AssistantService:
         attachments = await self.file_service.get_files_by_ids(
             file_ids=template_data.get_ids_by_type(wizard_type=WizardType.attachments)
         )
+        # __init__ sets attachments directly, bypassing the setter's count cap,
+        # so enforce it explicitly on the template path.
+        Assistant.validate_attachment_count(attachments)
         collections = [
             space.get_collection(collection_id=group_id)
             for group_id in template_data.get_ids_by_type(wizard_type=WizardType.groups)
@@ -410,7 +417,38 @@ class AssistantService:
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant.id)
 
+        self._validate_attachment_token_budget(assistant)
+
         return assistant
+
+    @staticmethod
+    def _validate_attachment_token_budget(assistant: Assistant) -> None:
+        """Reject saving when persistent attachments exceed the model's token
+        budget (a share of max_input_tokens). They ride along on every
+        question, so an over-budget set silently crowds out history and
+        knowledge. Advisory unless attachment_budget_enforced is set; skipped
+        when no model is selected (the budget is undefined)."""
+        settings = get_settings()
+        if not settings.attachment_budget_enforced:
+            return
+
+        model = assistant.completion_model
+        attachments = assistant.attachments
+        if model is None or not attachments:
+            return
+
+        budget = int(settings.attachment_context_budget_ratio * model.max_input_tokens)
+        projected = count_attachment_tokens(
+            text_files=[a for a in attachments if a.file_type == FileType.TEXT],
+            image_files=[a for a in attachments if a.file_type == FileType.IMAGE],
+            model_name=model.name,
+        )
+        if projected > budget:
+            pct = int(settings.attachment_context_budget_ratio * 100)
+            raise BadRequestException(
+                f"Attachments use ~{projected} tokens, exceeding the budget of "
+                f"{budget} ({pct}% of the model context window)."
+            )
 
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""
@@ -732,6 +770,9 @@ class AssistantService:
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
+
+        if attachments is not None or completion_model is not None:
+            self._validate_attachment_token_budget(assistant)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(

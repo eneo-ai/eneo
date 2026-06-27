@@ -11,6 +11,7 @@ from intric.completion_models.infrastructure.completion_service import Completio
 from intric.files.file_models import File, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
     NoModelSelectedException,
@@ -163,8 +164,20 @@ class Assistant(Entity):
     def attachments(self):
         return self._attachments
 
+    @staticmethod
+    def validate_attachment_count(attachments: list[File]) -> None:
+        # Model-independent guardrail. The binding limit is the token budget
+        # (enforced in the service where the model is known); this only stops a
+        # pathological number of files. Lives here so both the setter and the
+        # create-from-template path (which bypasses the setter via __init__) can
+        # share one check.
+        max_files = get_settings().attachment_max_files
+        if len(attachments) > max_files:
+            raise BadRequestException(f"Too many attachments (max {max_files}).")
+
     @attachments.setter
     def attachments(self, attachments: list[File]):
+        self.validate_attachment_count(attachments)
         for attachment in attachments:
             mimetype = attachment.mimetype or ""
             if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
