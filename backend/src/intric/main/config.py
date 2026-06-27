@@ -384,6 +384,11 @@ class Settings(BaseSettings):
     # whose attachments exceed the budget.
     attachment_budget_enforced: bool = False
 
+    # Storage backend for file binary content. "db" keeps bytes inline in the
+    # files.blob column (current behaviour); a future "s3" backend moves them to
+    # object storage. Reads always dual-resolve, so a half-migrated DB works.
+    file_content_storage_backend: str = "db"
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 

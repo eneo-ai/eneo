@@ -1,10 +1,11 @@
 import hashlib
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 from uuid import UUID
 
 from fastapi import UploadFile
 
+from intric.files.file_content_store import FileContentStore
 from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
@@ -13,11 +14,39 @@ from intric.users.user import UserInDB
 
 
 class FileService:
-    def __init__(self, user: UserInDB, repo: FileRepository, protocol: FileProtocol):
+    def __init__(
+        self,
+        user: UserInDB,
+        repo: FileRepository,
+        protocol: FileProtocol,
+        content_store: Optional[FileContentStore] = None,
+    ):
         super().__init__()
         self.user = user
         self.repo = repo
         self.protocol = protocol
+        self.content_store = content_store
+
+    async def read_blob(self, file: File) -> Optional[bytes]:
+        """Resolve a file's binary content through the storage seam.
+
+        Dual-read: an inline ``blob`` wins (current behaviour); otherwise the
+        bytes are fetched from the named backend by ``storage_key``. Returns
+        None when the file has no binary content.
+        """
+        if file.blob is not None:
+            return file.blob
+        if file.storage_key is not None and self.content_store is not None:
+            return await self.content_store.read(
+                key=file.storage_key, backend=file.storage_backend
+            )
+        return None
+
+    async def read_blob_by_id(self, file_id: UUID) -> Optional[bytes]:
+        """Load a file by id (no auth — for signed-URL callers) and resolve its
+        binary content via :meth:`read_blob`."""
+        file = await self.repo.get_by_id(file_id=file_id)
+        return await self.read_blob(file)
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncIterator[None]:
