@@ -1,7 +1,7 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
@@ -29,12 +29,14 @@ router = APIRouter()
 async def gen_url(
     tenant_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    state: Annotated[Optional[str], Query()] = None,
 ):
+    # The backend generates and stores its own single-use CSRF state (see
+    # oauth2_service.start_auth); callers no longer pass one in.
     oauth2_service = container.oauth2_service()
+    user = container.user()
 
     return await oauth2_service.start_auth(
-        tenant_integration_id=tenant_integration_id, state=state
+        tenant_integration_id=tenant_integration_id, user_id=user.id
     )
 
 
@@ -57,6 +59,7 @@ async def on_auth_callback(
         user_id=user.id,
         tenant_integration_id=params.tenant_integration_id,
         auth_code=params.auth_code,
+        state=params.state,
     )
 
     # Audit logging

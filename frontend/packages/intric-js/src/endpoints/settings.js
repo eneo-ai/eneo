@@ -18,6 +18,20 @@ export function initSettings(client) {
     },
 
     /**
+     * Update user settings
+     * @param {import('../types/resources').Settings} settings
+     * @throws {IntricError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    update: async (settings) => {
+      const res = await client.fetch("/api/v1/settings/", {
+        method: "post",
+        requestBody: { "application/json": settings }
+      });
+      return res;
+    },
+
+    /**
      * Update template feature setting for the tenant
      * @param {boolean} enabled Whether to enable templates
      * @throws {IntricError}
@@ -288,6 +302,20 @@ export function initSettings(client) {
       const res = await client.fetch("/api/v1/settings/ai-builder-budget", {
         method: "patch",
         requestBody: { "application/json": patch }
+      });
+      return res;
+    },
+
+    /**
+     * Set whether model input/output prices are shown to regular users (org-wide).
+     * @param {boolean} enabled Whether to show model pricing to users
+     * @throws {IntricError}
+     * @returns {Promise<{ show_model_pricing: boolean }>}
+     */
+    updateModelPricingVisibility: async (enabled) => {
+      const res = await client.fetch("/api/v1/admin/settings/model-pricing-visibility", {
+        method: "put",
+        requestBody: { "application/json": { show_model_pricing: enabled } }
       });
       return res;
     }

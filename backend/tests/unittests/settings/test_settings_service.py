@@ -180,8 +180,29 @@ async def test_update_settings():
 
     settings = await service.update_settings(new_settings)
 
-    assert settings == settings_expected
+    assert settings.chatbot_widget == settings_expected.chatbot_widget
+    assert settings.using_templates == False
     assert repo.settings[TEST_USER.id] == settings_expected
+
+async def test_update_settings_creates_row_when_missing():
+    repo = MockRepo()
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+    )
+
+    new_settings = SettingsPublic(chatbot_widget={"preferred_text_format": "richtext"})
+
+    settings = await service.update_settings(new_settings)
+
+    assert settings.chatbot_widget == {"preferred_text_format": "richtext"}
+    assert repo.settings[TEST_USER.id].chatbot_widget == {
+        "preferred_text_format": "richtext"
+    }
 
 
 async def test_get_flow_input_limits_reads_tenant_override(monkeypatch):

@@ -14,7 +14,10 @@ logger = get_logger(__name__)
 
 
 def from_domain_service(
-    service: Service, permissions: list["ResourcePermission"] | None = None
+    service: Service,
+    permissions: list["ResourcePermission"] | None = None,
+    *,
+    show_pricing: bool = True,
 ):
     permissions = permissions or []
 
@@ -22,12 +25,14 @@ def from_domain_service(
     assert service.completion_model is not None, "Service must have a completion model"
     return ServicePublicWithUser(
         **service.model_dump(exclude={"permissions", "completion_model"}),
-        completion_model=CompletionModelPublic.from_domain(service.completion_model),
+        completion_model=CompletionModelPublic.from_domain(
+            service.completion_model, show_pricing=show_pricing
+        ),
         permissions=permissions,
     )
 
 
-def to_question(question: Question, service: Service):
+def to_question(question: Question, service: Service, *, show_pricing: bool = True):
     try:
         output = json.loads(question.answer)
     except json.JSONDecodeError:
@@ -39,7 +44,9 @@ def to_question(question: Question, service: Service):
         id=question.id,
         input=question.question,
         output=output,
-        completion_model=CompletionModelPublic.from_domain(service.completion_model),
+        completion_model=CompletionModelPublic.from_domain(
+            service.completion_model, show_pricing=show_pricing
+        ),
         references=[
             InfoBlobPublic(
                 **blob.model_dump(), metadata=InfoBlobMetadata(**blob.model_dump())

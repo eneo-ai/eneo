@@ -538,7 +538,8 @@ class SpaceAssembler:
         ]
         completion_models = [
             self.completion_model_assembler.from_completion_model_to_model(
-                completion_model=model
+                completion_model=model,
+                show_pricing=self.user.can_view_model_pricing,
             )
             for model in space.completion_models
             if (
@@ -711,7 +712,9 @@ class SpaceAssembler:
             apps=applications.apps.items,
             services=applications.services.items,
             completion_models=[
-                self.completion_model_assembler.from_completion_model_to_model(cm)
+                self.completion_model_assembler.from_completion_model_to_model(
+                    cm, show_pricing=self.user.can_view_model_pricing
+                )
                 for cm in result.affected_completion_models
             ],
             embedding_models=[

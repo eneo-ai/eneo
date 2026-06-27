@@ -181,15 +181,19 @@ class SettingService:
         settings = await self.repo.get(self.user.id)
         return await self._build_settings_public(settings_in_db=settings)
 
-    async def update_settings(self, settings: SettingsPublic) -> SettingsInDB:
+    async def update_settings(self, settings: SettingsPublic) -> SettingsPublic:
         settings_upsert = SettingsUpsert(**settings.model_dump(), user_id=self.user.id)
 
-        settings_in_db = await self.repo.update(settings_upsert)
+        existing_settings = await self.repo.get(self.user.id)
+        if existing_settings is None:
+            settings_in_db = await self.repo.add(settings_upsert)
+        else:
+            settings_in_db = await self.repo.update(settings_upsert)
         logger.info(
             "Updated settings: %s for user: %s" % (settings_upsert, self.user.username)
         )
 
-        return settings_in_db
+        return await self._build_settings_public(settings_in_db=settings_in_db)
 
     async def _get_tenant_for_flow_settings(self) -> Any:
         tenant_override = getattr(self.tenant_repo, "tenant", None)

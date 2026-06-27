@@ -27,6 +27,9 @@ class Tenants(BasePublic):
     zitadel_org_id: Mapped[Optional[str]] = mapped_column(index=True)
     provisioning: Mapped[bool] = mapped_column(default=False)
     security_enabled: Mapped[bool] = mapped_column(default=False)
+    show_model_pricing: Mapped[bool] = mapped_column(
+        nullable=False, server_default=sa.true()
+    )
     state: Mapped[str] = mapped_column(String, default=TenantState.ACTIVE.value)
     api_credentials: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"

@@ -1,12 +1,17 @@
+import json
+import secrets
 from typing import TYPE_CHECKING
 
 from intric.integration.domain.entities.oauth_token import OauthToken
 from intric.integration.domain.entities.user_integration import UserIntegration
 from intric.integration.presentation.models import IntegrationType
 from intric.main.exceptions import BadRequestException
+from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from uuid import UUID
+
+    import redis.asyncio as redis
 
     from intric.integration.domain.repositories.oauth_token_repo import (
         OauthTokenRepository,
@@ -24,6 +29,14 @@ if TYPE_CHECKING:
         SharepointAuthService,
     )
 
+logger = get_logger(__name__)
+
+# CSRF state for the per-user OAuth flow. The backend generates the state, binds it
+# to the initiating user + tenant integration in Redis, and requires the callback to
+# echo it back — preventing auth-code injection / login-CSRF.
+_OAUTH_STATE_PREFIX = "integration:oauth_state:"
+_OAUTH_STATE_TTL_SECONDS = 600
+
 
 class Oauth2Service:
     def __init__(
@@ -33,6 +46,7 @@ class Oauth2Service:
         user_integration_repo: "UserIntegrationRepository",
         oauth_token_repo: "OauthTokenRepository",
         sharepoint_auth_service: "SharepointAuthService",
+        redis_client: "redis.Redis",
     ) -> None:
         super().__init__()
         self.confluence_auth_service = confluence_auth_service
@@ -40,16 +54,47 @@ class Oauth2Service:
         self.user_integration_repo = user_integration_repo
         self.oauth_token_repo = oauth_token_repo
         self.sharepoint_auth_service = sharepoint_auth_service
+        self.redis_client = redis_client
 
         self._auth_mapper = {
             IntegrationType.Confluence.value: self.confluence_auth_service,
             IntegrationType.Sharepoint.value: self.sharepoint_auth_service,
         }
 
+    async def _store_oauth_state(
+        self, state: str, user_id: "UUID", tenant_integration_id: "UUID"
+    ) -> None:
+        await self.redis_client.set(
+            f"{_OAUTH_STATE_PREFIX}{state}",
+            json.dumps(
+                {
+                    "user_id": str(user_id),
+                    "tenant_integration_id": str(tenant_integration_id),
+                }
+            ),
+            ex=_OAUTH_STATE_TTL_SECONDS,
+        )
+
+    async def _pop_oauth_state(self, state: str) -> dict[str, str] | None:
+        # GETDEL is atomic — a single round-trip that returns and deletes the value
+        # — so the state is genuinely single-use even under concurrent callbacks.
+        raw = await self.redis_client.getdel(f"{_OAUTH_STATE_PREFIX}{state}")
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            # Corrupt payload: treat as an invalid state (caller raises a 400)
+            # instead of letting a JSON error surface as a 500.
+            logger.warning("Discarding corrupt OAuth state payload")
+            return None
+
     async def start_auth(
         self,
         tenant_integration_id: "UUID",
-        state: str | None = None,
+        user_id: "UUID",
     ) -> dict[str, str]:
         tenant_integration = await self.tenant_integration_repo.one(
             id=tenant_integration_id
@@ -59,21 +104,49 @@ class Oauth2Service:
         if integration_type not in self._auth_mapper:
             raise BadRequestException("Invalid integration type")
 
+        # Backend-generated, single-use state bound to this user + integration.
+        state = secrets.token_urlsafe(32)
+        await self._store_oauth_state(
+            state=state,
+            user_id=user_id,
+            tenant_integration_id=tenant_integration_id,
+        )
+
         if integration_type == IntegrationType.Sharepoint.value:
-            return await self.sharepoint_auth_service.gen_auth_url(
+            result = await self.sharepoint_auth_service.gen_auth_url(
                 state, tenant_id=tenant_integration.tenant_id
             )
-        if integration_type == IntegrationType.Confluence.value:
-            return await self.confluence_auth_service.gen_auth_url(state)
+        elif integration_type == IntegrationType.Confluence.value:
+            result = await self.confluence_auth_service.gen_auth_url(state)
+        else:
+            raise BadRequestException("Invalid integration type")
 
-        raise BadRequestException("Invalid integration type")
+        return {"auth_url": result["auth_url"], "state": state}
 
     async def auth_integration(
         self,
         user_id: "UUID",
         tenant_integration_id: "UUID",
         auth_code: str,
+        state: str,
     ) -> UserIntegration:
+        # CSRF: the state must have been issued by us to THIS user for THIS integration.
+        stored = await self._pop_oauth_state(state)
+        if stored is None:
+            raise BadRequestException(
+                "Invalid or expired OAuth state. Please restart the authentication flow."
+            )
+        if stored.get("user_id") != str(user_id) or stored.get(
+            "tenant_integration_id"
+        ) != str(tenant_integration_id):
+            logger.warning(
+                "Rejected OAuth callback with mismatched state binding (user=%s, "
+                "tenant_integration=%s)",
+                user_id,
+                tenant_integration_id,
+            )
+            raise BadRequestException("OAuth state does not match the request.")
+
         tenant_integration = await self.tenant_integration_repo.one(
             id=tenant_integration_id
         )

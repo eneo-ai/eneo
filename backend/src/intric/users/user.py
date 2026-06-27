@@ -308,6 +308,10 @@ class UserInDB(UserInDBBase):
 
         return permissions_set
 
+    @property
+    def can_view_model_pricing(self) -> bool:
+        return Permission.ADMIN in self.permissions or self.tenant.show_model_pricing
+
 
 class UserCreated(UserInDB):
     access_token: Optional[AccessToken] = None

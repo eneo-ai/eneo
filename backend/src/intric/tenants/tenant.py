@@ -36,6 +36,8 @@ class TenantBase(BaseModel):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
+    # When False, model input/output prices are hidden from regular users.
+    show_model_pricing: bool = True
 
     @field_validator("display_name")
     @classmethod
@@ -60,6 +62,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
+    show_model_pricing: bool = True
     default_role_id: Optional[UUID] = None
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
@@ -286,6 +289,12 @@ class TenantUpdate(TenantUpdatePublic):
         from intric.flows.flow_settings import validate_flow_settings_write
 
         return validate_flow_settings_write(v)
+
+
+class ModelPricingVisibility(BaseModel):
+    """Org-wide toggle for showing model input/output prices to regular users."""
+
+    show_model_pricing: bool
 
 
 class TenantWithMaskedCredentials(TenantInDB):

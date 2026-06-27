@@ -11,3 +11,13 @@
 @utility stable-gutter {
   scrollbar-gutter: stable both-edges;
 }
+
+/* Hide the native scrollbar while keeping the area scrollable. Referenced by the
+   command palette and sidebar; defined here so those surfaces don't fall back to
+   the OS scrollbar (which renders dark regardless of the app's light theme). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

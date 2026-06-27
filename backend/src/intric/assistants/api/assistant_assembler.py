@@ -58,7 +58,8 @@ class AssistantAssembler:
             return None
 
         return CompletionModelAssembler.from_completion_model_to_sparse(
-            completion_model=model
+            completion_model=model,
+            show_pricing=self.user.can_view_model_pricing,
         )
 
     def _get_prompt(self, assistant: Assistant):
@@ -90,20 +91,23 @@ class AssistantAssembler:
             models_enforced=effective_config.models_enforced,
             available_models=[
                 CompletionModelAssembler.from_completion_model_to_sparse(
-                    completion_model=m
+                    completion_model=m,
+                    show_pricing=self.user.can_view_model_pricing,
                 )
                 for m in effective_config.available_models
             ],
             locked_model=(
                 CompletionModelAssembler.from_completion_model_to_sparse(
-                    completion_model=effective_config.locked_model
+                    completion_model=effective_config.locked_model,
+                    show_pricing=self.user.can_view_model_pricing,
                 )
                 if effective_config.locked_model is not None
                 else None
             ),
             default_model=(
                 CompletionModelAssembler.from_completion_model_to_sparse(
-                    completion_model=effective_config.policy_default_model
+                    completion_model=effective_config.policy_default_model,
+                    show_pricing=self.user.can_view_model_pricing,
                 )
                 if effective_config.policy_default_model is not None
                 else None

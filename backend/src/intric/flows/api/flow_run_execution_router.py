@@ -77,7 +77,6 @@ from intric.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
 )
-from intric.server.protocol import responses
 
 router = APIRouter()
 
@@ -638,7 +637,21 @@ async def _commit_flow_runtime_write_before_response(
     operation_id="get_flow_run_status_capabilities",
     summary="Get flow run status capabilities",
     description=_FLOW_RUN_STATUS_CAPABILITIES_DESCRIPTION,
-    responses=responses.get_responses([401, 403]),
+    responses={
+        401: error_response(
+            description="Authentication is required to inspect Flow run capabilities.",
+            message="Unauthenticated.",
+            intric_error_code=ErrorCodes.AUTHENTICATION_ERROR,
+            code="authentication_error",
+        ),
+        403: error_response(
+            description=_FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            intric_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
 )
 async def get_flow_run_status_capabilities(
     _container: Container = Depends(get_container(with_user=True)),

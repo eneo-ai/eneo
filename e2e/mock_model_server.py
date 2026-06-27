@@ -14,6 +14,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPLY = os.environ.get("MOCK_REPLY", "E2E mock completion: pong")
+ERROR_MARKER = os.environ.get("MOCK_ERROR_MARKER", "E2E_FORCE_MODEL_ERROR")
 PORT = int(os.environ.get("MOCK_PORT", "8200"))
 
 
@@ -25,6 +26,21 @@ def _chunk(delta: dict, finish_reason=None) -> bytes:
         "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
     }
     return f"data: {json.dumps(payload)}\n\n".encode()
+
+
+def _request_text(payload: dict) -> str:
+    parts: list[str] = []
+    for message in payload.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text") or item.get("content")
+                    if isinstance(text, str):
+                        parts.append(text)
+    return "\n".join(parts)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,6 +61,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self.path.endswith("/chat/completions"):
             self._json(404, {"error": "not found"})
+            return
+
+        if ERROR_MARKER and ERROR_MARKER in _request_text(req):
+            self._json(
+                500,
+                {
+                    "error": {
+                        "message": "E2E forced model failure",
+                        "type": "server_error",
+                        "code": "e2e_forced_model_failure",
+                    }
+                },
+            )
             return
 
         if req.get("stream"):

@@ -2338,6 +2338,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/settings/model-pricing-visibility": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set model pricing visibility
+     * @description Toggle whether model input/output prices are shown to regular users across the organization.
+     */
+    put: operations["update_model_pricing_visibility_api_v1_admin_settings_model_pricing_visibility_put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/super-api-key-status": {
     parameters: {
       query?: never;
@@ -10807,11 +10827,15 @@ export interface components {
        * Format: uuid
        */
       tenant_integration_id: string;
+      /** State */
+      state: string;
     };
     /** AuthUrlPublic */
     AuthUrlPublic: {
       /** Auth Url */
       auth_url: string;
+      /** State */
+      state: string;
     };
     /**
      * AvailabilityResponse
@@ -19927,6 +19951,14 @@ export interface components {
       force_override?: boolean;
     };
     /**
+     * ModelPricingVisibility
+     * @description Org-wide toggle for showing model input/output prices to regular users.
+     */
+    ModelPricingVisibility: {
+      /** Show Model Pricing */
+      show_model_pricing: boolean;
+    };
+    /**
      * ModelProviderCreate
      * @description Request model for creating a model provider.
      */
@@ -23080,6 +23112,26 @@ export interface components {
        */
       expires_in_hours: number;
       /**
+       * Consecutive Renewal Failures
+       * @description Consecutive failed renewal attempts
+       */
+      consecutive_renewal_failures: number;
+      /**
+       * Last Renewal Failed At
+       * @description Most recent failed renewal attempt timestamp
+       */
+      last_renewal_failed_at?: string | null;
+      /**
+       * Last Renewal Error
+       * @description Most recent renewal failure message
+       */
+      last_renewal_error?: string | null;
+      /**
+       * Last Webhook Received At
+       * @description Most recent valid webhook received for this subscription
+       */
+      last_webhook_received_at?: string | null;
+      /**
        * Owner Email
        * @description Email of subscription owner (None for organization integrations)
        */
@@ -23668,6 +23720,8 @@ export interface components {
       files_processed?: number;
       /** Files Deleted */
       files_deleted?: number;
+      /** Out Of Scope Deleted */
+      out_of_scope_deleted?: number;
       /** Pages Processed */
       pages_processed?: number;
       /** Folders Processed */
@@ -23676,6 +23730,12 @@ export interface components {
       skipped_items?: number;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Trigger */
+      trigger?: string;
+      /** Recovery */
+      recovery?: string;
+      /** Changes Detected */
+      changes_detected?: number;
     };
     /**
      * TargetKind
@@ -23776,6 +23836,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
     };
     /** TenantCompletionModelCreate */
     TenantCompletionModelCreate: {
@@ -24036,6 +24101,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Default Role Id */
       default_role_id?: string | null;
       /**
@@ -24166,6 +24236,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
       /** Default Role Id */
@@ -24419,6 +24494,11 @@ export interface components {
        * @default false
        */
       security_enabled?: boolean;
+      /**
+       * Show Model Pricing
+       * @default true
+       */
+      show_model_pricing?: boolean;
       /** Default Role Id */
       default_role_id?: string | null;
       /**
@@ -24557,9 +24637,8 @@ export interface components {
      * ToolCallResultPublic
      * @description Lazy-loaded payload for a single tool call's upstream response.
      *
-     *     Only the niche "Visa svar" view fetches this — keeping it out of the
-     *     streaming hot path lets the SSE payload stay small even when a tool
-     *     returns several KB of text.
+     *     Keeping this out of the streaming hot path lets the SSE payload stay small
+     *     even when a tool returns several KB of text.
      */
     ToolCallResultPublic: {
       /** Tool Call Id */
@@ -35637,6 +35716,75 @@ export interface operations {
       };
     };
   };
+  update_model_pricing_visibility_api_v1_admin_settings_model_pricing_visibility_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelPricingVisibility"];
+      };
+    };
+    responses: {
+      /** @description Updated model pricing visibility. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelPricingVisibility"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
+        };
+      };
+    };
+  };
   get_super_api_key_status_api_v1_admin_super_api_key_status_get: {
     parameters: {
       query?: never;
@@ -42577,21 +42725,38 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunStatusCapabilitiesPublic"];
         };
       };
-      /** @description Unauthorized */
+      /** @description Authentication is required to inspect Flow run capabilities. */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "Unauthenticated.",
+           *       "intric_error_code": 9005,
+           *       "code": "authentication_error"
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Forbidden */
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "message": "API key space scope does not match requested flow.",
+           *       "intric_error_code": 9001,
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       }
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -52331,9 +52496,7 @@ export interface operations {
   };
   gen_url_api_v1_integrations_auth__tenant_integration_id__url__get: {
     parameters: {
-      query?: {
-        state?: string | null;
-      };
+      query?: never;
       header?: never;
       path: {
         tenant_integration_id: string;

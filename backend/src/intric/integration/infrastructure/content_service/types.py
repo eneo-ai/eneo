@@ -2,6 +2,27 @@ from typing import Any, Protocol
 
 from typing_extensions import TypedDict
 
+# Owned by the domain layer; re-exported here so existing infrastructure importers
+# keep working without the domain importing upward.
+from intric.integration.domain.value_objects import (
+    OAuthResource,
+    SkippedDetail,
+    SyncMetadata,
+)
+
+__all__ = [
+    "GraphParentReference",
+    "SharePointItem",
+    "OAuthResource",
+    "SkippedDetail",
+    "SyncStats",
+    "SyncMetadata",
+    "SharePointTokenProtocol",
+    "SharePointWebhookResourceData",
+    "SharePointWebhookNotification",
+    "SharePointWebhookPayload",
+]
+
 
 class GraphParentReference(TypedDict, total=False):
     id: str
@@ -15,7 +36,7 @@ class SharePointItem(TypedDict, total=False):
     name: str
     webUrl: str
     cTag: str
-    deleted: bool
+    deleted: bool | dict[str, Any]
     folder: dict[str, Any]
     file: dict[str, Any]
     parentReference: GraphParentReference
@@ -26,33 +47,12 @@ class SharePointItem(TypedDict, total=False):
     lastModifiedDateTime: str
 
 
-class OAuthResource(TypedDict, total=False):
-    id: str
-    url: str
-    name: str
-    type: str
-    webUrl: str
-
-
-class SkippedDetail(TypedDict):
-    file: str
-    reason: str
-
-
 class SyncStats(TypedDict):
     files_processed: int
     files_deleted: int
+    out_of_scope_deleted: int
     folders_processed: int
     pages_processed: int
-    skipped_items: int
-    skipped_details: list[SkippedDetail]
-
-
-class SyncMetadata(TypedDict, total=False):
-    files_processed: int
-    files_deleted: int
-    pages_processed: int
-    folders_processed: int
     skipped_items: int
     skipped_details: list[SkippedDetail]
 

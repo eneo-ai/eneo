@@ -14,7 +14,9 @@ if TYPE_CHECKING:
 
 
 class CompletionModelAssembler:
-    def from_completion_model_to_model(self, completion_model: "CompletionModel"):
+    def from_completion_model_to_model(
+        self, completion_model: "CompletionModel", *, show_pricing: bool = True
+    ):
         return CompletionModelPublic(
             id=completion_model.id,
             created_at=completion_model.created_at,
@@ -44,11 +46,15 @@ class CompletionModelAssembler:
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
-            input_cost_per_token=getattr(
-                completion_model, "input_cost_per_token", None
+            input_cost_per_token=(
+                getattr(completion_model, "input_cost_per_token", None)
+                if show_pricing
+                else None
             ),
-            output_cost_per_token=getattr(
-                completion_model, "output_cost_per_token", None
+            output_cost_per_token=(
+                getattr(completion_model, "output_cost_per_token", None)
+                if show_pricing
+                else None
             ),
             security_classification=SecurityClassificationPublic.from_domain(
                 completion_model.security_classification,
@@ -65,6 +71,8 @@ class CompletionModelAssembler:
     @staticmethod
     def from_completion_model_to_sparse(
         completion_model: "CompletionModel | CompletionModelSparse",
+        *,
+        show_pricing: bool = True,
     ) -> CompletionModelSparse:
         """
         Converts a domain CompletionModel to a CompletionModelSparse instance.
@@ -95,14 +103,26 @@ class CompletionModelAssembler:
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=(
+                getattr(completion_model, "input_cost_per_token", None)
+                if show_pricing
+                else None
+            ),
+            output_cost_per_token=(
+                getattr(completion_model, "output_cost_per_token", None)
+                if show_pricing
+                else None
+            ),
             provider_type=completion_model.provider_type,
         )
 
     def from_completion_models_to_models(
-        self, completion_models: list["CompletionModel"]
+        self, completion_models: list["CompletionModel"], *, show_pricing: bool = True
     ):
         completion_models_public = [
-            self.from_completion_model_to_model(completion_model=completion_model)
+            self.from_completion_model_to_model(
+                completion_model=completion_model, show_pricing=show_pricing
+            )
             for completion_model in completion_models
         ]
 
