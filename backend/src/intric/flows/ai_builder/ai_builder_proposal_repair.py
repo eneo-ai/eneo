@@ -63,6 +63,7 @@ class ForcedToolRetryOutcome:
     events: tuple[AIBuilderStreamEvent, ...] | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
+    failure_codes: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +203,22 @@ def _repair_terminal_events(
         else tuple()
     )
     return (*result.events, *user_message_events)
+
+
+async def _classify_processed_repair_attempt(
+    *,
+    retry_config: ToolRetryConfig,
+    invocation: ToolRetryInvocation,
+) -> ForcedToolRetryOutcome:
+    tool_result = await retry_config.process_tool_invocation(invocation)
+    terminal_events = _repair_terminal_events(tool_result)
+    if terminal_events:
+        return ForcedToolRetryOutcome(events=terminal_events)
+    return ForcedToolRetryOutcome(
+        feedback=tool_result.feedback,
+        failure_kind=tool_result.failure_kind,
+        failure_codes=tool_result.failure_codes,
+    )
 
 
 def _build_tool_retry_invocation(
@@ -452,37 +469,37 @@ async def _request_self_correction_events(
                     )
                     return
 
-                tool_result = await retry_config.process_tool_invocation(
-                    _build_tool_retry_invocation(
+                repair_outcome = await _classify_processed_repair_attempt(
+                    retry_config=retry_config,
+                    invocation=_build_tool_retry_invocation(
                         ctx=ctx,
                         arguments=arguments,
                         assistant_content=assistant_text
                         or "Här är mitt korrigerade förslag:",
                         tool_call_id=correction_tool_call.id,
-                    )
+                    ),
                 )
-                terminal_events = _repair_terminal_events(tool_result)
-                if not terminal_events:
+                if repair_outcome.events is None:
                     if retry_state.can_retry():
                         retry_feedback = (
                             correction_tool_call,
                             _build_retry_feedback(
                                 target_kind=retry_config.target_kind,
-                                feedback=tool_result.feedback
+                                feedback=repair_outcome.feedback
                                 or "Invalid tool payload.",
-                                failure_codes=tool_result.failure_codes,
+                                failure_codes=repair_outcome.failure_codes,
                                 retry_count=retry_state.next_retry_count,
                             ),
                         )
                         break
                     yield build_self_correction_error_event(
-                        feedback=tool_result.feedback,
-                        failure_kind=tool_result.failure_kind,
+                        feedback=repair_outcome.feedback,
+                        failure_kind=repair_outcome.failure_kind,
                         request_id=ctx.request_id,
                     )
                     return
 
-                for event in terminal_events:
+                for event in repair_outcome.events:
                     yield event
                 return
 
@@ -618,27 +635,23 @@ async def _execute_forced_tool_retry(
                 failure_kind="parse",
             )
 
-        tool_result = await request.retry_config.process_tool_invocation(
-            _build_tool_retry_invocation(
+        repair_outcome = await _classify_processed_repair_attempt(
+            retry_config=request.retry_config,
+            invocation=_build_tool_retry_invocation(
                 ctx=ctx,
                 arguments=arguments,
                 assistant_content=request.assistant_text,
                 tool_call_id=tool_call.id,
-            )
+            ),
         )
-        terminal_events = _repair_terminal_events(tool_result)
-        if not terminal_events:
+        if repair_outcome.events is None:
             logger.warning(
                 "Forced tool retry returned %s issue: %s",
-                tool_result.failure_kind or "unknown",
-                tool_result.feedback or "missing feedback",
-            )
-            return ForcedToolRetryOutcome(
-                feedback=tool_result.feedback,
-                failure_kind=tool_result.failure_kind,
+                repair_outcome.failure_kind or "unknown",
+                repair_outcome.feedback or "missing feedback",
             )
 
-        return ForcedToolRetryOutcome(events=terminal_events)
+        return repair_outcome
 
     return ForcedToolRetryOutcome()
 
@@ -669,32 +682,29 @@ async def _try_process_json_text_as_tool_arguments(
     if arguments is None:
         return ForcedToolRetryOutcome()
 
-    tool_result = await retry_config.process_tool_invocation(
-        _build_tool_retry_invocation(
+    repair_outcome = await _classify_processed_repair_attempt(
+        retry_config=retry_config,
+        invocation=_build_tool_retry_invocation(
             ctx=ctx,
             arguments=arguments,
             assistant_content="Här är mitt korrigerade förslag:",
             tool_call_id=f"call_text_{uuid4().hex}",
-        )
+        ),
     )
-    terminal_events = _repair_terminal_events(tool_result)
-    if terminal_events:
+    if repair_outcome.events is not None:
         logger.info(
             "Accepted %s arguments returned as JSON text during forced retry.",
             PROPOSE_FLOW_TOOL_NAME,
         )
-        return ForcedToolRetryOutcome(events=terminal_events)
+        return repair_outcome
 
     logger.warning(
         "JSON text fallback for %s returned %s issue: %s",
         PROPOSE_FLOW_TOOL_NAME,
-        tool_result.failure_kind or "unknown",
-        tool_result.feedback or "missing feedback",
+        repair_outcome.failure_kind or "unknown",
+        repair_outcome.feedback or "missing feedback",
     )
-    return ForcedToolRetryOutcome(
-        feedback=tool_result.feedback,
-        failure_kind=tool_result.failure_kind,
-    )
+    return repair_outcome
 
 
 def _parse_json_object_text(text: str) -> dict[str, Any] | None:

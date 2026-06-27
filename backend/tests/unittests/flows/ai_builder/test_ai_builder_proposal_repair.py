@@ -426,7 +426,9 @@ async def test_run_forced_tool_retry_after_text_accepts_json_arguments_returned_
                 {
                     "flow_name": "Text JSON outline",
                     "plan_rationale": "The model returned JSON as prose.",
-                    "steps": [{"name": "Analyze", "instructions": "Analyze the input."}],
+                    "steps": [
+                        {"name": "Analyze", "instructions": "Analyze the input."}
+                    ],
                 }
             ),
             turn=turn,
@@ -704,6 +706,49 @@ async def test_run_tool_self_correction_adds_duplicate_name_outline_guidance() -
 
     assert len(retry_feedback) == 2
     assert "Every steps[] name must be unique case-insensitively" in retry_feedback[1]
+
+
+@pytest.mark.asyncio
+async def test_run_tool_self_correction_uses_fallback_for_missing_retry_feedback() -> (
+    None
+):
+    observed_messages: list[list[dict[str, Any]]] = []
+
+    async def call_proposal_completion(
+        request: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        observed_messages.append(request.messages)
+        return _bad_tool_response(len(observed_messages))
+
+    async def process_invocation(_: ToolRetryInvocation) -> ToolProcessingResult:
+        return ToolProcessingResult(failure_kind="validation")
+
+    events: list[dict[str, str]] = []
+    async for event in run_tool_self_correction(
+        _make_self_correction_request(
+            error_message="original invalid",
+            llm_messages=[{"role": "user", "content": "go"}],
+            self_correction_temperature=0.35,
+            self_correction_bumped_temperature=0.6,
+            max_self_correction_retries=1,
+            forced_proposal_temperature=0.1,
+            repair_completion=call_proposal_completion,
+            process_tool_invocation=process_invocation,
+            target_kind=TargetKind.CREATE,
+        )
+    ):
+        events.append(encode_ai_builder_stream_event(event))
+
+    assert events[-1]["event"] == "error"
+    assert len(observed_messages) == 2
+    retry_feedback = observed_messages[1][-1]
+    assert retry_feedback["role"] == "tool"
+    assert str(retry_feedback["content"]).startswith(
+        "CORRECTION STILL INVALID: Invalid tool payload."
+    )
+    assert f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call." in str(
+        retry_feedback["content"]
+    )
 
 
 @pytest.mark.asyncio
