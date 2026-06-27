@@ -774,10 +774,15 @@ class AssistantService:
         )
 
         # Validate before persisting (the in-memory assistant already reflects the
-        # final model + attachments from update() above), so a save that no longer
-        # fits — e.g. after switching to a smaller-context model — is rejected
-        # without committing an invalid row.
-        if attachments is not None or completion_model is not None:
+        # final model + prompt + attachments from update() above), so a save that
+        # no longer fits — after switching to a smaller-context model OR enlarging
+        # the prompt (which counts toward the ceiling) — is rejected without
+        # committing an invalid row.
+        if (
+            attachments is not None
+            or completion_model is not None
+            or prompt_obj is not None
+        ):
             self._validate_attachments_fit(assistant)
 
         refreshed_space = await self.space_repo.update(space)
