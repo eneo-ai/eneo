@@ -2,37 +2,52 @@
   import { browser } from "$app/environment";
   import type { UploadedFile } from "@intric/intric-js";
   import { IconDocument } from "@intric/icons/document";
-  import { Button, Dialog, Markdown } from "@intric/ui";
+  import { IconDownload } from "@intric/icons/download";
+  import { IconCopy } from "@intric/icons/copy";
+  import { IconCheck } from "@intric/icons/check";
+  import { Markdown } from "@intric/ui";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
   import type { Snippet } from "svelte";
 
-  export let file: UploadedFile;
-  export let index: number | undefined = undefined;
-  export let isTableView = false;
-  export let isOpen: Dialog.OpenState | undefined = undefined;
-  export let children: Snippet<[{ showFile: () => void }]> | undefined = undefined;
+  let {
+    file,
+    index = undefined,
+    isTableView = false,
+    open = $bindable(false),
+    children
+  }: {
+    file: UploadedFile;
+    index?: number;
+    isTableView?: boolean;
+    open?: boolean;
+    children?: Snippet<[{ showFile: () => void }]>;
+  } = $props();
 
   const intric = getIntric();
 
-  let loadedContent: string | undefined = undefined;
-  let signedUrl: string | undefined = undefined;
-  let loadingFile = false;
-  let loadError = false;
+  let loadedContent = $state<string | undefined>(undefined);
+  let signedUrl = $state<string | undefined>(undefined);
+  let loadingFile = $state(false);
+  let loadError = $state(false);
+  let copied = $state(false);
 
   // Text files include plain text, PDFs, DOCX, PPTX, etc. (all are returned as text from backend)
-  const isTextFile =
+  const isTextFile = $derived(
     (file.mimetype?.includes("text") ||
       file.mimetype?.includes("pdf") ||
       file.mimetype?.includes("document") ||
       file.mimetype?.includes("presentation") ||
       file.mimetype?.includes("msword") ||
       file.mimetype?.includes("officedocument")) ??
-    false;
-  const isImageFile = file.mimetype?.includes("image") ?? false;
-  const isAudioFile = file.mimetype?.includes("audio") ?? false;
+      false
+  );
+  const isImageFile = $derived(file.mimetype?.includes("image") ?? false);
+  const isAudioFile = $derived(file.mimetype?.includes("audio") ?? false);
 
   async function loadFile() {
     if (signedUrl) return true;
@@ -86,34 +101,31 @@
     }
   }
 
-  let copyButtonText = m.copy_to_clipboard();
   async function copyText() {
     await loadFile();
     if (loadedContent && browser) {
       navigator.clipboard.writeText(loadedContent);
-      copyButtonText = m.copied();
+      copied = true;
       setTimeout(() => {
-        copyButtonText = m.copy_to_clipboard();
+        copied = false;
       }, 2000);
     }
   }
 
   const showFile = () => {
-    if (isOpen) {
-      $isOpen = true;
-      loadFile();
-    }
+    open = true;
+    loadFile();
   };
 </script>
 
-<Dialog.Root bind:isOpen>
+<Dialog.Root bind:open>
   {#if children}
     {@render children({ showFile })}
   {:else}
     <Button
+      variant="ghost"
       class={isTableView ? "-ml-1" : "bg-preview !border-default max-w-[30ch] border shadow-sm"}
-      on:click={showFile}
-      padding="icon-leading"
+      onclick={showFile}
     >
       {#if index}
         <span
@@ -129,51 +141,64 @@
     </Button>
   {/if}
 
-  <Dialog.Content width="medium">
-    <Dialog.Title>{file.name}</Dialog.Title>
-    <Dialog.Description hidden
-      >{m.attachment_file_preview_for({ name: file.name })}</Dialog.Description
-    >
+  <Dialog.Content class="sm:max-w-2xl">
+    <Dialog.Header>
+      <Dialog.Title>{file.name}</Dialog.Title>
+      <Dialog.Description class="sr-only">
+        {m.attachment_file_preview_for({ name: file.name })}
+      </Dialog.Description>
+    </Dialog.Header>
 
-    <Dialog.Section scrollable>
-      <div class="p-4">
-        {#if loadingFile}
-          <pre>{m.loading()}</pre>
-        {:else if loadError}
-          <pre>{m.attachment_error_loading_content()}</pre>
-        {:else if isTextFile && loadedContent}
-          <Markdown source={loadedContent}></Markdown>
-        {:else if isImageFile && signedUrl}
-          <img src={signedUrl} alt={file.name} class="max-w-full rounded-lg" />
-        {:else if isAudioFile && signedUrl}
-          <audio controls class="w-full">
-            <source src={signedUrl} type={file.mimetype} />
-            {m.attachment_audio_not_supported()}
-          </audio>
-        {:else}
-          <div class="text-center">
-            <p class="mb-4">{m.preview_not_available()}</p>
-            <Button on:click={downloadFile} variant="outlined">
-              {m.download_file()}
-            </Button>
-          </div>
+    <div class="border-default max-h-[60vh] overflow-y-auto rounded-lg border p-4">
+      {#if loadingFile}
+        <pre>{m.loading()}</pre>
+      {:else if loadError}
+        <pre>{m.attachment_error_loading_content()}</pre>
+      {:else if isTextFile && loadedContent}
+        <Markdown source={loadedContent}></Markdown>
+      {:else if isImageFile && signedUrl}
+        <img src={signedUrl} alt={file.name} class="max-w-full rounded-lg" />
+      {:else if isAudioFile && signedUrl}
+        <audio controls class="w-full">
+          <source src={signedUrl} type={file.mimetype} />
+          {m.attachment_audio_not_supported()}
+        </audio>
+      {:else}
+        <div class="text-center">
+          <p class="mb-4">{m.preview_not_available()}</p>
+          <Button variant="outline" onclick={downloadFile}>
+            <IconDownload />
+            {m.download_file()}
+          </Button>
+        </div>
+      {/if}
+    </div>
+
+    <Dialog.Footer class="sm:justify-between">
+      <div class="flex flex-col-reverse gap-2 sm:flex-row">
+        <Button variant="ghost" onclick={downloadFile}>
+          <IconDownload />
+          {m.download_file()}
+        </Button>
+
+        {#if isTextFile && loadedContent}
+          <Button variant="ghost" onclick={copyText}>
+            {#if copied}
+              <IconCheck />
+              {m.copied()}
+            {:else}
+              <IconCopy />
+              {m.copy_to_clipboard()}
+            {/if}
+          </Button>
         {/if}
       </div>
-    </Dialog.Section>
 
-    <Dialog.Controls let:close>
-      <Button variant="simple" on:click={downloadFile} padding="icon-leading">
-        {m.download_file()}
-      </Button>
-
-      {#if isTextFile && loadedContent}
-        <Button variant="simple" padding="icon-leading" on:click={copyText}>
-          {copyButtonText}
-        </Button>
-      {/if}
-
-      <div class="flex-grow"></div>
-      <Button variant="primary" is={close}>{m.done()}</Button>
-    </Dialog.Controls>
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button {...props}>{m.done()}</Button>
+        {/snippet}
+      </Dialog.Close>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
