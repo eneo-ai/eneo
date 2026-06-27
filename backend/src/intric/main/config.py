@@ -374,6 +374,16 @@ class Settings(BaseSettings):
     # files are cut with a visible truncation notice instead of erroring
     attachment_max_tokens_per_file: int = 20000
 
+    # Persistent assistant attachments ride along on every question, so they
+    # must share the model's input window with the prompt, history, knowledge and
+    # the question itself. The binding limit is a share of max_input_tokens; the
+    # file count is only a secondary guardrail.
+    attachment_context_budget_ratio: float = Field(default=0.5, gt=0, le=1)
+    attachment_max_files: int = 15
+    # Advisory by default (meter only). Flip on to reject saving an assistant
+    # whose attachments exceed the budget.
+    attachment_budget_enforced: bool = False
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 
