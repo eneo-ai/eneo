@@ -609,17 +609,10 @@ def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
     assert with_extra_dicts.token_count > without_tools.token_count
 
 
-def test_oversized_attachment_is_truncated_with_notice(
-    context_builder: ContextBuilder, monkeypatch: pytest.MonkeyPatch
-):
-    from intric.completion_models.infrastructure import context_builder as cb_module
+def test_attachment_text_is_sent_whole():
     from intric.completion_models.infrastructure.context_builder import (
-        ATTACHMENT_TRUNCATION_NOTICE,
         build_files_string,
     )
-
-    settings = MagicMock(attachment_max_tokens_per_file=10)
-    monkeypatch.setattr(cb_module, "get_settings", lambda: settings)
 
     file = MagicMock(
         text="word " * 1000, file_type=FileType.TEXT, mimetype="text/plain"
@@ -628,25 +621,9 @@ def test_oversized_attachment_is_truncated_with_notice(
 
     result = build_files_string([file])
 
-    assert ATTACHMENT_TRUNCATION_NOTICE in result
-    assert len(result) < len(file.text)
-
-
-def test_truncation_stays_within_budget_including_notice():
-    from intric.completion_models.infrastructure.context_builder import (
-        ATTACHMENT_TRUNCATION_NOTICE,
-        _truncate_to_tokens,
-    )
-
-    max_tokens = 100
-    # Token-dense text (few chars per token) — the proportional cut alone
-    # would overshoot the budget.
-    text = "0123456789abcdef" * 2000
-
-    result = _truncate_to_tokens(text, max_tokens=max_tokens)
-
-    assert ATTACHMENT_TRUNCATION_NOTICE in result
-    assert count_tokens(result) <= max_tokens
+    # No silent truncation: the whole document text is inlined, with its header.
+    assert file.text in result
+    assert "FILE: big.txt" in result
 
 
 def test_vision_false_drops_current_images(context_builder: ContextBuilder):

@@ -370,22 +370,17 @@ class Settings(BaseSettings):
     attachment_image_extraction: bool = True
     attachment_max_extracted_images: int = 8
 
-    # Per-file token cap when attachments are inlined into the prompt; larger
-    # files are cut with a visible truncation notice instead of erroring
-    attachment_max_tokens_per_file: int = 20000
-
-    # Persistent assistant attachments ride along on every question, so they
-    # must share the model's input window with the prompt, history, knowledge and
-    # the question itself. The binding limit is a share of max_input_tokens; the
-    # file count is only a secondary guardrail.
-    attachment_context_budget_ratio: float = Field(default=0.5, gt=0, le=1)
-    attachment_max_files: int = 15
-    # Total/per-file byte cap for assistant attachments (advertised to the client
-    # and enforced in the domain). 25 MB.
-    attachment_max_size_bytes: int = 26214400
-    # Advisory by default (meter only). Flip on to reject saving an assistant
-    # whose attachments exceed the budget.
-    attachment_budget_enforced: bool = False
+    # Persistent assistant attachments are sent whole on every question,
+    # alongside the system prompt. The binding limit is that they must FIT the
+    # model's input window with room left to ask (enforced on save, see
+    # attachment_token_ceiling); a file that doesn't fit is rejected, never
+    # silently truncated. The file count is only an abuse guardrail and the byte
+    # cap only bounds storage.
+    attachment_max_files: int = 100
+    attachment_max_size_bytes: int = 26214400  # 25 MB
+    # Tokens kept free in the input window for the live question (and a little
+    # history) when checking whether the prompt + attachments fit.
+    attachment_context_reserve_tokens: int = 2000
 
     # Storage backend for file binary content. "db" keeps bytes inline in the
     # files.blob column (current behaviour); a future "s3" backend moves them to

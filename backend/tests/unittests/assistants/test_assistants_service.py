@@ -59,6 +59,7 @@ def setup_fixture():
     mock_assistant.collections = []
     mock_assistant.websites = []
     mock_assistant.integration_knowledge_list = []
+    mock_assistant.attachments = []  # default: no attachments -> fit check no-op
     mock_assistant.has_knowledge.return_value = False
     mock_assistant.has_mcp.return_value = False
     mock_space = MagicMock()
@@ -363,6 +364,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     space.get_completion_model.return_value = template_model
 
     created_assistant = MagicMock(id=uuid4())
+    created_assistant.attachments = []  # no attachments -> fit check is a no-op
     refreshed_space = MagicMock()
     refreshed_space.get_assistant.return_value = created_assistant
 
@@ -403,6 +405,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     template_data.get_ids_by_type.return_value = []
 
     created_assistant = MagicMock(id=uuid4())
+    created_assistant.attachments = []  # no attachments -> fit check is a no-op
     refreshed_space = MagicMock()
     refreshed_space.get_assistant.return_value = created_assistant
 

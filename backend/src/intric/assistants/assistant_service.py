@@ -24,7 +24,7 @@ from intric.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from intric.completion_models.infrastructure.web_search import WebSearch
-from intric.files.attachment_budget import compute_attachment_token_budget
+from intric.files.attachment_budget import attachment_token_ceiling
 from intric.files.file_models import File, FileType
 from intric.files.file_service import FileService
 from intric.governance_policy.domain.policy_resolver import (
@@ -39,7 +39,6 @@ from intric.help_assistants.infrastructure.org_space_assistant_role_repo import 
 )
 from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
-from intric.main.config import get_settings
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -415,9 +414,9 @@ class AssistantService:
         )
 
         # Validate before persisting: the factory-built assistant already carries
-        # the final model + attachments, so an over-budget set is rejected
+        # the final model + attachments, so a set that doesn't fit is rejected
         # without leaving an invalid row behind.
-        self._validate_attachment_token_budget(assistant)
+        self._validate_attachments_fit(assistant)
 
         space.add_assistant(assistant)
         refreshed_space = await self.space_repo.update(space)
@@ -426,32 +425,34 @@ class AssistantService:
         return assistant
 
     @staticmethod
-    def _validate_attachment_token_budget(assistant: Assistant) -> None:
-        """Reject saving when persistent attachments exceed the model's token
-        budget (a share of max_input_tokens). They ride along on every
-        question, so an over-budget set silently crowds out history and
-        knowledge. Advisory unless attachment_budget_enforced is set; skipped
-        when no model is selected (the budget is undefined)."""
-        settings = get_settings()
-        if not settings.attachment_budget_enforced:
-            return
+    def _validate_attachments_fit(assistant: Assistant) -> None:
+        """Reject saving when the system prompt + persistent attachments don't
+        fit the model's context window with room left to ask a question.
 
+        Attachments are sent whole (never truncated) on every request, so if
+        they don't fit the request can't run — a clear rejection beats silently
+        sending part of a document. Skipped when no model is selected."""
         model = assistant.completion_model
         attachments = assistant.attachments
         if model is None or not attachments:
             return
 
-        budget = compute_attachment_token_budget(model.max_input_tokens)
-        projected = count_attachment_tokens(
+        ceiling = attachment_token_ceiling(model.max_input_tokens)
+        prompt_text = (
+            getattr(assistant.prompt, "text", None)
+            if assistant.prompt is not None
+            else None
+        )
+        used = count_tokens(prompt_text or "", model.name) + count_attachment_tokens(
             text_files=[a for a in attachments if a.file_type == FileType.TEXT],
             image_files=[a for a in attachments if a.file_type == FileType.IMAGE],
             model_name=model.name,
         )
-        if projected > budget:
-            pct = round(budget / model.max_input_tokens * 100)
+        if used > ceiling:
             raise BadRequestException(
-                f"Attachments use ~{projected} tokens, exceeding the budget of "
-                f"{budget} ({pct}% of the model context window)."
+                f"The prompt and attachments need ~{used} tokens, but only "
+                f"{ceiling} fit this model's context window. Remove content or "
+                f"choose a model with a larger context."
             )
 
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
@@ -773,10 +774,11 @@ class AssistantService:
         )
 
         # Validate before persisting (the in-memory assistant already reflects the
-        # final model + attachments from update() above), so an over-budget save
-        # is rejected without committing an invalid row.
+        # final model + attachments from update() above), so a save that no longer
+        # fits — e.g. after switching to a smaller-context model — is rejected
+        # without committing an invalid row.
         if attachments is not None or completion_model is not None:
-            self._validate_attachment_token_budget(assistant)
+            self._validate_attachments_fit(assistant)
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)

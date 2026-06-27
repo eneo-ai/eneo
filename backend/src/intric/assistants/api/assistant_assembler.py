@@ -13,7 +13,7 @@ from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
-from intric.files.attachment_budget import compute_attachment_token_budget
+from intric.files.attachment_budget import attachment_token_ceiling
 from intric.files.file_models import (
     AcceptedFileType,
     FilePublic,
@@ -79,10 +79,11 @@ class AssistantAssembler:
 
     def _get_allowed_attachments(self, completion_model: "CompletionModel | None"):
         settings = get_settings()
-        # The binding limit is the token budget; it can only be computed once a
-        # model is selected. max_files is a secondary guardrail.
+        # The binding limit is the fit ceiling (prompt + attachments must stay
+        # under it); it can only be computed once a model is selected. max_files
+        # is only an abuse guardrail.
         max_tokens = (
-            compute_attachment_token_budget(completion_model.max_input_tokens)
+            attachment_token_ceiling(completion_model.max_input_tokens)
             if completion_model is not None
             else None
         )
