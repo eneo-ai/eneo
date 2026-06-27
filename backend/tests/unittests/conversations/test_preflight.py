@@ -27,6 +27,9 @@ def _make_service(
         assistant_service.get_effective_completion_model = AsyncMock(
             return_value=assistant.completion_model
         )
+        # Default: no persistent prompt/attachments. Baseline-specific tests
+        # override this. Without it the AsyncMock returns a non-iterable.
+        assistant_service.get_preflight_baseline = AsyncMock(return_value=(None, []))
 
     group_chat_service = AsyncMock()
     if group_chat is not None:
@@ -308,6 +311,77 @@ async def test_preflight_counts_file_header_for_textless_documents():
     assert result.file_tokens == expected_tokens
     assert result.file_tokens > 0
     assert result.excluded_file_count == 1
+
+
+@pytest.mark.asyncio
+async def test_preflight_includes_assistant_baseline():
+    """A bare assistant target reports the persistent baseline: the system
+    prompt and the attachments sent on every question, in their own fields."""
+    attachment = MagicMock()
+    attachment.file_type = FileType.TEXT
+    attachment.text = "persistent knowledge base content"
+    attachment.name = "kb.txt"
+
+    service = _make_service(assistant=_make_assistant())
+    service.assistant_service.get_preflight_baseline = AsyncMock(
+        return_value=("You are a helpful assistant.", [attachment])
+    )
+
+    result = await service.preflight_tokens(
+        question="hi",
+        file_ids=[],
+        assistant_id=uuid4(),
+    )
+
+    assert result.prompt_tokens == count_tokens(
+        "You are a helpful assistant.", "gpt-4o"
+    )
+    assert result.assistant_attachment_tokens == count_tokens(
+        build_files_string([attachment]), "gpt-4o"
+    )
+    assert result.assistant_attachment_tokens > 0
+
+
+@pytest.mark.asyncio
+async def test_preflight_baseline_zero_for_session_target():
+    """An existing session already carries the prompt + attachments in its
+    history, so the baseline fields stay 0 and the baseline is not fetched."""
+    session = MagicMock()
+    session.group_chat_id = None
+    session.assistant = MagicMock()
+    session.assistant.id = uuid4()
+
+    service = _make_service(session=session, assistant=_make_assistant())
+
+    result = await service.preflight_tokens(
+        question="hi",
+        file_ids=[],
+        session_id=uuid4(),
+    )
+
+    assert result.assistant_attachment_tokens == 0
+    assert result.prompt_tokens == 0
+    service.assistant_service.get_preflight_baseline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preflight_baseline_zero_for_group_chat_target():
+    """Group-chat targets have no single persistent baseline; fields stay 0."""
+    member = MagicMock()
+    member.assistant.completion_model = _make_completion_model("gpt-4o")
+    group_chat = MagicMock()
+    group_chat.assistants = [member]
+
+    service = _make_service(group_chat=group_chat)
+
+    result = await service.preflight_tokens(
+        question="hi",
+        file_ids=[],
+        group_chat_id=uuid4(),
+    )
+
+    assert result.assistant_attachment_tokens == 0
+    assert result.prompt_tokens == 0
 
 
 @pytest.mark.asyncio

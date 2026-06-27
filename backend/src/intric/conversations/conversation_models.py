@@ -92,6 +92,12 @@ class PreflightResponse(BaseModel):
     excluded_file_count: int = 0
     model_name: str
     context_window: int
+    # Persistent baseline for an assistant target: the system prompt and the
+    # attachments sent on EVERY question. 0 for session/group-chat targets.
+    # Kept separate from input_tokens/file_tokens (the per-message delta) so a
+    # caller showing both never double-counts.
+    assistant_attachment_tokens: int = 0
+    prompt_tokens: int = 0
 
 
 class ConversationRequest(_ConversationTarget):

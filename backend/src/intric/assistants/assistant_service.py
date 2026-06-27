@@ -24,7 +24,7 @@ from intric.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from intric.completion_models.infrastructure.web_search import WebSearch
-from intric.files.file_models import FileType
+from intric.files.file_models import File, FileType
 from intric.files.file_service import FileService
 from intric.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
@@ -869,6 +869,28 @@ class AssistantService:
             current_model=assistant.completion_model,
             effective_config=effective_config,
         )
+
+    async def get_preflight_baseline(
+        self, assistant_id: UUID
+    ) -> tuple[str | None, list[File]]:
+        """The always-present cost of an assistant: its system prompt text and
+        its persistent attachments, which ride along on every question.
+
+        Preflight uses this so the meter can show the baseline, not just the
+        per-message delta. Applies the same read authorization as
+        get_effective_completion_model (including the personal-default carve-out)
+        so it can't probe assistants the caller cannot access.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        self._authorize_read_assistant(space=space, assistant=assistant)
+
+        prompt_text = (
+            getattr(assistant.prompt, "text", None)
+            if assistant.prompt is not None
+            else None
+        )
+        return prompt_text, assistant.attachments
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
