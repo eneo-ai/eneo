@@ -111,6 +111,9 @@ class AssistantFactory:
                 prompt_in_db=prompt, is_selected=True
             )
 
+        # Reconstruction from persisted rows: the attachment count cap is a
+        # write-time rule (setter + create-from-template), deliberately not
+        # re-applied here so an already-stored assistant always loads.
         attachments = [
             File.model_validate(attachment.file)
             for attachment in assistant_in_db.attachments
@@ -200,6 +203,9 @@ class AssistantFactory:
                 is_selected=True,
             )
 
+        # Reconstruction from persisted rows: the attachment count cap is a
+        # write-time rule (setter + create-from-template), deliberately not
+        # re-applied here so an already-stored assistant always loads.
         attachments = [
             File.model_validate(attachment.file)
             for attachment in assistant_in_db.attachments

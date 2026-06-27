@@ -13,6 +13,7 @@ from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
+from intric.files.attachment_budget import compute_attachment_token_budget
 from intric.files.file_models import (
     AcceptedFileType,
     FilePublic,
@@ -80,20 +81,20 @@ class AssistantAssembler:
         settings = get_settings()
         # The binding limit is the token budget; it can only be computed once a
         # model is selected. max_files is a secondary guardrail.
-        max_tokens = None
-        if completion_model is not None:
-            max_tokens = int(
-                settings.attachment_context_budget_ratio
-                * completion_model.max_input_tokens
-            )
+        max_tokens = (
+            compute_attachment_token_budget(completion_model.max_input_tokens)
+            if completion_model is not None
+            else None
+        )
+        max_size = settings.attachment_max_size_bytes
         return FileRestrictions(
             accepted_file_types=[
-                AcceptedFileType(mimetype=mimetype, size_limit=26214400)
+                AcceptedFileType(mimetype=mimetype, size_limit=max_size)
                 for mimetype in TextMimeTypes.values()
             ],
             limit=Limit(
                 max_files=settings.attachment_max_files,
-                max_size=26214400,
+                max_size=max_size,
                 max_tokens=max_tokens,
             ),
         )

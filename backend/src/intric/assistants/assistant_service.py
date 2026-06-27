@@ -24,6 +24,7 @@ from intric.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
 from intric.completion_models.infrastructure.web_search import WebSearch
+from intric.files.attachment_budget import compute_attachment_token_budget
 from intric.files.file_models import File, FileType
 from intric.files.file_service import FileService
 from intric.governance_policy.domain.policy_resolver import (
@@ -413,11 +414,14 @@ class AssistantService:
             description=template.description,
         )
 
+        # Validate before persisting: the factory-built assistant already carries
+        # the final model + attachments, so an over-budget set is rejected
+        # without leaving an invalid row behind.
+        self._validate_attachment_token_budget(assistant)
+
         space.add_assistant(assistant)
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant.id)
-
-        self._validate_attachment_token_budget(assistant)
 
         return assistant
 
@@ -437,14 +441,14 @@ class AssistantService:
         if model is None or not attachments:
             return
 
-        budget = int(settings.attachment_context_budget_ratio * model.max_input_tokens)
+        budget = compute_attachment_token_budget(model.max_input_tokens)
         projected = count_attachment_tokens(
             text_files=[a for a in attachments if a.file_type == FileType.TEXT],
             image_files=[a for a in attachments if a.file_type == FileType.IMAGE],
             model_name=model.name,
         )
         if projected > budget:
-            pct = int(settings.attachment_context_budget_ratio * 100)
+            pct = round(budget / model.max_input_tokens * 100)
             raise BadRequestException(
                 f"Attachments use ~{projected} tokens, exceeding the budget of "
                 f"{budget} ({pct}% of the model context window)."
@@ -768,11 +772,14 @@ class AssistantService:
             knowledge_changing=knowledge_changing,
         )
 
-        refreshed_space = await self.space_repo.update(space)
-        assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
-
+        # Validate before persisting (the in-memory assistant already reflects the
+        # final model + attachments from update() above), so an over-budget save
+        # is rejected without committing an invalid row.
         if attachments is not None or completion_model is not None:
             self._validate_attachment_token_budget(assistant)
+
+        refreshed_space = await self.space_repo.update(space)
+        assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(

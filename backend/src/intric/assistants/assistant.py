@@ -181,10 +181,14 @@ class Assistant(Entity):
         for attachment in attachments:
             mimetype = attachment.mimetype or ""
             if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
-                raise BadRequestException("Attachements can only be text files")
+                raise BadRequestException("Attachments can only be text files")
 
-        if sum(attachment.size for attachment in attachments) > 26214400:
-            raise BadRequestException("Files too large!")
+        max_size = get_settings().attachment_max_size_bytes
+        if sum(attachment.size for attachment in attachments) > max_size:
+            raise BadRequestException(
+                f"Attachments exceed the maximum total size of "
+                f"{max_size // (1024 * 1024)} MB."
+            )
 
         self._attachments = attachments
 

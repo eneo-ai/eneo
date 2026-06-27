@@ -380,6 +380,9 @@ class Settings(BaseSettings):
     # file count is only a secondary guardrail.
     attachment_context_budget_ratio: float = Field(default=0.5, gt=0, le=1)
     attachment_max_files: int = 15
+    # Total/per-file byte cap for assistant attachments (advertised to the client
+    # and enforced in the domain). 25 MB.
+    attachment_max_size_bytes: int = 26214400
     # Advisory by default (meter only). Flip on to reject saving an assistant
     # whose attachments exceed the budget.
     attachment_budget_enforced: bool = False
