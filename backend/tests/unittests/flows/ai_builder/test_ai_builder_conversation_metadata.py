@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import get_args
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
+    loose_tool_call_name,
+    loose_tool_call_names_from_message,
     make_persisted_assistant_tool_call,
     metadata_for_user_message,
     metadata_with_slot_classification,
@@ -142,6 +145,32 @@ def test_tool_calls_from_message_skips_malformed_arguments() -> None:
         )
         == tuple()
     )
+
+
+def test_loose_tool_call_names_from_message_preserves_legacy_name_only_rows() -> None:
+    assert loose_tool_call_names_from_message(
+        {
+            "tool_calls": [
+                {"name": "ask_structured_question"},
+                {"id": "call_bad_args", "name": "confirm_requirements"},
+                {"name": ""},
+                {"name": 123},
+            ]
+        }
+    ) == ("ask_structured_question", "confirm_requirements")
+
+
+def test_loose_tool_call_name_reads_active_turn_runtime_shape() -> None:
+    tool_call = SimpleNamespace(
+        function=SimpleNamespace(name="ask_structured_question")
+    )
+
+    assert loose_tool_call_name({"name": "confirm_requirements"}) == (
+        "confirm_requirements"
+    )
+    assert loose_tool_call_name(tool_call) == "ask_structured_question"
+    assert loose_tool_call_name({"function": {"name": "ignored"}}) is None
+    assert loose_tool_call_name(object()) is None
 
 
 def test_provider_safe_tool_call_id_preserves_valid_ids() -> None:
@@ -391,7 +420,6 @@ def test_persisted_tool_call_fields_are_not_read_from_raw_mappings() -> None:
         forbidden,
         exclude={
             "ai_builder_conversation_metadata.py",
-            "ai_builder_telemetry.py",
         },
     )
 

@@ -7,9 +7,13 @@ became part of the durable conversation history the user sees.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, cast
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    loose_tool_call_name,
+    loose_tool_call_names_from_message,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -136,7 +140,9 @@ def summarize_session_telemetry(
         if planner_telemetry is not None:
             _apply_planner_telemetry(summary, planner_telemetry)
             has_data = True
-        question_count = _clarification_question_count(_message_tool_calls(message))
+        question_count = _count_ask_question_names(
+            loose_tool_call_names_from_message(message)
+        )
         if question_count:
             summary["clarification_question_count"] += question_count
             has_data = True
@@ -158,7 +164,11 @@ def advance_session_telemetry(
         _apply_planner_telemetry(summary, planner_telemetry)
         has_data = True
 
-    question_count = _clarification_question_count(tool_calls)
+    question_count = _count_ask_question_names(
+        name
+        for tool_call in tool_calls or ()
+        if (name := loose_tool_call_name(tool_call)) is not None
+    )
     if question_count:
         summary["clarification_question_count"] += question_count
         has_data = True
@@ -306,31 +316,8 @@ def _message_metadata(
     return cast(Mapping[str, Any], metadata) if isinstance(metadata, Mapping) else None
 
 
-def _message_tool_calls(
-    message: ConversationMessage | Mapping[str, Any],
-) -> Sequence[object] | None:
-    if isinstance(message, ConversationMessage):
-        return message.tool_calls
-    tool_calls = message.get("tool_calls")
-    return (
-        cast(Sequence[object], tool_calls) if isinstance(tool_calls, Sequence) else None
-    )
-
-
-def _clarification_question_count(tool_calls: Sequence[object] | None) -> int:
-    if not isinstance(tool_calls, Sequence):
-        return 0
-    count = 0
-    for tool_call in tool_calls:
-        if not isinstance(tool_call, Mapping):
-            function = getattr(tool_call, "function", None)
-            name = getattr(function, "name", None)
-        else:
-            tool_call_map = cast(Mapping[str, Any], tool_call)
-            name = tool_call_map.get("name")
-        if name == ASK_STRUCTURED_QUESTION_TOOL_NAME:
-            count += 1
-    return count
+def _count_ask_question_names(names: Iterable[str]) -> int:
+    return sum(1 for name in names if name == ASK_STRUCTURED_QUESTION_TOOL_NAME)
 
 
 def _safe_int(value: object) -> int | None:

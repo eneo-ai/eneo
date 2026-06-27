@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from intric.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -12,6 +13,9 @@ from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
     build_planner_telemetry,
     summarize_session_telemetry,
+)
+from intric.flows.ai_builder.ai_builder_tool_names import (
+    ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -205,6 +209,71 @@ def test_build_planner_telemetry_defaults_aux_and_tool_call_count() -> None:
     assert rendered["tool_call_count"] == 0
     assert rendered["outcome_kind"] == "rejected"
     assert rendered["architecture_commit_populated"] is False
+
+
+def test_session_summary_counts_legacy_name_only_tool_call() -> None:
+    summary = summarize_session_telemetry(
+        [
+            {
+                "role": "assistant",
+                "content": "Legacy question.",
+                "tool_calls": [{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+                "metadata": {"planner_telemetry": _planner_telemetry()},
+            }
+        ]
+    )
+
+    assert summary is not None
+    assert summary["clarification_question_count"] == 1
+
+
+def test_session_summary_counts_legacy_tool_call_with_malformed_arguments() -> None:
+    summary = summarize_session_telemetry(
+        [
+            {
+                "role": "assistant",
+                "content": "Legacy question.",
+                "tool_calls": [
+                    {
+                        "id": "call_bad_args",
+                        "name": ASK_STRUCTURED_QUESTION_TOOL_NAME,
+                        "arguments": "{not json",
+                    }
+                ],
+                "metadata": {"planner_telemetry": _planner_telemetry()},
+            }
+        ]
+    )
+
+    assert summary is not None
+    assert summary["clarification_question_count"] == 1
+
+
+def test_active_turn_compact_tool_call_counts_clarification_question() -> None:
+    metadata = build_assistant_message_metadata(
+        [],
+        planner_telemetry=_planner_telemetry(),
+        tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+    )
+
+    assert metadata is not None
+    assert metadata["session_telemetry"]["clarification_question_count"] == 1
+
+
+def test_active_turn_runtime_tool_call_names_are_counted_exactly() -> None:
+    ask_tool_call = SimpleNamespace(
+        function=SimpleNamespace(name=ASK_STRUCTURED_QUESTION_TOOL_NAME)
+    )
+    other_tool_call = SimpleNamespace(function=SimpleNamespace(name="propose_flow"))
+
+    metadata = build_assistant_message_metadata(
+        [],
+        planner_telemetry=_planner_telemetry(),
+        tool_calls=[ask_tool_call, other_tool_call, object(), {"name": "other_tool"}],
+    )
+
+    assert metadata is not None
+    assert metadata["session_telemetry"]["clarification_question_count"] == 1
 
 
 def test_session_summary_accumulates_per_turn_fields_from_turn_telemetry() -> None:

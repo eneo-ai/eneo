@@ -310,6 +310,16 @@ def _object_sequence(value: object) -> Sequence[object] | None:
     return cast(Sequence[object], value)
 
 
+def _raw_tool_call_values_from_message(message: object) -> Sequence[object] | None:
+    raw_tool_calls: object = None
+    if isinstance(message, Mapping):
+        message_map = cast(Mapping[str, object], message)
+        raw_tool_calls = message_map.get("tool_calls")
+    else:
+        raw_tool_calls = getattr(message, "tool_calls", None)
+    return _object_sequence(raw_tool_calls)
+
+
 def _bounded_metadata_text(value: str, *, fallback: str) -> str:
     stripped = value.strip()
     if not stripped:
@@ -785,14 +795,7 @@ def persisted_assistant_tool_call_from_raw(
 
 
 def tool_calls_from_message(message: object) -> tuple[PersistedAssistantToolCall, ...]:
-    raw_tool_calls: object = None
-    if isinstance(message, Mapping):
-        message_map = cast(Mapping[str, object], message)
-        raw_tool_calls = message_map.get("tool_calls")
-    else:
-        raw_tool_calls = getattr(message, "tool_calls", None)
-
-    tool_call_values = _object_sequence(raw_tool_calls)
+    tool_call_values = _raw_tool_call_values_from_message(message)
     if tool_call_values is None:
         return tuple()
     parsed: list[PersistedAssistantToolCall] = []
@@ -801,6 +804,28 @@ def tool_calls_from_message(message: object) -> tuple[PersistedAssistantToolCall
         if tool_call is not None:
             parsed.append(tool_call)
     return tuple(parsed)
+
+
+def loose_tool_call_name(value: object) -> str | None:
+    value_map = _mapping_value(value)
+    if value_map is not None:
+        name = value_map.get("name")
+        return name if isinstance(name, str) and name else None
+    function = getattr(value, "function", None)
+    name = getattr(function, "name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def loose_tool_call_names_from_message(message: object) -> tuple[str, ...]:
+    """Loose by design: telemetry preserves legacy counts for invalid tool rows."""
+    tool_call_values = _raw_tool_call_values_from_message(message)
+    if tool_call_values is None:
+        return tuple()
+    return tuple(
+        name
+        for raw_tool_call in tool_call_values
+        if (name := loose_tool_call_name(raw_tool_call)) is not None
+    )
 
 
 def _text_from_scalar(value: object) -> str | None:
