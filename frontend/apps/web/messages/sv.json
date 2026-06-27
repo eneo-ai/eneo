@@ -442,7 +442,7 @@
   "context_usage": "Kontextanvändning",
   "context_usage_estimate": "Beräknad kontextanvändning",
   "config_attachment_meter_label": "Bilagornas kontext",
-  "config_attachment_meter_summary": "≈ {used} / {limit} tokens ({percent} %)",
+  "config_attachment_meter_summary": "≈ {used} / {limit} tokens ({percent}%)",
   "config_attachment_meter_aria": "Bilagornas kontextanvändning",
   "config_attachment_meter_over_budget": "Bilagorna fyller modellens inmatningsfönster. Ta bort några eller välj en modell med större kontext, annars kan delar av innehållet kapas.",
   "context_usage_detail": "{used} av {limit} tokens använda ({percent}%) — baserat på senaste svaret. Nästa meddelande startar härifrån.",

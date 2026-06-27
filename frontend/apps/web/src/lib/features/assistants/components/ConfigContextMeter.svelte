@@ -22,12 +22,6 @@
   let debounce: ReturnType<typeof setTimeout> | null = null;
 
   const limit = $derived(model?.max_input_tokens ?? 0);
-  const attachmentKey = $derived(
-    attachments
-      .map((a) => a.id)
-      .sort()
-      .join(",")
-  );
   const percent = $derived(limit > 0 ? (used / limit) * 100 : 0);
   const show = $derived(loaded && limit > 0 && attachments.length > 0 && used > 0);
   const tone = $derived(percent >= 100 ? "over" : percent >= 80 ? "near" : "ok");
@@ -35,12 +29,10 @@
   const nf = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
 
   $effect(() => {
-    // Track the model + attachment set so the estimate re-runs when either
-    // changes. The denominator uses the LIVE picked model (see parent), so it
-    // stays correct even before the assistant is saved.
+    // Reads model?.id and attachments below, so Svelte re-runs this whenever the
+    // selected model or the attachment set changes. The denominator uses the
+    // LIVE picked model (see parent), so it stays correct even before saving.
     const modelId = model?.id;
-    const key = attachmentKey;
-    void key;
 
     if (debounce) clearTimeout(debounce);
 

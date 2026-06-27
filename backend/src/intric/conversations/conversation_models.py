@@ -95,7 +95,9 @@ class PreflightResponse(BaseModel):
     # Persistent baseline for an assistant target: the system prompt and the
     # attachments sent on EVERY question. 0 for session/group-chat targets.
     # Kept separate from input_tokens/file_tokens (the per-message delta) so a
-    # caller showing both never double-counts.
+    # caller showing both never double-counts. The config-time meter reads the
+    # live per-message file_tokens for accuracy on unsaved edits; these report
+    # the always-present baseline for callers that need it (e.g. a turn-1 view).
     assistant_attachment_tokens: int = 0
     prompt_tokens: int = 0
 

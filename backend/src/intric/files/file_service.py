@@ -33,6 +33,10 @@ class FileService:
         Dual-read: an inline ``blob`` wins (current behaviour); otherwise the
         bytes are fetched from the named backend by ``storage_key``. Returns
         None when the file has no binary content.
+
+        This is the seam's read API. The existing blob consumers still read
+        ``file.blob`` directly; they are routed through here when an alternate
+        backend (S3) lands — see file_content_store.py for the consumer list.
         """
         if file.blob is not None:
             return file.blob
