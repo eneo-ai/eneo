@@ -15,7 +15,6 @@ from typing import (
 )
 from uuid import UUID
 
-from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -169,7 +168,6 @@ class ProposalTurnContext:
     usage_tracker: ProposalTurnTelemetry | None = None
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
-    discovery_runtime: DiscoveryRuntimeResult | None = None
 
     @property
     def session_id(self) -> UUID:

@@ -166,66 +166,6 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
 
 
 @pytest.mark.asyncio
-async def test_create_propose_flow_is_blocked_until_requirements_are_confirmed() -> (
-    None
-):
-    submission = _make_submission()
-    process_create = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
-    )
-    tool_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Test Flow",
-            "plan_rationale": "Extraktion först.",
-            "steps": [
-                {
-                    "name": "Extract",
-                    "instructions": "Extract the text.",
-                    "output_type": "text",
-                }
-            ],
-        },
-        tool_call_id="call-before-confirmation",
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
-            "resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=False),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
-            "build_discovery_runtime_result",
-            new=AsyncMock(return_value=SimpleNamespace(followup=None)),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
-            "analyze_discovery_ready",
-            return_value=True,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission."
-            "process_create_intent_arguments",
-            new=process_create,
-        ),
-    ):
-        dispatched = submission.dispatch_submission_tool_call(
-            ctx=_make_context(request_id="req-proposal-gate"),
-            tool_call=tool_call,
-        )
-        assert dispatched is not None
-        events = _wire_events([event async for event in dispatched])
-
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "requirements_not_confirmed"
-    assert payload["phase"] == "requirements"
-    process_create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_scoped_revision_preflight_skips_existing_flow_edit_context() -> None:
     submission = _make_submission()
     ctx = _make_context(flow=SimpleNamespace(id=uuid4()))
@@ -422,10 +362,6 @@ async def test_create_propose_flow_quality_failure_records_failed_first_attempt(
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction",
             side_effect=_repair_events,
@@ -480,10 +416,6 @@ async def test_create_propose_flow_architecture_error_returns_event_without_repa
     )
 
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction"
@@ -579,10 +511,6 @@ async def test_create_propose_flow_user_message_emits_text_event() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
@@ -617,10 +545,6 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
     )
 
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
@@ -737,10 +661,6 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
@@ -799,10 +719,6 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
         yield build_status_event("repairing")
 
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission."
             "run_tool_self_correction",
@@ -920,20 +836,10 @@ async def test_create_propose_flow_self_correction_returns_typed_error_when_comp
         tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
     )
 
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-    ):
-        litellm_client.acompletion = AsyncMock(
-            side_effect=RuntimeError("provider unavailable")
-        )
-        dispatched = submission.dispatch_submission_tool_call(
-            ctx=ctx, tool_call=tool_call
-        )
-        assert dispatched is not None
-        events = _wire_events([event async for event in dispatched])
+    litellm_client.acompletion = AsyncMock(side_effect=RuntimeError("provider unavailable"))
+    dispatched = submission.dispatch_submission_tool_call(ctx=ctx, tool_call=tool_call)
+    assert dispatched is not None
+    events = _wire_events([event async for event in dispatched])
 
     assert [event["event"] for event in events] == ["status", "error"]
     error_payload = json.loads(events[1]["data"])
@@ -998,18 +904,9 @@ async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
         tool_call_id="call-edit-no-prerequisites",
     )
 
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state"
-        ) as requirements,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.build_discovery_runtime_result",
-            new=AsyncMock(),
-        ) as discovery,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
-            new=process_edit,
-        ),
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
+        new=process_edit,
     ):
         dispatched = submission.dispatch_submission_tool_call(
             ctx=_make_context(flow=SimpleNamespace(id=uuid4(), steps=[])),
@@ -1019,8 +916,6 @@ async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
         events = _wire_events([event async for event in dispatched])
 
     assert [event["event"] for event in events] == ["plan"]
-    requirements.assert_not_called()
-    discovery.assert_not_awaited()
     process_edit.assert_awaited_once()
 
 

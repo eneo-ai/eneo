@@ -197,10 +197,6 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
@@ -643,10 +639,6 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
@@ -780,10 +772,6 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
@@ -888,10 +876,6 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,
         ),
@@ -994,10 +978,6 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         return await _store_compiled_plan(**kwargs)
 
     with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
             new=process_outline,

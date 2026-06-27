@@ -126,10 +126,20 @@ PROPOSAL_SUBMISSION_REQUIRED_PRIVATE_METHODS = frozenset(
         "_process_submission_invocation",
         "_proposal_retry_config",
         "_record_failed_proposal_attempt_repair",
-        "_resolve_submission_prerequisite_events",
         "_retry_forced_proposal_after_text",
         "_run_proposal_self_correction",
     }
+)
+PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_MODULES = frozenset(
+    {
+        "intric.flows.ai_builder.ai_builder_backend_question_persistence",
+        "intric.flows.ai_builder.ai_builder_discovery_runtime",
+        "intric.flows.ai_builder.ai_builder_requirements_state",
+        "intric.flows.ai_builder.ai_builder_tool_names",
+    }
+)
+PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_NAMES = frozenset(
+    {"assistant_metadata_with_usage"}
 )
 PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS = frozenset(
     {
@@ -1454,6 +1464,20 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
                 f"{submission_path}:{submission_classes[0].lineno} stale private "
                 f"methods {sorted(stale_private_methods)}"
             )
+        for module in _imported_modules(submission_tree):
+            if module in PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_MODULES:
+                violations.append(f"{submission_path}: imports {module}")
+        for node in ast.walk(submission_tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            imported_names = {alias.name for alias in node.names}
+            forbidden_names = sorted(
+                imported_names & PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_NAMES
+            )
+            if forbidden_names:
+                violations.append(
+                    f"{submission_path}:{node.lineno} imports {forbidden_names}"
+                )
 
         retry_finalizers = [
             node

@@ -441,7 +441,6 @@ class AIBuilderPlanner:
                             conversation
                         ),
                         planning_state=proposal_request.planning_state,
-                        discovery_runtime=proposal_request.discovery_runtime,
                         plan_edit_context=proposal_request.plan_edit_context,
                         prior_plan_for_revision=(
                             proposal_request.prior_plan_for_revision

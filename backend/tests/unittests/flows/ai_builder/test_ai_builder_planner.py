@@ -966,11 +966,6 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             slot_classification_metadata=None,
             plan_edit_context=None,
             planning_state=PlanningState.empty(),
-            discovery_runtime=_runtime_result(
-                None,
-                DiscoveryAnalysis(issues=()),
-                PlanningState.empty(),
-            ),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[
                     _model_resource(str(local_model_id), "Renamed model")

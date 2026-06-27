@@ -11,7 +11,6 @@ from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
     persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
-from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -107,7 +106,6 @@ class AIBuilderProposalProcessor:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
-        discovery_runtime: DiscoveryRuntimeResult | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         """Run the server-selected plan proposal task.
 
@@ -148,7 +146,6 @@ class AIBuilderProposalProcessor:
             planning_state=planning_state,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
-            discovery_runtime=discovery_runtime,
         ):
             yield event
 

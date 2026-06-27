@@ -23,7 +23,6 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    DiscoveryRuntimeResult,
     build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -145,7 +144,6 @@ class ProposalPrepared(_PreparedBase):
     prior_plan_for_revision: BuilderPlan | None
     resource_catalog: AIBuilderResourceCatalog
     planning_state: PlanningState
-    discovery_runtime: DiscoveryRuntimeResult
 
 
 PreparedTurnOutcome: TypeAlias = (
@@ -280,7 +278,6 @@ async def prepare_planner_request(
         prior_plan_for_revision=request.prior_plan_for_revision,
         resource_catalog=resource_catalog,
         planning_state=rebuilt_planning_state,
-        discovery_runtime=discovery_runtime,
     )
 
 

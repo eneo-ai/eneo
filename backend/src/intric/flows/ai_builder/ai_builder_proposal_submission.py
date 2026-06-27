@@ -11,9 +11,6 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     build_proposal_architecture_error_event,
     record_proposal_architecture_failure,
 )
-from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
-    persist_backend_question,
-)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     make_provider_safe_server_tool_call_id,
@@ -23,10 +20,6 @@ from intric.flows.ai_builder.ai_builder_create_proposal import (
     process_create_intent_arguments,
     process_scoped_step_revision_if_requested,
     scoped_step_revision_assistant_text,
-)
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    DiscoveryRuntimeResult,
-    build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -44,7 +37,6 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
 )
 from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_events import build_text_event
-from intric.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
 from intric.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionMessage,
     LLMCompletionToolCall,
@@ -68,7 +60,6 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalRepairReason,
     ProposalTurnTelemetry,
-    assistant_metadata_with_usage,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
     record_proposal_first_attempt,
@@ -83,16 +74,10 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     forced_tool_choice,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from intric.flows.ai_builder.ai_builder_requirements_state import (
-    resolve_requirements_state,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from intric.flows.ai_builder.ai_builder_tool_names import (
-    ASK_STRUCTURED_QUESTION_TOOL_NAME,
-)
 from intric.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
     parse_tool_call_arguments,
@@ -209,7 +194,6 @@ class ProposalSubmissionOwner:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
-        discovery_runtime: DiscoveryRuntimeResult | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         target_kind = TargetKind.EDIT if flow is not None else TargetKind.CREATE
         tool_schemas = self._active_submission_tool_schemas(
@@ -241,7 +225,6 @@ class ProposalSubmissionOwner:
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
-            discovery_runtime=discovery_runtime,
         )
         scoped_revision_preflight_result = (
             await self._preflight_scoped_step_revision_if_requested(ctx=ctx)
@@ -571,55 +554,6 @@ class ProposalSubmissionOwner:
         ):
             yield event
 
-    async def _resolve_submission_prerequisite_events(
-        self,
-        *,
-        ctx: ProposalTurnContext,
-        requirements_not_confirmed_message: str,
-    ) -> tuple[bool, tuple[AIBuilderStreamEvent, ...]]:
-        requirements_state = resolve_requirements_state(ctx.conversation)
-        if requirements_state.confirmed:
-            return False, ()
-
-        discovery_runtime = (
-            ctx.discovery_runtime
-            or await build_discovery_runtime_result(
-                ctx.conversation,
-                flow=ctx.flow,
-                litellm_client=self.litellm_client,
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-                tenant_id=ctx.turn.tenant_id,
-            )
-        )
-        if discovery_runtime.followup is not None:
-            followup_result = await persist_backend_question(
-                repo=self.repo,
-                turn=ctx.turn,
-                conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
-                question=discovery_runtime.followup,
-                flow=ctx.flow,
-                tool_content="Question presented to user. Awaiting their selection.",
-                assistant_metadata=assistant_metadata_with_usage(
-                    conversation=ctx.conversation,
-                    base_metadata=ctx.assistant_metadata,
-                    usage_tracker=ctx.usage_tracker,
-                    tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-                ),
-            )
-            return True, followup_result.events
-        if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
-            return True, ()
-        return True, (
-            build_ai_builder_error_event(
-                message=requirements_not_confirmed_message,
-                code=AIBuilderErrorCode.REQUIREMENTS_NOT_CONFIRMED,
-                phase=AIBuilderErrorPhase.REQUIREMENTS,
-                request_id=ctx.request_id,
-            ),
-        )
-
     async def _handle_propose_flow_tool_call(
         self,
         *,
@@ -630,20 +564,6 @@ class ProposalSubmissionOwner:
         is_create = target_kind == TargetKind.CREATE
         assistant_snapshots = None if is_create else ctx.assistant_snapshots
         planning_state = ctx.planning_state
-        if is_create:
-            (
-                blocked,
-                prerequisite_events,
-            ) = await self._resolve_submission_prerequisite_events(
-                ctx=ctx,
-                requirements_not_confirmed_message=(
-                    "Requirements must be confirmed before creating a flow."
-                ),
-            )
-            for event in prerequisite_events:
-                yield event
-            if blocked:
-                return
 
         retry_config = self._proposal_retry_config(
             target_kind=target_kind,
