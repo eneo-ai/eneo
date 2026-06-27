@@ -12,12 +12,24 @@
   import type { UploadedFile } from "@intric/intric-js";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
+  import ConfigContextMeter from "$lib/features/assistants/components/ConfigContextMeter.svelte";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
   // This is only the new uploads, it is bound to the attachment upload
   const intric = getIntric();
   const {
-    state: { update }
+    state: { update, resource }
   } = getAssistantEditor();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
+
+  // The editor only tracks completion_model.id, so resolve the full model —
+  // with its context window — from the space's models. Using the live picked
+  // model keeps the meter correct before the assistant is saved.
+  $: selectedModel = $currentSpace.completion_models.find(
+    (model) => model.id === $update.completion_model?.id
+  );
 
   const attachmentRules = getExplicitAttachmentRules($update.allowed_attachments);
 
@@ -62,6 +74,12 @@
 
   $: runningUploads = $newAttachments.filter((attachment) => attachment.status !== "completed");
 </script>
+
+<ConfigContextMeter
+  assistantId={$resource.id}
+  model={selectedModel}
+  attachments={$update.attachments}
+></ConfigContextMeter>
 
 {#each $update.attachments as file (file.id)}
   <div
