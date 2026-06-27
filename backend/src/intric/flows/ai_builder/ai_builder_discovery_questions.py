@@ -8,6 +8,11 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryQuestionSuggestion,
     QuestionExposure,
 )
+from intric.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
+    legacy_question_id_for_slot,
+    render_question,
+)
 
 
 def localized_text(language: DiscoveryLanguage, swedish: str, english: str) -> str:
@@ -29,6 +34,29 @@ def _option(
         label=localized_text(language, swedish_label, english_label),
         description=localized_text(language, swedish_description, english_description),
         value=value,
+    )
+
+
+def _catalog_question(
+    slot_name: str,
+    *,
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    template = QUESTION_CATALOG[slot_name]
+    rendered = render_question(slot_name, language)
+    return DiscoveryQuestionSuggestion(
+        question_id=legacy_question_id_for_slot(slot_name),
+        question=rendered.question,
+        options=tuple(
+            DiscoveryQuestionOption(
+                id=option.id,
+                label=option.label,
+                description=option.description,
+                value=option.value,
+            )
+            for option in rendered.options
+        ),
+        exposure=template.exposure,
     )
 
 
@@ -68,61 +96,7 @@ def processing_scope_question(
 def input_material_mode_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="input_material_mode",
-        question=localized_text(
-            language,
-            "Vilket material ska flödet ta emot vid körning?",
-            "What source material should the flow accept at runtime?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="audio",
-                swedish_label="Ljud",
-                english_label="Audio",
-                swedish_description="Ladda upp en ljudfil som ska transkriberas i flödet.",
-                english_description="Upload an audio file that should be transcribed in the flow.",
-                value="audio",
-            ),
-            _option(
-                language=language,
-                id="documents",
-                swedish_label="Dokument",
-                english_label="Documents",
-                swedish_description="Ladda upp dokument som PDF, Word eller liknande filer.",
-                english_description="Upload documents such as PDF or Word files.",
-                value="documents",
-            ),
-            _option(
-                language=language,
-                id="json",
-                swedish_label="JSON",
-                english_label="JSON",
-                swedish_description="Ta emot en strukturerad JSON-payload vid körning.",
-                english_description="Accept a structured JSON payload at runtime.",
-                value="json",
-            ),
-            _option(
-                language=language,
-                id="text",
-                swedish_label="Text",
-                english_label="Text",
-                swedish_description="Klistra in materialet direkt som text.",
-                english_description="Paste the source material as text.",
-                value="text",
-            ),
-            _option(
-                language=language,
-                id="text_and_documents",
-                swedish_label="Både text och dokument",
-                english_label="Both text and documents",
-                swedish_description="Stöd både inklistrad text och uppladdade dokument.",
-                english_description="Support both pasted text and uploaded documents.",
-                value="text_and_documents",
-            ),
-        ),
-    )
+    return _catalog_question("primary_runtime_input", language=language)
 
 
 def flow_input_architecture_question(
@@ -219,199 +193,19 @@ def document_kind_question(language: DiscoveryLanguage) -> DiscoveryQuestionSugg
 def document_material_scope_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="document_material_scope",
-        question=localized_text(
-            language,
-            "Hur brukar underlaget per körning se ut?",
-            "For one run, what should the uploaded source material usually look like?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="single_document_case",
-                swedish_label="Ett huvuddokument per körning",
-                english_label="One main document per run",
-                swedish_description="Varje körning analyserar normalt ett primärt dokument.",
-                english_description="Each run usually analyzes one primary PDF or document.",
-                value="single_document_case",
-            ),
-            _option(
-                language=language,
-                id="multiple_documents_case",
-                swedish_label="Flera dokument i samma körning",
-                english_label="Several documents in the same run",
-                swedish_description="Varje körning ska kunna hantera ett dokumentpaket med flera relaterade filer.",
-                english_description="Each run should handle a document package with multiple related files.",
-                value="multiple_documents_case",
-            ),
-            _option(
-                language=language,
-                id="flexible_document_case",
-                swedish_label="Ibland ett, ibland flera dokument",
-                english_label="Either one or several documents",
-                swedish_description="Flödet ska fungera både för en enskild fil och ett dokumentpaket.",
-                english_description="The flow should work for both a single file and a document package.",
-                value="flexible_document_case",
-            ),
-        ),
-    )
+    return _catalog_question("document_material_scope", language=language)
 
 
 def post_processing_goal_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="post_processing_goal",
-        question=localized_text(
-            language,
-            "Vad ska flödet hjälpa dig göra med materialet?",
-            "What should the flow help you do with the material?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="stop_after_primary_operation",
-                swedish_label="Bara grundresultatet",
-                english_label="Only the primary result",
-                swedish_description="Stanna efter exempelvis transkription eller konvertering.",
-                english_description="Stop after the transcript, conversion, or other primary result.",
-                value="stop_after_primary_operation",
-            ),
-            _option(
-                language=language,
-                id="summarize_or_overview",
-                swedish_label="Sammanfatta eller ge överblick",
-                english_label="Summarize or give an overview",
-                swedish_description="Skapa en kortare sammanfattning eller översikt.",
-                english_description="Create a shorter summary or overview.",
-                value="summarize_or_overview",
-            ),
-            _option(
-                language=language,
-                id="extract_key_information",
-                swedish_label="Plocka ut nyckeluppgifter",
-                english_label="Extract key information",
-                swedish_description="Hämta ut viktiga fakta, fält, datum, belopp eller liknande.",
-                english_description="Extract important facts, fields, dates, amounts, or similar details.",
-                value="extract_key_information",
-            ),
-            _option(
-                language=language,
-                id="structure_key_information",
-                swedish_label="Strukturera materialet",
-                english_label="Structure the material",
-                swedish_description="Gör materialet till tydliga anteckningar, memo eller rapport.",
-                english_description="Turn the material into clear notes, a memo, or a report.",
-                value="structure_key_information",
-            ),
-            _option(
-                language=language,
-                id="action_followup",
-                swedish_label="Beslut, nästa steg och uppföljning",
-                english_label="Decisions, next steps, and follow-up",
-                swedish_description="Plocka ut beslut, åtgärder, ansvariga, deadlines och öppna frågor.",
-                english_description="Extract decisions, actions, owners, deadlines, and open questions.",
-                value="action_followup",
-            ),
-            _option(
-                language=language,
-                id="decision_support",
-                swedish_label="Rekommendationer och vägval",
-                english_label="Recommendations and guidance",
-                swedish_description="Ta fram rekommendationer eller nästa möjliga vägval.",
-                english_description="Create recommendations or next possible choices.",
-                value="decision_support",
-            ),
-            _option(
-                language=language,
-                id="risk_or_issue_review",
-                swedish_label="Granska risker eller problem",
-                english_label="Review risks or issues",
-                swedish_description="Identifiera risker, avvikelser, osäkerheter eller problem.",
-                english_description="Identify risks, deviations, uncertainty, or problems.",
-                value="risk_or_issue_review",
-            ),
-            _option(
-                language=language,
-                id="compare_or_validate",
-                swedish_label="Jämföra eller validera",
-                english_label="Compare or validate",
-                swedish_description="Jämför mot annat underlag, regler, schema eller checklista.",
-                english_description="Compare against other material, rules, a schema, or a checklist.",
-                value="compare_or_validate",
-            ),
-        ),
-    )
+    return _catalog_question("post_processing_goal", language=language)
 
 
 def structured_io_contract_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="structured_io_contract",
-        question=localized_text(
-            language,
-            "Vad ska flödet göra mellan input-JSON och output-JSON?",
-            "What should the flow do between input JSON and output JSON?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="map_to_new_schema",
-                swedish_label="Mappa till nytt schema",
-                english_label="Map to a new schema",
-                swedish_description="Välj, döp om eller flytta fält till en ny JSON-struktur.",
-                english_description="Select, rename, or move fields into a new JSON shape.",
-                value="map_to_new_schema",
-            ),
-            _option(
-                language=language,
-                id="validate_against_schema_or_rules",
-                swedish_label="Validera mot schema eller regler",
-                english_label="Validate against schema or rules",
-                swedish_description="Kontrollera payloaden mot ett schema, regler eller krav.",
-                english_description="Check the payload against a schema, rules, or requirements.",
-                value="validate_against_schema_or_rules",
-            ),
-            _option(
-                language=language,
-                id="extract_or_compute_fields",
-                swedish_label="Extrahera eller beräkna fält",
-                english_label="Extract or compute fields",
-                swedish_description="Plocka ut, kombinera eller beräkna värden i JSON.",
-                english_description="Extract, combine, or compute values in JSON.",
-                value="extract_or_compute_fields",
-            ),
-            _option(
-                language=language,
-                id="normalize_or_enrich",
-                swedish_label="Normalisera eller berika",
-                english_label="Normalize or enrich",
-                swedish_description="Städa, standardisera eller komplettera payloaden.",
-                english_description="Clean, standardize, or enrich the payload.",
-                value="normalize_or_enrich",
-            ),
-            _option(
-                language=language,
-                id="classify_or_tag",
-                swedish_label="Klassificera eller tagga",
-                english_label="Classify or tag",
-                swedish_description="Lägg till kategori, status, etiketter eller routingfält.",
-                english_description="Add category, status, labels, or routing fields.",
-                value="classify_or_tag",
-            ),
-            _option(
-                language=language,
-                id="custom_schema_or_rules",
-                swedish_label="Eget schema eller egna regler",
-                english_label="Custom schema or rules",
-                swedish_description="Följ ett särskilt kontrakt som användaren beskriver.",
-                english_description="Follow a specific contract described by the user.",
-                value="custom_schema_or_rules",
-            ),
-        ),
-    )
+    return _catalog_question("structured_io_contract", language=language)
 
 
 def comparison_scope_conflict_question(
@@ -501,52 +295,7 @@ def comparison_scope_question(
 def final_output_mode_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="final_output_mode",
-        question=localized_text(
-            language,
-            "Vad ska flödet producera som slutresultat?",
-            "What should the flow produce as the final output?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="structured_text",
-                swedish_label="Strukturerat textresultat",
-                english_label="Structured text output",
-                swedish_description="Ett läsbart memo, rapport eller sammanfattning direkt i flödet.",
-                english_description="A readable memo, report, or summary in the flow output.",
-                value="structured_text",
-            ),
-            _option(
-                language=language,
-                id="pdf_document",
-                swedish_label="PDF-dokument",
-                english_label="PDF document",
-                swedish_description="Generera en PDF som slutresultat.",
-                english_description="Generate a PDF document as the final output.",
-                value="pdf_document",
-            ),
-            _option(
-                language=language,
-                id="docx_document",
-                swedish_label="DOCX-dokument",
-                english_label="DOCX document",
-                swedish_description="Generera ett Word-dokument som slutresultat.",
-                english_description="Generate a Word document as the final output.",
-                value="docx_document",
-            ),
-            _option(
-                language=language,
-                id="structured_json",
-                swedish_label="Strukturerad JSON",
-                english_label="Structured JSON",
-                swedish_description="Maskinläsbara fält för vidare automation eller system.",
-                english_description="Produce machine-readable fields for downstream systems.",
-                value="structured_json",
-            ),
-        ),
-    )
+    return _catalog_question("terminal_output", language=language)
 
 
 def external_delivery_internal_output_question(
@@ -570,34 +319,7 @@ def external_delivery_internal_output_question(
 def docx_output_mode_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="docx_output_mode",
-        question=localized_text(
-            language,
-            "Hur ska DOCX-resultatet skapas?",
-            "How should the DOCX output be created?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="generated_docx",
-                swedish_label="Genererad DOCX utan mall",
-                english_label="Generated DOCX without template",
-                swedish_description="Skapa dokumentinnehållet direkt utan en fast mall.",
-                english_description="Generate the document content directly without a fixed template.",
-                value="generated_docx",
-            ),
-            _option(
-                language=language,
-                id="template_fill_docx",
-                swedish_label="DOCX från mall",
-                english_label="DOCX from template",
-                swedish_description="Fyll en befintlig DOCX-mall med strukturerade fält.",
-                english_description="Fill an existing DOCX template with structured fields.",
-                value="template_fill_docx",
-            ),
-        ),
-    )
+    return _catalog_question("docx_output_mode", language=language)
 
 
 def output_reader_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
@@ -694,77 +416,13 @@ def final_output_scope_question(
 def runtime_metadata_fields_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="runtime_metadata_fields",
-        question=localized_text(
-            language,
-            "Ska användaren också ange metadata vid körning?",
-            "Should the user also enter metadata at runtime?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="no_extra_metadata",
-                swedish_label="Inga extra fält",
-                english_label="No extra fields",
-                swedish_description="Använd bara de uppladdade dokumenten som indata.",
-                english_description="Use only the uploaded documents as input.",
-                value="no_extra_metadata",
-            ),
-            _option(
-                language=language,
-                id="basic_case_metadata",
-                swedish_label="Lägg till grundläggande metadata",
-                english_label="Add basic metadata",
-                swedish_description="Låt användaren ange några enkla återanvändbara fält.",
-                english_description="Let the user enter a few simple reusable fields.",
-                value="basic_case_metadata",
-            ),
-            _option(
-                language=language,
-                id="detailed_case_metadata",
-                swedish_label="Lägg till rikare metadatafält",
-                english_label="Add richer metadata fields",
-                swedish_description="Samla flera återanvändbara fält som referenser, språk, fokus, datum eller ansvarig avdelning.",
-                english_description="Collect several reusable inputs such as references, language, focus, dates, or responsible department.",
-                value="detailed_case_metadata",
-            ),
-        ),
-    )
+    return _catalog_question("runtime_metadata_fields", language=language)
 
 
 def structured_analysis_need_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="structured_analysis_need",
-        question=localized_text(
-            language,
-            "Ska flödet också ta fram strukturerad analys som kan återanvändas i senare steg?",
-            "Should the flow also produce structured analysis that later steps can reuse?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="use_structured_analysis",
-                swedish_label="Ja, använd strukturerad analys där det förbättrar kvaliteten",
-                english_label="Yes, use structured analysis where it improves quality",
-                swedish_description="Extrahera viktiga fält som JSON innan slutrapporten skrivs.",
-                english_description="Extract important fields as JSON before writing the final report.",
-                value="use_structured_analysis",
-            ),
-            _option(
-                language=language,
-                id="text_only_analysis",
-                swedish_label="Nej, håll analysen som vanlig text",
-                english_label="No, keep the analysis as plain text",
-                swedish_description="Undvik extra struktur om den inte behövs.",
-                english_description="Avoid extra structure if it is not needed.",
-                value="text_only_analysis",
-            ),
-        ),
-        exposure="planner_internal",
-    )
+    return _catalog_question("structured_analysis_need", language=language)
 
 
 def final_pdf_type_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
@@ -810,34 +468,7 @@ def final_pdf_type_question(language: DiscoveryLanguage) -> DiscoveryQuestionSug
 def pdf_generation_mode_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
-    return DiscoveryQuestionSuggestion(
-        question_id="pdf_generation_mode",
-        question=localized_text(
-            language,
-            "När du säger PDF-mall, vilket upplägg menar du?",
-            "When you say PDF template, which setup do you mean?",
-        ),
-        options=(
-            _option(
-                language=language,
-                id="generated_pdf",
-                swedish_label="Vanlig genererad PDF",
-                english_label="Normal generated PDF",
-                swedish_description="Skapa en PDF direkt från analysen utan en fast mall.",
-                english_description="Generate a PDF directly from the analysis without a fixed template.",
-                value="generated_pdf",
-            ),
-            _option(
-                language=language,
-                id="pdf_template_requested",
-                swedish_label="Specifik PDF-mall krävs",
-                english_label="A specific PDF template is required",
-                swedish_description="Slutresultatet behöver följa en bestämd PDF-mall eller layout. Inbyggd mallfyllning stöds bara för DOCX/Word.",
-                english_description="The final result must follow a specific PDF template or layout. Native template filling is only supported for DOCX/Word.",
-                value="pdf_template_requested",
-            ),
-        ),
-    )
+    return _catalog_question("pdf_generation_mode", language=language)
 
 
 def question_suggestion_for_id(

@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     _QUESTION_IMPACT,
 )
 from intric.flows.ai_builder.ai_builder_discovery_families import QUESTION_FAMILY
+from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryLanguage
 from intric.flows.ai_builder.ai_builder_discovery_priority import (
     DISCOVERY_ISSUE_PRIORITY,
 )
@@ -837,87 +838,666 @@ class TestDomainNeutrality:
                     )
 
 
-class TestQuestionCopyParity:
-    """The `QUESTION_CATALOG` and `ai_builder_discovery_questions` each
-    render the same user-facing question surface. Both are live — the
-    catalog feeds Builder question selection, and the builders feed the
-    discovery runtime. Any drift between them means the controller and runtime
-    disagree on what to call the same slot. Pin exact parity
-    per (template_id, locale) across question text, help text, options,
-    and worked examples so a future edit to one source blows up here
-    before shipping.
-    """
+_SLOT_BACKED_DISCOVERY_GOLDEN = {
+    ("primary_runtime_input", "sv"): {
+        "question_id": "input_material_mode",
+        "question": "Vilket material ska flödet ta emot vid körning?",
+        "options": (
+            (
+                "audio",
+                "Ljud",
+                "Ladda upp en ljudfil som ska transkriberas i flödet.",
+                "audio",
+            ),
+            (
+                "documents",
+                "Dokument",
+                "Ladda upp dokument som PDF, Word eller liknande filer.",
+                "documents",
+            ),
+            (
+                "json",
+                "JSON",
+                "Ta emot en strukturerad JSON-payload vid körning.",
+                "json",
+            ),
+            ("text", "Text", "Klistra in materialet direkt som text.", "text"),
+            (
+                "text_and_documents",
+                "Både text och dokument",
+                "Stöd både inklistrad text och uppladdade dokument.",
+                "text_and_documents",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("primary_runtime_input", "en"): {
+        "question_id": "input_material_mode",
+        "question": "What source material should the flow accept at runtime?",
+        "options": (
+            (
+                "audio",
+                "Audio",
+                "Upload an audio file that should be transcribed in the flow.",
+                "audio",
+            ),
+            (
+                "documents",
+                "Documents",
+                "Upload documents such as PDF or Word files.",
+                "documents",
+            ),
+            ("json", "JSON", "Accept a structured JSON payload at runtime.", "json"),
+            ("text", "Text", "Paste the source material as text.", "text"),
+            (
+                "text_and_documents",
+                "Both text and documents",
+                "Support both pasted text and uploaded documents.",
+                "text_and_documents",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("terminal_output", "sv"): {
+        "question_id": "final_output_mode",
+        "question": "Vad ska flödet producera som slutresultat?",
+        "options": (
+            (
+                "structured_text",
+                "Strukturerat textresultat",
+                "Ett läsbart memo, rapport eller sammanfattning direkt i flödet.",
+                "structured_text",
+            ),
+            (
+                "pdf_document",
+                "PDF-dokument",
+                "Generera en PDF som slutresultat.",
+                "pdf_document",
+            ),
+            (
+                "docx_document",
+                "DOCX-dokument",
+                "Generera ett Word-dokument som slutresultat.",
+                "docx_document",
+            ),
+            (
+                "structured_json",
+                "Strukturerad JSON",
+                "Maskinläsbara fält för vidare automation eller system.",
+                "structured_json",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("terminal_output", "en"): {
+        "question_id": "final_output_mode",
+        "question": "What should the flow produce as the final output?",
+        "options": (
+            (
+                "structured_text",
+                "Structured text output",
+                "A readable memo, report, or summary in the flow output.",
+                "structured_text",
+            ),
+            (
+                "pdf_document",
+                "PDF document",
+                "Generate a PDF document as the final output.",
+                "pdf_document",
+            ),
+            (
+                "docx_document",
+                "DOCX document",
+                "Generate a Word document as the final output.",
+                "docx_document",
+            ),
+            (
+                "structured_json",
+                "Structured JSON",
+                "Produce machine-readable fields for downstream systems.",
+                "structured_json",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("docx_output_mode", "sv"): {
+        "question_id": "docx_output_mode",
+        "question": "Hur ska DOCX-resultatet skapas?",
+        "options": (
+            (
+                "generated_docx",
+                "Genererad DOCX utan mall",
+                "Skapa dokumentinnehållet direkt utan en fast mall.",
+                "generated_docx",
+            ),
+            (
+                "template_fill_docx",
+                "DOCX från mall",
+                "Fyll en befintlig DOCX-mall med strukturerade fält.",
+                "template_fill_docx",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("docx_output_mode", "en"): {
+        "question_id": "docx_output_mode",
+        "question": "How should the DOCX output be created?",
+        "options": (
+            (
+                "generated_docx",
+                "Generated DOCX without template",
+                "Generate the document content directly without a fixed template.",
+                "generated_docx",
+            ),
+            (
+                "template_fill_docx",
+                "DOCX from template",
+                "Fill an existing DOCX template with structured fields.",
+                "template_fill_docx",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("pdf_generation_mode", "sv"): {
+        "question_id": "pdf_generation_mode",
+        "question": "När du säger PDF-mall, vilket upplägg menar du?",
+        "options": (
+            (
+                "generated_pdf",
+                "Vanlig genererad PDF",
+                "Skapa en PDF direkt från analysen utan en fast mall.",
+                "generated_pdf",
+            ),
+            (
+                "pdf_template_requested",
+                "Specifik PDF-mall krävs",
+                "Slutresultatet behöver följa en bestämd PDF-mall eller layout. "
+                "Inbyggd mallfyllning stöds bara för DOCX/Word.",
+                "pdf_template_requested",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("pdf_generation_mode", "en"): {
+        "question_id": "pdf_generation_mode",
+        "question": "When you say PDF template, which setup do you mean?",
+        "options": (
+            (
+                "generated_pdf",
+                "Normal generated PDF",
+                "Generate a PDF directly from the analysis without a fixed template.",
+                "generated_pdf",
+            ),
+            (
+                "pdf_template_requested",
+                "A specific PDF template is required",
+                "The final result must follow a specific PDF template or layout. "
+                "Native template filling is only supported for DOCX/Word.",
+                "pdf_template_requested",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("document_material_scope", "sv"): {
+        "question_id": "document_material_scope",
+        "question": "Hur brukar underlaget per körning se ut?",
+        "options": (
+            (
+                "single_document_case",
+                "Ett huvuddokument per körning",
+                "Varje körning analyserar normalt ett primärt dokument.",
+                "single_document_case",
+            ),
+            (
+                "multiple_documents_case",
+                "Flera dokument i samma körning",
+                "Varje körning ska kunna hantera ett dokumentpaket med flera relaterade filer.",
+                "multiple_documents_case",
+            ),
+            (
+                "flexible_document_case",
+                "Ibland ett, ibland flera dokument",
+                "Flödet ska fungera både för en enskild fil och ett dokumentpaket.",
+                "flexible_document_case",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("document_material_scope", "en"): {
+        "question_id": "document_material_scope",
+        "question": "For one run, what should the uploaded source material usually look like?",
+        "options": (
+            (
+                "single_document_case",
+                "One main document per run",
+                "Each run usually analyzes one primary PDF or document.",
+                "single_document_case",
+            ),
+            (
+                "multiple_documents_case",
+                "Several documents in the same run",
+                "Each run should handle a document package with multiple related files.",
+                "multiple_documents_case",
+            ),
+            (
+                "flexible_document_case",
+                "Either one or several documents",
+                "The flow should work for both a single file and a document package.",
+                "flexible_document_case",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("post_processing_goal", "sv"): {
+        "question_id": "post_processing_goal",
+        "question": "Vad ska flödet hjälpa dig göra med materialet?",
+        "options": (
+            (
+                "stop_after_primary_operation",
+                "Bara grundresultatet",
+                "Stanna efter exempelvis transkription eller konvertering.",
+                "stop_after_primary_operation",
+            ),
+            (
+                "summarize_or_overview",
+                "Sammanfatta eller ge överblick",
+                "Skapa en kortare sammanfattning eller översikt.",
+                "summarize_or_overview",
+            ),
+            (
+                "extract_key_information",
+                "Plocka ut nyckeluppgifter",
+                "Hämta ut viktiga fakta, fält, datum, belopp eller liknande.",
+                "extract_key_information",
+            ),
+            (
+                "structure_key_information",
+                "Strukturera materialet",
+                "Gör materialet till tydliga anteckningar, memo eller rapport.",
+                "structure_key_information",
+            ),
+            (
+                "action_followup",
+                "Beslut, nästa steg och uppföljning",
+                "Plocka ut beslut, åtgärder, ansvariga, deadlines och öppna frågor.",
+                "action_followup",
+            ),
+            (
+                "decision_support",
+                "Rekommendationer och vägval",
+                "Ta fram rekommendationer eller nästa möjliga vägval.",
+                "decision_support",
+            ),
+            (
+                "risk_or_issue_review",
+                "Granska risker eller problem",
+                "Identifiera risker, avvikelser, osäkerheter eller problem.",
+                "risk_or_issue_review",
+            ),
+            (
+                "compare_or_validate",
+                "Jämföra eller validera",
+                "Jämför mot annat underlag, regler, schema eller checklista.",
+                "compare_or_validate",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("post_processing_goal", "en"): {
+        "question_id": "post_processing_goal",
+        "question": "What should the flow help you do with the material?",
+        "options": (
+            (
+                "stop_after_primary_operation",
+                "Only the primary result",
+                "Stop after the transcript, conversion, or other primary result.",
+                "stop_after_primary_operation",
+            ),
+            (
+                "summarize_or_overview",
+                "Summarize or give an overview",
+                "Create a shorter summary or overview.",
+                "summarize_or_overview",
+            ),
+            (
+                "extract_key_information",
+                "Extract key information",
+                "Extract important facts, fields, dates, amounts, or similar details.",
+                "extract_key_information",
+            ),
+            (
+                "structure_key_information",
+                "Structure the material",
+                "Turn the material into clear notes, a memo, or a report.",
+                "structure_key_information",
+            ),
+            (
+                "action_followup",
+                "Decisions, next steps, and follow-up",
+                "Extract decisions, actions, owners, deadlines, and open questions.",
+                "action_followup",
+            ),
+            (
+                "decision_support",
+                "Recommendations and guidance",
+                "Create recommendations or next possible choices.",
+                "decision_support",
+            ),
+            (
+                "risk_or_issue_review",
+                "Review risks or issues",
+                "Identify risks, deviations, uncertainty, or problems.",
+                "risk_or_issue_review",
+            ),
+            (
+                "compare_or_validate",
+                "Compare or validate",
+                "Compare against other material, rules, a schema, or a checklist.",
+                "compare_or_validate",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("structured_io_contract", "sv"): {
+        "question_id": "structured_io_contract",
+        "question": "Vad ska flödet göra mellan input-JSON och output-JSON?",
+        "options": (
+            (
+                "map_to_new_schema",
+                "Mappa till nytt schema",
+                "Välj, döp om eller flytta fält till en ny JSON-struktur.",
+                "map_to_new_schema",
+            ),
+            (
+                "validate_against_schema_or_rules",
+                "Validera mot schema eller regler",
+                "Kontrollera payloaden mot ett schema, regler eller krav.",
+                "validate_against_schema_or_rules",
+            ),
+            (
+                "extract_or_compute_fields",
+                "Extrahera eller beräkna fält",
+                "Plocka ut, kombinera eller beräkna värden i JSON.",
+                "extract_or_compute_fields",
+            ),
+            (
+                "normalize_or_enrich",
+                "Normalisera eller berika",
+                "Städa, standardisera eller komplettera payloaden.",
+                "normalize_or_enrich",
+            ),
+            (
+                "classify_or_tag",
+                "Klassificera eller tagga",
+                "Lägg till kategori, status, etiketter eller routingfält.",
+                "classify_or_tag",
+            ),
+            (
+                "custom_schema_or_rules",
+                "Eget schema eller egna regler",
+                "Följ ett särskilt kontrakt som användaren beskriver.",
+                "custom_schema_or_rules",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("structured_io_contract", "en"): {
+        "question_id": "structured_io_contract",
+        "question": "What should the flow do between input JSON and output JSON?",
+        "options": (
+            (
+                "map_to_new_schema",
+                "Map to a new schema",
+                "Select, rename, or move fields into a new JSON shape.",
+                "map_to_new_schema",
+            ),
+            (
+                "validate_against_schema_or_rules",
+                "Validate against schema or rules",
+                "Check the payload against a schema, rules, or requirements.",
+                "validate_against_schema_or_rules",
+            ),
+            (
+                "extract_or_compute_fields",
+                "Extract or compute fields",
+                "Extract, combine, or compute values in JSON.",
+                "extract_or_compute_fields",
+            ),
+            (
+                "normalize_or_enrich",
+                "Normalize or enrich",
+                "Clean, standardize, or enrich the payload.",
+                "normalize_or_enrich",
+            ),
+            (
+                "classify_or_tag",
+                "Classify or tag",
+                "Add category, status, labels, or routing fields.",
+                "classify_or_tag",
+            ),
+            (
+                "custom_schema_or_rules",
+                "Custom schema or rules",
+                "Follow a specific contract described by the user.",
+                "custom_schema_or_rules",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("structured_analysis_need", "sv"): {
+        "question_id": "structured_analysis_need",
+        "question": (
+            "Ska flödet också ta fram strukturerad analys som kan återanvändas i senare steg?"
+        ),
+        "options": (
+            (
+                "use_structured_analysis",
+                "Ja, använd strukturerad analys där det förbättrar kvaliteten",
+                "Extrahera viktiga fält som JSON innan slutrapporten skrivs.",
+                "use_structured_analysis",
+            ),
+            (
+                "text_only_analysis",
+                "Nej, håll analysen som vanlig text",
+                "Undvik extra struktur om den inte behövs.",
+                "text_only_analysis",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "planner_internal",
+    },
+    ("structured_analysis_need", "en"): {
+        "question_id": "structured_analysis_need",
+        "question": "Should the flow also produce structured analysis that later steps can reuse?",
+        "options": (
+            (
+                "use_structured_analysis",
+                "Yes, use structured analysis where it improves quality",
+                "Extract important fields as JSON before writing the final report.",
+                "use_structured_analysis",
+            ),
+            (
+                "text_only_analysis",
+                "No, keep the analysis as plain text",
+                "Avoid extra structure if it is not needed.",
+                "text_only_analysis",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "planner_internal",
+    },
+    ("runtime_metadata_fields", "sv"): {
+        "question_id": "runtime_metadata_fields",
+        "question": "Ska användaren också ange metadata vid körning?",
+        "options": (
+            (
+                "no_extra_metadata",
+                "Inga extra fält",
+                "Använd bara de uppladdade dokumenten som indata.",
+                "no_extra_metadata",
+            ),
+            (
+                "basic_case_metadata",
+                "Lägg till grundläggande metadata",
+                "Låt användaren ange några enkla återanvändbara fält.",
+                "basic_case_metadata",
+            ),
+            (
+                "detailed_case_metadata",
+                "Lägg till rikare metadatafält",
+                "Samla flera återanvändbara fält som referenser, språk, fokus, "
+                "datum eller ansvarig avdelning.",
+                "detailed_case_metadata",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+    ("runtime_metadata_fields", "en"): {
+        "question_id": "runtime_metadata_fields",
+        "question": "Should the user also enter metadata at runtime?",
+        "options": (
+            (
+                "no_extra_metadata",
+                "No extra fields",
+                "Use only the uploaded documents as input.",
+                "no_extra_metadata",
+            ),
+            (
+                "basic_case_metadata",
+                "Add basic metadata",
+                "Let the user enter a few simple reusable fields.",
+                "basic_case_metadata",
+            ),
+            (
+                "detailed_case_metadata",
+                "Add richer metadata fields",
+                "Collect several reusable inputs such as references, language, focus, "
+                "dates, or responsible department.",
+                "detailed_case_metadata",
+            ),
+        ),
+        "selection_mode": "single",
+        "allow_custom": True,
+        "exposure": "user_requirement",
+    },
+}
 
-    @staticmethod
-    def _builders_by_template_id():
-        from intric.flows.ai_builder.ai_builder_discovery_questions import (
-            comparison_scope_question,
-            document_kind_question,
-            document_material_scope_question,
-            docx_output_mode_question,
-            final_output_mode_question,
-            final_output_scope_question,
-            final_pdf_type_question,
-            flow_input_architecture_question,
-            input_material_mode_question,
-            output_reader_question,
-            pdf_generation_mode_question,
-            post_processing_goal_question,
-            processing_scope_question,
-            runtime_metadata_fields_question,
-            structured_analysis_need_question,
-            structured_io_contract_question,
+
+def _discovery_payload(
+    question_id: str,
+    locale: DiscoveryLanguage,
+) -> dict[str, object]:
+    from intric.flows.ai_builder.ai_builder_discovery_questions import (
+        question_suggestion_for_id,
+    )
+
+    suggestion = question_suggestion_for_id(question_id, language=locale)
+    assert suggestion is not None
+    return {
+        "question_id": suggestion.question_id,
+        "question": suggestion.question,
+        "options": tuple(
+            (option.id, option.label, option.description, option.value)
+            for option in suggestion.options
+        ),
+        "selection_mode": suggestion.selection_mode,
+        "allow_custom": suggestion.allow_custom,
+        "exposure": suggestion.exposure,
+    }
+
+
+class TestSlotBackedDiscoveryQuestionProjection:
+    @pytest.mark.parametrize(
+        ("slot_name", "locale"),
+        sorted(_SLOT_BACKED_DISCOVERY_GOLDEN),
+    )
+    def test_slot_backed_discovery_questions_match_frozen_payload(
+        self,
+        slot_name: str,
+        locale: DiscoveryLanguage,
+    ) -> None:
+        question_id = legacy_question_id_for_slot(slot_name)
+
+        assert (
+            _discovery_payload(question_id, locale)
+            == (_SLOT_BACKED_DISCOVERY_GOLDEN[(slot_name, locale)])
         )
 
-        return {
-            "processing_scope": processing_scope_question,
-            "input_material_mode": input_material_mode_question,
-            "flow_input_architecture": flow_input_architecture_question,
-            "document_kind": document_kind_question,
-            "document_material_scope": document_material_scope_question,
-            "post_processing_goal": post_processing_goal_question,
-            "structured_io_contract": structured_io_contract_question,
-            "comparison_scope": comparison_scope_question,
-            "final_output_mode": final_output_mode_question,
-            "docx_output_mode": docx_output_mode_question,
-            "output_reader": output_reader_question,
-            "final_output_scope": final_output_scope_question,
-            "runtime_metadata_fields": runtime_metadata_fields_question,
-            "structured_analysis_need": structured_analysis_need_question,
-            "final_pdf_type": final_pdf_type_question,
-            "pdf_generation_mode": pdf_generation_mode_question,
+    def test_frozen_payload_covers_every_catalog_slot_and_locale(self) -> None:
+        assert set(_SLOT_BACKED_DISCOVERY_GOLDEN) == {
+            (slot_name, locale)
+            for slot_name in QUESTION_CATALOG
+            for locale in ("sv", "en")
         }
 
     @pytest.mark.parametrize("locale", ["sv", "en"])
-    def test_catalog_matches_discovery_builder_surface(self, locale: str) -> None:
-        builders = self._builders_by_template_id()
-        for template_id, builder in builders.items():
-            if template_id not in QUESTION_CATALOG:
-                continue
-            rendered = render_question(template_id, locale)  # type: ignore[arg-type]
-            suggestion = builder(locale)  # type: ignore[arg-type]
-            assert rendered.question == suggestion.question, (
-                f"{template_id} [{locale}]: question text diverged "
-                f"between catalog and discovery builder"
+    def test_product_specific_questions_are_not_catalog_slot_projections(
+        self,
+        locale: DiscoveryLanguage,
+    ) -> None:
+        input_projection = _discovery_payload("input_material_mode", locale)
+        flow_architecture = _discovery_payload("flow_input_architecture", locale)
+        terminal_projection = _discovery_payload("final_output_mode", locale)
+        final_pdf_type = _discovery_payload("final_pdf_type", locale)
+
+        assert flow_architecture["question_id"] == "flow_input_architecture"
+        assert flow_architecture["question"] != input_projection["question"]
+        assert final_pdf_type["question_id"] == "final_pdf_type"
+        assert final_pdf_type["question"] != terminal_projection["question"]
+
+    @pytest.mark.parametrize("locale", ["sv", "en"])
+    def test_external_delivery_keeps_own_text_and_final_output_options(
+        self,
+        locale: DiscoveryLanguage,
+    ) -> None:
+        from intric.flows.ai_builder.ai_builder_discovery_questions import (
+            external_delivery_internal_output_question,
+        )
+
+        suggestion = external_delivery_internal_output_question(locale)
+        final_output = _discovery_payload("final_output_mode", locale)
+
+        assert suggestion.question != final_output["question"]
+        assert suggestion.question_id == final_output["question_id"]
+        assert (
+            tuple(
+                (option.id, option.label, option.description, option.value)
+                for option in suggestion.options
             )
-            catalog_options = {option.id: option for option in rendered.options}
-            builder_options = {option.id: option for option in suggestion.options}
-            assert set(catalog_options) == set(builder_options), (
-                f"{template_id} [{locale}]: option id set diverged "
-                f"between catalog and discovery builder"
-            )
-            for option_id, catalog_option in catalog_options.items():
-                builder_option = builder_options[option_id]
-                assert catalog_option.label == builder_option.label, (
-                    f"{template_id} [{locale}] option {option_id!r}: "
-                    f"label diverged between catalog and discovery builder"
-                )
-                assert catalog_option.description == builder_option.description, (
-                    f"{template_id} [{locale}] option {option_id!r}: "
-                    f"description diverged between catalog and discovery "
-                    f"builder"
-                )
-                assert catalog_option.value == builder_option.value, (
-                    f"{template_id} [{locale}] option {option_id!r}: "
-                    f"value diverged between catalog and discovery builder"
-                )
+            == final_output["options"]
+        )
+        assert suggestion.selection_mode == final_output["selection_mode"]
+        assert suggestion.allow_custom == final_output["allow_custom"]
+        assert suggestion.exposure == final_output["exposure"]
