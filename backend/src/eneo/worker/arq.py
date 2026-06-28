@@ -36,6 +36,8 @@ class WorkerSettings:
     on_startup = worker.on_startup
     on_shutdown = worker.on_shutdown
     retry_jobs = worker.retry_jobs
+    job_serializer = worker.job_serializer
+    job_deserializer = worker.job_deserializer
     job_timeout = worker.job_timeout
     max_jobs = worker.max_jobs
     expires_extra_ms = worker.expires_extra_ms

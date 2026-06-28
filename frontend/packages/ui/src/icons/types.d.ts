@@ -9,264 +9,261 @@ declare module "@eneo/icons" {
   import { Icon as IconComponent } from "@eneo/icons/*";
   export type Icon = typeof IconComponent;
 }
-declare module "@eneo/icons/search" {
-  export { Icon as IconSearch } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/list" {
-  export { Icon as IconList } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/bulb" {
-  export { Icon as IconBulb } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/cog" {
-  export { Icon as IconCog } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/selected-item" {
-  export { Icon as IconSelectedItem } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/assistant" {
-  export { Icon as IconAssistant } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/circle" {
-  export { Icon as IconCircle } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/library" {
-  export { Icon as IconLibrary } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/chevron-down" {
-  export { Icon as IconChevronDown } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/list-arrows" {
-  export { Icon as IconListArrows } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/logout" {
-  export { Icon as IconLogout } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/loading-spinner" {
-  export { Icon as IconLoadingSpinner } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/link-external" {
-  export { Icon as IconLinkExternal } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/overview" {
-  export { Icon as IconOverview } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/cancel" {
-  export { Icon as IconCancel } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/file-audio" {
-  export { Icon as IconFileAudio } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/services" {
-  export { Icon as IconServices } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/microphone" {
-  export { Icon as IconMicrophone } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/arrow-up-to-line" {
-  export { Icon as IconArrowUpToLine } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/session" {
-  export { Icon as IconSession } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/file" {
-  export { Icon as IconFile } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/service" {
-  export { Icon as IconService } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/move" {
-  export { Icon as IconMove } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/sparkles" {
-  export { Icon as IconSparkles } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/file-text" {
-  export { Icon as IconFileText } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/at-symbol" {
-  export { Icon as IconAtSymbol } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/chevron-right" {
-  export { Icon as IconChevronRight } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/link" {
-  export { Icon as IconLink } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/key" {
-  export { Icon as IconKey } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/stop-circle" {
-  export { Icon as IconStopCircle } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/sort-desc" {
-  export { Icon as IconSortDesc } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/download" {
-  export { Icon as IconDownload } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/knowledge" {
-  export { Icon as IconKnowledge } from "@eneo/icons/*";
+declare module "@eneo/icons/CPU" {
+  export { Icon as IconCPU } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/app" {
   export { Icon as IconApp } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/file-image" {
-  export { Icon as IconFileImage } from "@eneo/icons/*";
+declare module "@eneo/icons/arrow-down-to-line" {
+  export { Icon as IconArrowDownToLine } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/code" {
-  export { Icon as IconCode } from "@eneo/icons/*";
+declare module "@eneo/icons/arrow-up-to-line" {
+  export { Icon as IconArrowUpToLine } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/stop" {
-  export { Icon as IconStop } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/CPU" {
-  export { Icon as IconCPU } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/squares" {
-  export { Icon as IconSquares } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/plus" {
-  export { Icon as IconPlus } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/document" {
-  export { Icon as IconDocument } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/check" {
-  export { Icon as IconCheck } from "@eneo/icons/*";
+declare module "@eneo/icons/assistant" {
+  export { Icon as IconAssistant } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/assistants" {
   export { Icon as IconAssistants } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/sort-asc-desc" {
-  export { Icon as IconSortAscDesc } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/info" {
-  export { Icon as IconInfo } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/x-mark" {
-  export { Icon as IconXMark } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/people" {
-  export { Icon as IconPeople } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/copy" {
-  export { Icon as IconCopy } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/thumb" {
-  export { Icon as IconThumb } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/arrow-down-to-line" {
-  export { Icon as IconArrowDownToLine } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/refresh" {
-  export { Icon as IconRefresh } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/eneo" {
-  export { Icon as IconEneo } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/square" {
-  export { Icon as IconSquare } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/play" {
-  export { Icon as IconPlay } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/eneo" {
-  export { Icon as IconEneo } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/notification" {
-  export { Icon as IconNotification } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/drop-file" {
-  export { Icon as IconDropFile } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/feedback" {
-  export { Icon as IconFeedback } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/notification-dot" {
-  export { Icon as IconNotificationDot } from "@eneo/icons/*";
+declare module "@eneo/icons/at-symbol" {
+  export { Icon as IconAtSymbol } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/attachment" {
   export { Icon as IconAttachment } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/trash" {
-  export { Icon as IconTrash } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/collections" {
-  export { Icon as IconCollections } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/star" {
-  export { Icon as IconStar } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/edit" {
-  export { Icon as IconEdit } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/send-arrow" {
-  export { Icon as IconSendArrow } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/upload-cloud" {
-  export { Icon as IconUploadCloud } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/integrations" {
-  export { Icon as IconIntegrations } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/sort-asc" {
-  export { Icon as IconSortAsc } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/question-mark" {
-  export { Icon as IconQuestionMark } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/web" {
-  export { Icon as IconWeb } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/usage" {
-  export { Icon as IconUsage } from "@eneo/icons/*";
-}
 declare module "@eneo/icons/building-2" {
   export { Icon as IconBuilding2 } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/profile" {
-  export { Icon as IconProfile } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/share" {
-  export { Icon as IconShare } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/storage" {
-  export { Icon as IconStorage } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/speech-bubble" {
-  export { Icon as IconSpeechBubble } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/filter" {
-  export { Icon as IconFilter } from "@eneo/icons/*";
+declare module "@eneo/icons/bulb" {
+  export { Icon as IconBulb } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/calendar" {
   export { Icon as IconCalendar } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/ellipsis" {
-  export { Icon as IconEllipsis } from "@eneo/icons/*";
+declare module "@eneo/icons/cancel" {
+  export { Icon as IconCancel } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/lock-closed" {
-  export { Icon as IconLockClosed } from "@eneo/icons/*";
+declare module "@eneo/icons/check" {
+  export { Icon as IconCheck } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/upload" {
-  export { Icon as IconUpload } from "@eneo/icons/*";
+declare module "@eneo/icons/chevron-down" {
+  export { Icon as IconChevronDown } from "@eneo/icons/*";
 }
-declare module "@eneo/icons/enter" {
-  export { Icon as IconEnter } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/lock-open" {
-  export { Icon as IconLockOpen } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/history" {
-  export { Icon as IconHistory } from "@eneo/icons/*";
-}
-declare module "@eneo/icons/folder" {
-  export { Icon as IconFolder } from "@eneo/icons/*";
+declare module "@eneo/icons/chevron-right" {
+  export { Icon as IconChevronRight } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/chevron-up-down" {
   export { Icon as IconChevronUpDown } from "@eneo/icons/*";
 }
+declare module "@eneo/icons/circle" {
+  export { Icon as IconCircle } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/code" {
+  export { Icon as IconCode } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/cog" {
+  export { Icon as IconCog } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/collections" {
+  export { Icon as IconCollections } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/copy" {
+  export { Icon as IconCopy } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/document" {
+  export { Icon as IconDocument } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/download" {
+  export { Icon as IconDownload } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/drop-file" {
+  export { Icon as IconDropFile } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/edit" {
+  export { Icon as IconEdit } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/ellipsis" {
+  export { Icon as IconEllipsis } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/eneo" {
+  export { Icon as IconEneo } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/enter" {
+  export { Icon as IconEnter } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/feedback" {
+  export { Icon as IconFeedback } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/file-audio" {
+  export { Icon as IconFileAudio } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/file-image" {
+  export { Icon as IconFileImage } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/file-text" {
+  export { Icon as IconFileText } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/file" {
+  export { Icon as IconFile } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/filter" {
+  export { Icon as IconFilter } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/folder" {
+  export { Icon as IconFolder } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/history" {
+  export { Icon as IconHistory } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/info" {
+  export { Icon as IconInfo } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/integrations" {
+  export { Icon as IconIntegrations } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/key" {
+  export { Icon as IconKey } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/knowledge" {
+  export { Icon as IconKnowledge } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/library" {
+  export { Icon as IconLibrary } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/link-external" {
+  export { Icon as IconLinkExternal } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/link" {
+  export { Icon as IconLink } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/list-arrows" {
+  export { Icon as IconListArrows } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/list" {
+  export { Icon as IconList } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/loading-spinner" {
+  export { Icon as IconLoadingSpinner } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/lock-closed" {
+  export { Icon as IconLockClosed } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/lock-open" {
+  export { Icon as IconLockOpen } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/logout" {
+  export { Icon as IconLogout } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/microphone" {
+  export { Icon as IconMicrophone } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/move" {
+  export { Icon as IconMove } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/notification-dot" {
+  export { Icon as IconNotificationDot } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/notification" {
+  export { Icon as IconNotification } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/overview" {
+  export { Icon as IconOverview } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/people" {
+  export { Icon as IconPeople } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/play" {
+  export { Icon as IconPlay } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/plus" {
+  export { Icon as IconPlus } from "@eneo/icons/*";
+}
 declare module "@eneo/icons/print" {
   export { Icon as IconPrint } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/profile" {
+  export { Icon as IconProfile } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/question-mark" {
+  export { Icon as IconQuestionMark } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/refresh" {
+  export { Icon as IconRefresh } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/search" {
+  export { Icon as IconSearch } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/selected-item" {
+  export { Icon as IconSelectedItem } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/send-arrow" {
+  export { Icon as IconSendArrow } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/service" {
+  export { Icon as IconService } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/services" {
+  export { Icon as IconServices } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/session" {
+  export { Icon as IconSession } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/share" {
+  export { Icon as IconShare } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/sort-asc-desc" {
+  export { Icon as IconSortAscDesc } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/sort-asc" {
+  export { Icon as IconSortAsc } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/sort-desc" {
+  export { Icon as IconSortDesc } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/sparkles" {
+  export { Icon as IconSparkles } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/speech-bubble" {
+  export { Icon as IconSpeechBubble } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/square" {
+  export { Icon as IconSquare } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/squares" {
+  export { Icon as IconSquares } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/star" {
+  export { Icon as IconStar } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/stop-circle" {
+  export { Icon as IconStopCircle } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/stop" {
+  export { Icon as IconStop } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/storage" {
+  export { Icon as IconStorage } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/thumb" {
+  export { Icon as IconThumb } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/trash" {
+  export { Icon as IconTrash } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/upload-cloud" {
+  export { Icon as IconUploadCloud } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/upload" {
+  export { Icon as IconUpload } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/usage" {
+  export { Icon as IconUsage } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/web" {
+  export { Icon as IconWeb } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/x-mark" {
+  export { Icon as IconXMark } from "@eneo/icons/*";
 }

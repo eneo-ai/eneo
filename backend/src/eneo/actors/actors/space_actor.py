@@ -625,7 +625,7 @@ class SpaceActor:
 
         if (
             resource_type == SpaceResourceType.SERVICE
-            and Modules.INTRIC_APPLICATIONS not in self.user.modules
+            and Modules.ENEO_APPLICATIONS not in self.user.modules
         ):
             return False
 

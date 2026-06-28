@@ -139,7 +139,7 @@ class CommitHookTests(unittest.TestCase):
         bin_dir = root / "bin"
         marker = root / "type-check-ran"
         bin_dir.mkdir()
-        for executable in ("bash", "bun"):
+        for executable in ("bun",):
             candidate = bin_dir / executable
             candidate.write_text(
                 f"#!/usr/bin/env sh\nprintf '%s\\n' {executable} > {marker}\nexit 99\n",
@@ -270,13 +270,8 @@ class CommitHookTests(unittest.TestCase):
 
     def test_pre_push_check_runs_route_metadata_for_endpoint_changes(self) -> None:
         root = self.make_repo()
-        bin_dir = root / "bin"
         scripts_dir = root / "scripts"
-        bin_dir.mkdir()
         scripts_dir.mkdir()
-        bash = bin_dir / "bash"
-        bash.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
-        bash.chmod(0o755)
         (scripts_dir / "check_route_metadata.py").write_text(
             ROUTE_METADATA_CHECK.read_text(encoding="utf-8"),
             encoding="utf-8",
@@ -307,8 +302,7 @@ class CommitHookTests(unittest.TestCase):
         )
         subprocess.run(["git", "commit", "-m", "feat: add demo route"], cwd=root, check=True, capture_output=True, text=True)
 
-        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
-        result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
+        result = run_script(PRE_PUSH_CHECK, cwd=root)
         self.assertEqual(result.returncode, 2)
         self.assertIn("route decorator missing description, responses", result.stderr)
 

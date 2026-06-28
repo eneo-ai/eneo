@@ -1,5 +1,5 @@
-import { PartialError } from "./client";
-import { getBytes, getLines, getMessages } from "./parse";
+import { PartialError } from "./client.js";
+import { getBytes, getLines, getMessages } from "./parse.js";
 
 /**
  * Reading a ResponseStream and running a callback on every received message

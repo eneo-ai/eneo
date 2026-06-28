@@ -193,7 +193,7 @@ class CompletionService:
                     call_args = json.loads(arguments)
 
                     if name == "generate_image":
-                        yield Completion(response_type=ResponseType.INTRIC_EVENT)
+                        yield Completion(response_type=ResponseType.ENEO_EVENT)
 
                         chunk.image_data = await generate_image(**call_args)  # type: ignore[attr-defined]
                         chunk.response_type = ResponseType.FILES

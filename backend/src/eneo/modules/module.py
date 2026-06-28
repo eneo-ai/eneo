@@ -10,7 +10,7 @@ class Modules(str, Enum):
     Any change to these enums will result in database changes
     """
 
-    INTRIC_APPLICATIONS = "eneo-applications"
+    ENEO_APPLICATIONS = "eneo-applications"
 
 
 class ModuleBase(BaseModel):

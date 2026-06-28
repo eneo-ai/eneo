@@ -14,6 +14,7 @@ from dependency_injector import providers
 from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
+from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
@@ -181,6 +182,8 @@ class Worker:
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
         self.retry_jobs = False
+        self.job_serializer = serialize_job
+        self.job_deserializer = deserialize_job
         # Job timeout is a safety net - uses global env default as upper bound.
         # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
         # which respects tenant-specific crawl_max_length settings.

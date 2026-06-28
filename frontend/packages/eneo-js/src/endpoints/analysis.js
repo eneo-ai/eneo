@@ -1,7 +1,7 @@
 /** @typedef {import('../types/resources').AnalyticsData} AnalyticsData */
 /** @typedef {import('../types/resources').AnalyticsAggregatedData} AnalyticsAggregatedData */
 /** @typedef {import('../types/resources').Assistant} Assistant */
-import { EneoError } from "../client/client";
+import { EneoError } from "../client/client.js";
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints

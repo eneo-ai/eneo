@@ -7,8 +7,8 @@
  * @property {string} version Version of the Api this client was created for
  */
 
-import { readEvents } from "./stream";
-import { xhr } from "./xhr";
+import { readEvents } from "./stream.js";
+import { xhr } from "./xhr.js";
 
 /**
  * Creates a client to request eneo resources over a typesafe interface.

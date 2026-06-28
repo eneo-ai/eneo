@@ -1,4 +1,4 @@
-export { createEneo } from "./src/eneo";
-export { createEneoSocket } from "./src/socket/socket";
-export { createClient } from "./src/client/client";
-export { EneoError } from "./src/client/client";
+export { createEneo } from "./src/eneo.js";
+export { createEneoSocket } from "./src/socket/socket.js";
+export { createClient } from "./src/client/client.js";
+export { EneoError } from "./src/client/client.js";

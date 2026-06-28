@@ -5,6 +5,7 @@ from arq.connections import ArqRedis
 from arq.jobs import Job
 
 from eneo.jobs.job_models import Task
+from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import TaskParams
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotReadyException
@@ -21,7 +22,11 @@ class JobManager:
 
     async def init(self):
         settings = get_settings()
-        self._redis = await create_pool(build_arq_redis_settings(settings))
+        self._redis = await create_pool(
+            build_arq_redis_settings(settings),
+            job_serializer=serialize_job,
+            job_deserializer=deserialize_job,
+        )
 
         logger.debug(
             f"Job manager connected to redis on host {settings.redis_host}"

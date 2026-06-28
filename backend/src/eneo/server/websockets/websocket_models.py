@@ -6,7 +6,7 @@ from pydantic import BaseModel, model_validator
 
 from eneo.main.models import ChannelType, Status
 
-INTRIC_SUBPROTOCOL = "eneo"
+ENEO_SUBPROTOCOL = "eneo"
 
 
 class OutGoingMessageType(str, Enum):

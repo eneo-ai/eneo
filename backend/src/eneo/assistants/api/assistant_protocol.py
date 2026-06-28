@@ -230,7 +230,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],
         )
 
-    elif chunk.response_type == ResponseType.INTRIC_EVENT:
+    elif chunk.response_type == ResponseType.ENEO_EVENT:
         data = SSEEneoEvent(
             session_id=session_id,
             eneo_event_type=EneoEventType.GENERATING_IMAGE,

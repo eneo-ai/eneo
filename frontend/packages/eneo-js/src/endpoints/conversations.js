@@ -6,7 +6,7 @@
 /** @typedef {import('../types/resources').Group} Group */
 /** @typedef {import('../types/resources').PromptSparse} PromptSparse */
 
-import { EneoError } from "../client/client";
+import { EneoError } from "../client/client.js";
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints

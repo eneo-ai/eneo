@@ -39,10 +39,10 @@ export const eneoIcons = () => {
     name: "vite-plugin-eneo-icons",
     enforce: "pre",
 
-    buildStart() {
+    async buildStart() {
       this.addWatchFile(paths.iconFolderPath);
       this.addWatchFile(paths.templateFilePath);
-      generateTypes();
+      await generateTypes();
     },
 
     resolveId(id) {
@@ -169,12 +169,15 @@ function createCommonTypeDeclaration(iconTemplateContents) {
 /** @param {string[]} iconFilePaths */
 function createIndividualModuleDeclarations(iconFilePaths) {
   const getModuleName = (/** @type {string} */ icon) => "@eneo/icons/" + icon.replace(".svg", "");
-  return iconFilePaths.reduce((acc, icon) => {
-    acc += `declare module "${getModuleName(icon)}" {
+  return [...new Set(iconFilePaths.filter((icon) => icon.endsWith(".svg")).sort())].reduce(
+    (acc, icon) => {
+      acc += `declare module "${getModuleName(icon)}" {
       export {Icon as ${getIconName(icon)}} from "@eneo/icons/*";
     }`;
-    return acc;
-  }, "");
+      return acc;
+    },
+    ""
+  );
 }
 
 /**

@@ -1,7 +1,7 @@
 /** @typedef {import('../types/resources').AssistantTemplate} AssistantTemplate */
 /** @typedef {import('../types/resources').AppTemplate} AppTemplate */
 
-import { EneoError } from "../client/client";
+import { EneoError } from "../client/client.js";
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints

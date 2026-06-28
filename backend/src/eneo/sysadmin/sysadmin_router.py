@@ -758,7 +758,7 @@ async def add_origin(
         entity_id=origin.tenant_id,
         description="Updated tenant API key policy (allowed origin added)",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {"tenant_id": str(origin.tenant_id)},
             "changes": {"allowed_origins": {"added": [origin.url]}},
         },
@@ -811,7 +811,7 @@ async def delete_origin(
         entity_id=origin.tenant_id,
         description="Updated tenant API key policy (allowed origin removed)",
         metadata={
-            "actor": {"type": "sysadmin", "via": "intric_super_api_key"},
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
             "target": {"tenant_id": str(origin.tenant_id)},
             "changes": {"allowed_origins": {"removed": [origin.url]}},
         },
