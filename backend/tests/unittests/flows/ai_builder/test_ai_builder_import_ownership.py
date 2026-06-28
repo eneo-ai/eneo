@@ -236,6 +236,12 @@ PLANNER_REQUEST_PREPARATION_MODULE = ".".join(
 PLANNER_FAILURE_EVENTS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_planner_failure_events")
 )
+SEND_LEASE_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_send_lease")
+)
+USER_QUESTION_METADATA_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_user_question_metadata")
+)
 SERVER_DECISION_DISPATCH_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_server_decision_dispatch.py"
 )
@@ -244,6 +250,10 @@ PLANNER_REQUEST_PREPARATION_PATH = Path(
 )
 PLANNER_FAILURE_EVENTS_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_planner_failure_events.py"
+)
+SEND_LEASE_PATH = Path("src/intric/flows/ai_builder/ai_builder_send_lease.py")
+USER_QUESTION_METADATA_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_user_question_metadata.py"
 )
 PLANNER_PATH = Path("src/intric/flows/ai_builder/ai_builder_planner.py")
 PROPOSAL_INTENT_MODULE = ".".join(
@@ -331,6 +341,18 @@ PLANNER_FAILURE_EVENTS_PUBLIC_NAMES = frozenset(
     {
         "build_planner_upstream_error_event",
         "build_session_send_lease_lost_event",
+    }
+)
+SEND_LEASE_PUBLIC_NAMES = frozenset(
+    {
+        "ClaimedSessionSendTurn",
+        "claim_ai_builder_send_turn",
+    }
+)
+USER_QUESTION_METADATA_PUBLIC_NAMES = frozenset(
+    {
+        "UserQuestionMetadataResolution",
+        "resolve_user_question_metadata",
     }
 )
 PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
@@ -1895,6 +1917,94 @@ def test_server_decision_dispatch_has_canonical_owner() -> None:
                     violations.append(
                         f"{dispatch_path}:{node.lineno} has {len(request_fields)} fields"
                     )
+
+    assert violations == []
+
+
+def test_send_turn_lifecycle_has_canonical_owners() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    planner_path = backend_root / PLANNER_PATH
+    send_lease_path = backend_root / SEND_LEASE_PATH
+    metadata_path = backend_root / USER_QUESTION_METADATA_PATH
+    violations: list[str] = []
+
+    if importlib.util.find_spec(SEND_LEASE_MODULE) is None:
+        violations.append(f"{send_lease_path}: missing send lease owner module")
+    if importlib.util.find_spec(USER_QUESTION_METADATA_MODULE) is None:
+        violations.append(f"{metadata_path}: missing user question metadata owner module")
+
+    planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
+    planner_class = next(
+        node
+        for node in ast.walk(planner_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderPlanner"
+    )
+    planner_methods = {
+        node.name
+        for node in planner_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    stale_planner_methods = {
+        "_send_lock_lease_seconds",
+        "_next_send_lock_expiry",
+        "_send_lock_refresh_interval_seconds",
+        "_maintain_send_lock_lease",
+        "_resolve_message_metadata",
+    }
+    for method_name in sorted(planner_methods & stale_planner_methods):
+        violations.append(f"{planner_path}: AIBuilderPlanner defines {method_name}")
+
+    planner_imports = _imported_modules(planner_tree)
+    for required_module in {SEND_LEASE_MODULE, USER_QUESTION_METADATA_MODULE}:
+        if required_module not in planner_imports:
+            violations.append(f"{planner_path}: does not import {required_module}")
+
+    for node in ast.walk(planner_tree):
+        if isinstance(node, ast.Name) and node.id in {
+            "SessionSendLease",
+            "SessionSendTurn",
+            "uuid4",
+        }:
+            violations.append(f"{planner_path}:{node.lineno} references {node.id}")
+
+    if send_lease_path.is_file():
+        send_lease_tree = ast.parse(
+            send_lease_path.read_text(), filename=str(send_lease_path)
+        )
+        public_names = _top_level_public_names(send_lease_tree)
+        if public_names != SEND_LEASE_PUBLIC_NAMES:
+            violations.append(f"{send_lease_path}: public names {sorted(public_names)}")
+        for module in _imported_modules(send_lease_tree):
+            if module in {
+                AI_BUILDER_PLANNER_MODULE,
+                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
+                SERVER_DECISION_DISPATCH_MODULE,
+                USER_QUESTION_METADATA_MODULE,
+                "intric.flows.ai_builder.ai_builder_litellm_completion",
+            }:
+                violations.append(f"{send_lease_path}: imports {module}")
+        for node in ast.walk(send_lease_tree):
+            if isinstance(node, ast.Name) and node.id == "Any":
+                violations.append(f"{send_lease_path}:{node.lineno} references Any")
+
+    if metadata_path.is_file():
+        metadata_tree = ast.parse(metadata_path.read_text(), filename=str(metadata_path))
+        public_names = _top_level_public_names(metadata_tree)
+        if public_names != USER_QUESTION_METADATA_PUBLIC_NAMES:
+            violations.append(f"{metadata_path}: public names {sorted(public_names)}")
+        for module in _imported_modules(metadata_tree):
+            if module in {
+                AI_BUILDER_PLANNER_MODULE,
+                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
+                SERVER_DECISION_DISPATCH_MODULE,
+                SEND_LEASE_MODULE,
+                "intric.flows.ai_builder.ai_builder_repo",
+                "intric.flows.ai_builder.ai_builder_litellm_completion",
+            }:
+                violations.append(f"{metadata_path}: imports {module}")
+        for node in ast.walk(metadata_tree):
+            if isinstance(node, ast.Name) and node.id == "Any":
+                violations.append(f"{metadata_path}:{node.lineno} references Any")
 
     assert violations == []
 

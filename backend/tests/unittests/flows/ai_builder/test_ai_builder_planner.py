@@ -67,6 +67,9 @@ from intric.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     CommitArchitecture,
 )
+from intric.flows.ai_builder.ai_builder_user_question_metadata import (
+    resolve_user_question_metadata,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -333,8 +336,16 @@ async def _collect_send_message_events(
     ]
 
 
+def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_send_lease."
+        "_send_lock_refresh_interval_seconds",
+        lambda: 0,
+    )
+
+
 @pytest.mark.asyncio
-async def test_resolve_message_metadata_uses_freeform_inference_before_adjudication() -> (
+async def test_resolve_user_question_metadata_uses_freeform_inference_before_adjudication() -> (
     None
 ):
     planner = _make_planner()
@@ -345,15 +356,18 @@ async def test_resolve_message_metadata_uses_freeform_inference_before_adjudicat
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.infer_question_answer_from_freeform",
+            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "infer_question_answer_from_freeform",
             return_value=inferred_answer,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.adjudicate_pending_question_answer",
+            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
         ) as adjudicate,
     ):
-        result = await planner._resolve_message_metadata(
+        result = await resolve_user_question_metadata(
+            litellm_client=planner.litellm_client,
             conversation=[],
             message="Use uploaded documents.",
             question_answer=None,
@@ -368,12 +382,13 @@ async def test_resolve_message_metadata_uses_freeform_inference_before_adjudicat
 
 
 @pytest.mark.asyncio
-async def test_resolve_message_metadata_preserves_requirements_confirmation_and_ui_language() -> (
+async def test_resolve_user_question_metadata_preserves_requirements_confirmation_and_ui_language() -> (
     None
 ):
     planner = _make_planner()
 
-    result = await planner._resolve_message_metadata(
+    result = await resolve_user_question_metadata(
+        litellm_client=planner.litellm_client,
         conversation=[],
         message="Yes",
         question_answer={
@@ -396,22 +411,25 @@ async def test_resolve_message_metadata_preserves_requirements_confirmation_and_
 
 
 @pytest.mark.asyncio
-async def test_resolve_message_metadata_does_not_adjudicate_without_pending_question() -> (
+async def test_resolve_user_question_metadata_does_not_adjudicate_without_pending_question() -> (
     None
 ):
     planner = _make_planner()
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.infer_question_answer_from_freeform",
+            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "infer_question_answer_from_freeform",
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.adjudicate_pending_question_answer",
+            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
         ) as adjudicate,
     ):
-        result = await planner._resolve_message_metadata(
+        result = await resolve_user_question_metadata(
+            litellm_client=planner.litellm_client,
             conversation=[],
             message="Bygg ett flöde som skapar en DOCX-rapport från ljud.",
             question_answer=None,
@@ -425,7 +443,7 @@ async def test_resolve_message_metadata_does_not_adjudicate_without_pending_ques
 
 
 @pytest.mark.asyncio
-async def test_resolve_message_metadata_marks_auxiliary_llm_when_pending_answer_adjudication_runs() -> (
+async def test_resolve_user_question_metadata_marks_auxiliary_llm_when_pending_answer_adjudication_runs() -> (
     None
 ):
     planner = _make_planner()
@@ -453,11 +471,13 @@ async def test_resolve_message_metadata_marks_auxiliary_llm_when_pending_answer_
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.infer_question_answer_from_freeform",
+            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "infer_question_answer_from_freeform",
             return_value=None,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.adjudicate_pending_question_answer",
+            "intric.flows.ai_builder.ai_builder_user_question_metadata."
+            "adjudicate_pending_question_answer",
             new_callable=AsyncMock,
             return_value=PendingQuestionResolution(
                 question_id="final_output_mode",
@@ -466,7 +486,8 @@ async def test_resolve_message_metadata_marks_auxiliary_llm_when_pending_answer_
             ),
         ),
     ):
-        result = await planner._resolve_message_metadata(
+        result = await resolve_user_question_metadata(
+            litellm_client=planner.litellm_client,
             conversation=conversation,
             message="Make it a PDF",
             question_answer=None,
@@ -478,7 +499,7 @@ async def test_resolve_message_metadata_marks_auxiliary_llm_when_pending_answer_
 
 
 @pytest.mark.asyncio
-async def test_resolve_message_metadata_infers_final_output_answer_from_structured_label() -> (
+async def test_resolve_user_question_metadata_infers_final_output_answer_from_structured_label() -> (
     None
 ):
     planner = _make_planner()
@@ -509,7 +530,8 @@ async def test_resolve_message_metadata_infers_final_output_answer_from_structur
         )
     ]
 
-    result = await planner._resolve_message_metadata(
+    result = await resolve_user_question_metadata(
+        litellm_client=planner.litellm_client,
         conversation=conversation,
         message="PDF-dokument",
         question_answer=None,
@@ -1040,11 +1062,7 @@ async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_di
     session_id = uuid4()
     refresh_attempted = asyncio.Event()
     _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
-    monkeypatch.setattr(
-        AIBuilderPlanner,
-        "_send_lock_refresh_interval_seconds",
-        staticmethod(lambda: 0),
-    )
+    _force_fast_send_lock_refresh(monkeypatch)
 
     async def refresh_fails(**_: object) -> bool:
         refresh_attempted.set()
@@ -1080,11 +1098,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
     planner = _make_planner()
     session_id = uuid4()
     refresh_attempted = asyncio.Event()
-    monkeypatch.setattr(
-        AIBuilderPlanner,
-        "_send_lock_refresh_interval_seconds",
-        staticmethod(lambda: 0),
-    )
+    _force_fast_send_lock_refresh(monkeypatch)
     _configure_minimal_send_message(
         planner,
         monkeypatch,
@@ -1145,6 +1159,51 @@ async def test_send_message_releases_lease_after_server_dispatch_exception(
 
     assert [event["event"] for event in events] == ["error", "done"]
     assert json.loads(events[0]["data"])["code"] == "planner_upstream_error"
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_releases_lease_when_request_preparation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+    )
+    planner.repo.load_planning_state.return_value = None
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+
+    async def fail_prepare(_: PlannerRequestPreparationInput) -> ServerOutputPrepared:
+        raise RuntimeError("preparation failed")
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        fail_prepare,
+    )
+    stream = planner.send_message(
+        session_id=session_id,
+        message="Build a flow",
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_models=None,
+        available_kbs=None,
+        flow=None,
+        assistant_snapshots=None,
+        attachment_files=None,
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+
+    with pytest.raises(RuntimeError, match="preparation failed"):
+        await anext(stream)
+
     planner.repo.release_session_send.assert_awaited_once()
 
 

@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from intric.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
 )
 from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
-    UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
     metadata_for_user_message,
     metadata_with_slot_classification,
-    requirements_confirmation_from_question_answer,
-    ui_language_from_question_answer,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -28,10 +22,6 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
 )
 from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_events import build_done_event
-from intric.flows.ai_builder.ai_builder_framework_policy import (
-    infer_question_answer_from_freeform,
-    latest_pending_structured_question,
-)
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -55,16 +45,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
 )
-from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
-    adjudicate_pending_question_answer,
-)
+from intric.flows.ai_builder.ai_builder_send_lease import claim_ai_builder_send_turn
 from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     dispatch_server_decision,
-)
-from intric.flows.ai_builder.ai_builder_session_turn import (
-    SessionSendLease,
-    SessionSendTurn,
 )
 from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
@@ -73,8 +57,10 @@ from intric.flows.ai_builder.ai_builder_settings import (
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
 )
+from intric.flows.ai_builder.ai_builder_user_question_metadata import (
+    resolve_user_question_metadata,
+)
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
 
@@ -95,13 +81,6 @@ def _session_status_value(status: object) -> str:
     if isinstance(value, str):
         return value
     return str(status)
-
-
-@dataclass(frozen=True)
-class PlannerMetadataResolution:
-    metadata: dict[str, Any] | None
-    is_requirements_confirmation: bool
-    used_auxiliary_llm: bool
 
 
 class AIBuilderPlanner:
@@ -129,117 +108,6 @@ class AIBuilderPlanner:
             self_correction_bumped_temperature=self_correction_bumped_temperature,
             forced_proposal_temperature=forced_proposal_temperature,
             quality_retry_warning_codes=quality_retry_warning_codes,
-        )
-
-    @staticmethod
-    def _send_lock_lease_seconds() -> int:
-        return max(30, int(get_settings().ai_builder_send_lock_lease_seconds))
-
-    @classmethod
-    def _next_send_lock_expiry(cls) -> datetime:
-        return datetime.now(timezone.utc) + timedelta(
-            seconds=cls._send_lock_lease_seconds()
-        )
-
-    @classmethod
-    def _send_lock_refresh_interval_seconds(cls) -> int:
-        return max(5, cls._send_lock_lease_seconds() // 3)
-
-    async def _maintain_send_lock_lease(
-        self,
-        *,
-        session_id: UUID,
-        lease: SessionSendLease,
-        stop_event: asyncio.Event,
-        lease_lost_event: asyncio.Event,
-    ) -> None:
-        while not stop_event.is_set():
-            try:
-                await asyncio.wait_for(
-                    stop_event.wait(),
-                    timeout=self._send_lock_refresh_interval_seconds(),
-                )
-                return
-            except asyncio.TimeoutError:
-                try:
-                    refreshed = await self.repo.refresh_session_send_lease(
-                        session_id=session_id,
-                        tenant_id=self.user.tenant_id,
-                        lease=lease,
-                        lock_expires_at=self._next_send_lock_expiry(),
-                    )
-                except Exception as error:
-                    logger.warning(
-                        "AI Builder send lease refresh failed.",
-                        exc_info=error,
-                        extra={
-                            "session_id": str(session_id),
-                            "request_id": str(lease.request_id),
-                        },
-                    )
-                    lease_lost_event.set()
-                    return
-
-                if not refreshed:
-                    logger.warning(
-                        "AI Builder send lease lost while processing.",
-                        extra={
-                            "session_id": str(session_id),
-                            "request_id": str(lease.request_id),
-                        },
-                    )
-                    lease_lost_event.set()
-                    return
-
-    async def _resolve_message_metadata(
-        self,
-        *,
-        conversation: list[ConversationMessage],
-        message: str,
-        question_answer: AIBuilderQuestionAnswerInput | None,
-        ui_language: str | None = None,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-    ) -> PlannerMetadataResolution:
-        if ui_language is None and question_answer is not None:
-            ui_language = ui_language_from_question_answer(question_answer)
-
-        is_requirements_confirmation = (
-            requirements_confirmation_from_question_answer(question_answer) is not None
-        )
-        metadata: dict[str, Any] | None = None
-        if question_answer is not None:
-            metadata = metadata_for_user_message(question_answer=question_answer)
-
-        used_auxiliary_llm = False
-        if metadata is None and not is_requirements_confirmation:
-            inferred_answer = infer_question_answer_from_freeform(conversation, message)
-            if inferred_answer is not None:
-                metadata = metadata_for_user_message(question_answer=inferred_answer)
-            elif latest_pending_structured_question(conversation) is not None:
-                adjudicated_answer = await adjudicate_pending_question_answer(
-                    litellm_client=self.litellm_client,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    conversation=conversation,
-                    user_message=message,
-                )
-                if adjudicated_answer is not None:
-                    metadata = metadata_for_user_message(
-                        question_answer=adjudicated_answer.to_question_answer()
-                    )
-                used_auxiliary_llm = True
-
-        if ui_language is not None:
-            metadata = {
-                **(metadata or {}),
-                UI_LANGUAGE_METADATA_KEY: ui_language,
-            }
-
-        return PlannerMetadataResolution(
-            metadata=metadata,
-            is_requirements_confirmation=is_requirements_confirmation,
-            used_auxiliary_llm=used_auxiliary_llm,
         )
 
     async def send_message(
@@ -295,39 +163,17 @@ class AIBuilderPlanner:
                 code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
             )
 
-        request_id = str(uuid4())
-        request_uuid = UUID(request_id)
-        lock_token = uuid4()
-        lease = SessionSendLease(request_id=request_uuid, lock_token=lock_token)
-        turn = SessionSendTurn(
+        async with claim_ai_builder_send_turn(
+            repo=self.repo,
             session_id=session_id,
             tenant_id=self.user.tenant_id,
-            lease=lease,
             base_planning_state_version=session.planning_state_version,
-        )
-        lease_stop_event = asyncio.Event()
-        lease_lost_event = asyncio.Event()
-        claimed = await self.repo.claim_session_send(
-            session_id=session_id,
-            tenant_id=self.user.tenant_id,
-            lease=lease,
-            lock_expires_at=self._next_send_lock_expiry(),
-        )
-        if not claimed:
-            raise AIBuilderBadRequestException(
-                "Another AI Builder message is already being processed for this session.",
-                code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
-            )
-        lease_task = asyncio.create_task(
-            self._maintain_send_lock_lease(
-                session_id=session_id,
-                lease=lease,
-                stop_event=lease_stop_event,
-                lease_lost_event=lease_lost_event,
-            )
-        )
+        ) as claimed_turn:
+            turn = claimed_turn.turn
+            lease = turn.lease
+            request_id = str(lease.request_id)
+            lease_lost_event = claimed_turn.lease_lost_event
 
-        try:
             if session_status == SessionStatus.AWAITING_APPROVAL.value:
                 await self.repo.update_session_status(
                     session_id=session_id,
@@ -350,7 +196,8 @@ class AIBuilderPlanner:
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
             )
-            metadata_resolution = await self._resolve_message_metadata(
+            metadata_resolution = await resolve_user_question_metadata(
+                litellm_client=self.litellm_client,
                 conversation=conversation,
                 message=message,
                 question_answer=question_answer,
@@ -418,6 +265,8 @@ class AIBuilderPlanner:
 
             match prepared_request:
                 case ProposalPrepared() as proposal_request:
+                    # Preserve proposal/server refresh-signal asymmetry: proposal
+                    # writes stay lease-guarded inside the processor.
                     async for event in self.proposal_processor.propose_plan(
                         turn=turn,
                         conversation=conversation,
@@ -504,20 +353,3 @@ class AIBuilderPlanner:
                     return
                 case _:
                     assert_never(prepared_request)
-        finally:
-            lease_stop_event.set()
-            try:
-                await lease_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as error:
-                logger.warning(
-                    "AI Builder lease task exited with an unexpected error.",
-                    exc_info=error,
-                    extra={"session_id": str(session_id), "request_id": request_id},
-                )
-            await self.repo.release_session_send(
-                session_id=session_id,
-                tenant_id=self.user.tenant_id,
-                lease=lease,
-            )
