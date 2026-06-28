@@ -17,10 +17,10 @@
 
   let { storageStats }: Props = $props();
 
-  const totalAvailable = storageStats.limit;
+  const totalAvailable = $derived(storageStats.limit);
 
   // For the colours we're currently just using names of css variables.
-  const items = [
+  const items = $derived([
     {
       label: m.public_spaces(),
       size: storageStats.shared_used,
@@ -38,7 +38,7 @@
       size: Math.max(totalAvailable - storageStats.total_used, 0),
       colour: "background-secondary"
     }
-  ];
+  ]);
 </script>
 
 <Settings.Row title={m.storage_summary()} description={m.storage_summary_description()}>

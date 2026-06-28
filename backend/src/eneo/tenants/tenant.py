@@ -1,6 +1,6 @@
 import re
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -37,6 +37,8 @@ class TenantBase(BaseModel):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
+    # When False, model input/output prices are hidden from regular users.
+    show_model_pricing: bool = True
 
     @field_validator("display_name")
     @classmethod
@@ -48,7 +50,7 @@ class TenantBase(BaseModel):
 
 
 class TenantPublic(PrivacyPolicyMixin, TenantBase):
-    pass
+    default_role_id: Optional[UUID] = None
 
 
 class TenantInDB(PrivacyPolicyMixin, InDB):
@@ -61,21 +63,19 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
+    show_model_pricing: bool = True
+    default_role_id: Optional[UUID] = None
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
+    api_key_policy: dict[str, Any] = Field(default_factory=dict)
     favorite_providers: list[str] = Field(default_factory=list)
 
     @field_validator("favorite_providers")
     @classmethod
     def validate_favorite_providers(cls, v: list[str]) -> list[str]:
         """Validate that favorite_providers is a list of strings."""
-        if not isinstance(v, list):
-            raise ValueError("favorite_providers must be a list")
-        for item in v:
-            if not isinstance(item, str):
-                raise ValueError("Each favorite provider must be a string")
         return v
 
     @field_validator("slug")
@@ -144,7 +144,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if has_full_federation_config:
             missing = required - set(v.keys())
             if missing:
-                raise ValueError(f"Federation config missing required fields: {missing}")
+                raise ValueError(
+                    f"Federation config missing required fields: {missing}"
+                )
         else:
             unexpected_fields = set(v.keys()) - redirect_only_fields
             if unexpected_fields:
@@ -159,6 +161,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         # Validate canonical_public_origin (optional field)
         if "canonical_public_origin" in v:
             from eneo.main.config import validate_public_origin
+
             try:
                 v["canonical_public_origin"] = validate_public_origin(
                     v["canonical_public_origin"]
@@ -178,26 +181,23 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
                     canonicalize_legacy_redirect_path(redirect_path)
                 )
             except ValueError as e:
-                raise ValueError(
-                    f"Invalid redirect_path in federation_config: {e}"
-                )
+                raise ValueError(f"Invalid redirect_path in federation_config: {e}")
 
         if "additional_redirect_uris" in v:
-
             additional_redirect_uris = v["additional_redirect_uris"]
             if not isinstance(additional_redirect_uris, list):
                 raise ValueError("additional_redirect_uris must be a list")
 
             normalized_redirect_uris: list[str] = []
-            for redirect_uri in additional_redirect_uris:
+            for redirect_uri in cast(list[object], additional_redirect_uris):
                 if not isinstance(redirect_uri, str):
                     raise ValueError(
                         "additional_redirect_uris must contain only strings"
                     )
                 try:
-                    normalized_redirect_uris.append(
-                        validate_redirect_uri(redirect_uri)
-                    )
+                    validated_uri = validate_redirect_uri(redirect_uri)
+                    if validated_uri is not None:
+                        normalized_redirect_uris.append(validated_uri)
                 except ValueError as e:
                     raise ValueError(
                         f"Invalid redirect URI in additional_redirect_uris: {e}"
@@ -209,7 +209,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if "allowed_domains" in v:
             if not isinstance(v["allowed_domains"], list):
                 raise ValueError("allowed_domains must be a list")
-            if not all(isinstance(d, str) for d in v["allowed_domains"]):
+            if not all(
+                isinstance(d, str) for d in cast(list[object], v["allowed_domains"])
+            ):
                 raise ValueError("allowed_domains must contain only strings")
 
         return v
@@ -246,10 +248,17 @@ class TenantUpdatePublic(BaseModel):
     provisioning: Optional[bool] = None
     state: Optional[TenantState] = None
     security_enabled: Optional[bool] = None
+    default_role_id: Optional[UUID] = None
 
 
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
+
+
+class ModelPricingVisibility(BaseModel):
+    """Org-wide toggle for showing model input/output prices to regular users."""
+
+    show_model_pricing: bool
 
 
 class TenantWithMaskedCredentials(TenantInDB):
@@ -296,12 +305,15 @@ class TenantWithMaskedCredentials(TenantInDB):
 
         # Mask the api_credentials - preserve structure but mask api_key field only
         if tenant.api_credentials:
-            masked = {}
-            for provider, cred in tenant.api_credentials.items():
+            masked: dict[str, Any] = {}
+            for provider, cred_raw in tenant.api_credentials.items():
+                cred: object = cred_raw
                 if isinstance(cred, dict):
                     # Preserve structure: copy all fields except mask api_key
-                    masked_cred = cred.copy()
-                    api_key = cred.get("api_key", "")
+                    cred_typed = cast(dict[str, object], cred)
+                    masked_cred: dict[str, object] = dict(cred_typed)
+                    raw_key = cred_typed.get("api_key", "")
+                    api_key = raw_key if isinstance(raw_key, str) else str(raw_key)
 
                     # Mask the api_key field
                     if len(api_key) > 4:

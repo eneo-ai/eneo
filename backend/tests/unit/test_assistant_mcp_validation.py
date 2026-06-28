@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from eneo.assistants.assistant_repo import AssistantRepository
+from eneo.assistants.assistant_service import AssistantService
+from eneo.main.exceptions import BadRequestException
+
+
+def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=False):
+    service = object.__new__(AssistantService)
+    assistant_id = uuid4()
+    assistant = SimpleNamespace(id=assistant_id, is_default=True, mcp_servers=[])
+    space = SimpleNamespace(
+        id=uuid4(),
+        get_assistant=lambda **_: assistant,
+        is_personal=lambda: is_personal,
+        is_mcp_server_in_space=lambda _server_id: server_in_space,
+    )
+    actor = SimpleNamespace(
+        can_edit_assistants=lambda: True,
+        get_assistant_permissions=lambda assistant: {},
+    )
+    session = SimpleNamespace(
+        scalar=AsyncMock(),
+        execute=AsyncMock(),
+    )
+    service.space_repo = SimpleNamespace(
+        get_space_by_assistant=AsyncMock(return_value=space)
+    )
+    service.actor_manager = SimpleNamespace(
+        get_space_actor_from_space=MagicMock(return_value=actor)
+    )
+    service.repo = SimpleNamespace(
+        session=session,
+        set_mcp_servers=AsyncMock(),
+        _set_mcp_servers=AsyncMock(),
+    )
+    service.user = SimpleNamespace(tenant_id=uuid4())
+    service.effective_config_service = None
+    return service, assistant_id, session
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_to_assistant_rejects_server_not_enabled_for_tenant():
+    service, assistant_id, session = _build_assistant_service_with_mocks()
+    session.scalar.return_value = None
+
+    with pytest.raises(BadRequestException, match="not enabled for this tenant"):
+        await service.add_mcp_to_assistant(
+            assistant_id=assistant_id, mcp_server_id=uuid4()
+        )
+
+    assert session.scalar.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_to_assistant_rejects_server_not_in_shared_space():
+    # Shared (non-personal) space: a tenant-enabled server that is not a member
+    # of the space is still rejected. Membership now comes from the space read
+    # model (space.is_mcp_server_in_space), so no spaces_mcp_servers round-trip
+    # is issued — only the tenant-enablement query hits the DB.
+    service, assistant_id, session = _build_assistant_service_with_mocks(
+        is_personal=False, server_in_space=False
+    )
+    session.scalar.return_value = SimpleNamespace(id=uuid4())  # server is enabled
+
+    with pytest.raises(
+        BadRequestException, match="not assigned to this assistant's space"
+    ):
+        await service.add_mcp_to_assistant(
+            assistant_id=assistant_id, mcp_server_id=uuid4()
+        )
+
+    assert session.scalar.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_creation():
+    # Regression for #500: a personal space exposes every tenant-enabled server
+    # via the read model (space.is_mcp_server_in_space -> True), even though the
+    # stale spaces_mcp_servers table holds no row for a server enabled after the
+    # space was created. The assignment must succeed, without a spaces_mcp_servers
+    # round-trip (server lookup + assistant row only).
+    service, assistant_id, session = _build_assistant_service_with_mocks(
+        is_personal=True, server_in_space=True
+    )
+    mcp_server_id = uuid4()
+    assistant_in_db = SimpleNamespace(id=assistant_id)
+    session.scalar.side_effect = [
+        SimpleNamespace(id=mcp_server_id),  # server exists and is enabled
+        assistant_in_db,  # assistant row for set_mcp_servers
+    ]
+    result = MagicMock()
+    result.scalars.return_value = []
+    session.execute.return_value = result
+
+    await service.add_mcp_to_assistant(
+        assistant_id=assistant_id,
+        mcp_server_id=mcp_server_id,
+    )
+
+    assert session.scalar.await_count == 2
+    service.repo.set_mcp_servers.assert_awaited_once_with(
+        assistant_in_db, [mcp_server_id]
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
+    service, assistant_id, session = _build_assistant_service_with_mocks()
+    mcp_server_id = uuid4()
+    assistant_in_db = SimpleNamespace(id=assistant_id)
+    service.effective_config_service = AsyncMock(
+        resolve_for=AsyncMock(
+            return_value=SimpleNamespace(
+                mcp_enforced=True,
+                available_mcp_servers=[SimpleNamespace(id=mcp_server_id)],
+            )
+        )
+    )
+    session.scalar.side_effect = [
+        SimpleNamespace(id=mcp_server_id),
+        assistant_in_db,
+    ]
+    result = MagicMock()
+    result.scalars.return_value = []
+    session.execute.return_value = result
+
+    await service.add_mcp_to_assistant(
+        assistant_id=assistant_id,
+        mcp_server_id=mcp_server_id,
+    )
+
+    assert session.scalar.await_count == 2
+    service.repo.set_mcp_servers.assert_awaited_once_with(
+        assistant_in_db, [mcp_server_id]
+    )
+
+
+@pytest.mark.asyncio
+async def test_assistant_repo_rejects_tool_overrides_outside_assigned_servers():
+    repo = object.__new__(AssistantRepository)
+    assistant_in_db = SimpleNamespace(id=uuid4())
+    valid_server_id = uuid4()
+    invalid_tool_id = uuid4()
+
+    session = SimpleNamespace(refresh=AsyncMock())
+    call_count = 0
+
+    async def _execute(_stmt):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            result = MagicMock()
+            result.fetchall.return_value = [(valid_server_id,)]
+            return result
+        if call_count == 3:
+            result = MagicMock()
+            result.fetchall.return_value = []
+            return result
+        return MagicMock()
+
+    session.execute = _execute
+    repo.session = session
+
+    with pytest.raises(
+        BadRequestException,
+        match="outside assistant MCP servers",
+    ):
+        await repo._set_mcp_tools(assistant_in_db, [(invalid_tool_id, True)])
+
+
+@pytest.mark.asyncio
+async def test_assistant_repo_accepts_tool_overrides_within_assigned_servers():
+    repo = object.__new__(AssistantRepository)
+    assistant_in_db = SimpleNamespace(id=uuid4())
+    valid_server_id = uuid4()
+    valid_tool_id = uuid4()
+
+    session = SimpleNamespace(refresh=AsyncMock())
+    call_count = 0
+
+    async def _execute(_stmt):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            result = MagicMock()
+            result.fetchall.return_value = [(valid_server_id,)]
+            return result
+        if call_count == 3:
+            result = MagicMock()
+            result.fetchall.return_value = [(valid_tool_id,)]
+            return result
+        return MagicMock()
+
+    session.execute = _execute
+    repo.session = session
+
+    await repo._set_mcp_tools(assistant_in_db, [(valid_tool_id, False)])
+
+    assert call_count == 4
+    session.refresh.assert_awaited_once_with(assistant_in_db)

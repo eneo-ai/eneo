@@ -9,30 +9,32 @@ import type { Space } from "@eneo/eneo-js";
 
 export const load: LayoutLoad = async (event) => {
   // Register dependency for targeted invalidation when space data changes
-  event.depends('spaces:data');
+  event.depends("spaces:data");
 
-  const { eneo, user, currentSpace: parentSpace, organizationSpace, loadedAt } = await event.parent();
+  const {
+    eneo,
+    user,
+    currentSpace: parentSpace,
+    organizationSpace,
+    loadedAt
+  } = await event.parent();
   const spaceId = event.params.spaceId;
 
   let currentSpace: Space = parentSpace;
   const loadDelta = new Date().getTime() - new Date(loadedAt).getTime();
 
   // Check if user is admin before attempting to fetch org space
-  const isAdmin = user?.predefined_roles?.some((role) =>
-    role.permissions?.includes('admin')
-  );
+  const isAdmin = user?.roles?.some((role) => role.permissions?.includes("admin"));
 
   if (!spaceId || spaceId === "personal") {
     currentSpace = loadDelta < 1500 ? parentSpace : await eneo.spaces.getPersonalSpace();
-
-  } else if (
-    spaceId === "organization" ||
-    spaceId === organizationSpace?.id
-  ) {
+  } else if (spaceId === "organization" || spaceId === organizationSpace?.id) {
     currentSpace =
       loadDelta < 1500 && organizationSpace
         ? organizationSpace
-        : isAdmin ? await eneo.spaces.getOrganizationSpace() : null;
+        : isAdmin
+          ? await eneo.spaces.getOrganizationSpace()
+          : parentSpace;
   } else {
     currentSpace = await eneo.spaces.get({ id: spaceId });
   }

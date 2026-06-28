@@ -26,7 +26,8 @@ class OauthTokenService:
         oauth_token_repo: "OauthTokenRepository",
         confluence_auth_service: "ConfluenceAuthService",
         sharepoint_auth_service: "SharepointAuthService",
-    ):
+    ) -> None:
+        super().__init__()
         self.oauth_token_repo = oauth_token_repo
         self.confluence_auth_service = confluence_auth_service
         self.sharepoint_auth_service = sharepoint_auth_service
@@ -71,6 +72,8 @@ class OauthTokenService:
                 )
             elif token.token_type.is_sharepoint:
                 # Get tenant_id from the user_integration to use tenant-specific configuration
+                assert token.user_integration is not None
+                assert token.user_integration.tenant_integration is not None
                 tenant_id = token.user_integration.tenant_integration.tenant_id
                 token_result = await self.sharepoint_auth_service.refresh_access_token(
                     refresh_token=token.refresh_token, tenant_id=tenant_id
@@ -78,8 +81,13 @@ class OauthTokenService:
             else:
                 raise ValueError("Unknown integration type")
 
+            assert token_result is not None
             token.access_token = token_result["access_token"]
-            token.refresh_token = token_result["refresh_token"]
+            # Some providers/flows omit refresh_token on refresh (no rotation);
+            # keep the existing one instead of overwriting it with None.
+            new_refresh_token = token_result.get("refresh_token")
+            if new_refresh_token:
+                token.refresh_token = new_refresh_token
 
             token = await self.oauth_token_repo.update(obj=token)
             return token

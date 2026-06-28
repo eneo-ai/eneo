@@ -1,8 +1,8 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, and_, select, TIMESTAMP, String
+from sqlalchemy import TIMESTAMP, BigInteger, ForeignKey, String, and_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
@@ -21,7 +21,7 @@ class CrawlRuns(BasePublic):
     files_downloaded: Mapped[Optional[int]] = mapped_column()
     pages_failed: Mapped[Optional[int]] = mapped_column()
     files_failed: Mapped[Optional[int]] = mapped_column()
-    failure_summary: Mapped[Optional[dict]] = mapped_column(
+    failure_summary: Mapped[Optional[dict[str, int]]] = mapped_column(
         JSONB,
         nullable=True,
         comment="JSONB dict mapping failure reason codes to counts",
@@ -89,14 +89,14 @@ class Websites(BasePublic):
     group: Mapped[CollectionsTable] = relationship()
     embedding_model: Mapped[EmbeddingModels] = relationship()
 
-    @declared_attr
-    def __mapper_args__(cls):
+    @declared_attr  # pyright: ignore[reportArgumentType]  # dict return is valid for __mapper_args__ declared_attr
+    def __mapper_args__(cls):  # type: ignore[override]
         most_recent_crawl = (
             select(CrawlRuns.id)
             .where(CrawlRuns.website_id == cls.id)
             .order_by(CrawlRuns.created_at.desc())
             .limit(1)
-            .correlate(cls.__table__)
+            .correlate(cls.__table__)  # type: ignore[attr-defined]
             .scalar_subquery()
         )
 

@@ -3,7 +3,7 @@
   import type { Writable } from "svelte/store";
 
   export let selectedWebsiteIds: Writable<Set<string>>;
-  export let websites: any[];
+  export let websites: { id: string }[];
   export let onToggleAll: () => void;
 
   $: isAllSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size === websites.length;

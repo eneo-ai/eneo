@@ -61,7 +61,13 @@ function createJobManager(data: { eneo: Eneo }) {
       // Keep failed and completed jobs so we can show their status in the UI
       // Backend returns completed jobs for 5 minutes to allow UI to detect completion
       jobs
-        .filter((job) => job.status === "in progress" || job.status === "queued" || job.status === "failed" || job.status === "complete")
+        .filter(
+          (job) =>
+            job.status === "in progress" ||
+            job.status === "queued" ||
+            job.status === "failed" ||
+            job.status === "complete"
+        )
         .map((job) => [job.id, job])
     );
 
@@ -69,9 +75,11 @@ function createJobManager(data: { eneo: Eneo }) {
     let jobsCompleted = false;
     for (const [id, newJob] of updatedJobs) {
       const oldJob = currentJobs.get(id);
-      if (oldJob &&
-          (oldJob.status === "in progress" || oldJob.status === "queued") &&
-          newJob.status === "complete") {
+      if (
+        oldJob &&
+        (oldJob.status === "in progress" || oldJob.status === "queued") &&
+        newJob.status === "complete"
+      ) {
         jobsCompleted = true;
         break;
       }
@@ -107,7 +115,9 @@ function createJobManager(data: { eneo: Eneo }) {
       await updateJobs();
       updateJobsInterval = setInterval(async () => {
         const jobs = await updateJobs();
-        const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+        const hasActiveJobs = jobs.some(
+          (job) => job.status === "in progress" || job.status === "queued"
+        );
         if (!hasActiveJobs) {
           stopUpdatePolling();
         }
@@ -128,7 +138,9 @@ function createJobManager(data: { eneo: Eneo }) {
 
     updateJobsInterval = setInterval(async () => {
       const jobs = await updateJobs();
-      const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+      const hasActiveJobs = jobs.some(
+        (job) => job.status === "in progress" || job.status === "queued"
+      );
       const timeSinceJobAdded = Date.now() - lastJobAddedTime;
 
       // Switch to slow polling after 15 seconds or if no active jobs
@@ -140,7 +152,9 @@ function createJobManager(data: { eneo: Eneo }) {
           clearInterval(updateJobsInterval);
           updateJobsInterval = setInterval(async () => {
             const jobs = await updateJobs();
-            const hasActiveJobs = jobs.some((job) => job.status === "in progress" || job.status === "queued");
+            const hasActiveJobs = jobs.some(
+              (job) => job.status === "in progress" || job.status === "queued"
+            );
             if (!hasActiveJobs) {
               stopUpdatePolling();
             }
@@ -229,7 +243,7 @@ function createJobManager(data: { eneo: Eneo }) {
           })
           .catch((error) => {
             const fallbackMessage = m.file_upload_error();
-            const message = getUploadErrorMessage(error, upload.file.name);
+            const message = getUploadErrorMessage(error);
             toast.error(`${fallbackMessage}: ${upload.file.name}: ${message}`);
             runningUploads.delete(uploadId);
             upload.status = "failed";
@@ -280,9 +294,11 @@ function createJobManager(data: { eneo: Eneo }) {
   const currentlyRunningJobs = derived(
     [currentJobStore, currentUploadsStore],
     ([jobs, uploads]) => {
-      const activeJobs = jobs.filter((job) => job.status === "in progress" || job.status === "queued");
-      const activeUploads = uploads.filter((upload) =>
-        upload.status === "queued" || upload.status === "uploading"
+      const activeJobs = jobs.filter(
+        (job) => job.status === "in progress" || job.status === "queued"
+      );
+      const activeUploads = uploads.filter(
+        (upload) => upload.status === "queued" || upload.status === "uploading"
       );
       return activeJobs.length + activeUploads.length;
     }

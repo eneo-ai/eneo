@@ -9,6 +9,7 @@
   $: displayName = assistant.type === "default-assistant" ? m.personal_assistant() : assistant.name;
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
 <a
   aria-label={displayName}
   href={localizeHref(`/dashboard/${assistant.id}?tab=chat`)}
@@ -26,3 +27,4 @@
 
   <div class="flex-grow"></div>
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

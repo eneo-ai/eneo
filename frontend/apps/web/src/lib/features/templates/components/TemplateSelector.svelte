@@ -43,7 +43,10 @@
       <div class="grid grid-cols-2 gap-4">
         <button
           data-selected={$creationMode === "blank"}
-          onclick={(e) => { e.preventDefault(); $creationMode = "blank"; }}
+          onclick={(e) => {
+            e.preventDefault();
+            $creationMode = "blank";
+          }}
           class="selector"
         >
           <div class="flex w-full items-center justify-start gap-2 text-left">

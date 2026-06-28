@@ -1,6 +1,7 @@
 """API routes for audit category configuration."""
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -13,6 +14,7 @@ from eneo.audit.schemas.audit_config_schemas import (
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +27,10 @@ router = APIRouter(prefix="/config")
     response_model=AuditConfigResponse,
     summary="Get audit category configuration",
     description="Retrieve all audit category configurations for the current tenant.",
+    responses=responses.get_responses([403]),
 )
 async def get_audit_config(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AuditConfigResponse:
     """
     Get audit category configuration for the current tenant.
@@ -44,9 +47,7 @@ async def get_audit_config(
 
     audit_config_service = container.audit_config_service()
 
-    logger.info(
-        f"User {user.id} fetching audit config for tenant {user.tenant_id}"
-    )
+    logger.info(f"User {user.id} fetching audit config for tenant {user.tenant_id}")
 
     return await audit_config_service.get_config(user.tenant_id)
 
@@ -56,10 +57,11 @@ async def get_audit_config(
     response_model=AuditConfigResponse,
     summary="Update audit category configuration",
     description="Update one or more audit category configurations for the current tenant.",
+    responses=responses.get_responses([400, 403]),
 )
 async def update_audit_config(
     request: AuditConfigUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> AuditConfigResponse:
     """
     Update audit category configurations for the current tenant.
@@ -87,7 +89,9 @@ async def update_audit_config(
 
     # Capture old configuration for audit log
     old_config = await audit_config_service.get_config(user.tenant_id)
-    old_config_dict = {c.category: c.enabled for c in old_config.categories}
+    old_config_dict: dict[str, bool] = {
+        c.category: c.enabled for c in old_config.categories
+    }
 
     # Update configuration
     updated_config = await audit_config_service.update_config(
@@ -95,28 +99,22 @@ async def update_audit_config(
     )
 
     # Build changes dict for audit log
-    changes = {}
+    changes: dict[str, dict[str, object]] = {}
     for update in request.updates:
         old_value = old_config_dict.get(update.category)
         if old_value != update.enabled:
-            changes[update.category] = {
-                "old": old_value,
-                "new": update.enabled
-            }
+            changes[update.category] = {"old": old_value, "new": update.enabled}
 
     # Create audit log for configuration change
     if changes:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=user.tenant_id,
             description="Updated audit logging configuration",
-            metadata={
-                "setting": "audit_category_config",
-                "changes": changes
-            },
+            metadata={"setting": "audit_category_config", "changes": changes},
         )
 
     return updated_config
@@ -132,9 +130,10 @@ async def update_audit_config(
     response_model=ActionConfigResponse,
     summary="Get per-action audit configuration",
     description="Retrieve all 65 actions with their enabled status for the modal UI.",
+    responses=responses.get_responses([403]),
 )
 async def get_action_config(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ActionConfigResponse:
     """
     Get all actions with their enabled status (considering category + overrides).
@@ -151,9 +150,7 @@ async def get_action_config(
 
     audit_config_service = container.audit_config_service()
 
-    logger.info(
-        f"User {user.id} fetching action config for tenant {user.tenant_id}"
-    )
+    logger.info(f"User {user.id} fetching action config for tenant {user.tenant_id}")
 
     return await audit_config_service.get_action_config(user.tenant_id)
 
@@ -163,10 +160,11 @@ async def get_action_config(
     response_model=ActionConfigResponse,
     summary="Update per-action audit configuration",
     description="Update one or more action-level audit configurations.",
+    responses=responses.get_responses([400, 403]),
 )
 async def update_action_config(
     request: ActionConfigUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> ActionConfigResponse:
     """
     Update action overrides for a tenant.
@@ -201,7 +199,7 @@ async def update_action_config(
     if request.updates:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=user.tenant_id,
@@ -209,9 +207,8 @@ async def update_action_config(
             metadata={
                 "setting": "audit_action_config",
                 "updates": [
-                    {"action": u.action, "enabled": u.enabled}
-                    for u in request.updates
-                ]
+                    {"action": u.action, "enabled": u.enabled} for u in request.updates
+                ],
             },
         )
 

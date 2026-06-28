@@ -1,7 +1,7 @@
 # MIT License
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Annotated, AsyncIterator, Optional, cast
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query
@@ -16,8 +16,8 @@ from eneo.analysis.analysis import (
     AnalysisJobStatusResponse,
     AnalysisProcessingMode,
     AskAnalysis,
-    AssistantInsightQuestion,
     AssistantActivityStats,
+    AssistantInsightQuestion,
     ConversationInsightRequest,
     ConversationInsightResponse,
     Counts,
@@ -28,19 +28,20 @@ from eneo.analysis.analysis_job_manager import AnalysisJobManager
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask
-from eneo.sessions.session import SessionPublic, SessionMetadataPublic
-from eneo.sessions.session_protocol import (
-    to_session_metadata_paginated_response,
-    to_session_public,
-)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.logging import get_logger
-from eneo.main.models import PaginatedResponse, CursorPaginatedResponse
+from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.questions import question_protocol
 from eneo.questions.question import Message
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
+from eneo.sessions.session import SessionMetadataPublic, SessionPublic
+from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
+    to_session_public,
+)
 
 logger = get_logger(__name__)
 
@@ -77,7 +78,9 @@ def _default_analytics_range(
 ) -> tuple[datetime, datetime]:
     now = datetime.now(timezone.utc)
     resolved_start = start_date if start_date is not None else now - timedelta(days=30)
-    resolved_end = end_date if end_date is not None else now + timedelta(hours=1, minutes=1)
+    resolved_end = (
+        end_date if end_date is not None else now + timedelta(hours=1, minutes=1)
+    )
     if resolved_start.tzinfo is None:
         resolved_start = resolved_start.replace(tzinfo=timezone.utc)
     if resolved_end.tzinfo is None:
@@ -85,18 +88,30 @@ def _default_analytics_range(
     return resolved_start, resolved_end
 
 
-@router.get("/counts/", response_model=Counts)
-async def get_counts(container: Container = Depends(get_container(with_user=True))):
+@router.get(
+    "/counts/",
+    response_model=Counts,
+    description="Get total tenant counts.",
+    responses=responses.get_responses([403]),
+)
+async def get_counts(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
     """Total counts."""
     service = container.analysis_service()
     return await service.get_tenant_counts()
 
 
-@router.get("/metadata-statistics/")
+@router.get(
+    "/metadata-statistics/",
+    response_model=MetadataStatistics,
+    description="Get metadata statistics for analytics.",
+    responses=responses.get_responses([403]),
+)
 async def get_metadata(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
     end_date: datetime | None = None,
-    container: Container = Depends(get_container(with_user=True)),
 ) -> MetadataStatistics:
     """Data for analytics.
 
@@ -117,11 +132,16 @@ async def get_metadata(
     )
 
 
-@router.get("/assistant-activity/", response_model=AssistantActivityStats)
+@router.get(
+    "/assistant-activity/",
+    response_model=AssistantActivityStats,
+    description="Get assistant activity statistics for the tenant.",
+    responses=responses.get_responses([403]),
+)
 async def get_assistant_activity(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
     end_date: datetime | None = None,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """Get assistant activity statistics for the tenant.
 
@@ -144,12 +164,15 @@ async def get_assistant_activity(
 
 
 @router.get(
-    "/metadata-statistics/aggregated/", response_model=MetadataStatisticsAggregated
+    "/metadata-statistics/aggregated/",
+    response_model=MetadataStatisticsAggregated,
+    description="Get aggregated analytics data in hourly buckets.",
+    responses=responses.get_responses([403]),
 )
 async def get_metadata_aggregated(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
     end_date: datetime | None = None,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """Aggregated data for analytics (hourly buckets)."""
     start_date, end_date = _default_analytics_range(
@@ -166,14 +189,19 @@ async def get_metadata_aggregated(
     )
 
 
-@router.get("/assistants/{assistant_id}/", response_model=PaginatedResponse[Message])
+@router.get(
+    "/assistants/{assistant_id}/",
+    response_model=PaginatedResponse[Message],
+    description="Get the questions asked to an assistant within a time range.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def get_most_recent_questions(
     assistant_id: UUID,
-    days_since: int = Query(ge=0, le=90, default=30),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    days_since: Annotated[int, Query(ge=0, le=90)] = 30,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     include_followups: bool = False,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """Get all the questions asked to an assistant in the last `days_since` days.
 
@@ -211,17 +239,19 @@ async def get_most_recent_questions(
 @router.get(
     "/assistants/{assistant_id}/questions/",
     response_model=CursorPaginatedResponse[AssistantInsightQuestion],
+    description="Get paginated question history for an assistant.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_most_recent_questions_paginated(
     assistant_id: UUID,
-    days_since: int = Query(ge=0, le=90, default=30),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    days_since: Annotated[int, Query(ge=0, le=90)] = 30,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     include_followups: bool = False,
-    limit: int = Query(DEFAULT_QUESTIONS_PAGE_LIMIT, ge=1, le=200),
+    limit: Annotated[int, Query(ge=1, le=200)] = DEFAULT_QUESTIONS_PAGE_LIMIT,
     cursor: str | None = None,
     q: str | None = None,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """Get paginated question history for an assistant.
 
@@ -236,16 +266,14 @@ async def get_most_recent_questions_paginated(
         q = q.strip() or None
 
     service = container.analysis_service()
-    items, total_count, next_cursor = (
-        await service.get_assistant_question_history_page(
-            assistant_id=assistant_id,
-            from_date=from_date,
-            to_date=to_date,
-            include_followups=include_followups,
-            limit=limit,
-            query=q,
-            cursor=cursor,
-        )
+    items, total_count, next_cursor = await service.get_assistant_question_history_page(
+        assistant_id=assistant_id,
+        from_date=from_date,
+        to_date=to_date,
+        include_followups=include_followups,
+        limit=limit,
+        query=q,
+        cursor=cursor,
     )
 
     return CursorPaginatedResponse(
@@ -257,15 +285,20 @@ async def get_most_recent_questions_paginated(
     )
 
 
-@router.post("/assistants/{assistant_id}/")
+@router.post(
+    "/assistants/{assistant_id}/",
+    response_model=None,
+    description="Ask a question using an assistant's recent questions as context.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def ask_question_about_questions(
     assistant_id: UUID,
     ask_analysis: AskAnalysis,
-    days_since: int = Query(ge=0, le=90, default=30),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    days_since: Annotated[int, Query(ge=0, le=90)] = 30,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     include_followups: bool = False,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """Ask a question with the questions asked to an assistant in the last
       `days_since` days as the context.
@@ -301,10 +334,11 @@ async def ask_question_about_questions(
     if ask_analysis.stream:
 
         async def event_stream():
-            async for chunk in ai_response.completion:
+            completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
+            async for chunk in completion_stream:
                 if chunk.stop:
                     continue
-                yield AnalysisAnswer(answer=chunk.text).model_dump_json()
+                yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
 
         return EventSourceResponse(event_stream())
 
@@ -314,17 +348,24 @@ async def ask_question_about_questions(
     return AnalysisAnswer(answer=completion.text or "")
 
 
-@router.post("/conversation-insights/")
+@router.post(
+    "/conversation-insights/",
+    response_model=None,
+    description="Ask a question about an assistant's or group chat's conversations.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def ask_unified_questions_about_questions(
     ask_analysis: AskAnalysis,
-    days_since: int = Query(ge=0, le=90, default=DEFAULT_INSIGHTS_DAYS),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    days_since: Annotated[int, Query(ge=0, le=90)] = DEFAULT_INSIGHTS_DAYS,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     include_followups: bool = False,
     assistant_id: UUID | None = None,
     group_chat_id: UUID | None = None,
-    processing_mode: AnalysisProcessingMode = Query(AnalysisProcessingMode.SYNC),
-    container: Container = Depends(get_container(with_user=True)),
+    processing_mode: Annotated[
+        AnalysisProcessingMode, Query()
+    ] = AnalysisProcessingMode.SYNC,
 ):
     """Ask a question about the questions asked to an assistant or group chat.
 
@@ -419,10 +460,11 @@ async def ask_unified_questions_about_questions(
     if ask_analysis.stream:
 
         async def event_stream():
-            async for chunk in ai_response.completion:
+            completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
+            async for chunk in completion_stream:
                 if chunk.stop:
                     continue
-                yield AnalysisAnswer(answer=chunk.text).model_dump_json()
+                yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
 
         return EventSourceResponse(event_stream())
 
@@ -445,15 +487,11 @@ async def ask_unified_questions_about_questions(
 @router.get(
     "/conversation-insights/",
     response_model=ConversationInsightResponse,
-    responses={
-        403: {
-            "description": "Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled"
-        }
-    },
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_conversation_insights(
-    request: ConversationInsightRequest = Depends(),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    request: Annotated[ConversationInsightRequest, Depends()],
 ):
     """
     Get statistics about conversations for either an assistant or a group chat.
@@ -481,10 +519,12 @@ async def get_conversation_insights(
 @router.get(
     "/conversation-insights/jobs/{job_id}/",
     response_model=AnalysisJobStatusResponse,
+    description="Get the status of a conversation insights analysis job.",
+    responses=responses.get_responses([404]),
 )
 async def get_conversation_insight_job(
     job_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     manager = AnalysisJobManager(container.redis_client())
     tenant_id = container.user().tenant_id
@@ -505,22 +545,18 @@ async def get_conversation_insight_job(
 @router.get(
     "/conversation-insights/sessions/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
-    responses={
-        403: {
-            "description": "Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled"
-        }
-    },
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_conversation_insight_sessions(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     assistant_id: Optional[UUID] = None,
     group_chat_id: Optional[UUID] = None,
-    limit: Optional[int] = Query(DEFAULT_SESSIONS_PAGE_LIMIT, ge=1, le=100),
+    limit: Annotated[Optional[int], Query(ge=1, le=100)] = DEFAULT_SESSIONS_PAGE_LIMIT,
     cursor: Optional[datetime] = None,
     previous: bool = False,
     name_filter: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     """
     Get all sessions for an assistant or group chat across all
@@ -562,6 +598,8 @@ async def get_conversation_insight_sessions(
         end_date = end_date.replace(tzinfo=timezone.utc)
     if name_filter is not None:
         name_filter = name_filter.strip() or None
+    if limit is None:
+        limit = DEFAULT_SESSIONS_PAGE_LIMIT
 
     service = container.analysis_service()
 
@@ -576,6 +614,7 @@ async def get_conversation_insight_sessions(
             end_date=end_date,
         )
     else:
+        assert group_chat_id is not None
         sessions, total = await service.get_group_chat_insight_sessions(
             group_chat_id=group_chat_id,
             limit=limit,
@@ -590,7 +629,7 @@ async def get_conversation_insight_sessions(
         sessions=sessions,
         total_count=total,
         limit=limit,
-        cursor=cursor,
+        cursor=cast(datetime, cursor),
         previous=previous,
     )
 
@@ -598,15 +637,11 @@ async def get_conversation_insight_sessions(
 @router.get(
     "/conversation-insights/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses={
-        403: {
-            "description": "Forbidden - Either user is not ADMIN/EDITOR or insights are not enabled"
-        }
-    },
+    responses=responses.get_responses([403, 404]),
 )
 async def get_conversation_insight_session(
     session_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Get a specific session with insight access.
@@ -625,4 +660,5 @@ async def get_conversation_insight_session(
 
     service = container.analysis_service()
     session = await service.get_insight_session(session_id=session_id)
+    assert session is not None
     return to_session_public(session=session)

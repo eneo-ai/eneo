@@ -11,6 +11,7 @@
   import WrapperNameCell from "./WrapperNameCell.svelte";
   import { integrationData } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { SvelteMap } from "svelte/reactivity";
 
   interface Props {
     onSelectIntegrationForSyncHistory?: (integration: IntegrationKnowledge) => void;
@@ -22,9 +23,8 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const knowledge = derived(
-    currentSpace,
-    ($currentSpace) => $currentSpace.knowledge.integrationKnowledge.filter(k => k.space_id === $currentSpace.id)
+  const knowledge = derived(currentSpace, ($currentSpace) =>
+    $currentSpace.knowledge.integrationKnowledge.filter((k) => k.space_id === $currentSpace.id)
   );
 
   // --- Wrapper grouping logic ---
@@ -57,24 +57,32 @@
   function getCountSubtitle(counts: SharePointItemTypeCounts): string {
     const parts: string[] = [];
     if (counts.files > 0) {
-      parts.push(counts.files === 1
-        ? m.sharepoint_wrapper_files_one({ count: counts.files })
-        : m.sharepoint_wrapper_files_other({ count: counts.files }));
+      parts.push(
+        counts.files === 1
+          ? m.sharepoint_wrapper_files_one({ count: counts.files })
+          : m.sharepoint_wrapper_files_other({ count: counts.files })
+      );
     }
     if (counts.folders > 0) {
-      parts.push(counts.folders === 1
-        ? m.sharepoint_wrapper_folders_one({ count: counts.folders })
-        : m.sharepoint_wrapper_folders_other({ count: counts.folders }));
+      parts.push(
+        counts.folders === 1
+          ? m.sharepoint_wrapper_folders_one({ count: counts.folders })
+          : m.sharepoint_wrapper_folders_other({ count: counts.folders })
+      );
     }
     if (counts.sites > 0) {
-      parts.push(counts.sites === 1
-        ? m.sharepoint_wrapper_sites_one({ count: counts.sites })
-        : m.sharepoint_wrapper_sites_other({ count: counts.sites }));
+      parts.push(
+        counts.sites === 1
+          ? m.sharepoint_wrapper_sites_one({ count: counts.sites })
+          : m.sharepoint_wrapper_sites_other({ count: counts.sites })
+      );
     }
     if (parts.length === 0) {
-      parts.push(counts.total === 1
-        ? m.wrapper_items_count_one({ count: counts.total })
-        : m.wrapper_items_count_other({ count: counts.total }));
+      parts.push(
+        counts.total === 1
+          ? m.wrapper_items_count_one({ count: counts.total })
+          : m.wrapper_items_count_other({ count: counts.total })
+      );
     }
     return parts.join(", ");
   }
@@ -104,7 +112,7 @@
 
   const displayItems = derived([knowledge, currentSpace], ([$knowledge, $currentSpace]) => {
     // Group items by wrapper_id
-    const wrapperMap = new Map<string, IntegrationKnowledge[]>();
+    const wrapperMap = new SvelteMap<string, IntegrationKnowledge[]>();
     const noWrapper: IntegrationKnowledge[] = [];
 
     for (const item of $knowledge) {
@@ -125,12 +133,15 @@
       if (wrapperItems.length >= 2) {
         // Show as folder row
         const representative = wrapperItems[0];
-        const wrapperName = (typeof representative.wrapper_name === "string" && representative.wrapper_name.trim().length > 0)
-          ? representative.wrapper_name
-          : representative.name;
+        const wrapperName =
+          typeof representative.wrapper_name === "string" &&
+          representative.wrapper_name.trim().length > 0
+            ? representative.wrapper_name
+            : representative.name;
         const counts = getSharePointItemTypeCounts(wrapperItems);
-        const ownedItems = wrapperItems.filter(i => i.space_id === $currentSpace.id);
-        const ownedInCurrentSpace = ownedItems.length > 0 && ownedItems.length === wrapperItems.length;
+        const ownedItems = wrapperItems.filter((i) => i.space_id === $currentSpace.id);
+        const ownedInCurrentSpace =
+          ownedItems.length > 0 && ownedItems.length === wrapperItems.length;
         const permissions = (ownedItems[0] ?? representative).permissions ?? [];
 
         items.push({
@@ -177,7 +188,9 @@
 
   const embeddingModels = derived(currentSpace, ($currentSpace) => {
     const modelsInSpace = $currentSpace.embedding_models.map((model) => model.id);
-    const ownedKnowledge = $currentSpace.knowledge.integrationKnowledge.filter(k => k.space_id === $currentSpace.id);
+    const ownedKnowledge = $currentSpace.knowledge.integrationKnowledge.filter(
+      (k) => k.space_id === $currentSpace.id
+    );
     const modelsInIntegrationKnowledge = ownedKnowledge.map((item) => ({
       ...item.embedding_model,
       inSpace: modelsInSpace.includes(item.embedding_model.id)
@@ -210,14 +223,14 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          return createRender(WrapperNameCell, {
+          return Table.renderComponent(WrapperNameCell, {
             name: di.wrapperName,
             link: `/spaces/${$currentSpace.routeId}/knowledge/integrations/wrapper/${di.wrapperId}`,
             itemCount: di.itemCount,
             subtitle: getCountSubtitle(di.counts)
           });
         }
-        return createRender(IntegrationNameCell, {
+        return Table.renderComponent(IntegrationNameCell, {
           knowledge: di.item
         });
       }
@@ -229,12 +242,13 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          const countLabel = di.itemCount === 1
-            ? m.wrapper_items_count_one({ count: di.itemCount })
-            : m.wrapper_items_count_other({ count: di.itemCount });
+          const countLabel =
+            di.itemCount === 1
+              ? m.wrapper_items_count_one({ count: di.itemCount })
+              : m.wrapper_items_count_other({ count: di.itemCount });
           return createRender(Table.FormattedCell, { value: countLabel });
         }
-        return createRender(IntegrationSyncStatusCell, {
+        return Table.renderComponent(IntegrationSyncStatusCell, {
           knowledge: di.item,
           onShowSyncHistory: onSelectIntegrationForSyncHistory
             ? () => onSelectIntegrationForSyncHistory(di.item)
@@ -252,7 +266,9 @@
           return createRender(Table.FormattedCell, { value: "" });
         }
         const labelKey = integrationData[di.item.integration_type].previewLinkLabel;
-        const translatedLabel = m[labelKey as keyof typeof m]?.() ?? labelKey;
+        const translatedLabel =
+          (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
+          labelKey;
         return createRender(Table.ButtonCell, {
           link: di.item.url ?? "",
           label: translatedLabel,
@@ -265,7 +281,7 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          return createRender(SharePointWrapperActions, {
+          return Table.renderComponent(SharePointWrapperActions, {
             wrapperId: di.wrapperId,
             wrapperName: di.wrapperName,
             itemCount: di.itemCount,

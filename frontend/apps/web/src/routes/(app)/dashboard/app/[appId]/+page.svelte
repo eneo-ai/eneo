@@ -35,7 +35,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Dashboard – {data.app.name}</title>
+  <title>Eneo.ai – {m.dashboard()} – {data.app.name}</title>
 </svelte:head>
 
 <div class="outer bg-primary flex w-full flex-col">
@@ -43,7 +43,12 @@
     class="bg-primary sticky top-0 z-10 flex items-center justify-between px-3.5 py-3 backdrop-blur-md"
     in:fade={{ duration: 50 }}
   >
-    <a href={localizeHref("/dashboard")} class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg">
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+    <a
+      href={localizeHref("/dashboard")}
+      class="flex max-w-[calc(100%_-_7rem)] flex-grow items-center rounded-lg"
+    >
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <span
         class="border-default hover:bg-hover-dimmer flex h-8 w-8 items-center justify-center rounded-lg border"
         >←</span

@@ -1,22 +1,14 @@
-import redis.asyncio as aioredis
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import AsyncIterator
 
+import redis.asyncio as aioredis
 from dependency_injector import containers, providers
+
 from eneo.actors import ActorFactory, ActorManager
 from eneo.admin.admin_service import AdminService
 from eneo.admin.quota_service import QuotaService
 from eneo.ai_models.ai_models_service import AIModelsService
-from eneo.audit.application.audit_config_service import AuditConfigService
-from eneo.audit.application.audit_export_service import AuditExportService
-from eneo.audit.application.audit_service import AuditService
-from eneo.audit.application.retention_service import RetentionService
-from eneo.audit.infrastructure.audit_config_repository import (
-    AuditConfigRepositoryImpl,
-)
-from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.audit.infrastructure.audit_session_service import AuditSessionService
 from eneo.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
@@ -42,15 +34,31 @@ from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.assistants.assistant_service import AssistantService
 from eneo.assistants.references import ReferencesService
+from eneo.audit.application.audit_config_service import AuditConfigService
+from eneo.audit.application.audit_export_service import AuditExportService
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.application.retention_service import RetentionService
+from eneo.audit.infrastructure.audit_config_repository import (
+    AuditConfigRepositoryImpl,
+)
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.audit.infrastructure.audit_session_service import AuditSessionService
+from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
+from eneo.authentication.api_key_maintenance import ApiKeyMaintenanceService
+from eneo.authentication.api_key_policy import ApiKeyPolicyService
+from eneo.authentication.api_key_rate_limiter import ApiKeyRateLimiter
 from eneo.authentication.api_key_repo import ApiKeysRepository
+from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
+from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_service import AuthService
 from eneo.collections.application.collection_crud_service import CollectionCRUDService
 from eneo.completion_models.application import CompletionModelCRUDService
-from eneo.completion_models.application.completion_model_migration_service import (
-    CompletionModelMigrationService,
-)
 from eneo.completion_models.application.completion_model_migration_history_service import (
     CompletionModelMigrationHistoryService,
+)
+from eneo.completion_models.application.completion_model_migration_service import (
+    CompletionModelMigrationService,
 )
 from eneo.completion_models.application.completion_model_usage_service import (
     CompletionModelUsageService,
@@ -76,6 +84,9 @@ from eneo.embedding_models.infrastructure.create_embeddings_service import (
     CreateEmbeddingsService,
 )
 from eneo.embedding_models.infrastructure.datastore import Datastore
+from eneo.feature_flag.feature_flag_factory import FeatureFlagFactory
+from eneo.feature_flag.feature_flag_repo import FeatureFlagRepository
+from eneo.feature_flag.feature_flag_service import FeatureFlagService
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
@@ -83,12 +94,36 @@ from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
+from eneo.governance_policy.application.effective_config_service import (
+    EffectiveConfigService,
+)
+from eneo.governance_policy.application.governance_policy_service import (
+    GovernancePolicyService,
+)
+from eneo.governance_policy.infrastructure.governance_policy_repo_impl import (
+    GovernancePolicyRepoImpl,
+)
+from eneo.governance_policy.presentation.governance_policy_assembler import (
+    GovernancePolicyAssembler,
+)
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
 )
 from eneo.groups_legacy.group_repo import GroupRepository
 from eneo.groups_legacy.group_service import GroupService
+from eneo.help_assistants.application.helper_run_service import HelperRunService
+from eneo.help_assistants.application.org_space_assistant_role_service import (
+    OrgSpaceAssistantRoleService,
+)
+from eneo.help_assistants.domain.factory import HelperAssistantsFactory
+from eneo.help_assistants.infrastructure.help_assistant_assignment_history_repo import (
+    HelpAssistantAssignmentHistoryRepo,
+)
+from eneo.help_assistants.infrastructure.helper_run_repo import HelperRunRepo
+from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
+    OrgSpaceAssistantRoleRepo,
+)
 from eneo.icons.icon_repo import IconRepository
 from eneo.icons.icon_service import IconService
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
@@ -102,12 +137,16 @@ from eneo.integration.application.integration_preview_service import (
     IntegrationPreviewService,
 )
 from eneo.integration.application.integration_service import IntegrationService
+from eneo.integration.application.oauth2_service import Oauth2Service
+from eneo.integration.application.sharepoint_auth_router import SharePointAuthRouter
 from eneo.integration.application.sharepoint_tree_service import (
     SharePointTreeService as AppSharePointTreeService,
 )
-from eneo.integration.application.oauth2_service import Oauth2Service
 from eneo.integration.application.tenant_integration_service import (
     TenantIntegrationService,
+)
+from eneo.integration.application.tenant_sharepoint_app_service import (
+    TenantSharePointAppService,
 )
 from eneo.integration.application.user_integration_service import (
     UserIntegrationService,
@@ -115,36 +154,14 @@ from eneo.integration.application.user_integration_service import (
 from eneo.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
 )
+from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
+    ServiceAccountAuthService,
+)
 from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
 from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
     TenantAppAuthService,
-)
-from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-    ServiceAccountAuthService,
-)
-from eneo.integration.application.sharepoint_auth_router import SharePointAuthRouter
-from eneo.integration.application.tenant_sharepoint_app_service import (
-    TenantSharePointAppService,
-)
-from eneo.integration.infrastructure.tenant_sharepoint_app_repo_impl import (
-    TenantSharePointAppRepositoryImpl,
-)
-from eneo.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
-    TenantSharePointAppMapper,
-)
-from eneo.integration.infrastructure.sharepoint_webhook_service import (
-    SharepointWebhookService,
-)
-from eneo.integration.infrastructure.office_change_key_service import (
-    OfficeChangeKeyService,
-)
-from eneo.integration.infrastructure.sharepoint_subscription_service import (
-    SharePointSubscriptionService,
-)
-from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
-    SharePointSubscriptionRepositoryImpl,
 )
 from eneo.integration.infrastructure.content_service.confluence_content_service import (
     ConfluenceContentService,
@@ -170,10 +187,16 @@ from eneo.integration.infrastructure.mappers.sync_log_mapper import (
 from eneo.integration.infrastructure.mappers.tenant_integration_mapper import (
     TenantIntegrationMapper,
 )
+from eneo.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
+    TenantSharePointAppMapper,
+)
 from eneo.integration.infrastructure.mappers.user_integration_mapper import (
     UserIntegrationMapper,
 )
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
+from eneo.integration.infrastructure.office_change_key_service import (
+    OfficeChangeKeyService,
+)
 from eneo.integration.infrastructure.preview_service.confluence_preview_service import (
     ConfluencePreviewService,
 )
@@ -198,6 +221,18 @@ from eneo.integration.infrastructure.repo_impl.tenant_integration_repo_impl impo
 from eneo.integration.infrastructure.repo_impl.user_integration_repo_impl import (
     UserIntegrationRepoImpl,
 )
+from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
+    SharePointSubscriptionRepositoryImpl,
+)
+from eneo.integration.infrastructure.sharepoint_subscription_service import (
+    SharePointSubscriptionService,
+)
+from eneo.integration.infrastructure.sharepoint_webhook_service import (
+    SharepointWebhookService,
+)
+from eneo.integration.infrastructure.tenant_sharepoint_app_repo_impl import (
+    TenantSharePointAppRepositoryImpl,
+)
 from eneo.integration.presentation.assemblers.confluence_content_assembler import (
     ConfluenceContentAssembler,
 )
@@ -213,13 +248,29 @@ from eneo.integration.presentation.assemblers.tenant_integration_assembler impor
 from eneo.integration.presentation.assemblers.user_integration_assembler import (
     UserIntegrationAssembler,
 )
+from eneo.jobs.job_repo import JobRepository
+from eneo.jobs.job_service import JobService
+from eneo.jobs.task_service import TaskService
+from eneo.limits.limit_service import LimitService
+from eneo.main.aiohttp_client import aiohttp_client
+from eneo.main.config import get_settings
+from eneo.main.logging import get_logger
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
+from eneo.mcp_servers.application.mcp_session_lifecycle_service import (
+    McpSessionLifecycleService,
+)
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
+)
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
+    MCPProxySessionFactory,
+)
+from eneo.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_impl import (
+    ChatSessionMcpStateRepo,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -234,21 +285,29 @@ from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 from eneo.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
     MCPServerToolAssembler,
 )
-from eneo.jobs.job_repo import JobRepository
-from eneo.jobs.job_service import JobService
-from eneo.jobs.task_service import TaskService
-from eneo.limits.limit_service import LimitService
-from eneo.main.aiohttp_client import aiohttp_client
+from eneo.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
 from eneo.modules.module_repo import ModuleRepository
-from eneo.predefined_roles.predefined_role_service import PredefinedRolesService
-from eneo.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
+from eneo.prompt_library.application.prompt_library_service import (
+    PromptLibraryService,
+)
+from eneo.prompt_library.infrastructure.prompt_library_repo_impl import (
+    PromptLibraryRepoImpl,
+)
+from eneo.prompt_library.presentation.prompt_library_assembler import (
+    PromptLibraryAssembler,
+)
 from eneo.prompts.api.prompt_assembler import PromptAssembler
 from eneo.prompts.prompt_factory import PromptFactory
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
+from eneo.redis.connection import build_redis_pool_kwargs
 from eneo.roles.roles_repo import RolesRepository
 from eneo.roles.roles_service import RolesService
+from eneo.scim.repositories.token_repository import ScimTokenRepository
+from eneo.scim.services.token_service import ScimTokenService
 from eneo.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
 )
@@ -256,11 +315,11 @@ from eneo.security_classifications.domain.repositories.security_classification_r
     SecurityClassificationRepoImpl,
 )
 from eneo.services.service_repo import ServiceRepository
-from eneo.settings.encryption_service import EncryptionService
 from eneo.services.service_runner import ServiceRunner
 from eneo.services.service_service import ServiceService
 from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import SessionRepository
+from eneo.settings.encryption_service import EncryptionService
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings_repo import SettingsRepository
 from eneo.spaces.api.space_assembler import SpaceAssembler
@@ -292,9 +351,6 @@ from eneo.templates.assistant_template.assistant_template_repo import (
 from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from eneo.feature_flag.feature_flag_factory import FeatureFlagFactory
-from eneo.feature_flag.feature_flag_repo import FeatureFlagRepository
-from eneo.feature_flag.feature_flag_service import FeatureFlagService
 from eneo.templates.templates_service import TemplateService
 from eneo.tenants.tenant import TenantInDB
 from eneo.tenants.tenant_repo import TenantRepository
@@ -305,6 +361,12 @@ from eneo.token_usage.infrastructure.user_token_usage_analyzer import (
     UserTokenUsageAnalyzer,
 )
 from eneo.transcription_models.application import TranscriptionModelCRUDService
+from eneo.transcription_models.application.transcription_model_migration_history_service import (  # noqa: E501
+    TranscriptionModelMigrationHistoryService,
+)
+from eneo.transcription_models.application.transcription_model_migration_service import (  # noqa: E501
+    TranscriptionModelMigrationService,
+)
 from eneo.transcription_models.domain import TranscriptionModelRepository
 from eneo.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
@@ -331,9 +393,6 @@ from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerS
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 from eneo.workflows.step_repo import StepRepository
-from eneo.main.config import get_settings
-from eneo.main.logging import get_logger
-from eneo.redis.connection import build_redis_pool_kwargs
 
 _logger = get_logger(__name__)
 
@@ -343,7 +402,9 @@ def _create_redis_client() -> aioredis.Redis:
     url = f"redis://{settings.redis_host}:{settings.redis_port}"
     kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
 
-    return aioredis.Redis.from_url(url, **kwargs)
+    # redis-py stubs declare Redis.from_url(**kwargs: Unknown), so pyright marks the
+    # call as partially unknown even though the return type is concrete.
+    return aioredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimiter:
@@ -353,6 +414,23 @@ def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimi
         max_concurrent=settings.tenant_worker_concurrency_limit,
         ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
     )
+
+
+def _build_encryption_service() -> EncryptionService:
+    # NOTE: Must use get_settings() directly because the config provider chain is
+    # never initialized — the encryption service is constructed before any DI wiring.
+    settings = get_settings()
+    key = settings.encryption_key
+    if settings.testing:
+        key = None
+    _logger.info(
+        "Container: Initializing EncryptionService",
+        extra={
+            "encryption_key_present": bool(key),
+            "testing_mode": settings.testing,
+        },
+    )
+    return EncryptionService(key)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -400,7 +478,7 @@ class SessionProxy:
             )
         return getattr(session, name)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object) -> object:
         """Allow the proxy to be called if anyone tries to invoke it."""
         session = _active_session_ctx.get()
         if session is None:
@@ -408,11 +486,14 @@ class SessionProxy:
                 "Cannot call SessionProxy without active session scope. "
                 "Wrap your code in 'async with container.session_scope():'."
             )
-        return session(*args, **kwargs)
+        # AsyncSession is not callable; the runtime check above prevents reaching
+        # this branch in practice. Pyright still flags both the call and the
+        # unknown return, so we suppress both rules.
+        return session(*args, **kwargs)  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
 
 
 class Container(containers.DeclarativeContainer):
-    __self__ = providers.Self()
+    __self__: providers.Self["Container"] = providers.Self()
 
     # Configuration
     config = providers.Configuration()
@@ -432,20 +513,6 @@ class Container(containers.DeclarativeContainer):
     # Encryption service (singleton - shared across all repositories)
     # NOTE: Must use get_settings() directly because config provider is never populated
     # The config.settings provider chain is never initialized, so we use get_settings() module singleton
-    def _build_encryption_service() -> EncryptionService:
-        settings = get_settings()
-        key = settings.encryption_key
-        if settings.testing:
-            key = None
-        _logger.info(
-            "Container: Initializing EncryptionService",
-            extra={
-                "encryption_key_present": bool(key),
-                "testing_mode": settings.testing,
-            },
-        )
-        return EncryptionService(key)
-
     encryption_service: providers.Singleton[EncryptionService] = providers.Singleton(
         _build_encryption_service
     )
@@ -460,6 +527,7 @@ class Container(containers.DeclarativeContainer):
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
     app_template_factory = providers.Factory(AppTemplateFactory)
     feature_flag_factory = providers.Factory(FeatureFlagFactory)
+    helper_assistants_factory = providers.Factory(HelperAssistantsFactory)
 
     # App factory must be defined before it's used by the space factory
     app_factory = providers.Factory(
@@ -505,6 +573,7 @@ class Container(containers.DeclarativeContainer):
     storage_assembler = providers.Factory(StorageInfoAssembler)
     app_assembler = providers.Factory(
         AppAssembler,
+        user=user,
         prompt_assembler=prompt_assembler,
     )
     app_run_assembler = providers.Factory(AppRunAssembler)
@@ -537,7 +606,9 @@ class Container(containers.DeclarativeContainer):
     tenant_integration_mapper = providers.Factory(TenantIntegrationMapper)
     user_integration_mapper = providers.Factory(UserIntegrationMapper)
     integration_knowledge_mapper = providers.Factory(IntegrationKnowledgeMapper)
-    confluence_token_mapper = providers.Factory(OauthTokenMapper)
+    confluence_token_mapper = providers.Factory(
+        OauthTokenMapper, encryption_service=encryption_service
+    )
     sync_log_mapper = providers.Factory(SyncLogMapper)
     sharepoint_subscription_mapper = providers.Factory(SharePointSubscriptionMapper)
 
@@ -562,15 +633,37 @@ class Container(containers.DeclarativeContainer):
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
+    prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
+    prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
+    governance_policy_repo = providers.Factory(
+        GovernancePolicyRepoImpl, session=session
+    )
+    governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
+    org_space_assistant_role_repo = providers.Factory(
+        OrgSpaceAssistantRoleRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    help_assistant_assignment_history_repo = providers.Factory(
+        HelpAssistantAssignmentHistoryRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    helper_run_repo = providers.Factory(
+        HelperRunRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    model_provider_repository = providers.Factory(
+        ModelProviderRepository, session=session, tenant_id=user.provided.tenant_id
+    )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
+    api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
     group_repo = providers.Factory(GroupRepository, session=session)
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
     allowed_origin_repo = providers.Factory(AllowedOriginRepository, session=session)
-    predefined_roles_repo = providers.Factory(
-        PredefinedRolesRepository, session=session
-    )
     role_repo = providers.Factory(RolesRepository, session=session)
     completion_model_repo = providers.Factory(
         CompletionModelsRepository, session=session
@@ -723,6 +816,7 @@ class Container(containers.DeclarativeContainer):
         config=config,
         encryption_service=encryption_service,
         session=session,
+        redis_client=redis_client,
     )
 
     # Datastore
@@ -792,6 +886,15 @@ class Container(containers.DeclarativeContainer):
         CompletionModelMigrationHistoryService,
         session=session,
     )
+    transcription_model_migration_service = providers.Factory(
+        TranscriptionModelMigrationService,
+        session=session,
+        transcription_model_repo=transcription_model_repo,
+    )
+    transcription_model_migration_history_service = providers.Factory(
+        TranscriptionModelMigrationHistoryService,
+        session=session,
+    )
     transcription_model_service = providers.Factory(
         TranscriptionModelService,
         transcription_model_repo=transcription_model_repo,
@@ -799,28 +902,7 @@ class Container(containers.DeclarativeContainer):
     auth_service = providers.Factory(
         AuthService,
         api_key_repo=api_key_repo,
-    )
-    tenant_service = providers.Factory(
-        TenantService,
-        repo=tenant_repo,
-        completion_model_repo=completion_model_repo,
-        embedding_model_repo=embedding_model_repo,
-        transcription_model_enable_service=transcription_model_enable_service,
-    )
-    user_service = providers.Factory(
-        UserService,
-        user_repo=user_repo,
-        auth_service=auth_service,
-        settings_repo=settings_repo,
-        tenant_repo=tenant_repo,
-        predefined_roles_repo=predefined_roles_repo,
-        info_blob_repo=info_blob_repo,
-    )
-    security_classification_service = providers.Factory(
-        SecurityClassificationService,
-        user=user,
-        repo=security_classification_repo,
-        tenant_service=tenant_service,
+        api_key_v2_repo=api_key_v2_repo,
     )
     # Feature flag service for audit logging and other toggles
     feature_flag_service = providers.Factory(
@@ -832,6 +914,42 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    scim_token_repository = providers.Factory(
+        ScimTokenRepository,
+        session=session,
+    )
+    scim_token_service = providers.Factory(
+        ScimTokenService,
+        repository=scim_token_repository,
+        audit_service=audit_service,
+    )
+    tenant_service = providers.Factory(
+        TenantService,
+        repo=tenant_repo,
+        completion_model_repo=completion_model_repo,
+        embedding_model_repo=embedding_model_repo,
+        transcription_model_enable_service=transcription_model_enable_service,
+        role_repo=role_repo,
+        audit_service=audit_service,
+    )
+    security_classification_service = providers.Factory(
+        SecurityClassificationService,
+        user=user,
+        repo=security_classification_repo,
+        tenant_service=tenant_service,
+    )
+    api_key_scope_revoker = providers.Factory(
+        ApiKeyScopeRevoker,
+        api_key_repo=api_key_v2_repo,
+        audit_service=audit_service,
+        user=user,
+    )
+    api_key_auth_resolver = providers.Factory(
+        ApiKeyAuthResolver,
+        api_key_repo=api_key_v2_repo,
+        legacy_repo=api_key_repo,
+        audit_service=audit_service,
     )
     audit_export_service = providers.Factory(
         AuditExportService,
@@ -860,6 +978,29 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         security_classification_service=security_classification_service,
         icon_repo=icon_repo,
+        api_key_scope_revoker=api_key_scope_revoker,
+    )
+    api_key_policy_service = providers.Factory(
+        ApiKeyPolicyService,
+        space_service=space_service,
+        user=user,
+    )
+    api_key_rate_limiter = providers.Factory(
+        ApiKeyRateLimiter,
+        redis_client=redis_client,
+    )
+    api_key_lifecycle_service = providers.Factory(
+        ApiKeyLifecycleService,
+        api_key_repo=api_key_v2_repo,
+        policy_service=api_key_policy_service,
+        audit_service=audit_service,
+        user=user,
+    )
+    api_key_maintenance_service = providers.Factory(
+        ApiKeyMaintenanceService,
+        api_key_repo=api_key_v2_repo,
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
     )
     storage_service = providers.Factory(StorageInfoService, repo=storage_repo)
     job_service = providers.Factory(
@@ -913,10 +1054,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=allowed_origin_repo,
     )
-    predefined_role_service = providers.Factory(
-        PredefinedRolesService, repo=predefined_roles_repo
+    role_service = providers.Factory(
+        RolesService, user=user, repo=role_repo, user_repo=user_repo
     )
-    role_service = providers.Factory(RolesService, user=user, repo=role_repo)
     settings_service = providers.Factory(
         SettingService,
         user=user,
@@ -924,6 +1064,7 @@ class Container(containers.DeclarativeContainer):
         ai_models_service=ai_models_service,
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
+        audit_service=audit_service,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -966,6 +1107,12 @@ class Container(containers.DeclarativeContainer):
     prompt_service = providers.Factory(
         PromptService, user=user, repo=prompt_repo, factory=prompt_factory
     )
+    prompt_library_service = providers.Factory(
+        PromptLibraryService,
+        user=user,
+        repo=prompt_library_repo,
+        governance_policy_repo=governance_policy_repo,
+    )
     file_protocol = providers.Factory(
         FileProtocol,
         file_size_service=file_size_service,
@@ -986,11 +1133,26 @@ class Container(containers.DeclarativeContainer):
         session=session,
         user=user,
     )
+    chat_session_mcp_state_repo = providers.Factory(
+        ChatSessionMcpStateRepo,
+        session=session,
+    )
+    mcp_proxy_session_factory = providers.Factory(
+        MCPProxySessionFactory,
+        encryption_service=encryption_service,
+    )
+    mcp_session_lifecycle_service = providers.Factory(
+        McpSessionLifecycleService,
+        state_repo=chat_session_mcp_state_repo,
+        mcp_server_repo=mcp_server_repo,
+        proxy_factory=mcp_proxy_session_factory,
+    )
     session_service = providers.Factory(
         SessionService,
         user=user,
         question_repo=question_repo,
         session_repo=session_repo,
+        mcp_session_lifecycle_service=mcp_session_lifecycle_service,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
@@ -998,6 +1160,32 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         group_service=group_service,
+    )
+    # Personal assistant governance services are declared before assistant_service
+    # because runtime enforcement injects effective_config_service into
+    # AssistantService — the DI chain has to be top-to-bottom resolvable.
+    mcp_server_settings_service = providers.Factory(
+        MCPServerSettingsService,
+        mcp_server_repo=mcp_server_repo,
+        user=user,
+        encryption_service=encryption_service,
+    )
+    governance_policy_service = providers.Factory(
+        GovernancePolicyService,
+        user=user,
+        repo=governance_policy_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
+        prompt_library_service=prompt_library_service,
+        model_provider_repository=model_provider_repository,
+    )
+    effective_config_service = providers.Factory(
+        EffectiveConfigService,
+        user=user,
+        policy_repo=governance_policy_repo,
+        prompt_library_repo=prompt_library_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
     )
     assistant_service = providers.Factory(
         AssistantService,
@@ -1019,6 +1207,37 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         references_service=references_service,
         icon_repo=icon_repo,
+        org_space_assistant_role_repo=org_space_assistant_role_repo,
+        help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
+        api_key_scope_revoker=api_key_scope_revoker,
+        effective_config_service=effective_config_service,
+    )
+    org_space_assistant_role_service = providers.Factory(
+        OrgSpaceAssistantRoleService,
+        user=user,
+        role_repo=org_space_assistant_role_repo,
+        history_repo=help_assistant_assignment_history_repo,
+        assistant_service=assistant_service,
+        assistant_repo=assistant_repo,
+        prompt_service=prompt_service,
+        users_repo=user_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        space_service=space_service,
+        audit_service=audit_service,
+        factory=helper_assistants_factory,
+    )
+    helper_run_service = providers.Factory(
+        HelperRunService,
+        user=user,
+        helper_run_repo=helper_run_repo,
+        role_service=org_space_assistant_role_service,
+        assistant_service=assistant_service,
+        session_repo=session_repo,
+        question_repo=question_repo,
+        completion_service=completion_service,
+        references_service=references_service,
+        factory=helper_assistants_factory,
+        audit_service=audit_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1044,6 +1263,7 @@ class Container(containers.DeclarativeContainer):
         TemplateService,
         app_service=app_template_service,
         assistant_service=assistant_template_service,
+        tenant_id=user.provided.tenant_id,
     )
 
     space_init_service = providers.Factory(
@@ -1056,12 +1276,27 @@ class Container(containers.DeclarativeContainer):
     user_group_service = providers.Factory(
         UserGroupsService, user=user, repo=user_groups_repo
     )
+    user_service = providers.Factory(
+        UserService,
+        user_repo=user_repo,
+        auth_service=auth_service,
+        api_key_auth_resolver=api_key_auth_resolver,
+        api_key_v2_repo=api_key_v2_repo,
+        audit_service=audit_service,
+        settings_repo=settings_repo,
+        tenant_repo=tenant_repo,
+        info_blob_repo=info_blob_repo,
+        api_key_rate_limiter=api_key_rate_limiter,
+        feature_flag_service=feature_flag_service,
+        session=session,
+    )
     admin_service = providers.Factory(
         AdminService,
         user=user,
         user_repo=user_repo,
         tenant_service=tenant_service,
         user_service=user_service,
+        api_key_scope_revoker=api_key_scope_revoker,
     )
     service_service = providers.Factory(
         ServiceService,
@@ -1086,22 +1321,6 @@ class Container(containers.DeclarativeContainer):
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
         encryption_service=encryption_service,
-    )
-    mcp_server_settings_service = providers.Factory(
-        MCPServerSettingsService,
-        mcp_server_repo=mcp_server_repo,
-        user=user,
-    )
-    integration_knowledge_service = providers.Factory(
-        IntegrationKnowledgeService,
-        job_service=job_service,
-        user=user,
-        oauth_token_repo=oauth_token_repo,
-        space_repo=space_repo,
-        integration_knowledge_repo=integration_knowledge_repo,
-        embedding_model_repo=embedding_model_repo2,
-        user_integration_repo=user_integration_repo,
-        actor_manager=actor_manager,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
@@ -1136,6 +1355,7 @@ class Container(containers.DeclarativeContainer):
         user_integration_repo=user_integration_repo,
         oauth_token_repo=oauth_token_repo,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
     )
 
     oauth_token_service = providers.Factory(
@@ -1226,6 +1446,7 @@ class Container(containers.DeclarativeContainer):
         job_repo=job_repo,
         user_repo=user_repo,
         change_key_service=office_change_key_service,
+        sharepoint_subscription_repo=sharepoint_subscription_repo,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,
@@ -1281,6 +1502,7 @@ class Container(containers.DeclarativeContainer):
         session_service=session_service,
         completion_service=completion_service,
         space_service=space_service,
+        file_service=file_service,
     )
 
     # Token Usage
@@ -1338,6 +1560,7 @@ class Container(containers.DeclarativeContainer):
         app_template_service=app_template_service,
         actor_manager=actor_manager,
         icon_repo=icon_repo,
+        api_key_scope_revoker=api_key_scope_revoker,
     )
     app_run_service = providers.Factory(
         AppRunService,

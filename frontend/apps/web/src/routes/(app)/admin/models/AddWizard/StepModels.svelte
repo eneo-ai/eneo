@@ -1,720 +1,240 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Step 3 — add one or more models to the selected provider.
+
+  This file orchestrates three concerns:
+    - Source the suggestions list (live first, static fallback) — see loadModels.ts
+    - Edit the in-progress draft — see ModelDraftForm
+    - Show what's been queued — see ModelDraftList
+-->
+
 <script lang="ts">
-  import { Button, Input } from "@eneo/ui";
-  import { createEventDispatcher, onMount } from "svelte";
+  import { untrack } from "svelte";
+  import { ArrowLeft, TriangleAlert } from "lucide-svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowLeft, Plus, Trash2, Sparkles, Check, ListPlus, TriangleAlert, Search, Loader2, CircleCheck, CircleX, Zap } from "lucide-svelte";
-  import HelpTooltip from "../components/HelpTooltip.svelte";
   import { getEneo } from "$lib/core/Eneo";
+
+  import {
+    formatProviderLabel,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
+  import type { WizardModelDraft } from "./wizardState";
+  import {
+    type ModelDraftState,
+    type ModelInfo,
+    type ModelType,
+    applyCatalogModelToDraft,
+    createEmptyDraft,
+    draftToWizardModel,
+    findDraftCostOverflow,
+    isDraftComplete,
+    MAX_COST_INPUT
+  } from "./models/draft";
   import { toast } from "$lib/components/toast";
+  import {
+    isSelfHostedProvider,
+    loadLiveModels,
+    providerSupportsMode,
+    staticCatalog
+  } from "./models/loadModels";
+
+  import ModelSuggestions from "./models/ModelSuggestions.svelte";
+  import ModelDraftForm from "./models/ModelDraftForm.svelte";
+  import ModelDraftList from "./models/ModelDraftList.svelte";
+
+  let {
+    modelType = "completion",
+    providerType,
+    providerId,
+    capabilities = null,
+    models = $bindable([]),
+    canFinish = $bindable(false),
+    onDraftChange,
+    onBack,
+    onSkip
+  }: {
+    modelType?: ModelType;
+    providerType: string;
+    providerId: string | null;
+    capabilities?: ModelProviderCapabilities | null;
+    models?: WizardModelDraft[];
+    canFinish?: boolean;
+    onDraftChange: (draft: WizardModelDraft | null) => void;
+    onBack: () => void;
+    onSkip: () => void;
+  } = $props();
 
   const eneo = getEneo();
 
-  /** Capabilities loaded by parent (AddWizard) */
-  export let capabilities: { providers: Record<string, any>; default_fields: any[] } | null = null;
+  // --- Draft state -------------------------------------------------------
 
-  // Hosting location options
-  const hostingOptions = [
-    { value: "swe", label: m.hosting_swe() },
-    { value: "eu", label: m.hosting_eu() },
-    { value: "usa", label: m.hosting_usa() },
-    { value: "chn", label: m.hosting_chn() },
-    { value: "can", label: m.hosting_can() },
-    { value: "gbr", label: m.hosting_gbr() },
-    { value: "isr", label: m.hosting_isr() },
-    { value: "kor", label: m.hosting_kor() },
-    { value: "deu", label: m.hosting_deu() },
-    { value: "fra", label: m.hosting_fra() },
-    { value: "jpn", label: m.hosting_jpn() }
-  ] as const;
+  // Seed once from the props. The wizard rekeys steps when modelType or
+  // providerType changes, so we don't need a derived/effect here.
+  let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, providerType)));
 
-  // Default hosting region per provider type
-  const providerDefaultHosting: Record<string, string> = {
-    openai: "usa",
-    anthropic: "usa",
-    gemini: "usa",
-    google: "usa",
-    cohere: "can",
-    mistral: "fra",
-    deepseek: "chn",
-    ai21: "isr",
-    friendliai: "kor",
-    aleph_alpha: "deu",
-    nscale: "gbr",
-    zhipuai: "chn",
-    moonshot: "chn",
-    baidu: "chn",
-    volcengine: "chn",
-  };
+  const draftComplete = $derived(isDraftComplete(draft, modelType));
 
-  // Auto-focus first input on mount
-  onMount(() => {
-    setTimeout(() => {
-      const input = document.getElementById("model-name") as HTMLInputElement;
-      input?.focus();
-    }, 100);
+  // Publish a snapshot of the draft to the parent so it can flush an
+  // un-added but valid form when the user clicks "Finish". Replaces the old
+  // bind:this hack.
+  $effect(() => {
+    onDraftChange(draftComplete ? draftToWizardModel(draft) : null);
   });
 
-  export let modelType: "completion" | "embedding" | "transcription" = "completion";
-  export let providerType: string;
-  export let providerId: string | null;
-  export let models: Array<{
-    name: string;
-    displayName: string;
-    maxInputTokens?: number;
-    maxOutputTokens?: number;
-    vision?: boolean;
-    reasoning?: boolean;
-    supportsToolCalling?: boolean;
-    family?: string;
-    dimensions?: number;
-    maxInput?: number;
-    hosting?: string;
-  }> = [];
+  $effect(() => {
+    canFinish = models.length > 0 || draftComplete;
+  });
 
-  const dispatch = createEventDispatcher<{
-    complete: { skip: boolean; pendingModel?: typeof currentModel };
-    back: void;
-  }>();
+  // --- Suggestions -------------------------------------------------------
 
-  // LiteLLM mode mapping
-  const modeMap: Record<string, string> = {
-    completion: "completion",
-    embedding: "embedding",
-    transcription: "transcription",
-  };
+  // Live results override the static catalog if present. We track the
+  // (providerId, mode) tuple so switching tabs or providers re-fetches once.
+  let liveModels = $state<ModelInfo[]>([]);
+  let liveModelsError = $state<string | null>(null);
+  let liveLoadedFor = $state<{ providerId: string; modelType: ModelType } | null>(null);
 
-  // Model info from capabilities API
-  interface ModelInfo {
-    name: string;
-    max_input_tokens?: number;
-    max_output_tokens?: number;
-    supports_vision?: boolean;
-    supports_function_calling?: boolean;
-    supports_reasoning?: boolean;
-    output_vector_size?: number;
-  }
-
-  // Extract provider map from capabilities for model lookups
-  $: capabilityProviders = (capabilities?.providers ?? {}) as Record<string, { modes: string[], models: Record<string, ModelInfo[]> }>;
-
-  function formatTokens(limit: number): string {
-    if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
-      const val = limit / 1_000_000;
-      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
-    }
-    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
-    return limit.toString();
-  }
-
-  // Providers that need live model listing from their API (not LiteLLM static data)
-  const liveListProviders = new Set(["vllm"]);
-
-  // Providers where LiteLLM names don't match user input (e.g. Azure uses deployment names)
-  const noSuggestionsProviders = new Set(["azure"]);
-
-  // Live models fetched from the provider's own API
-  let liveModels: ModelInfo[] = [];
-  let liveModelsLoaded = false;
-  let liveModelsError = "";
-  async function loadLiveModels() {
-    if (!providerId || liveModelsLoaded) return;
-    liveModelsError = "";
-    try {
-      const result = await eneo.modelProviders.listModels({ id: providerId });
-      if (result && Array.isArray(result) && result.length > 0 && result[0]?.error) {
-        liveModelsError = result[0].error;
-      } else if (result && Array.isArray(result)) {
-        liveModels = result.map((m: any) => ({
-          name: m.model ? `${m.name} (${m.model})` : m.name,
-          max_input_tokens: undefined,
-          max_output_tokens: undefined,
-          supports_vision: false,
-          supports_reasoning: false,
-        }));
-      }
-    } catch {
-      liveModelsError = "Could not fetch models from provider";
-    }
-    liveModelsLoaded = true;
-  }
-  $: if (liveListProviders.has(providerType) && providerId) loadLiveModels();
-
-  // All models: live from provider API, static from LiteLLM, or none for Azure
-  $: allModels = noSuggestionsProviders.has(providerType)
-    ? []
-    : liveListProviders.has(providerType)
-      ? liveModels
-      : (capabilityProviders[providerType]?.models?.[modeMap[modelType]] ?? []) as ModelInfo[];
-
-  // Top 4 as quick suggestions (leaving room for "Browse all" chip)
-  $: suggestions = allModels.slice(0, 4);
-
-  // Self-hosted providers have no static model list — LiteLLM can't provide defaults
-  $: isSelfHostedProvider = providerType !== ""
-    && providerType in capabilityProviders
-    && Object.keys(capabilityProviders[providerType]?.models ?? {}).length === 0;
-
-  // Check if provider is known in LiteLLM but doesn't support this model type.
-  // Unknown providers (e.g. vLLM, self-hosted) are not flagged — they can host any model type.
-  $: providerHasNoSupport = providerType !== ""
-    && Object.keys(capabilityProviders).length > 0
-    && providerType in capabilityProviders
-    && !capabilityProviders[providerType]?.modes?.includes(modeMap[modelType]);
-
-  // Browse all models
-  let showAllModels = false;
-  let modelSearch = "";
-  $: filteredModels = modelSearch
-    ? allModels.filter(m => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
-    : allModels;
-
-  function selectModelInfo(info: ModelInfo) {
-    currentModel.name = info.name;
-    currentModel.displayName = info.name;
-    if (modelType === "completion") {
-      currentModel.maxInputTokens = info.max_input_tokens;
-      currentModel.maxOutputTokens = info.max_output_tokens;
-      currentModel.vision = info.supports_vision ?? false;
-      currentModel.reasoning = info.supports_reasoning ?? false;
-      currentModel.supportsToolCalling = info.supports_function_calling ?? false;
-    } else if (modelType === "embedding") {
-      currentModel.dimensions = info.output_vector_size;
-      currentModel.maxInput = info.max_input_tokens;
-    }
-  }
-
-  // Current model being edited
-  let currentModel = createEmptyModel();
-
-  function createEmptyModel() {
-    return {
-      name: "",
-      displayName: "",
-      maxInputTokens: undefined as number | undefined,
-      maxOutputTokens: undefined as number | undefined,
-      vision: false,
-      reasoning: false,
-      supportsToolCalling: false,
-      family: modelType === "embedding" ? "openai" : (providerType || "openai"),
-      dimensions: undefined as number | undefined,
-      maxInput: undefined as number | undefined,
-      hosting: providerDefaultHosting[providerType] ?? "swe"
-    };
-  }
-
-  function addModel() {
-    if (!currentModel.name.trim() || !currentModel.displayName.trim()) return;
-
-    models = [...models, { ...currentModel }];
-    currentModel = createEmptyModel();
-  }
-
-  // Validation state per model index
-  type ValidationState = { status: "idle" | "testing" | "success" | "error"; message?: string };
-  let validationStates: Record<number, ValidationState> = {};
-
-  async function testModel(index: number) {
+  $effect(() => {
     if (!providerId) return;
-    const model = models[index];
-    if (!model) return;
-
-    validationStates[index] = { status: "testing" };
-    validationStates = validationStates;
-
-    try {
-      const result = await eneo.modelProviders.validateModel(
-        { id: providerId },
-        { model_name: model.name, model_type: modelType }
-      );
-      if (result.success) {
-        validationStates[index] = { status: "success", message: m.model_test_success() };
-      } else {
-        validationStates[index] = { status: "error", message: result.error || m.model_test_failed() };
+    if (
+      liveLoadedFor &&
+      liveLoadedFor.providerId === providerId &&
+      liveLoadedFor.modelType === modelType
+    ) {
+      return;
+    }
+    const requested = { providerId, modelType };
+    liveLoadedFor = requested;
+    liveModels = [];
+    liveModelsError = null;
+    void loadLiveModels(eneo, providerId, modelType).then((result) => {
+      // Drop stale responses if the user has since switched provider/mode.
+      if (
+        liveLoadedFor?.providerId !== requested.providerId ||
+        liveLoadedFor?.modelType !== requested.modelType
+      ) {
+        return;
       }
-    } catch {
-      validationStates[index] = { status: "error", message: m.model_test_connection_error() };
+      liveModels = result.models;
+      liveModelsError = result.error;
+    });
+  });
+
+  const allModels = $derived(
+    liveModels.length > 0 ? liveModels : staticCatalog(capabilities, providerType, modelType)
+  );
+
+  const supportStatus = $derived(providerSupportsMode(capabilities, providerType, modelType));
+  const selfHosted = $derived(isSelfHostedProvider(capabilities, providerType));
+
+  // Raw `providerType` ("openai", "hosted_vllm") and `modelType`
+  // ("completion") are machine identifiers — surface them via the
+  // existing formatter + localised type labels so admins don't see
+  // "hosted_vllm" or "transcription" in plain text alerts.
+  const providerLabel = $derived(formatProviderLabel(providerType));
+  const modelTypeLabel = $derived(
+    modelType === "completion"
+      ? m.model_type_completion()
+      : modelType === "embedding"
+        ? m.model_type_embedding()
+        : m.model_type_transcription()
+  );
+
+  // --- Handlers ----------------------------------------------------------
+
+  function selectFromCatalog(info: ModelInfo) {
+    draft = applyCatalogModelToDraft(draft, info, modelType);
+  }
+
+  function commitDraft(event: SubmitEvent) {
+    event.preventDefault();
+    if (!draftComplete) return;
+    if (findDraftCostOverflow(draft) !== null) {
+      toast.error(m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") }));
+      return;
     }
-    validationStates = validationStates;
-  }
-
-  function removeModel(index: number) {
-    models = models.filter((_, i) => i !== index);
-    // Re-index validation states
-    const newStates: Record<number, ValidationState> = {};
-    for (const [key, val] of Object.entries(validationStates)) {
-      const k = Number(key);
-      if (k < index) newStates[k] = val;
-      else if (k > index) newStates[k - 1] = val;
-    }
-    validationStates = newStates;
-  }
-
-  function useSuggestion(suggestion: typeof suggestions[0]) {
-    currentModel = {
-      name: suggestion.name,
-      displayName: suggestion.displayName,
-      maxInputTokens: suggestion.maxInputTokens,
-      maxOutputTokens: suggestion.maxOutputTokens,
-      vision: suggestion.vision ?? false,
-      reasoning: suggestion.reasoning ?? false,
-      supportsToolCalling: suggestion.supportsToolCalling ?? false,
-      family: modelType === "embedding" ? "openai" : (providerType || "openai"),
-      dimensions: undefined,
-      maxInput: undefined,
-      hosting: providerDefaultHosting[providerType] ?? "swe"
-    };
-  }
-
-  function handleSkip() {
-    dispatch("complete", { skip: true });
-  }
-
-  function handleBack() {
-    dispatch("back");
-  }
-
-  let isLookingUpDefaults = false;
-  async function lookupDefaults() {
-    if (!currentModel.name.trim()) return;
-    isLookingUpDefaults = true;
-    try {
-      const result = await eneo.modelProviders.getModelDefaults(currentModel.name.trim());
-      if (result.found) {
-        if (result.max_input_tokens != null) currentModel.maxInputTokens = result.max_input_tokens;
-        if (result.max_output_tokens != null) currentModel.maxOutputTokens = result.max_output_tokens;
-        currentModel.vision = result.supports_vision ?? false;
-        currentModel.reasoning = result.supports_reasoning ?? false;
-        currentModel.supportsToolCalling = result.supports_function_calling ?? false;
-        toast.success(m.reset_to_defaults_success());
-      } else {
-        toast.info(m.reset_to_defaults_not_found({ model: currentModel.name.trim() }));
-      }
-    } catch {
-      toast.info(m.reset_to_defaults_not_found({ model: currentModel.name.trim() }));
-    } finally {
-      isLookingUpDefaults = false;
-    }
-  }
-
-  $: canAddModel = currentModel.name.trim() !== ""
-    && currentModel.displayName.trim() !== ""
-    && (modelType !== "completion" || (currentModel.maxInputTokens != null && currentModel.maxInputTokens > 0 && currentModel.maxOutputTokens != null && currentModel.maxOutputTokens > 0));
-
-  function formatTokenLimit(limit: number): string {
-    if (limit >= 1_000_000) return `${(limit / 1_000_000).toFixed(limit % 1_000_000 === 0 ? 0 : 1)}M`;
-    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
-    return limit.toString();
-  }
-
-  // Export for parent to bind and track
-  export let canFinish = false;
-  $: canFinish = models.length > 0 || canAddModel;
-
-  // Export pending model for parent to check
-  export function getPendingModel() {
-    if (canAddModel) {
-      return { ...currentModel };
-    }
-    return null;
+    models = [...models, draftToWizardModel(draft)];
+    draft = createEmptyDraft(modelType, providerType);
   }
 </script>
 
 <div class="flex flex-col gap-6">
-  <!-- Header -->
-  <div>
-    <h3 class="font-medium text-primary">{m.add_models()}</h3>
-    <p class="text-sm text-muted">{m.add_models_description()}</p>
-  </div>
+  <header>
+    <h3 class="text-foreground font-medium">{m.add_models()}</h3>
+    <p class="text-muted-foreground text-sm">{m.add_models_description()}</p>
+  </header>
 
-  <!-- Warning when provider doesn't support this model type -->
-  {#if providerHasNoSupport}
-    <div class="flex items-start gap-3 rounded-lg border border-label-default bg-label-dimmer px-4 py-3 text-sm label-warning">
-      <TriangleAlert class="h-5 w-5 flex-shrink-0 text-label-stronger mt-0.5" />
+  {#if supportStatus === "unsupported"}
+    <div
+      class="border-warning-default/30 bg-warning-dimmer/30 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+      role="alert"
+    >
+      <TriangleAlert class="text-warning-stronger mt-0.5 size-5 shrink-0" aria-hidden="true" />
       <div>
-        <p class="font-medium text-label-stronger">{m.provider_no_support_title({ providerType, modelType })}</p>
-        <p class="text-label-default mt-0.5">{m.provider_no_support_description()}</p>
+        <p class="text-warning-stronger font-medium">
+          {m.provider_no_support_title({
+            providerType: providerLabel,
+            modelType: modelTypeLabel
+          })}
+        </p>
+        <p class="text-warning-default mt-0.5">{m.provider_no_support_description()}</p>
       </div>
     </div>
   {/if}
 
-  <!-- Error fetching live models -->
   {#if liveModelsError}
-    <div class="rounded-lg border border-dimmer bg-surface-dimmer px-4 py-3 text-sm text-muted">
+    <div
+      class="border-border bg-muted/30 text-muted-foreground rounded-lg border px-4 py-3 text-sm"
+    >
       <p>{liveModelsError}</p>
       <p class="mt-1">{m.enter_model_manually()}</p>
     </div>
   {/if}
 
-  <!-- Suggestions (if available) -->
-  {#if suggestions.length > 0}
-    <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-2 text-sm text-muted">
-        <Sparkles class="h-4 w-4" />
-        <span>{m.suggested_models()}</span>
-      </div>
+  <ModelSuggestions models={allModels} selectedName={draft.name} onSelect={selectFromCatalog} />
 
-      <div class="flex flex-wrap gap-2">
-        {#each suggestions as suggestion}
-          <button
-            type="button"
-            class="rounded-full border px-3 py-1.5 text-sm transition-all duration-150
-              {currentModel.name === suggestion.name
-                ? 'border-accent-default bg-accent-dimmer text-accent-stronger'
-                : 'border-dimmer hover:border-accent-default hover:bg-accent-dimmer'}
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-            on:click={() => selectModelInfo(suggestion)}
-          >
-            {suggestion.name}
-          </button>
-        {/each}
-        {#if allModels.length > 4}
-          <button
-            type="button"
-            class="rounded-full border border-dimmer px-3 py-1.5 text-sm transition-all duration-150
-              hover:border-accent-default hover:bg-accent-dimmer
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface
-              flex items-center gap-1.5"
-            on:click={() => { showAllModels = !showAllModels; modelSearch = ""; }}
-          >
-            <Search class="h-3.5 w-3.5" />
-            {showAllModels ? m.close() : m.browse_all()}
-          </button>
-        {/if}
-      </div>
-
-      {#if showAllModels}
-        <div class="rounded-lg border border-dimmer bg-surface-dimmer p-3 flex flex-col gap-2">
-          <input
-            type="text"
-            bind:value={modelSearch}
-            placeholder={m.search_models()}
-            class="w-full rounded-md border border-dimmer bg-surface px-3 py-2 text-sm text-primary
-              placeholder:text-muted focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
-          />
-          <div class="max-h-48 overflow-y-auto flex flex-col gap-1">
-            {#each filteredModels as model}
-              <button
-                type="button"
-                class="w-full text-left rounded-md px-3 py-2 text-sm transition-all duration-100
-                  {currentModel.name === model.name
-                    ? 'bg-accent-dimmer text-accent-stronger'
-                    : 'text-primary hover:bg-hover'}
-                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default/60"
-                on:click={() => { selectModelInfo(model); showAllModels = false; }}
-              >
-                <span class="font-medium">{model.name}</span>
-                <span class="flex gap-3 text-xs text-muted mt-0.5">
-                  {#if model.max_input_tokens}
-                    <span>{formatTokens(model.max_input_tokens)} context</span>
-                  {/if}
-                  {#if model.supports_vision}
-                    <span>Vision</span>
-                  {/if}
-                  {#if model.supports_reasoning}
-                    <span>Reasoning</span>
-                  {/if}
-                  {#if model.output_vector_size}
-                    <span>{model.output_vector_size}d</span>
-                  {/if}
-                </span>
-              </button>
-            {/each}
-            {#if filteredModels.length === 0}
-              <p class="text-sm text-muted px-3 py-2">{m.no_models_found()}</p>
-            {/if}
-          </div>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- Model Form -->
-  <form on:submit|preventDefault={addModel} class="flex flex-col gap-4">
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <!-- Model Identifier -->
-      <div class="flex flex-col gap-2">
-        <label for="model-name" class="text-sm font-medium flex items-center gap-1.5">
-          {m.model_identifier()}
-          <HelpTooltip text={m.model_identifier_help()} />
-        </label>
-        <Input.Text
-          id="model-name"
-          bind:value={currentModel.name}
-          placeholder={modelType === "completion"
-            ? m.model_identifier_placeholder_completion()
-            : modelType === "embedding"
-              ? m.model_identifier_placeholder_embedding()
-              : m.model_identifier_placeholder_transcription()}
-        />
-        {#if modelType === "completion" && currentModel.name.trim() && !isSelfHostedProvider}
-          <button
-            type="button"
-            class="text-xs text-accent-default hover:text-accent-stronger transition-colors underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 self-start"
-            disabled={isLookingUpDefaults}
-            on:click={lookupDefaults}
-          >
-            {#if isLookingUpDefaults}
-              <Loader2 class="w-3 h-3 animate-spin" />
-            {/if}
-            {m.lookup_defaults()}
-          </button>
-        {/if}
-      </div>
-
-      <!-- Display Name -->
-      <div class="flex flex-col gap-2">
-        <label for="display-name" class="text-sm font-medium">{m.display_name()}</label>
-        <Input.Text
-          id="display-name"
-          bind:value={currentModel.displayName}
-          placeholder={m.display_name_placeholder_completion()}
-        />
-      </div>
-    </div>
-
-    <!-- Completion-specific fields -->
-    {#if modelType === "completion"}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div class="flex flex-col gap-2">
-          <label for="max-input-tokens" class="text-sm font-medium flex items-center gap-1.5">
-            {m.max_input_tokens()}
-            <HelpTooltip text={m.max_input_tokens_help()} />
-          </label>
-          <Input.Text
-            id="max-input-tokens"
-            type="number"
-            bind:value={currentModel.maxInputTokens}
-            placeholder={m.max_input_tokens()}
-            min="1024"
-            max="10000000"
-          />
-          <p class="text-xs text-muted">{m.token_reference_input()}</p>
-        </div>
-
-        <div class="flex flex-col gap-2">
-          <label for="max-output-tokens" class="text-sm font-medium flex items-center gap-1.5">
-            {m.max_output_tokens()}
-            <HelpTooltip text={m.max_output_tokens_help()} />
-          </label>
-          <Input.Text
-            id="max-output-tokens"
-            type="number"
-            bind:value={currentModel.maxOutputTokens}
-            placeholder={m.max_output_tokens()}
-            min="1"
-            max="10000000"
-          />
-          <p class="text-xs text-muted">{m.token_reference_output()}</p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="flex items-center gap-6 col-span-3">
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              bind:checked={currentModel.vision}
-              class="rounded accent-accent-default h-4 w-4"
-            />
-            <span class="flex items-center gap-1">
-              {m.vision_support()}
-              <HelpTooltip text={m.vision_help()} />
-            </span>
-          </label>
-
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              bind:checked={currentModel.reasoning}
-              class="rounded accent-accent-default h-4 w-4"
-            />
-            <span class="flex items-center gap-1">
-              {m.reasoning_support()}
-              <HelpTooltip text={m.reasoning_help()} />
-            </span>
-          </label>
-
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              bind:checked={currentModel.supportsToolCalling}
-              class="rounded accent-accent-default h-4 w-4"
-            />
-            <span class="flex items-center gap-1">
-              {m.tool_calling_support()}
-              <HelpTooltip text={m.tool_calling_help()} />
-            </span>
-          </label>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Embedding-specific fields -->
-    {#if modelType === "embedding"}
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="flex flex-col gap-2">
-          <label for="model-family" class="text-sm font-medium flex items-center gap-1.5">
-            {m.model_family()}
-            <HelpTooltip text={m.model_family_help()} />
-          </label>
-          <select
-            id="model-family"
-            bind:value={currentModel.family}
-            class="h-10 rounded-md border border-dimmer bg-surface px-3 text-sm text-primary
-              focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
-          >
-            <option value="openai">OpenAI (Standard)</option>
-            <option value="e5">E5 (HuggingFace)</option>
-          </select>
-        </div>
-
-        <div class="flex flex-col gap-2">
-          <label for="dimensions" class="text-sm font-medium flex items-center gap-1.5">
-            {m.dimensions()}
-            <HelpTooltip text={m.dimensions_help()} />
-          </label>
-          <Input.Text
-            id="dimensions"
-            type="number"
-            bind:value={currentModel.dimensions}
-            placeholder="1536"
-          />
-        </div>
-
-        <div class="flex flex-col gap-2">
-          <label for="max-input" class="text-sm font-medium">{m.max_input_tokens()}</label>
-          <Input.Text
-            id="max-input"
-            type="number"
-            bind:value={currentModel.maxInput}
-            placeholder="8191"
-          />
-        </div>
-      </div>
-    {/if}
-
-    <!-- Hosting Location (common to all model types) -->
-    <div class="flex flex-col gap-2">
-      <label for="hosting" class="text-sm font-medium">{m.hosting_region()}</label>
-      <select
-        id="hosting"
-        bind:value={currentModel.hosting}
-        class="h-10 rounded-md border border-dimmer bg-surface px-3 text-sm text-primary
-          focus:border-accent-default focus:outline-none focus:ring-1 focus:ring-accent-default"
-      >
-        {#each hostingOptions as option}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
-    </div>
-
-    <!-- Action Buttons -->
-    <div class="border-t border-dimmer/40 pt-4 mt-2">
-      <div class="flex items-center gap-3">
-        <Button
-          type="submit"
-          variant="ghost"
-          class="gap-2 text-muted hover:text-primary focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-          disabled={!canAddModel}
-        >
-          <ListPlus class="h-4 w-4" />
-          {m.add_another_model()}
-        </Button>
-        {#if canAddModel && models.length === 0}
-          <span class="text-xs text-muted">
-            {m.or_click_finish_directly()}
-          </span>
-        {/if}
-      </div>
-    </div>
+  <form onsubmit={commitDraft} class="flex flex-col gap-4">
+    <ModelDraftForm
+      bind:draft
+      {modelType}
+      {providerType}
+      isSelfHosted={selfHosted}
+      canAdd={draftComplete}
+      showAddAnotherHint={draftComplete && models.length === 0}
+    />
   </form>
 
-  <!-- Added Models List -->
-  {#if models.length > 0}
-    <div class="flex flex-col gap-2">
-      <h4 class="text-sm font-medium text-muted">
-        {models.length === 1 ? m.models_to_add_one({ count: models.length }) : m.models_to_add_other({ count: models.length })}
-      </h4>
+  <ModelDraftList bind:models {providerId} {modelType} />
 
-      <div class="flex flex-col gap-2">
-        {#each models as model, index}
-          {@const vs = validationStates[index] ?? { status: "idle" }}
-          <div class="flex items-center justify-between rounded-lg border border-dimmer bg-surface p-3">
-            <div class="flex flex-col min-w-0 flex-1">
-              <span class="font-medium text-primary">{model.displayName}</span>
-              <span class="text-sm text-muted">{model.name}</span>
-              {#if vs.status === "error" && vs.message}
-                <span class="text-xs text-negative-default mt-1">{vs.message}</span>
-              {/if}
-            </div>
-
-            <div class="flex items-center gap-1 flex-shrink-0 ml-2">
-              {#if vs.status === "testing"}
-                <div class="p-2 text-muted">
-                  <Loader2 class="h-4 w-4 animate-spin" />
-                </div>
-              {:else if vs.status === "success"}
-                <div class="p-2 text-positive-default" title={vs.message}>
-                  <CircleCheck class="h-4 w-4" />
-                </div>
-              {:else if vs.status === "error"}
-                <div class="p-2 text-negative-default" title={vs.message}>
-                  <CircleX class="h-4 w-4" />
-                </div>
-              {/if}
-
-              <Button
-                variant="ghost"
-                padding="icon"
-                on:click={() => testModel(index)}
-                disabled={vs.status === "testing" || !providerId}
-                class="text-muted hover:text-accent-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-                title={m.test_model()}
-              >
-                <Zap class="h-4 w-4" />
-              </Button>
-
-              <Button
-                variant="ghost"
-                padding="icon"
-                on:click={() => removeModel(index)}
-                class="text-muted hover:text-negative-default focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-negative-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-              >
-                <Trash2 class="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
-  <!-- Navigation -->
-  <div class="flex items-center justify-between border-t border-dimmer pt-4">
+  <div class="border-border flex items-center justify-between border-t pt-4">
     <div class="flex items-center gap-4">
-      <Button variant="ghost" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
-        <ArrowLeft class="h-4 w-4" />
+      <Button type="button" variant="ghost" onclick={onBack}>
+        <ArrowLeft aria-hidden="true" />
         {m.back()}
       </Button>
 
-      <span class="text-sm text-muted/70">
-        {#if models.length === 0 && !canAddModel}
+      <span class="text-muted-foreground text-sm">
+        {#if models.length === 0 && !draftComplete}
           {m.add_at_least_one_model()}
-        {:else if models.length === 0 && canAddModel}
+        {:else if models.length === 0 && draftComplete}
           <span class="text-positive-default">{m.model_ready_to_add()}</span>
         {:else}
-          {models.length === 1 ? m.models_ready_one({ count: models.length }) : m.models_ready_other({ count: models.length })}
+          {models.length === 1
+            ? m.models_ready_one({ count: models.length })
+            : m.models_ready_other({ count: models.length })}
         {/if}
       </span>
     </div>
 
     <button
       type="button"
-      class="text-sm text-muted hover:text-primary transition-colors duration-150 underline decoration-muted/50 underline-offset-2 rounded-sm
-        focus-visible:outline-none focus-visible:text-primary focus-visible:ring-2 focus-visible:ring-accent-default/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-      on:click={handleSkip}
+      class="
+        text-muted-foreground hover:text-foreground
+        focus-visible:ring-ring/50 rounded-sm text-sm underline underline-offset-2
+        transition-colors duration-150 focus-visible:ring-3 focus-visible:outline-none
+      "
+      onclick={onSkip}
     >
       {m.skip_for_now()}
     </button>

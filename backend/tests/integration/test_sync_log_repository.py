@@ -55,6 +55,7 @@ async def create_integration_knowledge_record(
 
     # Try to reuse existing user's personal space, or create if doesn't exist
     from sqlalchemy import select
+
     existing_space_query = select(Spaces).where(Spaces.user_id == user.id).limit(1)
     result = await session.execute(existing_space_query)
     space = result.scalar_one_or_none()
@@ -164,9 +165,7 @@ async def test_sync_log_repo_get_by_integration_knowledge(db_container):
             created = await repo.add(log)
             inserted_logs.append(created)
             await session.execute(
-                text(
-                    "UPDATE sync_logs SET created_at = :created_at WHERE id = :id"
-                ),
+                text("UPDATE sync_logs SET created_at = :created_at WHERE id = :id"),
                 {
                     "created_at": now - timedelta(hours=i),
                     "id": created.id,
@@ -350,9 +349,7 @@ async def test_sync_log_repo_ordered_by_created_at_desc(db_container):
             created = await repo.add(log)
             created_entries.append((ts, created.id))
             await session.execute(
-                text(
-                    "UPDATE sync_logs SET created_at = :created_at WHERE id = :id"
-                ),
+                text("UPDATE sync_logs SET created_at = :created_at WHERE id = :id"),
                 {
                     "created_at": ts,
                     "id": created.id,
@@ -372,7 +369,10 @@ async def test_sync_log_repo_ordered_by_created_at_desc(db_container):
         created_at_values = [log.created_at for log in logs]
         assert created_at_values == sorted(created_at_values, reverse=True)
         expected_order = [
-            log_id for ts, log_id in sorted(created_entries, key=lambda item: item[0], reverse=True)
+            log_id
+            for ts, log_id in sorted(
+                created_entries, key=lambda item: item[0], reverse=True
+            )
         ]
         assert [log.id for log in logs] == expected_order
 

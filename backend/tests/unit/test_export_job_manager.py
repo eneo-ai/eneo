@@ -87,7 +87,9 @@ class TestExportJobCreation:
         assert stored_data["format"] == "csv"
 
     @pytest.mark.asyncio
-    async def test_create_job_returns_pending_status(self, manager_with_mocks, mock_settings):
+    async def test_create_job_returns_pending_status(
+        self, manager_with_mocks, mock_settings
+    ):
         """Verify created job starts in pending status."""
         manager, redis_mock = manager_with_mocks
         manager._settings = mock_settings
@@ -455,7 +457,9 @@ class TestExportJobCancellation:
         redis_mock.setex.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_is_cancelled_returns_true_when_flagged(self, manager_with_cancellable_job):
+    async def test_is_cancelled_returns_true_when_flagged(
+        self, manager_with_cancellable_job
+    ):
         """Verify is_cancelled detects cancellation flag."""
         manager, redis_mock, job_id, tenant_id = manager_with_cancellable_job
 
@@ -485,7 +489,9 @@ class TestExportJobCancellation:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_is_cancelled_returns_true_for_missing_job(self, manager_with_cancellable_job):
+    async def test_is_cancelled_returns_true_for_missing_job(
+        self, manager_with_cancellable_job
+    ):
         """Verify missing job is treated as cancelled."""
         manager, redis_mock, job_id, tenant_id = manager_with_cancellable_job
         redis_mock.get.return_value = None
@@ -672,7 +678,9 @@ class TestExportJobCleanup:
                 "created_at": past.isoformat() if is_expired else now.isoformat(),
                 "started_at": past.isoformat() if is_expired else now.isoformat(),
                 "completed_at": past.isoformat() if is_expired else now.isoformat(),
-                "expires_at": past.isoformat() if is_expired else (now + timedelta(hours=24)).isoformat(),
+                "expires_at": past.isoformat()
+                if is_expired
+                else (now + timedelta(hours=24)).isoformat(),
             }
             return json.dumps(job_data)
 
@@ -681,7 +689,9 @@ class TestExportJobCleanup:
         return manager, redis_mock, tenant_id, expired_job_id
 
     @pytest.mark.asyncio
-    async def test_get_expired_jobs_returns_only_expired(self, manager_with_expired_jobs):
+    async def test_get_expired_jobs_returns_only_expired(
+        self, manager_with_expired_jobs
+    ):
         """Verify only expired jobs are returned."""
         manager, redis_mock, tenant_id, expired_job_id = manager_with_expired_jobs
 

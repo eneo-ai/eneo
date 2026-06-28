@@ -6,7 +6,9 @@ from pydantic import AliasChoices, AliasPath, BaseModel, Field
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
-from eneo.embedding_models.presentation.embedding_model_models import EmbeddingModelPublic
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
+)
 from eneo.main.models import InDB, ModelId, ResourcePermissionsMixin, partial_model
 
 

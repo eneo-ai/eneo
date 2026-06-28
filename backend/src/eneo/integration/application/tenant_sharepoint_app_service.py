@@ -3,11 +3,11 @@ from typing import Optional
 from uuid import UUID
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
-    TenantSharePointApp,
     AUTH_METHOD_SERVICE_ACCOUNT,
+    TenantSharePointApp,
 )
 from eneo.integration.domain.repositories.tenant_sharepoint_app_repo import (
-    TenantSharePointAppRepository
+    TenantSharePointAppRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 class TenantSharePointAppService:
     """Service for managing tenant SharePoint application credentials."""
 
-    def __init__(self, tenant_app_repo: TenantSharePointAppRepository):
+    def __init__(self, tenant_app_repo: TenantSharePointAppRepository) -> None:
+        super().__init__()
         self.tenant_app_repo = tenant_app_repo
 
     async def get_active_app_for_tenant(
-        self,
-        tenant_id: UUID
+        self, tenant_id: UUID
     ) -> Optional[TenantSharePointApp]:
         """Get the active SharePoint app configuration for a tenant.
 
@@ -67,7 +67,7 @@ class TenantSharePointAppService:
             existing_app.update_credentials(
                 client_id=client_id,
                 client_secret=client_secret,
-                tenant_domain=tenant_domain
+                tenant_domain=tenant_domain,
             )
             if certificate_path:
                 existing_app.certificate_path = certificate_path
@@ -83,14 +83,11 @@ class TenantSharePointAppService:
                 tenant_domain=tenant_domain,
                 certificate_path=certificate_path,
                 created_by=created_by,
-                is_active=True
+                is_active=True,
             )
             return await self.tenant_app_repo.create(new_app)
 
-    async def deactivate_app(
-        self,
-        tenant_id: UUID
-    ) -> bool:
+    async def deactivate_app(self, tenant_id: UUID) -> bool:
         """Deactivate the SharePoint app for a tenant (emergency shutoff).
 
         This prevents the app from being used for authentication without deleting
@@ -102,10 +99,7 @@ class TenantSharePointAppService:
         logger.warning(f"Deactivating SharePoint app for tenant {tenant_id}")
         return await self.tenant_app_repo.deactivate(tenant_id)
 
-    async def delete_app(
-        self,
-        tenant_id: UUID
-    ) -> bool:
+    async def delete_app(self, tenant_id: UUID) -> bool:
         """Delete the SharePoint app configuration for a tenant.
 
         WARNING: This will break all integrations using this app for authentication.
@@ -175,11 +169,10 @@ class TenantSharePointAppService:
             existing_app.update_credentials(
                 client_id=client_id,
                 client_secret=client_secret,
-                tenant_domain=tenant_domain
+                tenant_domain=tenant_domain,
             )
             existing_app.update_service_account(
-                refresh_token=refresh_token,
-                email=service_account_email
+                refresh_token=refresh_token, email=service_account_email
             )
             if certificate_path:
                 existing_app.certificate_path = certificate_path

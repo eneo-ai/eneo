@@ -3,8 +3,6 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import litellm
-from fastapi import HTTPException
 from tenacity import (
     retry,
     retry_if_not_exception_type,
@@ -13,8 +11,12 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
-from eneo.main.exceptions import BadRequestException, OpenAIException
 from eneo.main.logging import get_logger
+from eneo.model_providers.infrastructure import litellm_transport
+from eneo.model_providers.infrastructure.litellm_provider import (
+    build_litellm_model_name,
+    build_litellm_provider_kwargs,
+)
 
 if TYPE_CHECKING:
     from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
@@ -38,7 +40,8 @@ class LiteLLMTranscriptionAdapter:
         model: "TranscriptionModel",
         credential_resolver: "TenantModelCredentialResolver",
         provider_type: str,
-    ):
+    ) -> None:
+        super().__init__()
         self.model = model
         self.credential_resolver = credential_resolver
         self.provider_type = provider_type
@@ -47,7 +50,7 @@ class LiteLLMTranscriptionAdapter:
         # LiteLLM requires the provider prefix to know which client to use
         # Users should set provider_type to a LiteLLM-compatible value
         # (e.g., "openai", "hosted_vllm" for OpenAI-compatible APIs)
-        self.litellm_model = f"{provider_type}/{model.model_name}"
+        self.litellm_model = build_litellm_model_name(provider_type, model.model_name)
 
         logger.debug(
             f"[LiteLLM] Initializing transcription adapter for model: {model.name} -> {self.litellm_model}"
@@ -57,27 +60,18 @@ class LiteLLMTranscriptionAdapter:
         """Mask API key for safe logging."""
         return f"...{api_key[-4:]}" if len(api_key) > 4 else "***"
 
-    def _prepare_kwargs(self) -> dict:
+    def _prepare_kwargs(self) -> dict[str, object]:
         """
         Prepare kwargs for LiteLLM transcription call with credentials.
         """
-        kwargs = {}
+        kwargs = build_litellm_provider_kwargs(self.credential_resolver)
 
-        # Inject API key (required)
-        api_key = self.credential_resolver.get_api_key()
-        kwargs["api_key"] = api_key
-
-        # Inject custom endpoint if present (for hosted_vllm, etc.)
-        endpoint = self.credential_resolver.get_credential_field(field="endpoint")
-        if endpoint:
-            kwargs["api_base"] = endpoint
+        api_key = kwargs.get("api_key")
+        if isinstance(api_key, str):
             logger.debug(
-                f"[LiteLLM] {self.litellm_model}: Injecting endpoint: {endpoint}"
+                f"[LiteLLM] {self.litellm_model}: Prepared kwargs "
+                f"with api_key={self._mask_api_key(api_key)}"
             )
-
-        logger.debug(
-            f"[LiteLLM] {self.litellm_model}: Prepared kwargs with api_key={self._mask_api_key(api_key)}"
-        )
 
         return kwargs
 
@@ -88,7 +82,7 @@ class LiteLLMTranscriptionAdapter:
         text = ""
         five_minutes = 60 * 5
         chunk_index = 0
-        total_duration_seconds = int(audio_file.info.duration)
+        total_duration_seconds = int(audio_file.duration)
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             total_chunks = len(files)
@@ -119,7 +113,9 @@ class LiteLLMTranscriptionAdapter:
     @retry(
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
-        retry=retry_if_not_exception_type(BadRequestException),
+        retry=retry_if_not_exception_type(
+            litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+        ),
         reraise=True,
     )
     async def _transcribe_chunk(self, file_path: Path) -> str:
@@ -141,34 +137,20 @@ class LiteLLMTranscriptionAdapter:
 
         try:
             with open(file_path, "rb") as audio_file:
-                response = await litellm.atranscription(
+                response = await litellm_transport.atranscription(
                     model=self.litellm_model,
                     file=audio_file,
                     **kwargs,
                 )
 
             logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
-            return response.text
+            return response.text  # type: ignore[return-value]
 
-        except litellm.AuthenticationError:
-            logger.error(
-                f"[LiteLLM] {self.litellm_model}: Authentication failed",
-                extra={
-                    "provider_id": str(self.credential_resolver.provider_id),
-                    "provider_type": self.provider_type,
-                },
-            )
-            raise HTTPException(
-                status_code=401,
-                detail=f"Invalid API credentials for provider {self.provider_type}. "
-                "Please verify your API key configuration.",
-            )
-        except litellm.BadRequestError as e:
-            logger.exception(f"[LiteLLM] {self.litellm_model}: Bad request error:")
-            raise BadRequestException("Invalid input") from e
-        except litellm.RateLimitError as e:
-            logger.exception(f"[LiteLLM] {self.litellm_model}: Rate limit error:")
-            raise OpenAIException("LiteLLM Rate limit exception") from e
         except Exception as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
-            raise OpenAIException(f"Unknown LiteLLM exception: {e}") from e
+            litellm_transport.raise_public_litellm_error(
+                e,
+                provider_type=self.provider_type,
+                is_unavailable=litellm_transport.is_provider_unavailable_error,
+                raise_unavailable=litellm_transport.raise_provider_unavailable,
+            )

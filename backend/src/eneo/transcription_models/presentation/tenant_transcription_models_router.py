@@ -1,15 +1,30 @@
 # MIT License
 
+from decimal import Decimal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from eneo.authentication.auth_dependencies import get_current_active_user
-from eneo.transcription_models.presentation.transcription_model_models import TranscriptionModelPublic
 from eneo.database.database import AsyncSession, get_session_with_transaction
+from eneo.main.container.container import Container
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission, validate_permission
+from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.tenant_models.application.tenant_model_service import (
+    TenantTranscriptionModelService,
+)
+from eneo.transcription_models.presentation.transcription_model_models import (
+    TranscriptionModelPublic,
+)
 from eneo.users.user import UserInDB
+
+CurrentUser = Annotated[UserInDB, Depends(get_current_active_user)]
+DBSession = Annotated[AsyncSession, Depends(get_session_with_transaction)]
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 router = APIRouter()
 
@@ -22,9 +37,19 @@ class TenantTranscriptionModelCreate(BaseModel):
     )
     display_name: str = Field(..., description="User-friendly display name")
     hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
-    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
+    family: str = Field(
+        default="openai",
+        description="Model family (e.g., 'openai', 'anthropic', 'deepseek')",
+    )
     is_active: bool = Field(default=True, description="Enable in organization")
     is_default: bool = Field(default=False, description="Set as default model")
+    description: str | None = Field(default=None, description="Model description")
+    cost_per_minute: Decimal | None = Field(
+        default=None, description="Indicative USD per minute of audio"
+    )
+    security_classification: ModelId | None = Field(
+        default=None, description="Security classification"
+    )
 
 
 class TenantTranscriptionModelUpdate(BaseModel):
@@ -32,79 +57,46 @@ class TenantTranscriptionModelUpdate(BaseModel):
     description: str | None = Field(None, description="Model description")
     hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
     open_source: bool | None = Field(None, description="Is the model open source")
-    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+    stability: str | None = Field(
+        None, description="Model stability (stable, experimental)"
+    )
+    cost_per_minute: Decimal | None = Field(
+        None, description="Indicative USD per minute of audio"
+    )
+    # See TenantCompletionModelUpdate for the rationale on folding these in.
+    is_default: bool | None = Field(None, description="Set as tenant default")
+    security_classification: ModelId | None = Field(
+        None, description="Security classification reference (null clears it)"
+    )
+
+
+def _service(
+    session: AsyncSession, user: UserInDB, container: Container
+) -> TenantTranscriptionModelService:
+    return TenantTranscriptionModelService(
+        session=session,
+        user=user,
+        audit_service=container.audit_service(),
+    )
 
 
 @router.post(
     "/",
+    description="Create a new tenant-specific transcription model.",
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def create_tenant_transcription_model(
     model_create: TenantTranscriptionModelCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: DBSession,
+    container: ContainerDep,
 ):
     """Create a new tenant-specific transcription model."""
-    from eneo.database.tables.ai_models_table import TranscriptionModels
-    from eneo.database.tables.model_providers_table import ModelProviders
-    import sqlalchemy as sa
-    from eneo.main.exceptions import BadRequestException, NotFoundException
+    validate_permission(user, Permission.ADMIN)
 
-    # Verify provider exists and belongs to user's tenant
-    stmt = sa.select(ModelProviders).where(
-        ModelProviders.id == model_create.provider_id,
-        ModelProviders.tenant_id == user.tenant_id,
-    )
-    result = await session.execute(stmt)
-    provider = result.scalar_one_or_none()
-
-    if not provider:
-        raise NotFoundException("Model provider not found or does not belong to your organization")
-
-    if not provider.is_active:
-        raise BadRequestException("Model provider is not active")
-
-    # If setting as default, unset all other defaults first
-    if model_create.is_default:
-        stmt = (
-            sa.update(TranscriptionModels)
-            .where(TranscriptionModels.tenant_id == user.tenant_id)
-            .values(is_default=False)
-        )
-        await session.execute(stmt)
-
-    # Create the transcription model with settings directly on it
-    new_model = TranscriptionModels(
-        tenant_id=user.tenant_id,
-        provider_id=model_create.provider_id,
-        name=model_create.display_name,  # User-friendly display name
-        model_name=model_create.name,  # Actual model name from provider
-        # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=model_create.family,
-        hosting=model_create.hosting,
-        org=None,
-        stability="stable",
-        open_source=False,
-        description=None,
-        hf_link=None,
-        is_deprecated=False,
-        base_url="",  # Will be set from provider config at runtime
-        # Settings (now directly on model)
-        is_enabled=model_create.is_active,
-        is_default=model_create.is_default,
-        security_classification_id=None,
-    )
-
-    session.add(new_model)
-    await session.flush()
-
-    # Load the model BEFORE committing
-    from eneo.transcription_models.domain.transcription_model_repo import TranscriptionModelRepository
-    repo = TranscriptionModelRepository(session, user)
-    transcription_model = await repo.one(new_model.id)
-
-    # Commit the transaction
+    service = _service(session, user, container)
+    transcription_model = await service.create(model_create)
     await session.commit()
 
     return TranscriptionModelPublic.from_domain(transcription_model)
@@ -112,54 +104,22 @@ async def create_tenant_transcription_model(
 
 @router.put(
     "/{model_id}/",
+    description="Update a tenant-specific transcription model.",
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_tenant_transcription_model(
     model_id: UUID,
     model_update: TenantTranscriptionModelUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: DBSession,
+    container: ContainerDep,
 ):
     """Update a tenant-specific transcription model."""
-    from eneo.database.tables.ai_models_table import TranscriptionModels
-    import sqlalchemy as sa
-    from eneo.main.exceptions import UnauthorizedException, NotFoundException
+    validate_permission(user, Permission.ADMIN)
 
-    # Verify model exists and belongs to user's tenant
-    stmt = sa.select(TranscriptionModels).where(
-        TranscriptionModels.id == model_id,
-        TranscriptionModels.tenant_id == user.tenant_id,
-    )
-    result = await session.execute(stmt)
-    model = result.scalar_one_or_none()
-
-    if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
-
-    # Cannot update global models
-    if model.tenant_id is None:
-        raise UnauthorizedException("Cannot update global models")
-
-    # Update fields that were provided
-    if model_update.display_name is not None:
-        model.name = model_update.display_name
-    if model_update.description is not None:
-        model.description = model_update.description
-    if model_update.hosting is not None:
-        model.hosting = model_update.hosting
-    if model_update.open_source is not None:
-        model.open_source = model_update.open_source
-    if model_update.stability is not None:
-        model.stability = model_update.stability
-
-    await session.flush()
-
-    # Load the updated model
-    from eneo.transcription_models.domain.transcription_model_repo import TranscriptionModelRepository
-    repo = TranscriptionModelRepository(session, user)
-    transcription_model = await repo.one(model.id)
-
+    service = _service(session, user, container)
+    transcription_model = await service.update(model_id, model_update)
     await session.commit()
 
     return TranscriptionModelPublic.from_domain(transcription_model)
@@ -167,39 +127,21 @@ async def update_tenant_transcription_model(
 
 @router.delete(
     "/{model_id}/",
-    responses=responses.get_responses([403, 404]),
+    description="Delete a tenant-specific transcription model.",
+    response_model=None,
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_tenant_transcription_model(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: CurrentUser,
+    session: DBSession,
+    container: ContainerDep,
 ):
     """Delete a tenant-specific transcription model."""
-    from eneo.database.tables.ai_models_table import TranscriptionModels
-    import sqlalchemy as sa
-    from eneo.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
+    validate_permission(user, Permission.ADMIN)
 
-    # Verify model exists and belongs to user's tenant
-    stmt = sa.select(TranscriptionModels).where(
-        TranscriptionModels.id == model_id,
-        TranscriptionModels.tenant_id == user.tenant_id,
-    )
-    result = await session.execute(stmt)
-    model = result.scalar_one_or_none()
-
-    if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
-
-    # Cannot delete global models
-    if model.tenant_id is None:
-        raise UnauthorizedException("Cannot delete global models")
-
-    # Delete the model (settings are now on the model itself)
-    try:
-        await session.delete(model)
-        await session.commit()
-    except sa.exc.IntegrityError:
-        await session.rollback()
-        raise BadRequestException("MODEL_IN_USE")
+    service = _service(session, user, container)
+    await service.delete(model_id)
+    await session.commit()
 
     return {"success": True}

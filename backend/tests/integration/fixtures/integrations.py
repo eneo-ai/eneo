@@ -36,7 +36,8 @@ async def integration_knowledge_factory(db_container):
         # Insert directly into database
         async with sessionmanager.session() as session:
             async with session.begin():
-                result = await session.execute(text("""
+                result = await session.execute(
+                    text("""
                     INSERT INTO integration_knowledge (
                         id, name, space_id, user_integration_id,
                         tenant_id, url, created_at, updated_at
@@ -44,18 +45,21 @@ async def integration_knowledge_factory(db_container):
                         gen_random_uuid(), :name, :space_id, :user_integration_id,
                         :tenant_id, :url, NOW(), NOW()
                     ) RETURNING id
-                """), {
-                    "name": name,
-                    "space_id": str(uuid4()),
-                    "user_integration_id": str(uuid4()),
-                    "tenant_id": str(tenant.id),
-                    "url": url,
-                })
+                """),
+                    {
+                        "name": name,
+                        "space_id": str(uuid4()),
+                        "user_integration_id": str(uuid4()),
+                        "tenant_id": str(tenant.id),
+                        "url": url,
+                    },
+                )
                 knowledge_id = result.scalar()
 
         # Return simple object with id
         class _Knowledge:
             pass
+
         k = _Knowledge()
         k.id = knowledge_id
         return k
@@ -117,9 +121,7 @@ async def sync_log_factory():
 async def create_sync_logs_in_db(sync_log_factory, db_container):
     """Factory for creating and saving multiple SyncLog records to database."""
 
-    async def _create_and_save(
-        integration_knowledge_id, count: int = 10, **log_kwargs
-    ):
+    async def _create_and_save(integration_knowledge_id, count: int = 10, **log_kwargs):
         """Create and save sync logs to database."""
         async with db_container() as container:
             repo = container.sync_log_repo()

@@ -1,7 +1,9 @@
-from typing import Optional
+from decimal import Decimal
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
+from typing_extensions import override
 
 from eneo.main.models import InDB, partial_model
 
@@ -20,6 +22,10 @@ class EmbeddingModelBase(BaseModel):
     description: Optional[str] = None
     org: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    # Indicative USD ratecard. Output is almost always 0 for embeddings but
+    # kept for symmetry with completion-model pricing.
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
 
     @classmethod
     def _validate_batch_size(cls, value: Optional[int]) -> Optional[int]:
@@ -31,7 +37,8 @@ class EmbeddingModelBase(BaseModel):
             raise ValueError("max_batch_size must not exceed 256")
         return value
 
-    def model_post_init(self, __context):
+    @override
+    def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
         # Pydantic v2 hook to validate custom constraints
         self.max_batch_size = self._validate_batch_size(self.max_batch_size)

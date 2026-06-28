@@ -29,7 +29,10 @@ export const actions: Actions = {
   }
 };
 
-async function getSingleTenantOidcLink(backendUrl: string, fetchFn: typeof fetch): Promise<string | undefined> {
+async function getSingleTenantOidcLink(
+  backendUrl: string,
+  fetchFn: typeof fetch
+): Promise<string | undefined> {
   try {
     // Call initiate auth endpoint WITHOUT tenant parameter for single-tenant mode
     // Backend will automatically use the first active tenant with global OIDC config
@@ -73,11 +76,10 @@ export const load = async (event) => {
   // Check if either single-tenant federation (DB) or global OIDC (env) is configured
   const { federationStatus } = event.locals.featureFlags;
   const hasSingleTenantOidc =
-    federationStatus.has_single_tenant_federation ||
-    federationStatus.has_global_oidc_config;
+    federationStatus.has_single_tenant_federation || federationStatus.has_global_oidc_config;
 
   if (hasSingleTenantOidc) {
-    singleTenantOidcLink = await getSingleTenantOidcLink(getBackendUrl(), event.fetch);
+    singleTenantOidcLink = await getSingleTenantOidcLink(getBackendUrl() ?? "", event.fetch);
   }
 
   return {

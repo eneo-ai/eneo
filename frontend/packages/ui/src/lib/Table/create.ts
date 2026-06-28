@@ -5,11 +5,13 @@
 */
 
 import { getContext, setContext } from "svelte";
+import type { Component } from "svelte";
 import {
   BodyRow,
   Column,
   Table,
   createTable,
+  createRender as _createRender,
   type DataLabel,
   type TableViewModel
 } from "svelte-headless-table";
@@ -51,7 +53,7 @@ export function getTableContext<T>(): TableContext<T> {
 
 export interface CreateTableOptions {
   disableClientFilter?: boolean;
-  serverSideFilter?: boolean;  // Keep filter UI but make it trigger server-side search
+  serverSideFilter?: boolean; // Keep filter UI but make it trigger server-side search
 }
 
 export function createWithResource<Resource extends Record<string, unknown>>(
@@ -76,7 +78,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
   pageSize = 999999,
   options: CreateTableOptions = {}
 ) {
-  const plugins: any = {
+  const plugins: Partial<Plugins<Resource>> = {
     select: addSelectedRows(),
     sort: addSortBy({ disableMultiSort: true }),
     page: addPagination({ initialPageSize: pageSize })
@@ -88,7 +90,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
       // Keep filter UI but disable client-side filtering (always returns true)
       // Component will watch filterValue and trigger server-side search
       plugins.tableFilter = addTableFilter({
-        fn: () => true  // No-op: all rows pass filter (server does filtering)
+        fn: () => true // No-op: all rows pass filter (server does filtering)
       });
     } else {
       // Standard client-side filtering
@@ -100,7 +102,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
     }
   }
 
-  const table: Table<Resource, Plugins<Resource>> = createTable(data, plugins);
+  const table: Table<Resource, Plugins<Resource>> = createTable(data, plugins as Plugins<Resource>);
 
   return {
     column: table.column,
@@ -192,7 +194,7 @@ export function createWithStore<Resource extends Record<string, unknown>>(
     createViewModel(columns: Column<Resource, Plugins<Resource>>[]) {
       const dataCols = table.createColumns(columns);
       return table.createViewModel(dataCols, {
-        rowDataId: (item) => String((item as any).id)
+        rowDataId: (item) => String((item as Record<string, unknown>).id)
       });
     }
   };
@@ -205,6 +207,24 @@ export function getCardCell<T>(row: BodyRow<T, Plugins<T>>) {
     });
   }
   return undefined;
+}
+
+/**
+ * Wrapper around svelte-headless-table's createRender that supports both
+ * Svelte 4 class components and Svelte 5 function components.
+ *
+ * svelte-render@2 expects Constructor<SvelteComponent> (Svelte 4 class-based),
+ * but Svelte 5 components using $props() are typed as Component<Props>.
+ * This wrapper casts the component to bridge the type gap.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function renderComponent(component: Component<any>, props?: Record<string, any>) {
+  if (props !== undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return _createRender(component as any, props);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return _createRender(component as any);
 }
 
 type Plugins<T> = {

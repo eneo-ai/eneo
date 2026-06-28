@@ -5,6 +5,7 @@ This provides a session-scoped event loop that works for both
 integration tests (with session-scoped async fixtures) and
 unit tests (with function-scoped tests).
 """
+
 import os
 
 # CRITICAL: Set crawler settings BEFORE importing pytest_plugins
@@ -16,21 +17,177 @@ if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
     os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour
 
 import asyncio
+import faulthandler
+import sys
+import threading
+import warnings
+from typing import TYPE_CHECKING
 
 import pytest
+
+from tests.warning_filters import IGNORED_WARNINGS
+
+if TYPE_CHECKING:
+    from _pytest.terminal import TerminalReporter
+
+
+def _install_warning_ignores_eagerly() -> None:
+    """Apply the structured ignores via warnings.filterwarnings() right now.
+
+    pytest's own ``filterwarnings = error`` (from pytest.ini) is active during
+    conftest import, which means any warning raised while importing the
+    integration conftest below would crash collection before pytest_configure
+    has a chance to register our ignores. Pushing the ignores onto the global
+    warnings filter list here ensures they win the match for import-time
+    warnings (e.g. starlette pulling in legacy `multipart`).
+
+    pytest_configure also registers them with the pytest config so they show
+    up in -W reports and the terminal summary stays consistent.
+    """
+    for entry in IGNORED_WARNINGS:
+        category = _resolve_category(entry.category)
+        warnings.filterwarnings(
+            "ignore",
+            message=entry.pattern,
+            category=category,
+            module=entry.module or "",
+        )
+
+
+def _resolve_category(name: str) -> type[Warning]:
+    """Map a category string (e.g. ``"DeprecationWarning"``) to its class."""
+    if not name:
+        return Warning
+    if "." in name:
+        module_name, attr = name.rsplit(".", 1)
+        import importlib
+
+        module = importlib.import_module(module_name)
+        return getattr(module, attr)
+    return getattr(__builtins__, name, None) or globals().get(name) or Warning
+
+
+_install_warning_ignores_eagerly()
+
 
 # Import shared fixture modules
 # These fixtures are automatically discovered by pytest
 # Organized to mirror the backend source structure (src/eneo/*)
 pytest_plugins = [
     "tests.integration.fixtures.completion_models",  # Completion model fixtures
-    "tests.integration.fixtures.assistants",         # Assistant fixtures
-    "tests.integration.fixtures.apps",               # App fixtures
-    "tests.integration.fixtures.services",           # Service fixtures
-    "tests.integration.fixtures.spaces",             # Space fixtures
+    "tests.integration.fixtures.transcription_models",  # Transcription model fixtures
+    "tests.integration.fixtures.assistants",  # Assistant fixtures
+    "tests.integration.fixtures.apps",  # App fixtures
+    "tests.integration.fixtures.services",  # Service fixtures
+    "tests.integration.fixtures.spaces",  # Space fixtures
     "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
-    "tests.integration.fixtures.integrations",       # Integration fixtures (SharePoint, etc.)
+    "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
 ]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register structured warning ignores so they ride alongside pytest.ini.
+
+    Each entry in IGNORED_WARNINGS is forced to declare a resolution path; this
+    hook turns them into real ``filterwarnings`` lines for pytest.
+    """
+    for entry in IGNORED_WARNINGS:
+        config.addinivalue_line("filterwarnings", entry.to_filter_string())
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(
+    session: pytest.Session,  # noqa: ARG001  # required by pytest hook contract
+    exitstatus: int,
+) -> None:
+    """Guarantee the process always terminates with a clear, bounded signal.
+
+    The tests themselves complete in ~11s, but interpreter shutdown can
+    intermittently hang while joining a non-daemon thread left running by the
+    test stack (a Twisted reactor started via Scrapy/crochet, or a leaked
+    async client). When that happens the process never exits, so CI and
+    automated callers wait indefinitely with no result after the summary line
+    has already printed.
+
+    This arms a daemon watchdog: if shutdown overruns the budget it dumps every
+    thread's traceback (to pinpoint the offending thread) and hard-exits while
+    preserving the pass/fail status. On a clean shutdown the daemon is killed
+    with the process and this is a no-op — zero impact on normal runs. Set
+    PYTEST_SHUTDOWN_WATCHDOG_SECONDS=0 to disable.
+    """
+    try:
+        budget = float(os.getenv("PYTEST_SHUTDOWN_WATCHDOG_SECONDS", "60"))
+    except ValueError:
+        budget = 60.0
+    if budget <= 0:
+        return
+
+    status = int(exitstatus)
+
+    def _watchdog() -> None:
+        import time
+
+        time.sleep(budget)
+        sys.stderr.write(
+            f"\n[pytest watchdog] interpreter shutdown exceeded {budget:.0f}s "
+            "after the session finished — a non-daemon thread is blocking exit. "
+            "Dumping thread tracebacks and forcing exit "
+            f"(status={status}).\n"
+        )
+        sys.stderr.flush()
+        faulthandler.dump_traceback(all_threads=True)
+        sys.stderr.flush()
+        os._exit(status)
+
+    threading.Thread(
+        target=_watchdog, name="pytest-shutdown-watchdog", daemon=True
+    ).start()
+
+
+def pytest_terminal_summary(
+    terminalreporter: "TerminalReporter",
+    exitstatus: int,  # noqa: ARG001  # required by pytest hook contract
+    config: pytest.Config,  # noqa: ARG001
+) -> None:
+    """Print the active warning ignores at the end of every run.
+
+    We want this tech debt visible on every test run so it doesn't quietly
+    rot. Each entry carries the concrete action required to delete it.
+    """
+    if not IGNORED_WARNINGS:
+        return
+
+    terminalreporter.write_sep("=", f"warning ignores ({len(IGNORED_WARNINGS)})")
+    terminalreporter.write_line(
+        "These filters silence pytest warnings today. Each must declare a "
+        "resolution path — work them down, don't grow the list."
+    )
+    terminalreporter.write_line("")
+    for entry in IGNORED_WARNINGS:
+        category = entry.category or "Warning"
+        terminalreporter.write_line(f"  • [{category}] {entry.pattern}")
+        terminalreporter.write_line(f"      why: {entry.reason}")
+        terminalreporter.write_line(f"      fix: {entry.resolution}")
+        terminalreporter.write_line("")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests with opt-in markers unless explicitly requested via -m."""
+    OPT_IN_MARKERS = {"api_key_matrix"}
+
+    # Check if any opt-in marker was explicitly requested via -m
+    marker_expr = config.getoption("-m", default="")
+    requested = {m for m in OPT_IN_MARKERS if m in marker_expr}
+
+    skip_markers = OPT_IN_MARKERS - requested
+    for item in items:
+        for marker_name in skip_markers:
+            if marker_name in item.keywords:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"'{marker_name}' tests require explicit -m {marker_name}"
+                    )
+                )
 
 
 @pytest.fixture(scope="session")

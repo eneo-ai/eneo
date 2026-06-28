@@ -1,8 +1,8 @@
 # MIT License
 
 
-import datetime
-from typing import NamedTuple
+from datetime import datetime
+from typing import Any, NamedTuple
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
+from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
@@ -22,18 +23,45 @@ from eneo.database.tables.users_table import Users
 from eneo.sessions.session import SessionInDB
 
 
+# IMPORTANT: every method in this repo that returns session/question rows or
+# aggregates derived from them must apply this filter. If you add a new such
+# method, either call this helper or document the explicit exception in a
+# comment on the new method. Mirrors
+# ``SessionRepository._exclude_helper_run_sessions`` — PRD §4 ("one rule, one
+# place"). Parametrised on the session-id column so both Sessions-scoped
+# (Sessions.id) and Questions-scoped (Questions.session_id) queries can apply
+# the same filter without joining Sessions.
+def _exclude_helper_run_sessions(
+    query: sa.Select[Any], session_id_col: Any
+) -> sa.Select[Any]:
+    """Exclude rows whose session is referenced by a ``help_assistant_runs`` row.
+
+    Helper conversations live in the regular ``sessions`` / ``questions``
+    tables so streaming, RAG, model selection, and tool calling all work — but
+    they must never appear in normal conversation / insights / analytics /
+    export endpoints. See PRD §4.
+    """
+    return query.where(
+        ~sa.exists(
+            sa.select(HelpAssistantRuns.id).where(
+                HelpAssistantRuns.session_id == session_id_col
+            )
+        )
+    )
+
+
 class AssistantMetadataRow(NamedTuple):
     """Lightweight row for assistant metadata (id and created_at only)."""
 
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
 
 
 class SessionMetadataRow(NamedTuple):
     """Lightweight row for session metadata."""
 
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
     assistant_id: UUID | None
     group_chat_id: UUID | None
 
@@ -42,7 +70,7 @@ class QuestionMetadataRow(NamedTuple):
     """Lightweight row for question metadata."""
 
     id: UUID
-    created_at: datetime.datetime
+    created_at: datetime
     assistant_id: UUID | None
     session_id: UUID
 
@@ -50,7 +78,7 @@ class QuestionMetadataRow(NamedTuple):
 class CountBucketRow(NamedTuple):
     """Aggregated count row by hour."""
 
-    created_at: datetime.datetime
+    created_at: datetime
     total: int
 
 
@@ -58,7 +86,7 @@ class QuestionTextRow(NamedTuple):
     """Lightweight question row for insights analysis."""
 
     question: str
-    created_at: datetime.datetime
+    created_at: datetime
     session_id: UUID
 
 
@@ -67,16 +95,19 @@ class AssistantInsightQuestionRow(NamedTuple):
 
     id: UUID
     question: str
-    created_at: datetime.datetime
+    created_at: datetime
     session_id: UUID
 
 
 class AnalysisRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
 
-    async def _get_count(self, table, tenant_id: UUID = None):
-        stmt = sa.select(sa.func.count()).select_from(table)
+    async def _get_count(
+        self, table: type, tenant_id: UUID | None = None
+    ) -> int | None:
+        stmt = sa.select(sa.func.count()).select_from(table)  # type: ignore[arg-type]  # table is a mapped ORM class; select_from accepts Any
 
         if tenant_id is not None:
             if table == Questions:
@@ -84,20 +115,26 @@ class AnalysisRepository:
             else:
                 stmt = stmt.join(Users).where(Users.tenant_id == tenant_id)
 
+        # Hide help-assistant runs from session/question totals (PRD §4).
+        if table == Sessions:
+            stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        elif table == Questions:
+            stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
+
         count = await self.session.scalar(stmt)
 
         return count
 
-    async def get_assistant_count(self, tenant_id: UUID = None):
+    async def get_assistant_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Assistants, tenant_id=tenant_id)
 
-    async def get_group_chat_count(self, tenant_id: UUID = None):
+    async def get_group_chat_count(self, tenant_id: UUID | None = None):
         return await self._get_count(table=GroupChatsTable, tenant_id=tenant_id)
 
-    async def get_session_count(self, tenant_id: UUID = None):
+    async def get_session_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Sessions, tenant_id=tenant_id)
 
-    async def get_question_count(self, tenant_id: UUID = None):
+    async def get_question_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Questions, tenant_id=tenant_id)
 
     async def get_tenant_counts(self, tenant_id: UUID) -> tuple[int, int, int]:
@@ -108,21 +145,21 @@ class AnalysisRepository:
             .where(Users.tenant_id == tenant_id)
             .scalar_subquery()
         )
-        session_count = (
+        session_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Sessions)
             .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
-            .scalar_subquery()
-        )
-        question_count = (
+            .where(Users.tenant_id == tenant_id),
+            Sessions.id,
+        ).scalar_subquery()
+        question_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Questions)
             .join(Sessions, Questions.session_id == Sessions.id)
             .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
-            .scalar_subquery()
-        )
+            .where(Users.tenant_id == tenant_id),
+            Sessions.id,
+        ).scalar_subquery()
         result = await self.session.execute(
             sa.select(assistant_count, session_count, question_count)
         )
@@ -132,9 +169,9 @@ class AnalysisRepository:
     async def get_assistant_sessions_since(
         self,
         assistant_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ):
         if tenant_id is None:
             raise ValueError("tenant_id is required for insights session queries")
@@ -151,6 +188,7 @@ class AnalysisRepository:
         stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
             Users.tenant_id == tenant_id
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -197,6 +235,11 @@ class AnalysisRepository:
                     Questions.web_search_results
                 ),
             )
+            .options(
+                selectinload(Sessions.questions).selectinload(
+                    Questions.mcp_tool_references
+                )
+            )
         )
 
         sessions = await self.session.scalars(stmt)
@@ -205,9 +248,9 @@ class AnalysisRepository:
     async def get_group_chat_sessions_since(
         self,
         group_chat_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ):
         if tenant_id is None:
             raise ValueError("tenant_id is required for insights session queries")
@@ -217,6 +260,7 @@ class AnalysisRepository:
         stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
             Users.tenant_id == tenant_id
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -257,6 +301,11 @@ class AnalysisRepository:
                 selectinload(Sessions.questions).selectinload(
                     Questions.web_search_results
                 ),
+            )
+            .options(
+                selectinload(Sessions.questions).selectinload(
+                    Questions.mcp_tool_references
+                )
             )
         )
 
@@ -310,19 +359,20 @@ class AnalysisRepository:
         assistant_id: UUID | None,
         group_chat_id: UUID | None,
     ) -> list[QuestionTextRow]:
-        if tenant_id is None:
-            raise ValueError("tenant_id is required for insights question queries")
-
         if assistant_id is None and group_chat_id is None:
             raise ValueError("Either assistant_id or group_chat_id is required")
 
         if assistant_id is not None and group_chat_id is not None:
             raise ValueError("Only one of assistant_id or group_chat_id can be set")
 
-        question_rank = sa.func.row_number().over(
-            partition_by=Questions.session_id,
-            order_by=(Questions.created_at.asc(), Questions.id.asc()),
-        ).label("question_rank")
+        question_rank = (
+            sa.func.row_number()
+            .over(
+                partition_by=Questions.session_id,
+                order_by=(Questions.created_at.asc(), Questions.id.asc()),
+            )
+            .label("question_rank")
+        )
 
         base_stmt = (
             sa.select(
@@ -338,6 +388,7 @@ class AnalysisRepository:
             .where(Sessions.created_at <= to_date)
             .where(Questions.question.isnot(None))
         )
+        base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
 
         if assistant_id is not None:
             base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
@@ -380,16 +431,17 @@ class AnalysisRepository:
         tenant_id: UUID,
         limit: int,
         query: str | None = None,
-        cursor_created_at: datetime.datetime | None = None,
+        cursor_created_at: datetime | None = None,
         cursor_id: UUID | None = None,
     ) -> tuple[list[AssistantInsightQuestionRow], int, bool]:
-        if tenant_id is None:
-            raise ValueError("tenant_id is required for insights question queries")
-
-        question_rank = sa.func.row_number().over(
-            partition_by=Questions.session_id,
-            order_by=(Questions.created_at.asc(), Questions.id.asc()),
-        ).label("question_rank")
+        question_rank = (
+            sa.func.row_number()
+            .over(
+                partition_by=Questions.session_id,
+                order_by=(Questions.created_at.asc(), Questions.id.asc()),
+            )
+            .label("question_rank")
+        )
 
         base_stmt = (
             sa.select(
@@ -407,6 +459,7 @@ class AnalysisRepository:
             .where(Sessions.created_at <= to_date)
             .where(Questions.question.isnot(None))
         )
+        base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
         if query:
             normalized_query = query.strip()
             if normalized_query:
@@ -468,9 +521,9 @@ class AnalysisRepository:
     async def get_assistant_conversation_counts(
         self,
         assistant_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for an assistant efficiently.
 
@@ -480,6 +533,9 @@ class AnalysisRepository:
         # Count sessions
         session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
             Sessions.assistant_id == assistant_id
+        )
+        session_count_stmt = _exclude_helper_run_sessions(
+            session_count_stmt, Sessions.id
         )
 
         if tenant_id is not None:
@@ -503,6 +559,9 @@ class AnalysisRepository:
             sa.select(sa.func.count(Questions.id))
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(Sessions.assistant_id == assistant_id)
+        )
+        question_count_stmt = _exclude_helper_run_sessions(
+            question_count_stmt, Sessions.id
         )
 
         if tenant_id is not None:
@@ -540,13 +599,14 @@ class AnalysisRepository:
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         return await self.session.scalar(stmt) or 0
 
     async def get_assistant_metadata_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[AssistantMetadataRow]:
         """Get lightweight assistant metadata (id, created_at only) for a tenant.
 
@@ -573,8 +633,8 @@ class AnalysisRepository:
     async def get_session_metadata_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[SessionMetadataRow]:
         """Get lightweight session metadata for a tenant.
 
@@ -593,6 +653,7 @@ class AnalysisRepository:
             .where(Users.tenant_id == tenant_id)
             .order_by(Sessions.created_at)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)
@@ -613,8 +674,8 @@ class AnalysisRepository:
     async def get_question_metadata_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[QuestionMetadataRow]:
         """Get lightweight question metadata for a tenant.
 
@@ -633,6 +694,7 @@ class AnalysisRepository:
             .where(Questions.tenant_id == tenant_id)
             .order_by(Questions.created_at)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
 
         if start_date is not None:
             stmt = stmt.where(Questions.created_at >= start_date)
@@ -653,8 +715,8 @@ class AnalysisRepository:
     async def get_assistant_counts_by_hour_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[CountBucketRow]:
         bucket = sa.func.date_trunc("hour", Assistants.created_at).label("created_at")
         stmt = (
@@ -678,8 +740,8 @@ class AnalysisRepository:
     async def get_session_counts_by_hour_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[CountBucketRow]:
         bucket = sa.func.date_trunc("hour", Sessions.created_at).label("created_at")
         stmt = (
@@ -689,6 +751,7 @@ class AnalysisRepository:
             .group_by(bucket)
             .order_by(bucket)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)
@@ -703,8 +766,8 @@ class AnalysisRepository:
     async def get_question_counts_by_hour_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[CountBucketRow]:
         bucket = sa.func.date_trunc("hour", Questions.created_at).label("created_at")
         stmt = (
@@ -714,6 +777,7 @@ class AnalysisRepository:
             .group_by(bucket)
             .order_by(bucket)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
 
         if start_date is not None:
             stmt = stmt.where(Questions.created_at >= start_date)
@@ -728,9 +792,9 @@ class AnalysisRepository:
     async def get_group_chat_conversation_counts(
         self,
         group_chat_id: UUID,
-        from_date: datetime = None,
-        to_date: datetime = None,
-        tenant_id: UUID = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for a group chat efficiently.
 
@@ -740,6 +804,9 @@ class AnalysisRepository:
         # Count sessions
         session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
             Sessions.group_chat_id == group_chat_id
+        )
+        session_count_stmt = _exclude_helper_run_sessions(
+            session_count_stmt, Sessions.id
         )
 
         if tenant_id is not None:
@@ -763,6 +830,9 @@ class AnalysisRepository:
             sa.select(sa.func.count(Questions.id))
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(Sessions.group_chat_id == group_chat_id)
+        )
+        question_count_stmt = _exclude_helper_run_sessions(
+            question_count_stmt, Sessions.id
         )
 
         if tenant_id is not None:
@@ -800,13 +870,14 @@ class AnalysisRepository:
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         return await self.session.scalar(stmt) or 0
 
     async def get_active_assistant_count_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> int:
         """Count distinct trackable assistants that have sessions in the given period.
 
@@ -825,6 +896,7 @@ class AnalysisRepository:
             .where(Assistants.published.is_(True))
             .where(Assistants.insight_enabled.is_(True))
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)
@@ -858,8 +930,8 @@ class AnalysisRepository:
     async def get_active_user_count_for_tenant(
         self,
         tenant_id: UUID,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> int:
         """Count distinct non-deleted users with sessions in the given period.
 
@@ -877,6 +949,7 @@ class AnalysisRepository:
             .where(Users.deleted_at.is_(None))  # Exclude deleted users
             .where(Sessions.service_id.is_(None))  # Exclude service sessions
         )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
 
         if start_date is not None:
             stmt = stmt.where(Sessions.created_at >= start_date)

@@ -1,11 +1,16 @@
 # MIT License
+from enum import Enum
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from eneo.main.models import InDB, ModelId
-from eneo.users.user import UserInDBBase, UserPublicBase
+from eneo.users.user import UserInDBBase, UserSparse
+
+
+class UserGroupState(str, Enum):
+    DELETED = "deleted"
 
 
 class UserGroupBase(BaseModel):
@@ -20,7 +25,7 @@ class UserGroupCreate(UserGroupBase):
     tenant_id: UUID
 
 
-class UserGroupUpdateRequest(UserGroupBase):
+class UserGroupUpdateRequest(BaseModel):
     name: Optional[str] = None
 
     users: list[ModelId] = []
@@ -39,4 +44,4 @@ class UserGroupInDB(UserGroupInDBBase):
 
 
 class UserGroupPublic(UserGroupBase, InDB):
-    users: list[UserPublicBase] = []
+    users: list[UserSparse] = []

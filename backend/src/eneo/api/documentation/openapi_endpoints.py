@@ -9,7 +9,9 @@ router = APIRouter()
     "/api-docs",
     tags=["Documentation"],
     summary="Get OpenAPI specification",
-    description="Returns the complete OpenAPI 3.0 specification for this API. Compatible with WSO2 API Manager."
+    description="Returns the complete OpenAPI 3.0 specification for this API. Compatible with WSO2 API Manager.",
+    responses={200: {"description": "OpenAPI specification"}},
+    response_model=None,
 )
 async def get_api_documentation(request: Request):
     """Returns the OpenAPI specification - identical to /openapi.json but documented."""

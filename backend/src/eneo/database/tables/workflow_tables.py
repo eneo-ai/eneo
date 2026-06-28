@@ -40,9 +40,9 @@ class Steps(BasePublic):
 
 assistants_steps_guardrails_table = Table(
     "assistants_steps_guardrails",
-    Base.metadata,
+    Base.metadata,  # type: ignore[attr-defined]
     Column(
         "assistant_id", ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
-    ),
-    Column("step_id", ForeignKey(Steps.id, ondelete="CASCADE"), primary_key=True),
+    ),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+    Column("step_id", ForeignKey(Steps.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
 )

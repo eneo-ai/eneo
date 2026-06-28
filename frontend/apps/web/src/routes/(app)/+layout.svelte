@@ -5,6 +5,7 @@
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
+  import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initEneo } from "$lib/core/Eneo";
   import { initEneoSocket } from "$lib/core/EneoSocket";
@@ -24,6 +25,7 @@
   initEneo(data);
   initAppContext(data);
   initJobManager(data);
+  initExpiringKeysStore(data);
   initAttachmentUrlService(data);
   initFaviconUrlService();
   const socket = initEneoSocket(data);
@@ -48,14 +50,15 @@
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
-
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
 <a
   href={contentLink}
   class="bg-primary text-accent-stronger absolute top-1 left-1 z-50 h-0 w-0 overflow-hidden rounded-lg font-medium shadow-lg focus:block focus:h-auto focus:w-auto"
   ><span class="block p-2">{m.jump_to_content()}</span></a
 >
+<!-- eslint-enable svelte/no-navigation-without-resolve -->
 
 <div class="bg-secondary absolute inset-0"></div>
 
@@ -63,6 +66,8 @@
 
 <div
   class="fixed inset-0 z-[100] h-3"
+  role="presentation"
+  aria-hidden="true"
   on:pointerenter={() => {
     $showHeader = true;
   }}
@@ -81,11 +86,13 @@
     <div
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
     >
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/")}>
         <EneoWordMark class="text-brand-eneo hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
         <IconEneo class="text-brand-eneo -ml-0.5 block md:hidden" viewBox="0 0 330 330"
         ></IconEneo>
       </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <Button
         unstyled
         class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 items-center justify-center rounded-lg text-lg md:group-hover:flex"
@@ -96,25 +103,42 @@
         <IconArrowUpToLine />
       </Button>
     </div>
-    <nav class="flex h-[3.25rem] w-full overflow-x-auto">
-      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
-      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
+    <nav class="flex h-[3.25rem] w-full items-center gap-1 overflow-x-auto px-3">
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}
+        >{m.personal()}</a
+      >
+      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
+        >{m.spaces()}</a
+      >
       {#if user.hasPermission("admin")}
-        <a href={localizeHref("/spaces/organization/knowledge")} data-current={isOrganization ? "page" : undefined}>{m.organization()}</a>
+        <a
+          href={localizeHref("/spaces/organization/knowledge")}
+          data-current={isOrganization ? "page" : undefined}>{m.organization()}</a
+        >
       {/if}
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
 
       <div aria-hidden="true" class="flex-grow"></div>
 
       <!-- Toggle -->
       {#if user.hasPermission("admin")}
-        <a href={localizeHref("/admin")} data-current={currentRoute.startsWith("/admin") ? "page" : undefined}
-          >{m.admin()}</a
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+        <a
+          href={localizeHref("/admin")}
+          data-current={currentRoute.startsWith("/admin") ? "page" : undefined}>{m.admin()}</a
         >
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/if}
 
-      <JobManagerDropdown></JobManagerDropdown>
-      <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu tenantFederationEnabled={Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation)}></ProfileMenu>
+      <div class="ml-3 flex items-center gap-3">
+        <JobManagerDropdown></JobManagerDropdown>
+        <ProfileMenu
+          tenantFederationEnabled={Boolean(
+            data.featureFlags?.federationStatus?.has_multi_tenant_federation
+          )}
+        ></ProfileMenu>
+      </div>
     </nav>
   </header>
 
@@ -126,14 +150,13 @@
 <Toaster />
 
 <style lang="postcss">
-  @reference "@eneo/ui/styles";
+  @reference "../../app.css";
   nav a {
-    @apply text-secondary hover:bg-accent-dimmer hover:text-brand-eneo flex h-[3.25rem] items-center px-8 pt-0.5 text-[0.9rem] tracking-[0.01rem] hover:font-medium hover:tracking-normal;
+    @apply text-secondary hover:bg-muted hover:text-foreground flex h-9 items-center rounded-lg px-3 text-[0.9rem] font-medium tracking-[0.01rem] transition-colors;
   }
 
   nav a[data-current="page"] {
-    @apply text-brand-eneo font-medium tracking-normal;
-    background: rgba(from var(--background-hover-default) r g b / 0.1);
+    @apply bg-muted text-foreground;
   }
 
   main {
@@ -149,9 +172,5 @@
     box-shadow: 0px 14px 12px 2px rgba(0, 0, 0, 0.1);
     border: 0.5px solid var(--border-stronger);
     border-bottom: 0px;
-  }
-
-  .subtle-border {
-    background: linear-gradient(0deg, var(--border-default) 0%, transparent 100%);
   }
 </style>

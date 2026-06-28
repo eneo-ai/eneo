@@ -115,7 +115,9 @@ class TestTimeoutConfiguration:
 
             assert configured_max_length == max_length
             assert isinstance(configured_max_length, int)
-            assert 60 <= configured_max_length <= 86400, "Max length must be in valid range"
+            assert 60 <= configured_max_length <= 86400, (
+                "Max length must be in valid range"
+            )
 
 
 @pytest.mark.asyncio
@@ -442,7 +444,9 @@ class TestTimeoutUpdatePropagation:
             # Verify only download_timeout changed
             download = get_crawler_setting("download_timeout", tenant.crawler_settings)
             dns = get_crawler_setting("dns_timeout", tenant.crawler_settings)
-            max_length = get_crawler_setting("crawl_max_length", tenant.crawler_settings)
+            max_length = get_crawler_setting(
+                "crawl_max_length", tenant.crawler_settings
+            )
 
             assert download == 250, "download_timeout should be updated"
             assert dns == 20, "dns_timeout should remain unchanged"

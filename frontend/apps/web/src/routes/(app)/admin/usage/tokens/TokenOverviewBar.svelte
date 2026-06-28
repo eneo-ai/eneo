@@ -34,7 +34,10 @@
           acc[provider].tokenCount += info.total_token_usage;
           return acc;
         },
-        {} as Record<string, { label: string; tokenCount: number; colour: string; provider: string }>
+        {} as Record<
+          string,
+          { label: string; tokenCount: number; colour: string; provider: string }
+        >
       )
     ).sort((a, b) => b.tokenCount - a.tokenCount);
   });

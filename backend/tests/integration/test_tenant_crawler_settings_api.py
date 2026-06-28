@@ -28,7 +28,9 @@ class TestUpdateCrawlerSettings:
         # Other settings should remain at defaults
         assert data["settings"]["dns_timeout"] == 30
 
-    async def test_update_multiple_settings(self, client, test_tenant, super_admin_token):
+    async def test_update_multiple_settings(
+        self, client, test_tenant, super_admin_token
+    ):
         """Multiple settings can be updated in single request."""
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
@@ -44,7 +46,11 @@ class TestUpdateCrawlerSettings:
         assert data["settings"]["download_timeout"] == 120
         assert data["settings"]["dns_timeout"] == 45
         assert data["settings"]["retry_times"] == 5
-        assert set(data["overrides"]) >= {"download_timeout", "dns_timeout", "retry_times"}
+        assert set(data["overrides"]) >= {
+            "download_timeout",
+            "dns_timeout",
+            "retry_times",
+        }
 
     async def test_empty_request_returns_current_settings(
         self, client, test_tenant, super_admin_token
@@ -58,9 +64,7 @@ class TestUpdateCrawlerSettings:
         assert response.status_code == 200
         data = response.json()
         assert "settings" in data
-        assert set(CRAWLER_SETTING_SPECS.keys()).issubset(
-            data["settings"].keys()
-        )
+        assert set(CRAWLER_SETTING_SPECS.keys()).issubset(data["settings"].keys())
 
     async def test_validation_rejects_out_of_range_below_min(
         self, client, test_tenant, super_admin_token
@@ -124,7 +128,9 @@ class TestUpdateCrawlerSettings:
         )
         assert response.status_code in [401, 403]
 
-    async def test_update_boolean_settings(self, client, test_tenant, super_admin_token):
+    async def test_update_boolean_settings(
+        self, client, test_tenant, super_admin_token
+    ):
         """Boolean settings can be updated."""
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
@@ -136,7 +142,9 @@ class TestUpdateCrawlerSettings:
         assert data["settings"]["obey_robots"] is False
         assert data["settings"]["autothrottle_enabled"] is False
 
-    async def test_update_download_max_size(self, client, test_tenant, super_admin_token):
+    async def test_update_download_max_size(
+        self, client, test_tenant, super_admin_token
+    ):
         """download_max_size setting can be updated."""
         response = await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
@@ -194,9 +202,7 @@ class TestGetCrawlerSettings:
         data = response.json()
         assert data["overrides"] == []
         assert "download_timeout" in data["settings"]
-        assert set(CRAWLER_SETTING_SPECS.keys()).issubset(
-            data["settings"].keys()
-        )
+        assert set(CRAWLER_SETTING_SPECS.keys()).issubset(data["settings"].keys())
 
     async def test_returns_merged_settings_after_update(
         self, client, test_tenant, super_admin_token
@@ -353,7 +359,9 @@ class TestCrawlerSettingsWorkflow:
         assert get_response.json()["settings"]["download_timeout"] == default_timeout
         assert get_response.json()["overrides"] == []
 
-    async def test_partial_updates_accumulate(self, client, test_tenant, super_admin_token):
+    async def test_partial_updates_accumulate(
+        self, client, test_tenant, super_admin_token
+    ):
         """Multiple partial updates accumulate correctly."""
         # Reset first
         await client.delete(

@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, unique
 from typing import Any
 
 from eneo.files.text import (
@@ -9,6 +9,7 @@ from eneo.files.text import (
 )
 
 
+@unique
 class ErrorCodes(int, Enum):
     NOT_FOUND = 9000
     UNAUTHORIZED = 9001
@@ -45,6 +46,23 @@ class ErrorCodes(int, Enum):
     # Provider errors
     PROVIDER_INACTIVE = 9031
     PROVIDER_NOT_FOUND = 9032
+    # Resource configuration errors
+    MODEL_NOT_AVAILABLE = 9033
+    KNOWLEDGE_MODEL_UNAVAILABLE = 9034
+    SECURITY_CLASSIFICATION_MISMATCH = 9035
+    # MCP upstream errors
+    MCP_UPSTREAM_ERROR = 9036
+    MCP_UPSTREAM_AUTH_ERROR = 9037
+    # Resource readiness
+    RESOURCE_NOT_READY = 9038
+    # Model lifecycle — soft-delete blocked because the model is still
+    # referenced by an active resource (assistants, apps, services,
+    # assistant/app templates). Space membership alone does not block.
+    MODEL_IN_USE = 9039
+    # System user protection
+    SYSTEM_USER_PROTECTED = 9040
+    # AI provider deterministically rejected the request (4xx upstream)
+    PROVIDER_REJECTED_REQUEST = 9041
 
 
 class NotFoundException(Exception):
@@ -52,7 +70,16 @@ class NotFoundException(Exception):
 
 
 class UnauthorizedException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str = "forbidden",
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
 
 
 class UnsupportedModelException(Exception):
@@ -109,6 +136,18 @@ class BadRequestException(Exception):
     pass
 
 
+class ModelInUseException(Exception):
+    """Raised when trying to soft-delete a model that is still referenced.
+
+    Surfaced as 400 with a dedicated error code so the frontend can show a
+    localized "Model is in use" message and offer the migration flow as a
+    follow-up action — the generic BAD_REQUEST code can't carry that
+    context.
+    """
+
+    pass
+
+
 class QuotaExceededException(Exception):
     pass
 
@@ -118,6 +157,28 @@ class UniqueException(Exception):
 
 
 class OpenAIException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+        details: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+        self.details = details
+
+
+class ProviderRejectedRequestException(OpenAIException):
+    """The AI provider deterministically rejected the request (upstream 4xx).
+
+    Subclasses OpenAIException so existing provider-error handling keeps
+    catching it, but maps to 400 instead of 503: the request/configuration is
+    at fault, not provider availability, and retrying cannot succeed.
+    """
+
     pass
 
 
@@ -303,6 +364,18 @@ class APIKeyNotConfiguredException(Exception):
     pass
 
 
+class SystemUserProtected(Exception):
+    """Raised when an admin path tries to delete or mutate a system user.
+
+    Per-tenant system users (``users.is_system_user = true``) own seeded
+    Help Assistant rows; deleting them would cascade-destroy the org-space's
+    Prompt Guide and audit history. The marker is authoritative — no admin
+    path is allowed to remove it.
+    """
+
+    pass
+
+
 class ProviderInactiveException(Exception):
     """Raised when attempting to use a model whose provider is inactive/disabled."""
 
@@ -311,6 +384,36 @@ class ProviderInactiveException(Exception):
 
 class ProviderNotFoundException(Exception):
     """Raised when the model's provider cannot be found in the database."""
+
+    pass
+
+
+class ModelNotAvailableException(Exception):
+    """Raised when a model is assigned to a resource but not available in the space."""
+
+    pass
+
+
+class KnowledgeModelUnavailableException(Exception):
+    """Raised when a knowledge source uses an embedding model that is not available."""
+
+    pass
+
+
+class SecurityClassificationMismatchException(Exception):
+    """Raised when a resource does not meet the space's security classification."""
+
+    pass
+
+
+class MCPClientError(Exception):
+    """Raised when an upstream MCP service fails."""
+
+    pass
+
+
+class MCPAuthenticationError(MCPClientError):
+    """Raised when upstream MCP authentication fails."""
 
     pass
 
@@ -331,9 +434,21 @@ EXCEPTION_MAP = {
         ErrorCodes.USER_NOT_CREATED,
     ),
     BadRequestException: (400, None, ErrorCodes.BAD_REQUEST),
+    ModelInUseException: (
+        400,
+        "Model is currently in use and cannot be deleted.",
+        ErrorCodes.MODEL_IN_USE,
+    ),
     QuotaExceededException: (403, None, ErrorCodes.QUOTA_EXCEEDED),
     UniqueException: (400, None, ErrorCodes.UNIQUE_ERROR),
     OpenAIException: (503, None, ErrorCodes.OPENAI_ERROR),
+    # Starlette resolves handlers via MRO, so this subclass entry wins over
+    # the OpenAIException one for deterministic upstream rejections.
+    ProviderRejectedRequestException: (
+        400,
+        None,
+        ErrorCodes.PROVIDER_REJECTED_REQUEST,
+    ),
     ClaudeException: (503, None, ErrorCodes.CLAUDE_ERROR),
     ValidationException: (422, None, ErrorCodes.VALIDATION_ERROR),
     PydanticParseError: (500, None, ErrorCodes.PYDANTIC_PARSE_ERROR),
@@ -370,4 +485,33 @@ EXCEPTION_MAP = {
     # Provider errors - use None to pass through the exception's own message
     ProviderInactiveException: (503, None, ErrorCodes.PROVIDER_INACTIVE),
     ProviderNotFoundException: (404, None, ErrorCodes.PROVIDER_NOT_FOUND),
+    # Resource configuration errors - use None to pass through the exception's own message
+    ModelNotAvailableException: (400, None, ErrorCodes.MODEL_NOT_AVAILABLE),
+    KnowledgeModelUnavailableException: (
+        400,
+        None,
+        ErrorCodes.KNOWLEDGE_MODEL_UNAVAILABLE,
+    ),
+    SecurityClassificationMismatchException: (
+        400,
+        None,
+        ErrorCodes.SECURITY_CLASSIFICATION_MISMATCH,
+    ),
+    # MCP upstream errors
+    MCPClientError: (
+        502,
+        "MCP upstream service unavailable.",
+        ErrorCodes.MCP_UPSTREAM_ERROR,
+    ),
+    MCPAuthenticationError: (
+        502,
+        "MCP upstream authentication failed.",
+        ErrorCodes.MCP_UPSTREAM_AUTH_ERROR,
+    ),
+    NotReadyException: (
+        503,
+        "Resource is not ready yet.",
+        ErrorCodes.RESOURCE_NOT_READY,
+    ),
+    SystemUserProtected: (403, None, ErrorCodes.SYSTEM_USER_PROTECTED),
 }

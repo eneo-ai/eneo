@@ -5,10 +5,11 @@
 */
 
 import { goto } from "$app/navigation";
+import { resolve } from "$app/paths";
 import { createContext } from "$lib/core/context";
 import type { Eneo, ResourcePermission, Space, SpaceSparse } from "@eneo/eneo-js";
 import { derived, get, writable, type Readable } from "svelte/store";
-import { toast } from "$lib/components/toast";
+import { toastError } from "$lib/core/errors";
 
 const [getSpacesManager, setSpacesManager] = createContext<ReturnType<typeof SpacesManager>>(
   "Manages spaces / projects"
@@ -42,10 +43,7 @@ function SpacesManager(data: SpacesManagerParams) {
     return $spaces.find((s) => isOrganizationSpace(s))?.id ?? null;
   });
 
-  const organizationSpaceId = derived(
-    [organizationSpaceIdFromList],
-    ([$listId]) => $listId
-  );
+  const organizationSpaceId = derived([organizationSpaceIdFromList], ([$listId]) => $listId);
 
   const nonOrgSpaces = derived(userSpaces, ($spaces) =>
     $spaces.filter((s) => !isOrganizationSpace(s))
@@ -102,7 +100,7 @@ function SpacesManager(data: SpacesManagerParams) {
       refreshSpaces();
       return newSpace;
     } catch (e) {
-      toast.error(`Error creating new space ${space.name}`);
+      toastError(e);
       console.error(e);
     }
     return null;
@@ -129,7 +127,7 @@ function SpacesManager(data: SpacesManagerParams) {
       }
       return updatedSpace;
     } catch (e) {
-      toast.error(`Error updating space ${id}`);
+      toastError(e);
       console.error(e);
     }
   }
@@ -140,16 +138,18 @@ function SpacesManager(data: SpacesManagerParams) {
       await eneo.spaces.delete({ id: space.id });
       await refreshSpaces();
       if (space.id === get(currentSpace).id) {
-        goto("/spaces/list");
+        goto(resolve("/spaces/list"));
       }
     } catch (e) {
-      toast.error(`Error deleting space ${space.id}`);
+      toastError(e);
       console.error(e);
     }
   }
 
   async function updateDefaultAssistant({ completionModel }: { completionModel: { id: string } }) {
-    const id = get(currentSpace).default_assistant.id;
+    const defaultAssistant = get(currentSpace).default_assistant;
+    if (!defaultAssistant) return;
+    const id = defaultAssistant.id;
     try {
       const updatedAssistant = await eneo.assistants.update({
         assistant: { id },
@@ -160,7 +160,7 @@ function SpacesManager(data: SpacesManagerParams) {
         return $currentSpace;
       });
     } catch (e) {
-      toast.error("Error updating default assistant.");
+      toastError(e);
       console.error(e);
     }
   }
@@ -170,7 +170,7 @@ function SpacesManager(data: SpacesManagerParams) {
       accessibleSpaces: { subscribe: nonOrgSpaces.subscribe },
       nonOrgSpaces,
       currentSpace: derivedCurrentSpace(currentSpace),
-      organizationSpaceId,
+      organizationSpaceId
     },
     refreshSpaces,
     refreshCurrentSpace,
@@ -199,22 +199,21 @@ function derivedCurrentSpace(space: Readable<Space>) {
     return {
       ...$space,
       organization: isOrganizationSpace($space),
-      routeId: 
-        $space.personal 
-          ? "personal" 
-          : isOrganizationSpace($space) 
-            ? "organization"
-            : $space.id,
+      routeId: $space.personal
+        ? "personal"
+        : isOrganizationSpace($space)
+          ? "organization"
+          : $space.id,
       members: $space.members.items,
       applications: {
-        assistants: $space.applications.assistants.items,
-        groupChats: $space.applications.group_chats.items,
+        assistants: $space.applications?.assistants.items ?? [],
+        groupChats: $space.applications?.group_chats.items ?? [],
         chat: [
-          ...$space.applications.assistants.items,
-          ...$space.applications.group_chats.items
+          ...($space.applications?.assistants.items ?? []),
+          ...($space.applications?.group_chats.items ?? [])
         ].sort((a, b) => a.name.localeCompare(b.name)),
-        apps: $space.applications.apps.items,
-        services: $space.applications.services.items.filter((service) => {
+        apps: $space.applications?.apps.items ?? [],
+        services: ($space.applications?.services.items ?? []).filter((service) => {
           return !service.name.startsWith("_eneo");
         })
       },
@@ -228,15 +227,15 @@ function derivedCurrentSpace(space: Readable<Space>) {
           case "space":
             return $space.permissions?.includes(action) ?? false;
           case "assistant":
-            return $space.applications.assistants.permissions?.includes(action) ?? false;
+            return $space.applications?.assistants.permissions?.includes(action) ?? false;
           case "group_chat":
-            return $space.applications.group_chats.permissions?.includes(action) ?? false;
+            return $space.applications?.group_chats.permissions?.includes(action) ?? false;
           case "default_assistant":
-            return $space.default_assistant.permissions?.includes(action) ?? false;
+            return $space.default_assistant?.permissions?.includes(action) ?? false;
           case "app":
-            return $space.applications.apps.permissions?.includes(action) ?? false;
+            return $space.applications?.apps.permissions?.includes(action) ?? false;
           case "service":
-            return $space.applications.services.permissions?.includes(action) ?? false;
+            return $space.applications?.services.permissions?.includes(action) ?? false;
           case "collection":
             return $space.knowledge.groups.permissions?.includes(action) ?? false;
           case "website":

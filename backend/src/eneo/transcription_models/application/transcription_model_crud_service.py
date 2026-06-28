@@ -1,7 +1,8 @@
 from typing import TYPE_CHECKING, Optional, Union
 
+from eneo.main.datetime_utils import datetime_or_utc_min
 from eneo.main.exceptions import UnauthorizedException
-from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
+from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -11,6 +12,9 @@ if TYPE_CHECKING:
         SecurityClassificationRepoImpl,
     )
     from eneo.transcription_models.domain import TranscriptionModelRepository
+    from eneo.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
     from eneo.users.user import UserInDB
 
 
@@ -20,7 +24,8 @@ class TranscriptionModelCRUDService:
         user: "UserInDB",
         transcription_model_repo: "TranscriptionModelRepository",
         security_classification_repo: Optional["SecurityClassificationRepoImpl"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.transcription_model_repo = transcription_model_repo
         self.user = user
         self.security_classification_repo = security_classification_repo
@@ -41,7 +46,7 @@ class TranscriptionModelCRUDService:
 
         return [model for model in transcription_models if model.can_access]
 
-    async def get_default_transcription_model(self):
+    async def get_default_transcription_model(self) -> Optional["TranscriptionModel"]:
         transcription_models = await self.get_available_transcription_models()
 
         # First try to get the org default model
@@ -51,14 +56,16 @@ class TranscriptionModelCRUDService:
 
         # Otherwise get the latest model
         sorted_models = sorted(
-            transcription_models, key=lambda model: model.created_at, reverse=True
+            transcription_models,
+            key=lambda model: datetime_or_utc_min(model.created_at),
+            reverse=True,
         )
 
         # If no models are available
         if not sorted_models:
             return None
 
-        return sorted_models[0]  # type: ignore
+        return sorted_models[0]
 
     @validate_permissions(Permission.ADMIN)
     async def update_transcription_model(
@@ -76,12 +83,15 @@ class TranscriptionModelCRUDService:
         if is_org_default is not None:
             transcription_model.is_org_default = is_org_default
 
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if security_classification is None:
                 tm_security_classification = None
             else:
-                tm_security_classification = await self.security_classification_repo.one(
-                    id=security_classification.id
+                assert self.security_classification_repo is not None
+                tm_security_classification = (
+                    await self.security_classification_repo.one(
+                        id=security_classification.id
+                    )
                 )
             transcription_model.security_classification = tm_security_classification
 

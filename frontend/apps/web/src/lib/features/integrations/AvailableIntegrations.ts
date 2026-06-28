@@ -5,7 +5,7 @@ import type { UserIntegration } from "@eneo/eneo-js";
 const key = Symbol("Integrations context");
 
 export function setAvailableIntegrations(value: UserIntegration[]): void {
-  let store = getContextStore();
+  const store = getContextStore();
   if (store) {
     store.set(value);
   } else {

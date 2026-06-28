@@ -61,6 +61,46 @@ export function initConversations(client) {
     },
 
     /**
+     * Rename a conversation.
+     * NOTE: This endpoint exists in backend, but the generated schema types may lag behind.
+     * We intentionally bypass type checking here to keep runtime behavior working until types are regenerated.
+     * @param  {{id: string} | Conversation} conversation conversation
+     * @param  {{name: string}} body rename payload
+     * @returns {Promise<Conversation>} Updated conversation
+     * @throws {EneoError}
+     * */
+    rename: async (conversation, body) => {
+      const { id: session_id } = conversation;
+
+      const res = await client.fetch("/api/v1/conversations/{session_id}/name/", {
+        method: "patch",
+        params: { path: { session_id } },
+        requestBody: {
+          "application/json": body
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Lazy-fetch the persisted upstream response of a single tool call.
+     * @param  {{ sessionId: string, toolCallId: string }} params
+     * @returns {Promise<{tool_call_id: string, result?: string | null, mcp_tool_name?: string | null}>}
+     * @throws {EneoError}
+     */
+    getToolCallResult: async ({ sessionId, toolCallId }) => {
+      const res = await client.fetch(
+        "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/",
+        {
+          method: "get",
+          params: { path: { session_id: sessionId, tool_call_id: toolCallId } }
+        }
+      );
+      return res;
+    },
+
+    /**
      * Delete a specific conversation.
      * @param  {{id: string} | Conversation} conversation conversation
      * @returns {Promise<true>} true on success, otherwise throws
@@ -85,14 +125,17 @@ export function initConversations(client) {
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.useWebSearch] Should the assistant search the web? Defaults to false
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
+     * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
+     * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
      * @param {(data: import("../types/resources").SSE.Eneo) => void} [params.callbacks.onEneoEvent] Callback to run when an eneo event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
+     * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {EneoError}
@@ -105,6 +148,7 @@ export function initConversations(client) {
       tools,
       useWebSearch,
       requireToolApproval,
+      disabledMcpServerIds,
       abortController,
       callbacks
     }) => {
@@ -142,7 +186,12 @@ export function initConversations(client) {
               tools,
               stream: true,
               use_web_search: useWebSearch,
-              require_tool_approval: requireToolApproval
+              require_tool_approval: requireToolApproval,
+              // Spread (not a direct property) so it doesn't trip excess-property
+              // checks until schema.d.ts is regenerated via `bun run update`.
+              ...(disabledMcpServerIds && disabledMcpServerIds.length > 0
+                ? { disabled_mcp_server_ids: disabledMcpServerIds }
+                : {})
             }
           }
         },
@@ -167,6 +216,10 @@ export function initConversations(client) {
                   callbacks?.onText?.(data);
                   break;
 
+                case "reasoning":
+                  callbacks?.onReasoning?.(data);
+                  break;
+
                 case "image":
                   response.generated_files = data.generated_files;
                   callbacks?.onImage?.(data);
@@ -184,6 +237,10 @@ export function initConversations(client) {
                 case "tool_approval_required":
                   callbacks?.onToolApprovalRequired?.(data);
                   break;
+
+                case "tool_approval_timeout":
+                  callbacks?.onToolApprovalTimeout?.(data);
+                  break;
               }
             } catch (e) {
               return;
@@ -197,6 +254,52 @@ export function initConversations(client) {
     },
 
     /**
+     * Estimate exact token cost a request would add to context, without sending.
+     * Excludes RAG/web-search content (selected at request time).
+     * Caller should debounce; concurrent requests aren't aborted server-side.
+     * @param {Object} params
+     * @param {ChatPartner} [params.chatPartner] Target assistant or group chat (used when no conversation yet)
+     * @param {{id: string} | Conversation} [params.conversation] Existing conversation to continue
+     * @param {string} params.question The pending input
+     * @param {{id: string}[]} [params.files] Pending file attachments
+     * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
+     * @returns {Promise<import('../types/resources').PreflightResponse>}
+     * @throws {EneoError}
+     */
+    preflight: async ({ chatPartner, conversation, question, files, tools }) => {
+      /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
+      const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
+
+      if (conversation?.id && conversation.id.trim() !== "") {
+        target.session_id = conversation.id;
+      } else if (chatPartner?.id) {
+        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
+          target.assistant_id = chatPartner.id;
+        } else target.group_chat_id = chatPartner.id;
+      } else {
+        throw new EneoError(
+          "Preflight requires one of session, assistant, or groupChat",
+          "CONNECTION",
+          0,
+          0
+        );
+      }
+
+      const res = await client.fetch("/api/v1/conversations/preflight", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            ...target,
+            question,
+            file_ids: (files ?? []).map((f) => f.id),
+            tools
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Submit approval decisions for pending tool calls.
      * @param {Object} params Approval parameters
      * @param {string} params.approvalId The approval ID from the tool_approval_required event
@@ -205,9 +308,12 @@ export function initConversations(client) {
      * @throws {EneoError}
      * */
     approveTools: async ({ approvalId, decisions }) => {
+      /** @type {{status: string}} */
+      // @ts-ignore - response type is unknown in schema
       const res = await client.fetch("/api/v1/conversations/approve-tools/", {
         method: "post",
         params: { query: { approval_id: approvalId } },
+        // @ts-ignore - requestBody is optional in schema but we always send decisions
         requestBody: {
           "application/json": decisions
         }

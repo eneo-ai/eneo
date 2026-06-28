@@ -9,7 +9,7 @@
   import { m } from "$lib/paraglide/messages";
 
   interface Props {
-    value: number | null;
+    value: number | null | undefined;
     hasChanges?: boolean;
     inheritedDays?: number | null;
     inheritedFrom?: "space" | "tenant" | null;
@@ -17,6 +17,7 @@
     descriptionId?: string;
   }
 
+  /* eslint-disable @typescript-eslint/no-unused-vars -- props are part of component's public API */
   let {
     value = $bindable(),
     hasChanges = false,
@@ -25,6 +26,7 @@
     labelId,
     descriptionId
   }: Props = $props();
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   // Track if override is enabled
   let isOverrideEnabled = $state(value !== null);
@@ -40,18 +42,24 @@
     isOverrideEnabled = next;
   }
 
+  // Local non-null value for Input.Number binding
+  let inputValue = $state(value ?? 365);
+
   // Sync state if value changes externally
   $effect(() => {
     isOverrideEnabled = value !== null;
+    if (value !== null && value !== undefined) inputValue = value;
+  });
+
+  // Sync input changes back to value
+  $effect(() => {
+    if (isOverrideEnabled) value = inputValue;
   });
 </script>
 
-<div class="rounded-lg border border-default p-4 flex flex-col gap-3">
+<div class="border-default flex flex-col gap-3 rounded-lg border p-4">
   <!-- Switch to enable override -->
-  <Input.Switch
-    value={isOverrideEnabled}
-    sideEffect={handleSwitchChange}
-  >
+  <Input.Switch value={isOverrideEnabled} sideEffect={handleSwitchChange}>
     <span class="text-sm">
       {m.conversation_retention_override_label()}
       {#if inheritedDays !== null}
@@ -62,9 +70,9 @@
 
   <!-- Input field (only shown when override is enabled) -->
   {#if isOverrideEnabled}
-    <div class="flex items-center gap-2 pt-2 border-t border-default">
+    <div class="border-default flex items-center gap-2 border-t pt-2">
       <Input.Number
-        bind:value
+        bind:value={inputValue}
         min={1}
         max={2555}
         aria-label={m.number_of_days()}

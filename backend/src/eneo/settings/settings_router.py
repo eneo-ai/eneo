@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from eneo.authentication import auth_dependencies
@@ -7,39 +9,62 @@ from eneo.files.text import TextMimeTypes
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.main.models import PaginatedResponse
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
-from eneo.server.protocol import to_paginated_response
+from eneo.server.protocol import responses, to_paginated_response
 from eneo.settings import settings_factory
 from eneo.settings.setting_service import SettingService
-from eneo.settings.settings import GetModelsResponse, SettingsPublic, TemplateSettingUpdate
+from eneo.settings.settings import (
+    GetModelsResponse,
+    SettingsPublic,
+    ToggleSettingUpdate,
+)
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+settings_admin_router = APIRouter()
 
 
-@router.get("/", response_model=SettingsPublic)
+@router.get(
+    "/",
+    response_model=SettingsPublic,
+    description="Get the current tenant settings.",
+    responses=responses.get_responses([]),
+)
 async def get_settings(
-    service: SettingService = Depends(
-        settings_factory.get_settings_service_allowing_read_only_key
-    ),
+    service: Annotated[
+        SettingService,
+        Depends(settings_factory.get_settings_service_allowing_read_only_key),
+    ],
 ):
     return await service.get_settings()
 
 
-@router.post("/", response_model=SettingsPublic)
+@settings_admin_router.post(
+    "/",
+    response_model=SettingsPublic,
+    description="Update tenant settings; omitted fields are not updated.",
+    responses=responses.get_responses([403]),
+)
 async def upsert_settings(
     settings: SettingsPublic,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Omitted fields are not updated."""
+    validate_permission(container.user(), Permission.ADMIN)
     service = container.settings_service()
     return await service.update_settings(settings)
 
 
-@router.get("/models/", response_model=GetModelsResponse)
+@router.get(
+    "/models/",
+    response_model=GetModelsResponse,
+    description="List available completion and embedding models.",
+    responses=responses.get_responses([]),
+)
 async def get_models(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     From the response:
@@ -60,6 +85,8 @@ async def get_models(
 @router.get(
     "/formats/",
     response_model=PaginatedResponse[str],
+    description="List supported file format mime types.",
+    responses=responses.get_responses([]),
     dependencies=[Depends(auth_dependencies.get_current_active_user)],
 )
 def get_formats():
@@ -68,9 +95,10 @@ def get_formats():
     )
 
 
-@router.patch(
+@settings_admin_router.patch(
     "/templates",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle template feature",
     description="""
 Enable or disable the template management feature for your tenant.
@@ -100,8 +128,8 @@ Enable or disable the template management feature for your tenant.
     """,
 )
 async def update_template_setting(
-    data: TemplateSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    data: ToggleSettingUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Toggle template feature for tenant.
@@ -113,9 +141,10 @@ async def update_template_setting(
     return await service.update_template_setting(enabled=data.enabled)
 
 
-@router.patch(
+@settings_admin_router.patch(
     "/audit-logging",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle global audit logging",
     description="""
 Enable or disable global audit logging for your tenant.
@@ -147,8 +176,8 @@ Enable or disable global audit logging for your tenant.
     """,
 )
 async def update_audit_logging_setting(
-    data: TemplateSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    data: ToggleSettingUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Toggle global audit logging for tenant.
@@ -160,9 +189,10 @@ async def update_audit_logging_setting(
     return await service.update_audit_logging_setting(enabled=data.enabled)
 
 
-@router.patch(
+@settings_admin_router.patch(
     "/provisioning",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle JIT user provisioning",
     description="""
 Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
@@ -194,8 +224,35 @@ Enable or disable JIT (Just-In-Time) user provisioning for your tenant.
     """,
 )
 async def update_provisioning_setting(
-    data: TemplateSettingUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    data: ToggleSettingUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.settings_service()
     return await service.update_provisioning_setting(enabled=data.enabled)
+
+
+@settings_admin_router.patch(
+    "/api-key-expiry-notifications",
+    response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
+    summary="Toggle API key expiry notifications",
+    description="""
+Toggle API key expiry notifications for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Updates the `api_key_expiry_notifications` feature flag for your tenant
+- When enabled: API key expiry notification surfaces are active
+- When disabled: API key expiry notifications are suppressed
+- Change takes effect immediately
+    """,
+)
+async def update_api_key_expiry_notifications_setting(
+    data: ToggleSettingUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.settings_service()
+    return await service.update_api_key_expiry_notifications_setting(
+        enabled=data.enabled
+    )

@@ -7,8 +7,9 @@ from eneo.icons.icon import Icon, IconCreate
 
 
 class IconRepository:
-    def __init__(self, session: AsyncSession):
-        self._delegate = BaseRepositoryDelegate(
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
+        self._delegate: BaseRepositoryDelegate[Icon] = BaseRepositoryDelegate(
             session=session, table=Icons, in_db_model=Icon
         )
         self.session = session
@@ -19,5 +20,5 @@ class IconRepository:
     async def get(self, icon_id: UUID) -> Icon | None:
         return await self._delegate.get(id=icon_id)
 
-    async def delete(self, icon_id: UUID) -> Icon:
+    async def delete(self, icon_id: UUID) -> Icon | None:
         return await self._delegate.delete(icon_id)

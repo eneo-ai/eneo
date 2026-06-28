@@ -35,7 +35,9 @@ export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
 export type JobStatus = components["schemas"]["Status"];
-export type Tenant = components["schemas"]["TenantPublic"];
+// Backend's TenantPublic schema omits `id`, but the actual API response includes it.
+// Until the schema is fixed upstream we extend the type so consumers can use `tenant.id`.
+export type Tenant = components["schemas"]["TenantPublic"] & { id: string };
 export type ModelProviderPublic = components["schemas"]["ModelProviderPublic"];
 export type AnalyticsData = components["schemas"]["MetadataStatistics"];
 export type AnalyticsAggregateRow = {
@@ -66,6 +68,33 @@ export type Dashboard = components["schemas"]["Dashboard"];
 export type Prompt = components["schemas"]["PromptPublic"];
 export type PromptSparse = components["schemas"]["PromptSparse"];
 export type EneoErrorCode = components["schemas"]["ErrorCodes"] | 0;
+export type ApiKeyType = components["schemas"]["ApiKeyType"];
+export type ApiKeyOwnership = components["schemas"]["ApiKeyOwnership"];
+export type ApiKeyPermission = components["schemas"]["ApiKeyPermission"];
+export type ApiKeyScopeType = components["schemas"]["ApiKeyScopeType"];
+export type ApiKeyState = components["schemas"]["ApiKeyState"];
+export type ApiKeyStateReasonCode = components["schemas"]["ApiKeyStateReasonCode"];
+export type ResourcePermissionLevel = components["schemas"]["ResourcePermissionLevel"];
+export type ResourcePermissions = components["schemas"]["ResourcePermissions"];
+export type ApiKeyCreationConstraints = components["schemas"]["ApiKeyCreationConstraints"];
+export type ApiKeyV2 = components["schemas"]["ApiKeyV2"];
+export type ApiKeyCreateRequest = components["schemas"]["ApiKeyCreateRequest"];
+export type ApiKeyUpdateRequest = components["schemas"]["ApiKeyUpdateRequest"];
+export type ApiKeyStateChangeRequest = components["schemas"]["ApiKeyStateChangeRequest"];
+export type ApiKeyCreatedResponse = components["schemas"]["ApiKeyCreatedResponse"];
+export type ApiKeyPolicy = components["schemas"]["ApiKeyPolicyResponse"];
+export type SuperApiKeyStatus = components["schemas"]["SuperApiKeyStatus"];
+
+export type CursorPaginated<T> = {
+  items: T[];
+  total_count: number;
+  limit?: number | null;
+  next_cursor?: string | null;
+  previous_cursor?: string | null;
+};
+
+export type ApiKeyListResponse = components["schemas"]["ApiKeyListResponse"];
+export type ApiKeyAdminListResponse = components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
 export type App = components["schemas"]["AppPublic"];
 export type AppSparse = components["schemas"]["AppSparse"];
 export type AppRun = components["schemas"]["AppRunPublic"];
@@ -87,8 +116,16 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
   messages: ConversationMessage[];
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
-export type ConversationMessage = components["schemas"]["Message"];
+export type McpToolReference = components["schemas"]["McpToolReferencePublic"];
+// num_tokens_* are populated by the backend on every persisted message and
+// streamed live via the SSE token_usage event, but are not part of the generated
+// Message schema.
+export type ConversationMessage = components["schemas"]["Message"] & {
+  num_tokens_question?: number;
+  num_tokens_answer?: number;
+};
 export type ConversationTools = components["schemas"]["UseTools"];
+export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =
@@ -107,6 +144,7 @@ export type Paginated<T> = {
 
 export namespace SSE {
   export type Text = Omit<components["schemas"]["SSEText"], "$defs">;
+  export type Reasoning = Omit<components["schemas"]["SSEReasoning"], "$defs">;
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
   export type Eneo = Omit<components["schemas"]["SSEEneoEvent"], "$defs">;
@@ -122,8 +160,32 @@ export namespace SSE {
       tool_call_id?: string;
     }>;
   };
+  export type ToolApprovalTimeout = {
+    session_id: string;
+    eneo_event_type: "tool_approval_timeout";
+    approval_id: string;
+    tools: Array<{
+      server_name: string;
+      tool_name: string;
+      arguments?: Record<string, unknown>;
+      tool_call_id?: string;
+      approved?: boolean;
+      result_status?: string;
+    }>;
+  };
+  export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
-  export type Event = Text | FirstChunk | Files | Eneo | ToolCall | ToolApprovalRequired | Error;
+  export type Event =
+    | Text
+    | Reasoning
+    | FirstChunk
+    | Files
+    | Eneo
+    | ToolCall
+    | ToolApprovalRequired
+    | ToolApprovalTimeout
+    | TokenUsage
+    | Error;
 }
 
 export type UserTokenUsageSummary = components["schemas"]["UserTokenUsageSummary"];
@@ -131,6 +193,8 @@ export type UserTokenUsage = components["schemas"]["UserTokenUsage"];
 export type UserSortBy = components["schemas"]["UserSortBy"];
 export type ModelUsage = components["schemas"]["ModelUsage"];
 export type ModelKwargs = components["schemas"]["ModelKwargs"];
+export type ModelKwargCapability = components["schemas"]["ModelKwargCapability"];
+export type SupportedModelKwargs = components["schemas"]["SupportedModelKwargs"];
 
 // Tenant model update types
 export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];

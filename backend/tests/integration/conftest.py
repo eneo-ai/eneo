@@ -1,8 +1,10 @@
 """
 Integration test fixtures using testcontainers for PostgreSQL and Redis.
 """
+
 import json
 import os
+import socket
 from collections.abc import Callable
 from pathlib import Path
 
@@ -22,7 +24,10 @@ def pytest_collection_modifyitems(config, items):
     """
     # Check if migration_isolation marker was explicitly requested
     marker_expr = config.getoption("-m", default="")
-    if "migration_isolation" in marker_expr and "not migration_isolation" not in marker_expr:
+    if (
+        "migration_isolation" in marker_expr
+        and "not migration_isolation" not in marker_expr
+    ):
         # User explicitly requested migration_isolation tests, don't skip
         return
 
@@ -103,22 +108,23 @@ if not os.getenv("ENCRYPTION_KEY"):
 if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
 if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
-    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
+    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = (
+        "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
+    )
 
 import contextlib
 from typing import AsyncGenerator, Generator
 
 import psycopg2
-from alembic import command
-from alembic.config import Config
+from cryptography.fernet import Fernet
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
-from cryptography.fernet import Fernet
-
+from alembic import command
+from alembic.config import Config
 from init_db import add_tenant_user
 from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
@@ -129,6 +135,29 @@ from eneo.server.main import get_application
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
 _IN_DEVCONTAINER = os.getenv("POSTGRES_HOST") == "db"
 _TEST_NETWORK = "eneo" if _IN_DEVCONTAINER else None
+
+
+def _host_resolves(host: str) -> bool:
+    try:
+        socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+
+    return True
+
+
+def _container_network_ip(container, network_name: str | None) -> str | None:
+    if not network_name:
+        return None
+
+    container.reload()
+    network = (
+        container.attrs.get("NetworkSettings", {}).get("Networks", {}).get(network_name)
+    )
+    if not network:
+        return None
+
+    return network.get("IPAddress") or None
 
 
 @pytest.fixture(scope="session")
@@ -178,16 +207,26 @@ def test_settings(
     """
     Create test settings using testcontainer connection strings.
     """
-    # In devcontainer: use container name and internal port (same network)
-    # Outside devcontainer: use host IP and exposed port (bridge network)
-    if _IN_DEVCONTAINER:
-        pg_host = postgres_container._container.name
+    # In devcontainer: prefer container DNS when it is actually reachable.
+    # GitHub Codespaces exposes compose services like "db", but does not always
+    # make ad-hoc testcontainer names resolvable from the Codespaces container.
+    container_name = postgres_container._container.name
+    network_ip = _container_network_ip(postgres_container._container, _TEST_NETWORK)
+    if _IN_DEVCONTAINER and _host_resolves(container_name):
+        pg_host = container_name
         pg_port = 5432
-        redis_host = "redis"  # Use existing Redis service in devcontainer
-        redis_port = 6379
+    elif _IN_DEVCONTAINER and network_ip:
+        pg_host = network_ip
+        pg_port = 5432
     else:
         pg_host = postgres_container.get_container_host_ip()
         pg_port = int(postgres_container.get_exposed_port(5432))
+
+    if _IN_DEVCONTAINER:
+        redis_host = "redis"  # Use existing Redis service in devcontainer
+        redis_port = 6379
+    else:
+        assert redis_container is not None
         redis_host = redis_container.get_container_host_ip()
         redis_port = int(redis_container.get_exposed_port(6379))
 
@@ -201,23 +240,19 @@ def test_settings(
         postgres_password="integration_test_password",
         postgres_port=pg_port,
         postgres_db="integration_test_db",
-
         # Redis settings
         redis_host=redis_host,
         redis_port=redis_port,
         redis_db=1,  # Use database 1 for tests to avoid collisions with dev data
-
         # File upload limits
         upload_file_to_session_max_size=10_000_000,
         upload_image_to_session_max_size=5_000_000,
         upload_max_file_size=100_000_000,
         transcription_max_file_size=25_000_000,
-
         # API settings
         api_prefix="/api/v1",
         api_key_length=32,
         api_key_header_name="X-API-Key",
-
         # JWT settings
         jwt_audience="test_audience",
         jwt_issuer="test_issuer",
@@ -225,11 +260,9 @@ def test_settings(
         jwt_algorithm="HS256",
         jwt_secret="test_secret_key_for_integration_tests",
         jwt_token_prefix="Bearer",
-
         # Security
         url_signing_key="test_url_signing_key",
         eneo_super_api_key="test-super-admin-key-for-integration-tests",
-
         # LLM API Keys - CRITICAL: Set to None to prevent reading from environment
         # Integration tests should NEVER use real API keys
         openai_api_key=None,
@@ -238,7 +271,6 @@ def test_settings(
         mistral_api_key=None,
         ovhcloud_api_key=None,
         vllm_api_key=None,
-
         # Feature flags
         using_access_management=False,
         using_iam=False,
@@ -246,14 +278,11 @@ def test_settings(
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
-
         # Note: Set to False for integration tests that need full app functionality
         openapi_only_mode=False,
-
         # Development
         testing=False,  # Integration tests have full isolation via testcontainers
         dev=True,
-
         # Encryption
         encryption_key=encryption_key,
     )
@@ -332,6 +361,7 @@ def override_settings_for_session(test_settings: Settings):
     # - By MUTATING the existing object's model.name attribute, all references
     #   (including the one captured in the function signature) see the new header name
     import eneo.server.dependencies.auth_definitions as auth_defs
+
     auth_defs.API_KEY_HEADER.model.name = test_settings.api_key_header_name
 
     # Verify settings are correct
@@ -358,6 +388,7 @@ async def setup_database(test_settings: Settings):
     backend_dir = Path(__file__).parent.parent.parent
     alembic_ini_path = backend_dir / "alembic.ini"
     alembic_cfg = Config(str(alembic_ini_path))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     alembic_cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
 
     try:
@@ -424,6 +455,7 @@ async def setup_database(test_settings: Settings):
 
             # Verify tenant and users exist
             from eneo.main.container.container import Container
+
             container = Container(session=providers.Object(session))
 
             tenant_repo = container.tenant_repo()
@@ -458,16 +490,20 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
     async with sessionmanager.session() as session:
         async with session.begin():
             # Get all tables except alembic_version
-            result = await session.execute(text("""
+            result = await session.execute(
+                text("""
                 SELECT string_agg('"' || tablename || '"', ', ')
                 FROM pg_tables
                 WHERE schemaname = 'public' AND tablename != 'alembic_version'
-            """))
+            """)
+            )
             tables_csv = result.scalar()
 
             if tables_csv:
                 # Single TRUNCATE for all tables - much faster than one-by-one!
-                await session.execute(text(f'TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE'))
+                await session.execute(
+                    text(f"TRUNCATE TABLE {tables_csv} RESTART IDENTITY CASCADE")
+                )
 
     # Reseed tenant/user using existing helper function
     conn = psycopg2.connect(
@@ -504,6 +540,7 @@ async def cleanup_database(setup_database, test_settings):  # noqa: ARG001
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()
     conn.close()
@@ -525,6 +562,7 @@ async def app(setup_database):
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
     from eneo.server.dependencies.lifespan import startup
+
     await startup()
 
     # Verify app initialization
@@ -557,6 +595,7 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
 
 # Database session fixtures
 
+
 @pytest.fixture
 def db_session(setup_database):
     """
@@ -566,6 +605,7 @@ def db_session(setup_database):
         async with db_session() as session:
             # use session here
     """
+
     @contextlib.asynccontextmanager
     async def _session():
         async with sessionmanager.session() as session, session.begin():
@@ -598,6 +638,7 @@ def db_container(setup_database):
         async with db_container(user=custom_user, tenant=custom_tenant) as container:
             service = container.some_service()
     """
+
     @contextlib.asynccontextmanager
     async def _container(user=None, tenant=None):
         async with sessionmanager.session() as session, session.begin():
@@ -628,6 +669,7 @@ def db_container(setup_database):
 
 # User and authentication fixtures
 
+
 @pytest.fixture
 async def admin_user(db_container):
     """
@@ -649,14 +691,13 @@ async def admin_user_api_key(admin_user, db_container):
     async with db_container() as container:
         auth_service = container.auth_service()
         api_key = await auth_service.create_user_api_key(
-            prefix="test",
-            user_id=admin_user.id,
-            delete_old=True
+            prefix="test", user_id=admin_user.id, delete_old=True
         )
     return api_key
 
 
 # Additional fixtures for tenant credentials E2E tests
+
 
 @pytest.fixture
 async def async_session(setup_database):
@@ -735,10 +776,11 @@ def legacy_credentials_mode(test_settings):
             # Test runs with strict mode disabled
             pass
     """
-    from eneo.main.config import set_settings, get_settings
+    from dependency_injector import providers
+
+    from eneo.main.config import get_settings, set_settings
     from eneo.main.container.container import Container
     from eneo.settings.encryption_service import EncryptionService
-    from dependency_injector import providers
 
     # Save original settings
     original_settings = get_settings()
@@ -840,7 +882,9 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             algs=algs or [test_settings.jwt_algorithm],
         )
 
-    monkeypatch.setattr(AuthService, "create_access_token_for_user", patched_create_token)
+    monkeypatch.setattr(
+        AuthService, "create_access_token_for_user", patched_create_token
+    )
     monkeypatch.setattr(AuthService, "get_jwt_payload", patched_get_jwt_payload)
 
 
@@ -853,7 +897,10 @@ def jwks_mock(monkeypatch):
     """
     import jwt as jwt_lib
 
-    def _configure(signing_keys: dict[str, str] | None = None, default_key: str = "test-signing-key"):
+    def _configure(
+        signing_keys: dict[str, str] | None = None,
+        default_key: str = "test-signing-key",
+    ):
         keys = signing_keys or {}
 
         class _Key:
@@ -981,8 +1028,9 @@ async def tenant_user_token(test_tenant, test_settings):
     Creates the JWT directly using jwt.encode() with test_settings values,
     matching the pattern used in patch_auth_service_jwt fixture.
     """
-    import jwt
     from datetime import datetime, timedelta, timezone
+
+    import jwt
 
     now = datetime.now(timezone.utc)
 
@@ -1000,9 +1048,7 @@ async def tenant_user_token(test_tenant, test_settings):
 
     # Encode using test JWT secret (HS256)
     token = jwt.encode(
-        payload,
-        test_settings.jwt_secret,
-        algorithm=test_settings.jwt_algorithm
+        payload, test_settings.jwt_secret, algorithm=test_settings.jwt_algorithm
     )
 
     return token
@@ -1022,13 +1068,14 @@ async def seed_default_models(setup_database, monkeypatch):
 
     This fixture runs automatically for all integration tests after database setup.
     """
+    import sqlalchemy as sa
+
+    from eneo.database.database import sessionmanager
     from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
     from eneo.database.tables.model_providers_table import ModelProviders
-    from eneo.database.database import sessionmanager
-    from eneo.tenants.tenant_service import TenantService
-    from eneo.tenants.tenant import TenantBase, TenantInDB
     from eneo.database.tables.tenant_table import Tenants
-    import sqlalchemy as sa
+    from eneo.tenants.tenant import TenantBase, TenantInDB
+    from eneo.tenants.tenant_service import TenantService
 
     # Store IDs of created models for the patch function
     completion_model_ids = {}
@@ -1177,7 +1224,9 @@ def mock_transcription_models(monkeypatch):
     """Stub transcription model enablement to avoid external dependencies."""
     from uuid import uuid4
 
-    from eneo.transcription_models.infrastructure import enable_transcription_models_service
+    from eneo.transcription_models.infrastructure import (
+        enable_transcription_models_service,
+    )
 
     async def mock_get_model_id_by_name(self, model_name: str):
         return uuid4()
@@ -1223,7 +1272,9 @@ async def debug_auth_config(test_settings):
     print(f"Test settings eneo_super_api_key: {test_settings.eneo_super_api_key}")
     print(f"Runtime settings eneo_super_api_key: {runtime_settings.eneo_super_api_key}")
     print(f"Test settings api_key_header_name: {test_settings.api_key_header_name}")
-    print(f"Runtime settings api_key_header_name: {runtime_settings.api_key_header_name}")
+    print(
+        f"Runtime settings api_key_header_name: {runtime_settings.api_key_header_name}"
+    )
     print(f"API_KEY_HEADER name: {API_KEY_HEADER.model.name}")
     print(f"Settings object IDs match: {id(test_settings) == id(runtime_settings)}")
     print("=================\n")

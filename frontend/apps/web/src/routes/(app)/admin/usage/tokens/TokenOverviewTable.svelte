@@ -11,8 +11,12 @@
   import ModelNameAndVendor from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { formatNumber } from "$lib/core/formatting/formatNumber";
   import { m } from "$lib/paraglide/messages";
+  import { estimateCostFromTokens, formatCostUSD } from "$lib/features/ai-models/formatModelStats";
+  import type { CostRateMap } from "$lib/features/ai-models/costRates";
+  import EstimatedCostCell from "./EstimatedCostCell.svelte";
 
   export let tokenStats: TokenUsageSummary;
+  export let costRates: CostRateMap;
 
   $: models = tokenStats.models.toSorted((a, b) =>
     (a.model_org ?? "").localeCompare(b.model_org ?? "")
@@ -21,6 +25,13 @@
   let showAllItems = false;
 
   $: visibleItems = showAllItems ? models : models.slice(0, 10);
+
+  function estimateCostText(modelId: string, inputTokens: number, outputTokens: number): string {
+    const rates = costRates.get(modelId);
+    if (!rates) return "–";
+    const cost = estimateCostFromTokens(inputTokens, outputTokens, rates);
+    return formatCostUSD(cost);
+  }
 
   const table = Table.createWithResource(visibleItems);
 
@@ -37,13 +48,6 @@
             description: ""
           }
         });
-      },
-      plugins: {
-        sort: {
-          getSortValue(item) {
-            return item.model_nickname ?? "";
-          }
-        }
       }
     }),
 
@@ -63,6 +67,30 @@
       header: m.total_tokens(),
       accessor: "total_token_usage",
       cell: (item) => formatNumber(item.value)
+    }),
+
+    table.column({
+      header: m.estimated_cost(),
+      accessor: (item) => item,
+      cell: (item) =>
+        createRender(EstimatedCostCell, {
+          label: estimateCostText(
+            item.value.model_id,
+            item.value.input_token_usage,
+            item.value.output_token_usage
+          )
+        }),
+      plugins: {
+        sort: {
+          getSortValue(value) {
+            const rates = costRates.get(value.model_id);
+            if (!rates) return -1;
+            return (
+              estimateCostFromTokens(value.input_token_usage, value.output_token_usage, rates) ?? -1
+            );
+          }
+        }
+      }
     })
   ]);
 
@@ -83,6 +111,6 @@
 
 {#if models.length === 0}
   <div class="py-12 text-center">
-    <p class="text-gray-500">No model usage data available for this period</p>
+    <p class="text-gray-500">{m.usage_no_model_data_available()}</p>
   </div>
 {/if}

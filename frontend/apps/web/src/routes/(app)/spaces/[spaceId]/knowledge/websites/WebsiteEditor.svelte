@@ -6,7 +6,7 @@
   import { type Website } from "@eneo/eneo-js";
   import { Dialog, Button, Input, Select, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { tick } from "svelte";
   import { writable, type Writable } from "svelte/store";
 
@@ -40,8 +40,8 @@
 
   // HTTP Basic Authentication state
   let httpAuthEnabled = website?.requires_http_auth ?? false;
-  let httpAuthUsername = '';
-  let httpAuthPassword = '';
+  let httpAuthUsername = "";
+  let httpAuthPassword = "";
   let showPassword = false;
 
   // Duplicate URL warning state
@@ -84,7 +84,9 @@
     duplicateCheckPending = true;
     try {
       console.log("Checking URL:", editableWebsite.url);
-      existingOnOrg = await eneo.websites.checkUrl(editableWebsite.url);
+      existingOnOrg = (await eneo.websites.checkUrl(
+        editableWebsite.url
+      )) as unknown as ExistingWebsite | null;
       console.log("Check result:", existingOnOrg);
       if (existingOnOrg) {
         // Show warning modal on top of the main dialog
@@ -107,22 +109,28 @@
 
   function formatUpdateInterval(interval: string): string {
     switch (interval) {
-      case "daily": return m.every_day();
-      case "every_other_day": return m.every_other_day();
-      case "weekly": return m.every_week();
-      default: return m.never();
+      case "daily":
+        return m.every_day();
+      case "every_other_day":
+        return m.every_other_day();
+      case "weekly":
+        return m.every_week();
+      default:
+        return m.never();
     }
   }
 
   function formatDateTime(dateString: string | null): string {
     if (!dateString) return m.website_not_yet_crawled();
     const date = new Date(dateString);
-    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`;
   }
 
-  function formatCrawlResult(website: ExistingWebsite): { text: string; hasFailures: boolean } | null {
+  function formatCrawlResult(
+    website: ExistingWebsite
+  ): { text: string; hasFailures: boolean } | null {
     // If crawl is in progress
-    if (website.crawl_status === 'in progress' || website.crawl_status === 'queued') {
+    if (website.crawl_status === "in progress" || website.crawl_status === "queued") {
       return { text: m.website_crawl_in_progress(), hasFailures: false };
     }
 
@@ -145,10 +153,16 @@
     // Only pages, no files
     if (totalFiles === 0) {
       if (pagesFailed === 0) {
-        return { text: m.website_all_pages_indexed({ count: pagesSuccess.toString() }), hasFailures: false };
+        return {
+          text: m.website_all_pages_indexed({ count: pagesSuccess.toString() }),
+          hasFailures: false
+        };
       }
       return {
-        text: m.website_pages_indexed({ success: pagesSuccess.toString(), total: totalPages.toString() }),
+        text: m.website_pages_indexed({
+          success: pagesSuccess.toString(),
+          total: totalPages.toString()
+        }),
         hasFailures: true
       };
     }
@@ -167,14 +181,14 @@
 
   // Clear credentials when auth is disabled
   $: if (!httpAuthEnabled) {
-    httpAuthUsername = '';
-    httpAuthPassword = '';
+    httpAuthUsername = "";
+    httpAuthPassword = "";
   }
 
   function handleRemoveAuth() {
     httpAuthEnabled = false;
-    httpAuthUsername = '';
-    httpAuthPassword = '';
+    httpAuthUsername = "";
+    httpAuthPassword = "";
   }
 
   async function updateWebsite() {
@@ -184,15 +198,16 @@
       edits.name = websiteName === "" ? null : websiteName;
 
       // Handle HTTP auth fields
+      const editsAny = edits as Record<string, unknown>;
       if (httpAuthEnabled && httpAuthUsername) {
-        edits.http_auth_username = httpAuthUsername;
+        editsAny.http_auth_username = httpAuthUsername;
         if (httpAuthPassword) {
-          edits.http_auth_password = httpAuthPassword;
+          editsAny.http_auth_password = httpAuthPassword;
         }
       } else if (!httpAuthEnabled && website?.requires_http_auth) {
         // Remove auth if it was previously enabled
-        edits.http_auth_username = null;
-        edits.http_auth_password = null;
+        editsAny.http_auth_username = null;
+        editsAny.http_auth_password = null;
       }
 
       const updated = await eneo.websites.update({ website: { id: website.id }, update: edits });
@@ -200,7 +215,7 @@
       refreshCurrentSpace();
       $showDialog = false;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;
@@ -213,6 +228,7 @@
 
     isProcessing = true;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const websiteData: any = {
         spaceId: $currentSpace.id,
         ...editableWebsite,
@@ -229,12 +245,12 @@
       editableWebsite.updateWithValue(emptyWebsite());
       websiteName = "";
       httpAuthEnabled = false;
-      httpAuthUsername = '';
-      httpAuthPassword = '';
+      httpAuthUsername = "";
+      httpAuthPassword = "";
       refreshCurrentSpace();
       $showDialog = false;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;
@@ -310,15 +326,21 @@
       </Input.Switch>
 
       {#if httpAuthEnabled}
-        <div class="bg-info-dimmer border-info-default text-info-stronger m-4 rounded-md border px-3 py-2 text-sm">
+        <div
+          class="bg-info-dimmer border-info-default text-info-stronger m-4 rounded-md border px-3 py-2 text-sm"
+        >
           <span class="font-medium">{m.security_note()}</span>
           {m.credentials_encrypted_securely()}
         </div>
 
         {#if website?.requires_http_auth}
-          <div class="m-4 flex items-center gap-2 text-sm text-positive-stronger">
+          <div class="text-positive-stronger m-4 flex items-center gap-2 text-sm">
             <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" />
+              <path
+                fill-rule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                clip-rule="evenodd"
+              />
             </svg>
             {m.authentication_configured()}
           </div>
@@ -338,7 +360,9 @@
           <Input.Text
             bind:value={httpAuthPassword}
             label={m.password()}
-            description={website ? m.leave_blank_keep_password() : m.http_auth_password_description()}
+            description={website
+              ? m.leave_blank_keep_password()
+              : m.http_auth_password_description()}
             type={showPassword ? "text" : "password"}
             required={httpAuthEnabled && !website?.requires_http_auth}
             placeholder={m.enter_password()}
@@ -347,21 +371,31 @@
           />
           <button
             type="button"
-            class="absolute right-6 top-12 p-1 text-dimmer hover:text-default"
-            onclick={() => showPassword = !showPassword}
+            class="text-dimmer hover:text-default absolute top-12 right-6 p-1"
+            onclick={() => (showPassword = !showPassword)}
             aria-label={showPassword ? m.hide_password() : m.show_password()}
           >
             {#if showPassword}
               <!-- Eye slash icon -->
               <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.029 10.029 0 003.3-4.38 1.651 1.651 0 000-1.185A10.004 10.004 0 009.999 3a9.956 9.956 0 00-4.744 1.194L3.28 2.22zM7.752 6.69l1.092 1.092a2.5 2.5 0 013.374 3.373l1.091 1.092a4 4 0 00-5.557-5.557z" clip-rule="evenodd" />
-                <path d="M10.748 13.93l2.523 2.523a9.987 9.987 0 01-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 010-1.186A10.007 10.007 0 012.839 6.02L6.07 9.252a4 4 0 004.678 4.678z" />
+                <path
+                  fill-rule="evenodd"
+                  d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.029 10.029 0 003.3-4.38 1.651 1.651 0 000-1.185A10.004 10.004 0 009.999 3a9.956 9.956 0 00-4.744 1.194L3.28 2.22zM7.752 6.69l1.092 1.092a2.5 2.5 0 013.374 3.373l1.091 1.092a4 4 0 00-5.557-5.557z"
+                  clip-rule="evenodd"
+                />
+                <path
+                  d="M10.748 13.93l2.523 2.523a9.987 9.987 0 01-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 010-1.186A10.007 10.007 0 012.839 6.02L6.07 9.252a4 4 0 004.678 4.678z"
+                />
               </svg>
             {:else}
               <!-- Eye icon -->
               <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                <path fill-rule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" />
+                <path
+                  fill-rule="evenodd"
+                  d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                  clip-rule="evenodd"
+                />
               </svg>
             {/if}
           </button>
@@ -371,7 +405,7 @@
           <div class="m-4">
             <button
               type="button"
-              class="text-sm text-negative-default hover:text-negative-stronger"
+              class="text-negative-default hover:text-negative-stronger text-sm"
               onclick={handleRemoveAuth}
             >
               {m.remove_authentication()}
@@ -430,7 +464,9 @@
           variant="primary"
           type="button"
           on:click={checkUrlBeforeCreate}
-          disabled={isProcessing || duplicateCheckPending || $currentSpace.embedding_models.length === 0}
+          disabled={isProcessing ||
+            duplicateCheckPending ||
+            $currentSpace.embedding_models.length === 0}
           >{isProcessing || duplicateCheckPending ? m.creating() : m.create_website()}</Button
         >
       {:else if mode === "update"}
@@ -457,9 +493,13 @@
       <Dialog.Section class="p-4">
         <div class="bg-hover-dimmer border-default rounded-lg border p-4">
           <div class="flex items-start gap-3">
-            <div class="mt-0.5 flex-shrink-0 text-warning-default">
+            <div class="text-warning-default mt-0.5 flex-shrink-0">
               <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                <path
+                  fill-rule="evenodd"
+                  d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                  clip-rule="evenodd"
+                />
               </svg>
             </div>
             <div class="flex-1">
@@ -469,7 +509,11 @@
 
                 {#if crawlResult}
                   <span class="text-dimmer">{m.website_crawl_result()}:</span>
-                  <span class={crawlResult.hasFailures ? 'text-warning-stronger' : 'text-positive-stronger'}>
+                  <span
+                    class={crawlResult.hasFailures
+                      ? "text-warning-stronger"
+                      : "text-positive-stronger"}
+                  >
                     {crawlResult.text}
                   </span>
                 {/if}
@@ -487,7 +531,10 @@
       <Button is={close}>{m.go_back()}</Button>
       <Button
         variant="primary"
-        on:click={async () => { showDuplicateWarning.set(false); await createWebsite(); }}
+        on:click={async () => {
+          showDuplicateWarning.set(false);
+          await createWebsite();
+        }}
         disabled={isProcessing}
       >
         {isProcessing ? m.creating() : m.create_anyway()}

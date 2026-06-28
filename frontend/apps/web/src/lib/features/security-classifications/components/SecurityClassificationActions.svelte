@@ -8,7 +8,7 @@
   import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { EneoError, type SecurityClassification } from "@eneo/eneo-js";
+  import { type SecurityClassification } from "@eneo/eneo-js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconTrash } from "@eneo/icons/trash";
   import { IconEdit } from "@eneo/icons/edit";
@@ -16,7 +16,7 @@
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   type Props = {
     classification: SecurityClassification;
@@ -48,7 +48,7 @@
       await security.deleteClassification(classification);
       $showDeleteDialog = false;
     } catch (error) {
-      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 
@@ -62,7 +62,7 @@
       });
       $showEditDialog = false;
     } catch (error) {
-      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

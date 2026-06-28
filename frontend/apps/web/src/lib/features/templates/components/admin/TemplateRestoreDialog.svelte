@@ -45,9 +45,10 @@
 
       await invalidate("admin:templates:load");
       openController.set(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error restoring template:", error);
-      errorMessage = error.message || "Failed to restore template";
+      errorMessage =
+        (error instanceof Error ? error.message : String(error)) || "Failed to restore template";
     } finally {
       isLoading = false;
     }
@@ -63,18 +64,18 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-positive-default bg-positive-default/15 px-4 py-3">
+        <div class="border-positive-default bg-positive-default/15 rounded-lg border px-4 py-3">
           <div class="flex items-start gap-3">
             <Undo class="text-positive-default shrink-0" size={20} />
             <div class="flex flex-col gap-1">
-              <div class="font-semibold text-default">{template.name}</div>
-              <div class="text-sm text-dimmer">{m.template_will_be_restored()}</div>
+              <div class="text-default font-semibold">{template.name}</div>
+              <div class="text-dimmer text-sm">{m.template_will_be_restored()}</div>
             </div>
           </div>
         </div>
 
         {#if errorMessage}
-          <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
+          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
             {errorMessage}
           </div>
         {/if}

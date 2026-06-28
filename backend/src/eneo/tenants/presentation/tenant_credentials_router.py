@@ -6,7 +6,7 @@ tenant-specific LLM provider API credentials.
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -17,11 +17,11 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.server.dependencies.container import get_container
-from eneo.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
+from eneo.server.protocol import responses
 
 
 def check_feature_enabled(
-    settings: Settings = Depends(get_settings),
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     """Verify tenant credentials feature is enabled.
 
@@ -45,10 +45,13 @@ router = APIRouter(
         Depends(auth.authenticate_super_api_key),
         Depends(check_feature_enabled),
     ],
+    responses=responses.get_responses([401]),
 )
 
 # Provider enum - supported LLM providers
-Provider = Literal["openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"]
+Provider = Literal[
+    "openai", "anthropic", "azure", "mistral", "ovhcloud", "gemini", "cohere"
+]
 
 
 class SetCredentialRequest(BaseModel):
@@ -228,12 +231,13 @@ class ListCredentialsResponse(BaseModel):
     "System admin only. Provider-specific fields are validated: "
     "OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; "
     "Azure requires api_key, endpoint, and api_version.",
+    responses=responses.get_responses([403, 404]),
 )
 async def set_tenant_credential(
     tenant_id: UUID,
     provider: Provider,
     request: SetCredentialRequest,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> SetCredentialResponse:
     """
     Set or update tenant API credentials for a specific provider.
@@ -254,7 +258,7 @@ async def set_tenant_credential(
 
     Raises:
         HTTPException 404: Tenant not found
-        HTTPException 422: Validation error with field-level error messages
+        BadRequestException: Provider-specific credential validation failed
     """
     tenant_service = container.tenant_service()
     settings = get_settings()
@@ -269,39 +273,19 @@ async def set_tenant_credential(
             deployment_name=request.deployment_name,
             strict_mode=settings.tenant_credentials_enabled,
         )
-
-        return SetCredentialResponse(
-            tenant_id=result["tenant_id"],
-            provider=result["provider"],
-            masked_key=result["masked_key"],
-            message=f"API credential for {provider} set successfully",
-            set_at=result["set_at"],
-        )
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
-    except ValueError as e:
-        # Parse validation errors from service
-        error_message = str(e)
-        if "Credential validation failed" in error_message:
-            errors = error_message.split(": ", 1)[1].split("; ") if ": " in error_message else [error_message]
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "error": "credential_validation_failed",
-                    "message": f"Credential validation failed for provider '{provider}'",
-                    "errors": errors,
-                    "provider_requirements": {
-                        k: list(v) for k, v in PROVIDER_REQUIRED_FIELDS.items()
-                    },
-                },
-            )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
-        )
+
+    return SetCredentialResponse(
+        tenant_id=result["tenant_id"],
+        provider=result["provider"],
+        masked_key=result["masked_key"],
+        message=f"API credential for {provider} set successfully",
+        set_at=result["set_at"],
+    )
 
 
 @router.delete(
@@ -311,11 +295,12 @@ async def set_tenant_credential(
     summary="Delete tenant API credential",
     description="Delete API credentials for a specific LLM provider for a tenant. "
     "System admin only.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_credential(
     tenant_id: UUID,
     provider: Provider,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> DeleteCredentialResponse:
     """
     Delete tenant API credentials for a specific provider.
@@ -359,10 +344,11 @@ async def delete_tenant_credential(
     description="List all configured API credentials for a tenant with masked keys and encryption status. "
     "Shows last 4 characters of API key for verification and encryption state for security auditing. "
     "System admin only.",
+    responses=responses.get_responses([403, 404]),
 )
 async def list_tenant_credentials(
     tenant_id: UUID,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> ListCredentialsResponse:
     """
     List all configured API credentials for a tenant.

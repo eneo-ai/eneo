@@ -62,7 +62,7 @@
 
   const { headerRows, pageRows: rows, tableAttrs } = viewModel;
   // Handle optional tableFilter plugin (may be disabled for server-side search)
-  const { filterValue } = viewModel.pluginStates.tableFilter || { filterValue: writable('') };
+  const { filterValue } = viewModel.pluginStates.tableFilter || { filterValue: writable("") };
   const showCardSwitch = getCardCell($rows[0]) !== undefined;
 
   const filterContainer = cva("flex items-center justify-between gap-4 pb-1 pr-3 pt-3.5", {
@@ -145,11 +145,12 @@
                         <th
                           {...attrs}
                           class={tableHeader({
-                            columnType: cell.id === "table-action-key"
-                              ? "action"
-                              : cell.id === "select"
-                                ? "select"
-                                : "default"
+                            columnType:
+                              cell.id === "table-action-key"
+                                ? "action"
+                                : cell.id === "select"
+                                  ? "select"
+                                  : "default"
                           })}
                         >
                           <SortButton

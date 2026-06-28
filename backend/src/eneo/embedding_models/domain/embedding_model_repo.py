@@ -17,13 +17,16 @@ if TYPE_CHECKING:
 
 
 class EmbeddingModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB"):
+    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+        super().__init__()
         self.session = session
         self.user = user
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
-            sa.select(EmbeddingModels, ModelProviders.name, ModelProviders.provider_type)
+            sa.select(
+                EmbeddingModels, ModelProviders.name, ModelProviders.provider_type
+            )
             .outerjoin(ModelProviders, EmbeddingModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(EmbeddingModels.security_classification),
@@ -37,8 +40,11 @@ class EmbeddingModelRepository:
                 # UI filtering happens at the presentation layer
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == self.user.tenant_id
-                )
+                    EmbeddingModels.tenant_id == self.user.tenant_id,
+                ),
+                # Soft-deleted models are tombstones kept only so existing
+                # collections/websites still resolve; never surface them.
+                EmbeddingModels.deleted_at.is_(None),
             )
             .order_by(
                 EmbeddingModels.org,
@@ -66,7 +72,9 @@ class EmbeddingModelRepository:
     async def one_or_none(self, model_id: "UUID") -> Optional["EmbeddingModel"]:
         # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
-            sa.select(EmbeddingModels, ModelProviders.name, ModelProviders.provider_type)
+            sa.select(
+                EmbeddingModels, ModelProviders.name, ModelProviders.provider_type
+            )
             .outerjoin(ModelProviders, EmbeddingModels.provider_id == ModelProviders.id)
             .options(
                 selectinload(EmbeddingModels.security_classification),
@@ -79,8 +87,10 @@ class EmbeddingModelRepository:
                 # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == self.user.tenant_id
-                )
+                    EmbeddingModels.tenant_id == self.user.tenant_id,
+                ),
+                # Soft-deleted models stay invisible to all callers.
+                EmbeddingModels.deleted_at.is_(None),
             )
         )
 

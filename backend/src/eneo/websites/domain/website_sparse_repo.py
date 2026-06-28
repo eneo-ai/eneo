@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 class WebsiteSparseRepository:
     def __init__(self, session: "AsyncSession"):
+        super().__init__()
         self.session = session
 
     async def get_weekly_websites(self) -> list[WebsiteSparse]:

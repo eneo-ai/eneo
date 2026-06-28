@@ -21,6 +21,7 @@ class ModelProvider:
         created_at: datetime,
         updated_at: datetime,
     ):
+        super().__init__()
         self.id = id
         self.tenant_id = tenant_id
         self.name = name

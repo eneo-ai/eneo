@@ -1,10 +1,10 @@
 """Pydantic schemas for audit API."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -22,7 +22,7 @@ class AuditLogCreate(BaseModel):
     entity_type: EntityType
     entity_id: UUID
     description: str = Field(min_length=1, max_length=500)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
     outcome: Outcome = Outcome.SUCCESS
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -42,7 +42,7 @@ class AuditLogResponse(BaseModel):
     entity_id: UUID
     timestamp: datetime
     description: str
-    metadata: dict
+    metadata: dict[str, object]
     outcome: Outcome
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -52,8 +52,7 @@ class AuditLogResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditLogListRequest(BaseModel):
@@ -95,10 +94,19 @@ class ExportJobRequest(BaseModel):
     action: Optional[ActionType] = Field(None, description="Filter by action type")
     from_date: Optional[datetime] = Field(None, description="Filter from date")
     to_date: Optional[datetime] = Field(None, description="Filter to date")
-    format: str = Field("csv", description="Export format: csv or jsonl")
+    format: Literal["csv", "json", "jsonl"] = Field(
+        "csv", description="Export format: csv, json, or jsonl"
+    )
     max_records: Optional[int] = Field(
         None, ge=1, description="Maximum records to export"
     )
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def normalize_format(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.lower().strip()
+        return value
 
 
 class ExportJobResponse(BaseModel):

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class SecurityClassification(BasePublic):
     """Table for storing security levels"""
 
-    __tablename__ = "security_classifications"
+    __tablename__ = "security_classifications"  # type: ignore[assignment]
 
     # Core fields
     name: Mapped[str] = mapped_column()

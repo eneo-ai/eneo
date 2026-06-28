@@ -11,7 +11,7 @@
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let app: AppSparse;
@@ -30,7 +30,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      toast.error(m.could_not_delete_app());
+      toastError(e, m.could_not_delete_app());
       console.error(e);
     }
     isProcessing = false;
@@ -114,5 +114,6 @@
   resource={app}
   endpoints={eneo.apps}
   openController={showPublishDialog}
+  resourceKind="app"
   awaitUpdate
 ></PublishingDialog>

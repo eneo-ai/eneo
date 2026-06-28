@@ -6,24 +6,14 @@ import json
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Annotated, Any, Optional, Protocol, cast
 from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from jwt import PyJWKClient as _PyJWKClient
 from pydantic import BaseModel
-
-from eneo.main.aiohttp_client import aiohttp_client
-from eneo.main.config import get_settings, validate_redirect_uri
-from eneo.main.container.container import Container
-from eneo.main.logging import get_logger
-from eneo.main.request_context import set_request_context
-from eneo.observability.debug_toggle import is_debug_enabled
-from eneo.observability.redaction import sanitize_payload
-from eneo.server.dependencies.container import get_container
-from eneo.settings.credential_resolver import CredentialResolver
-from eneo.tenants.tenant import TenantState
+from typing_extensions import NotRequired, TypedDict
 
 # JIT provisioning imports
 from eneo.audit.application.audit_service import AuditService
@@ -31,8 +21,18 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.main.aiohttp_client import aiohttp_client
+from eneo.main.config import get_settings, validate_redirect_uri
+from eneo.main.container.container import Container
+from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
-from eneo.predefined_roles.predefined_role import PredefinedRoleName
+from eneo.main.request_context import set_request_context
+from eneo.observability.debug_toggle import is_debug_enabled
+from eneo.observability.redaction import sanitize_payload
+from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
+from eneo.settings.credential_resolver import CredentialResolver
+from eneo.tenants.tenant import TenantState
 from eneo.users.user import UserAdd, UserInDB, UserState
 
 logger = get_logger(__name__)
@@ -42,13 +42,72 @@ router = APIRouter(
     tags=["authentication"],
 )
 
+
+class OIDCClaimsMapping(TypedDict):
+    email: str
+
+
+class FederationConfig(TypedDict):
+    client_id: str
+    client_secret: str
+    provider: NotRequired[str]
+    discovery_endpoint: NotRequired[str]
+    authorization_endpoint: NotRequired[str]
+    token_endpoint: NotRequired[str]
+    jwks_uri: NotRequired[str]
+    token_endpoint_auth_method: NotRequired[str]
+    token_endpoint_auth_methods_supported: NotRequired[list[str]]
+    scopes: NotRequired[list[str]]
+    claims_mapping: NotRequired[OIDCClaimsMapping]
+    allowed_domains: NotRequired[list[str]]
+
+
+class OIDCDiscoveryDocument(TypedDict):
+    authorization_endpoint: NotRequired[str]
+    token_endpoint: NotRequired[str]
+    jwks_uri: NotRequired[str]
+    token_endpoint_auth_methods_supported: NotRequired[list[str]]
+
+
+class OIDCStatePayload(TypedDict):
+    tenant_id: str
+    tenant_slug: str
+    frontend_state: str
+    nonce: str
+    redirect_uri: str
+    correlation_id: str
+    exp: int
+    iat: int
+    config_version: str | None
+
+
+class OIDCStateCache(TypedDict):
+    tenant_id: str
+    tenant_slug: str
+    redirect_uri: str
+    config_version: str | None
+    iat: int
+
+
+class AccessTokenResponse(TypedDict):
+    access_token: str
+
+
+class _FederationConfigResolver(Protocol):
+    def get_federation_config(self) -> FederationConfig: ...
+
+
 JWKClient = _PyJWKClient
 PyJWKClient = JWKClient  # Backwards compatibility alias for tests/monkeypatching
 
 
 @contextlib.asynccontextmanager
 async def _cleanup_state_cache(
-    redis_client, state_key: str, *, tenant_id: UUID | None, correlation_id: str
+    redis_client: Any,
+    state_key: str,
+    *,
+    tenant_id: UUID | None,
+    correlation_id: str,
 ):
     try:
         yield
@@ -70,10 +129,10 @@ async def _cleanup_state_cache(
 
 async def _log_oidc_debug(
     *,
-    redis_client,
+    redis_client: Any,
     correlation_id: str | None,
     event: str,
-    **payload,
+    **payload: Any,
 ) -> None:
     if not correlation_id:
         correlation_id = "unknown"
@@ -94,7 +153,7 @@ async def _log_oidc_debug(
     )
 
 
-async def fetch_discovery(discovery_url: str) -> dict:
+async def fetch_discovery(discovery_url: str) -> OIDCDiscoveryDocument:
     """
     Fetch OIDC discovery document.
 
@@ -127,32 +186,40 @@ async def fetch_discovery(discovery_url: str) -> dict:
 
 
 async def _jit_provision_user(
-    container,
+    container: Container,
     tenant_id: UUID,
     email: str,
     correlation_id: str,
 ) -> UserInDB:
     """Create user via JIT provisioning during SSO login."""
-    predefined_roles_repo = container.predefined_roles_repo()
     user_repo = container.user_repo()
+    tenant_repo = container.tenant_repo()
 
-    user_role = await predefined_roles_repo.get_predefined_role_by_name(
-        PredefinedRoleName.USER
-    )
+    tenant = await tenant_repo.get(tenant_id)
 
-    if user_role is None:
-        logger.error(
-            "JIT provisioning failed: User role not found",
+    # Assign default role if configured on tenant
+    roles = []
+    if tenant and tenant.default_role_id:
+        roles = [ModelId(id=tenant.default_role_id)]
+        logger.info(
+            "JIT provisioning: Assigning default role",
+            extra={
+                "correlation_id": correlation_id,
+                "default_role_id": str(tenant.default_role_id),
+            },
+        )
+    else:
+        # WARNING (not INFO): a role-less user cannot create shared
+        # spaces, use assistants, apps, or any other permission-gated
+        # feature. See S7 rationale in user_service.py.
+        logger.warning(
+            "JIT provisioning: No default role configured; creating user "
+            "without role — user will have zero permissions until an "
+            "admin assigns roles",
             extra={
                 "correlation_id": correlation_id,
                 "tenant_id": str(tenant_id),
-                "email": email,
             },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="System configuration error: User role not found",
-            headers={"X-Correlation-ID": correlation_id},
         )
 
     username = email.split("@")[0].lower()
@@ -161,7 +228,7 @@ async def _jit_provision_user(
         email=email,
         username=username,
         tenant_id=tenant_id,
-        predefined_roles=[ModelId(id=user_role.id)],
+        roles=roles,
         state=UserState.ACTIVE,
     )
 
@@ -200,7 +267,7 @@ async def _jit_provision_user(
 
 
 async def _log_jit_user_created(
-    container,
+    container: Container,
     tenant_id: UUID,
     user: UserInDB,
     correlation_id: str,
@@ -343,9 +410,10 @@ class FederationStatusResponse(BaseModel):
         "Used by login page to determine which authentication method to show. "
         "No authentication required (public endpoint)."
     ),
+    responses=responses.get_responses([]),
 )
 async def get_federation_status(
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> FederationStatusResponse:
     """
     Determine federation configuration status.
@@ -393,17 +461,18 @@ async def get_federation_status(
     if settings.federation_enabled and tenant_count == 1:
         tenant = tenants[0]
         # Check if tenant has API-configured federation (non-empty federation_config JSONB)
-        if tenant.federation_config and len(tenant.federation_config) > 0:
+        tenant_federation_config = cast(dict[str, Any] | None, tenant.federation_config)
+        if tenant_federation_config and len(tenant_federation_config) > 0:
             # Verify it has the required fields (avoid empty dicts)
             required_fields = {"client_id", "discovery_endpoint"}
-            if required_fields.issubset(tenant.federation_config.keys()):
+            if required_fields.issubset(tenant_federation_config.keys()):
                 has_single_federation = True
                 logger.info(
                     "Single-tenant API federation detected",
                     extra={
                         "tenant_id": str(tenant.id),
                         "tenant_name": tenant.name,
-                        "provider": tenant.federation_config.get("provider", "unknown"),
+                        "provider": tenant_federation_config.get("provider", "unknown"),
                     },
                 )
 
@@ -424,9 +493,10 @@ async def get_federation_status(
         "Only returns tenants with slugs configured for federation. "
         "No authentication required."
     ),
+    responses=responses.get_responses([]),
 )
 async def list_tenants(
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ) -> TenantListResponse:
     """
     Get list of all active tenants for selector grid.
@@ -469,28 +539,33 @@ async def list_tenants(
         "Returns URL to redirect user to IdP login page."
     ),
     responses={
+        400: {"description": "Tenant selection or redirect URI is invalid"},
         403: {"description": "Tenant is not active"},
         404: {"description": "Tenant not found or not configured"},
         500: {"description": "Federation or redirect configuration missing"},
     },
 )
 async def initiate_auth(
-    tenant: Optional[str] = Query(
-        None,
-        description="Tenant slug (required for multi-tenant, optional for single-tenant)",
-    ),
-    state: Optional[str] = Query(
-        None, description="Optional frontend-generated CSRF state"
-    ),
-    redirect_uri_param: Optional[str] = Query(
-        None,
-        alias="redirect_uri",
-        description=(
-            "Optional redirect URI override. Must exactly match a configured "
-            "redirect URI for the tenant."
+    container: Annotated[Container, Depends(get_container())],
+    tenant: Annotated[
+        Optional[str],
+        Query(
+            description="Tenant slug (required for multi-tenant, optional for single-tenant)",
         ),
-    ),
-    container: Container = Depends(get_container()),
+    ] = None,
+    state: Annotated[
+        Optional[str], Query(description="Optional frontend-generated CSRF state")
+    ] = None,
+    redirect_uri_param: Annotated[
+        Optional[str],
+        Query(
+            alias="redirect_uri",
+            description=(
+                "Optional redirect URI override. Must exactly match a configured "
+                "redirect URI for the tenant."
+            ),
+        ),
+    ] = None,
 ) -> InitiateAuthResponse:
     """
     Get authorization URL for tenant's identity provider.
@@ -609,7 +684,10 @@ async def initiate_auth(
     )
 
     try:
-        federation_config = credential_resolver.get_federation_config()
+        federation_config = cast(
+            _FederationConfigResolver, credential_resolver
+        ).get_federation_config()
+        discovery_endpoint = federation_config.get("discovery_endpoint")
     except ValueError as e:
         logger.error(
             "No federation config for tenant",
@@ -686,31 +764,31 @@ async def initiate_auth(
         effective_updated_at.isoformat() if effective_updated_at else None
     )
 
-    state_payload = {
+    state_payload: OIDCStatePayload = {
         "tenant_id": str(tenant_obj.id),
-        "tenant_slug": tenant_obj.slug
-        or tenant_obj.name,  # Use actual tenant slug or name as fallback
+        "tenant_slug": tenant_obj.slug or tenant_obj.name,
         "frontend_state": state or "",
         "nonce": secrets.token_hex(16),
-        "redirect_uri": redirect_uri,  # Server-computed, consistent
+        "redirect_uri": redirect_uri,
         "correlation_id": correlation_id,
         "exp": int(time.time()) + settings.oidc_state_ttl_seconds,
-        "iat": int(time.time()),  # Issued at timestamp
+        "iat": int(time.time()),
         "config_version": tenant_config_version,
     }
-    signed_state = pyjwt.encode(state_payload, settings.jwt_secret, algorithm="HS256")
+    signed_state = pyjwt.encode(
+        cast(dict[str, Any], state_payload), settings.jwt_secret, algorithm="HS256"
+    )
 
-    state_cache_payload = {
+    state_cache_payload: OIDCStateCache = {
         "tenant_id": str(tenant_obj.id),
-        "tenant_slug": tenant_obj.slug
-        or tenant_obj.name,  # Use actual tenant slug or name as fallback
+        "tenant_slug": tenant_obj.slug or tenant_obj.name,
         "redirect_uri": redirect_uri,
         "config_version": tenant_config_version,
         "iat": state_payload["iat"],
     }
     state_cache_key = f"oidc:state:{state_payload['nonce']}"
 
-    redis_client = None
+    redis_client: Any = None
     try:
         redis_client = container.redis_client()
     except Exception:  # pragma: no cover - dependency injector safety net
@@ -756,9 +834,9 @@ async def initiate_auth(
 
     # Resolve authorization endpoint
     authorization_endpoint = federation_config.get("authorization_endpoint")
-    if not authorization_endpoint and federation_config.get("discovery_endpoint"):
+    if not authorization_endpoint and discovery_endpoint:
         try:
-            discovery = await fetch_discovery(federation_config["discovery_endpoint"])
+            discovery = await fetch_discovery(discovery_endpoint)
             authorization_endpoint = discovery.get("authorization_endpoint")
         except HTTPException:
             raise  # Re-raise HTTP exceptions
@@ -767,7 +845,7 @@ async def initiate_auth(
                 "Failed to fetch discovery endpoint",
                 extra={
                     "tenant_id": str(tenant_obj.id),
-                    "discovery_endpoint": federation_config.get("discovery_endpoint"),
+                    "discovery_endpoint": discovery_endpoint,
                     "error": str(e),
                 },
             )
@@ -832,6 +910,7 @@ async def initiate_auth(
 
 @router.post(
     "/callback",
+    response_model=AccessTokenResponse,
     summary="OIDC callback handler",
     description=(
         "Handle OIDC callback, validate token, lookup user. "
@@ -842,12 +921,13 @@ async def initiate_auth(
         400: {"description": "Invalid or expired state"},
         401: {"description": "Token validation failed"},
         403: {"description": "Domain not allowed, inactive tenant, or user missing"},
+        404: {"description": "Tenant or user not found"},
     },
 )
 async def auth_callback(
     callback: CallbackRequest,
-    container: Container = Depends(get_container()),
-):
+    container: Annotated[Container, Depends(get_container())],
+) -> AccessTokenResponse:
     """
     Handle OIDC callback after user authenticates with IdP.
 
@@ -873,8 +953,8 @@ async def auth_callback(
         HTTPException 403: Email domain not allowed for tenant or user not found
     """
     settings = get_settings()
-    redis_client = None
-    cached_state: dict | None = None
+    redis_client: Any = None
+    cached_state: OIDCStateCache | None = None
     state_cache_key: str | None = None
 
     try:
@@ -885,8 +965,9 @@ async def auth_callback(
     # Validate and decode state
     # Note: pyjwt.decode() automatically validates 'exp' claim and raises ExpiredSignatureError
     try:
-        state_payload = pyjwt.decode(
-            callback.state, settings.jwt_secret, algorithms=["HS256"]
+        state_payload = cast(
+            OIDCStatePayload,
+            pyjwt.decode(callback.state, settings.jwt_secret, algorithms=["HS256"]),
         )
     except pyjwt.ExpiredSignatureError:
         # Note: correlation_id not available yet (state decode failed)
@@ -909,11 +990,11 @@ async def auth_callback(
             detail="Invalid state parameter",
         )
 
-    state_nonce = state_payload.get("nonce")
+    state_nonce = state_payload["nonce"]
     if not state_nonce:
         logger.error(
             "State token missing nonce claim",
-            extra={"correlation_id": state_payload.get("correlation_id")},
+            extra={"correlation_id": state_payload["correlation_id"]},
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -926,7 +1007,7 @@ async def auth_callback(
     tenant_slug = state_payload["tenant_slug"]
     redirect_uri = state_payload["redirect_uri"]
     # Extract correlation ID from state (flows from initiate endpoint)
-    correlation_id = state_payload.get("correlation_id", secrets.token_hex(8))
+    correlation_id = state_payload["correlation_id"] or secrets.token_hex(8)
     set_request_context(correlation_id=correlation_id, tenant_slug=tenant_slug)
 
     await _log_oidc_debug(
@@ -940,11 +1021,13 @@ async def auth_callback(
         try:
             cached_raw = await redis_client.get(state_cache_key)
             if cached_raw:
-                cached_state = json.loads(cached_raw)
+                cached_state = cast(OIDCStateCache, json.loads(cached_raw))
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
-                event="callback.state_cache_hit" if cached_state else "callback.state_cache_miss",
+                event="callback.state_cache_hit"
+                if cached_state
+                else "callback.state_cache_miss",
                 tenant_slug=tenant_slug,
             )
         except Exception as exc:  # pragma: no cover - best effort cache fetch
@@ -1005,7 +1088,7 @@ async def auth_callback(
                         headers={"X-Correlation-ID": correlation_id},
                     )
 
-                expected_tenant_id = cached_state.get("tenant_id")
+                expected_tenant_id = cached_state["tenant_id"]
                 if expected_tenant_id and expected_tenant_id != str(tenant_id):
                     logger.error(
                         "OIDC state tenant mismatch detected",
@@ -1034,8 +1117,11 @@ async def auth_callback(
                         headers={"X-Correlation-ID": correlation_id},
                     )
 
-                expected_tenant_slug = (cached_state.get("tenant_slug") or "").lower()
-                if expected_tenant_slug and expected_tenant_slug != (tenant_slug or "").lower():
+                expected_tenant_slug = cached_state["tenant_slug"].lower()
+                if (
+                    expected_tenant_slug
+                    and expected_tenant_slug != (tenant_slug or "").lower()
+                ):
                     logger.error(
                         "OIDC state tenant slug mismatch detected",
                         extra={
@@ -1117,7 +1203,10 @@ async def auth_callback(
                 settings=settings,
                 encryption_service=encryption_service,
             )
-            federation_config = credential_resolver.get_federation_config()
+            federation_config = cast(
+                _FederationConfigResolver, credential_resolver
+            ).get_federation_config()
+            discovery_endpoint = federation_config.get("discovery_endpoint")
 
             # SECURITY: Validate redirect_uri from state matches tenant's expected redirect_uri
             # This provides defense-in-depth against:
@@ -1169,9 +1258,9 @@ async def auth_callback(
             current_config_version = (
                 tenant_obj.updated_at.isoformat() if tenant_obj.updated_at else None
             )
-            state_config_version = (cached_state or {}).get(
-                "config_version"
-            ) or state_payload.get("config_version")
+            state_config_version = (
+                cached_state["config_version"] if cached_state else None
+            ) or state_payload["config_version"]
             grace_period = min(
                 settings.oidc_redirect_grace_period_seconds,
                 settings.oidc_state_ttl_seconds,
@@ -1302,11 +1391,9 @@ async def auth_callback(
 
             # Resolve token endpoint
             token_endpoint = federation_config.get("token_endpoint")
-            if not token_endpoint and federation_config.get("discovery_endpoint"):
+            if not token_endpoint and discovery_endpoint:
                 try:
-                    discovery = await fetch_discovery(
-                        federation_config["discovery_endpoint"]
-                    )
+                    discovery = await fetch_discovery(discovery_endpoint)
                     token_endpoint = discovery.get("token_endpoint")
                 except HTTPException as e:
                     raise HTTPException(
@@ -1333,8 +1420,6 @@ async def auth_callback(
             def _select_auth_method(methods: list[str] | None) -> str | None:
                 if not methods:
                     return None
-                if not isinstance(methods, list):
-                    methods = [methods]
                 normalized = [str(m).lower() for m in methods if m]
                 if "client_secret_post" in normalized:
                     return "client_secret_post"
@@ -1350,14 +1435,12 @@ async def auth_callback(
             if not token_auth_method:
                 token_auth_method = _select_auth_method(supported_methods)
 
-            if not token_auth_method and federation_config.get("discovery_endpoint"):
+            if not token_auth_method and discovery_endpoint:
                 try:
-                    discovery = await fetch_discovery(
-                        federation_config["discovery_endpoint"]
+                    discovery = await fetch_discovery(discovery_endpoint)
+                    supported_methods = (
+                        discovery.get("token_endpoint_auth_methods_supported") or []
                     )
-                    supported_methods = discovery.get(
-                        "token_endpoint_auth_methods_supported"
-                    ) or []
                     token_auth_method = _select_auth_method(supported_methods)
                 except HTTPException:
                     # Discovery failure handled earlier when resolving endpoints; fall back
@@ -1376,19 +1459,20 @@ async def auth_callback(
             if not token_auth_method:
                 token_auth_method = "client_secret_post"
 
-            token_data = {
-                "grant_type": "authorization_code",
-                "code": callback.code,
-                "redirect_uri": redirect_uri,
-                "client_id": federation_config["client_id"],
-                "client_secret": federation_config["client_secret"],
-            }
+            token_data = cast(
+                dict[str, str],
+                {
+                    "grant_type": "authorization_code",
+                    "code": callback.code,
+                    "redirect_uri": redirect_uri,
+                    "client_id": federation_config["client_id"],
+                    "client_secret": federation_config["client_secret"],
+                },
+            )
             headers: dict[str, str] = {}
 
             if token_auth_method == "client_secret_basic":
-                credentials = (
-                    f"{federation_config['client_id']}:{federation_config['client_secret']}"
-                )
+                credentials = f"{federation_config['client_id']}:{federation_config['client_secret']}"
                 basic_token = base64.b64encode(credentials.encode()).decode()
                 headers["Authorization"] = f"Basic {basic_token}"
                 token_data.pop("client_secret", None)
@@ -1442,10 +1526,10 @@ async def auth_callback(
                     )
                 token_response = await resp.json()
 
-            id_token = token_response.get("id_token")
-            access_token = token_response.get("access_token")
+            id_token = cast(str | None, token_response.get("id_token"))
+            access_token = cast(str | None, token_response.get("access_token"))
 
-            if not id_token or not access_token:
+            if id_token is None or access_token is None:
                 logger.error(
                     "Missing id_token or access_token in response",
                     extra={
@@ -1460,14 +1544,13 @@ async def auth_callback(
                     detail="Missing id_token or access_token in response",
                     headers={"X-Correlation-ID": correlation_id},
                 )
+            assert id_token is not None and access_token is not None
 
             # Resolve JWKS URI
             jwks_uri = federation_config.get("jwks_uri")
-            if not jwks_uri and federation_config.get("discovery_endpoint"):
+            if not jwks_uri and discovery_endpoint:
                 try:
-                    discovery = await fetch_discovery(
-                        federation_config["discovery_endpoint"]
-                    )
+                    discovery = await fetch_discovery(discovery_endpoint)
                     jwks_uri = discovery.get("jwks_uri")
                 except HTTPException as e:
                     raise HTTPException(
@@ -1542,7 +1625,9 @@ async def auth_callback(
             )
 
             # Extract email from claims
-            claims_mapping = federation_config.get("claims_mapping", {"email": "email"})
+            claims_mapping: OIDCClaimsMapping = federation_config.get(
+                "claims_mapping"
+            ) or {"email": "email"}
             email_claim = claims_mapping.get("email", "email")
 
             logger.debug(
@@ -1613,7 +1698,7 @@ async def auth_callback(
                 )
 
             # CRITICAL: Email domain validation
-            allowed_domains = federation_config.get("allowed_domains", [])
+            allowed_domains = federation_config.get("allowed_domains") or []
             if allowed_domains:
                 email_domain_raw = domain_part
                 email_domain = email_domain_raw.lower()
@@ -1622,7 +1707,7 @@ async def auth_callback(
                 except Exception:  # pragma: no cover - defensive normalization
                     pass
 
-                normalized_allowed = []
+                normalized_allowed: list[str] = []
                 for domain in allowed_domains:
                     normalized = domain.lower()
                     try:
@@ -1714,7 +1799,9 @@ async def auth_callback(
                             "tenant_slug": tenant_slug,
                             "email": email,
                             "correlation_id": correlation_id,
-                            "provisioning_enabled": tenant.provisioning if tenant else False,
+                            "provisioning_enabled": tenant.provisioning
+                            if tenant
+                            else False,
                         },
                     )
                     await _log_oidc_debug(
@@ -1778,7 +1865,7 @@ async def auth_callback(
                 user_id=str(user.id),
             )
 
-            return {"access_token": access_token_response}
+            return AccessTokenResponse(access_token=access_token_response)
     except HTTPException:
         # Re-raise HTTPException with correlation_id already set
         raise

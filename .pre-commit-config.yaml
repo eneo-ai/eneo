@@ -1,13 +1,51 @@
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        stages: [pre-commit]
+        args: [--maxkb=750]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.3
     hooks:
-      # Lint using project configuration (pyproject.toml)
       - id: ruff-check
         name: ruff
         args: [--fix]
-        stages: [commit]
+        stages: [pre-commit]
         files: ^backend/
+      # Alembic migrations are excluded — they are historical artifacts that
+      # should not change after being deployed (whitespace churn breaks
+      # git blame / bisect on schema history).
+      - id: ruff-format
+        name: ruff-format
+        stages: [pre-commit]
+        files: ^backend/.*\.py$
+        exclude: ^backend/alembic/
+
+  - repo: local
+    hooks:
+      - id: commit-preflight
+        name: commit-preflight
+        entry: python3 scripts/commit_preflight.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: pyright
+        name: pyright
+        entry: bash backend/scripts/run_pyright_in_devcontainer.sh
+        language: system
+        types: [python]
+        files: ^backend/src/eneo/
+        pass_filenames: false
+        stages: [pre-commit]
 
   # Keep uv.lock in sync with pyproject.toml
   - repo: https://github.com/astral-sh/uv-pre-commit
@@ -15,3 +53,56 @@ repos:
     hooks:
       - id: uv-lock
         args: [--directory, backend]
+
+  # Frontend: auto-format changed files with prettier (writes changes back and re-stages)
+  - repo: local
+    hooks:
+      - id: frontend-format
+        name: frontend-format
+        entry: bash -c 'cd frontend && bunx --bun prettier --write --ignore-unknown "${@/#frontend\//}"' --
+        language: system
+        files: ^frontend/(apps|packages)/[^/]+/.*\.(svelte|ts|tsx|js|jsx|css|scss|json|md|yaml|yml|html)$
+        exclude: ^frontend/[^/]+/[^/]+/(\.svelte-kit|node_modules|build|dist)/
+        stages: [pre-commit]
+
+  # Frontend: lint changed Svelte/TS/JS files
+  - repo: local
+    hooks:
+      - id: frontend-lint
+        name: frontend-lint
+        entry: bash -c 'cd frontend/apps/web && bunx eslint --no-warn-ignored "${@/#frontend\/apps\/web\//}"' --
+        language: system
+        files: ^frontend/apps/web/src/.*\.(svelte|ts|js)$
+        stages: [pre-commit]
+
+  # Prevent duplicate keys in i18n message files
+  - repo: local
+    hooks:
+      - id: i18n-no-duplicate-keys
+        name: i18n-no-duplicate-keys
+        entry: python3 frontend/apps/web/scripts/check-i18n-duplicates.py
+        language: system
+        files: ^frontend/apps/web/messages/.*\.json$
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: i18n-key-parity
+        name: i18n-key-parity
+        entry: python3 frontend/apps/web/scripts/check-i18n-parity.py
+        language: system
+        files: ^frontend/apps/web/messages/.*\.json$
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: commit-msg-check
+        name: commit-msg-check
+        entry: python3 scripts/commit_msg_check.py
+        language: system
+        stages: [commit-msg]
+
+      - id: pre-push-check
+        name: pre-push-check
+        entry: python3 scripts/pre_push_check.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

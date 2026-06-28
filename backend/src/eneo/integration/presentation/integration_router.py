@@ -1,8 +1,12 @@
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
+# Audit logging - module level imports for consistency
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.integration.presentation.models import (
     Integration,
     IntegrationList,
@@ -17,11 +21,7 @@ from eneo.integration.presentation.models import (
 )
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
-
-# Audit logging - module level imports for consistency
-from eneo.audit.application.audit_metadata import AuditMetadata
-from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.entity_types import EntityType
+from eneo.server.protocol import responses
 
 router = APIRouter()
 
@@ -30,9 +30,11 @@ router = APIRouter()
     "/",
     response_model=IntegrationList,
     status_code=200,
+    description="List all available integrations.",
+    responses=responses.get_responses([]),
 )
 async def get_integrations(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_service()
 
@@ -47,10 +49,12 @@ async def get_integrations(
     "/tenant/",
     response_model=TenantIntegrationList,
     status_code=200,
+    description="List the tenant's integrations, optionally filtered.",
+    responses=responses.get_responses([]),
 )
 async def get_tenant_integrations(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
     filter: Optional[TenantIntegrationFilter] = None,
-    container: Container = Depends(get_container(with_user=True)),
 ):
     service = container.tenant_integration_service()
 
@@ -66,22 +70,26 @@ async def get_tenant_integrations(
     "/tenant/add/{integration_id}/",
     response_model=TenantIntegration,
     status_code=200,
+    description="Add an integration to the tenant.",
+    responses=responses.get_responses([400, 404]),
 )
 async def add_tenant_integration(
     integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.tenant_integration_service()
     user = container.user()
 
     # Add tenant integration
-    tenant_integration = await service.create_tenant_integration(integration_id=integration_id)
+    tenant_integration = await service.create_tenant_integration(
+        integration_id=integration_id
+    )
 
     # Audit logging
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_ADDED,
         entity_type=EntityType.INTEGRATION,
         entity_id=tenant_integration.id,
@@ -100,17 +108,22 @@ async def add_tenant_integration(
 @router.delete(
     "/tenant/remove/{tenant_integration_id}/",
     status_code=204,
+    description="Remove an integration from the tenant.",
+    responses=responses.get_responses([404]),
 )
 async def remove_tenant_integration(
     tenant_integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.tenant_integration_service()
     user = container.user()
 
     # Get tenant integration info BEFORE deletion (snapshot pattern)
+    # Use tenant_id filter to prevent cross-tenant deletion
     tenant_integration_repo = container.tenant_integration_repo()
-    tenant_integration = await tenant_integration_repo.one(id=tenant_integration_id)
+    tenant_integration = await tenant_integration_repo.one(
+        id=tenant_integration_id, tenant_id=user.tenant_id
+    )
 
     # Delete tenant integration
     await service.remove_tenant_integration(tenant_integration_id=tenant_integration_id)
@@ -119,7 +132,7 @@ async def remove_tenant_integration(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_REMOVED,
         entity_type=EntityType.INTEGRATION,
         entity_id=tenant_integration_id,
@@ -136,9 +149,11 @@ async def remove_tenant_integration(
     "/me/",
     response_model=UserIntegrationList,
     status_code=200,
+    description="List the current user's personal integrations.",
+    responses=responses.get_responses([]),
 )
 async def get_user_integrations(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Get user's personal integrations.
 
@@ -148,11 +163,14 @@ async def get_user_integrations(
     service = container.user_integration_service()
     user = container.user()
 
-    user_integrations = await service.get_my_integrations(user_id=user.id, tenant_id=user.tenant_id)
+    user_integrations = await service.get_my_integrations(
+        user_id=user.id, tenant_id=user.tenant_id
+    )
 
     # Filter out tenant_app integrations - they should only appear in admin panel
     personal_integrations = [
-        integration for integration in user_integrations
+        integration
+        for integration in user_integrations
         if integration.auth_type != "tenant_app"
     ]
 
@@ -163,8 +181,7 @@ async def get_user_integrations(
 
     assembler = container.user_integration_assembler()
     return assembler.to_paginated_response(
-        integrations=personal_integrations,
-        tenant_app_configured=tenant_app_configured
+        integrations=personal_integrations, tenant_app_configured=tenant_app_configured
     )
 
 
@@ -172,10 +189,12 @@ async def get_user_integrations(
     "/spaces/{space_id}/available/",
     response_model=UserIntegrationList,
     status_code=200,
+    description="List integrations available for a specific space.",
+    responses=responses.get_responses([404]),
 )
 async def get_available_integrations_for_space(
     space_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Get integrations available for a specific space, filtered by space type and auth type.
 
@@ -196,18 +215,19 @@ async def get_available_integrations_for_space(
 
     assembler = container.user_integration_assembler()
     return assembler.to_paginated_response(
-        integrations=user_integrations,
-        tenant_app_configured=tenant_app_configured
+        integrations=user_integrations, tenant_app_configured=tenant_app_configured
     )
 
 
 @router.delete(
     "/users/{user_integration_id}/",
     status_code=204,
+    description="Disconnect the current user's integration.",
+    responses=responses.get_responses([403, 404]),
 )
 async def disconnect_user_integration(
     user_integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.user_integration_service()
     user = container.user()
@@ -223,7 +243,7 @@ async def disconnect_user_integration(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_DISCONNECTED,
         entity_type=EntityType.INTEGRATION,
         entity_id=user_integration_id,
@@ -243,12 +263,16 @@ async def disconnect_user_integration(
     "/sync-logs/{integration_knowledge_id:uuid}/",
     response_model=PaginatedSyncLogList,
     status_code=200,
+    description="Get paginated sync history for an integration knowledge.",
+    responses=responses.get_responses([]),
 )
 async def get_sync_logs(
     integration_knowledge_id: UUID,
-    skip: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    skip: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
+    limit: Annotated[
+        int, Query(ge=1, le=100, description="Number of items per page")
+    ] = 10,
 ):
     """Get paginated sync history for an integration knowledge."""
     sync_log_repo = container.sync_log_repo()
@@ -260,9 +284,7 @@ async def get_sync_logs(
 
     # Get paginated logs
     sync_logs = await sync_log_repo.get_by_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id,
-        limit=limit,
-        offset=skip
+        integration_knowledge_id=integration_knowledge_id, limit=limit, offset=skip
     )
 
     # Convert domain entities to presentation models
@@ -276,16 +298,13 @@ async def get_sync_logs(
             error_message=log.error_message,
             started_at=log.started_at,
             completed_at=log.completed_at,
-            created_at=log.created_at,
+            created_at=log.created_at or log.started_at,
         )
         for log in sync_logs
     ]
 
     return PaginatedSyncLogList(
-        items=sync_log_models,
-        total_count=total_count,
-        page_size=limit,
-        offset=skip
+        items=sync_log_models, total_count=total_count, page_size=limit, offset=skip
     )
 
 
@@ -293,15 +312,19 @@ async def get_sync_logs(
     "/{user_integration_id}/preview/",
     response_model=IntegrationPreviewDataList,
     status_code=200,
+    description="Get preview data for a user integration.",
+    responses=responses.get_responses([400, 404]),
 )
 async def get_integration_preview(
     user_integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_preview_service()
     assembler = container.confluence_content_assembler()
 
-    preview_data = await service.get_preview_data(user_integration_id=user_integration_id)
+    preview_data = await service.get_preview_data(
+        user_integration_id=user_integration_id
+    )
 
     return assembler.to_paginated_response(items=preview_data)
 
@@ -310,15 +333,24 @@ async def get_integration_preview(
     "/{user_integration_id:uuid}/sharepoint/tree/",
     response_model=SharePointTreeResponse,
     status_code=200,
+    description="Get SharePoint/OneDrive folder tree for a user integration.",
+    responses=responses.get_responses([400, 404]),
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
-    space_id: UUID = Query(..., description="Space ID (for auth routing)"),
-    site_id: Optional[str] = Query(None, description="SharePoint site ID (required for SharePoint)"),
-    drive_id: Optional[str] = Query(None, description="Drive ID (required for OneDrive)"),
-    folder_id: Optional[str] = Query(None, description="Folder ID (null for root)"),
-    folder_path: str = Query("", description="Current folder path"),
-    container: Container = Depends(get_container(with_user=True)),
+    space_id: Annotated[UUID, Query(description="Space ID (for auth routing)")],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    site_id: Annotated[
+        Optional[str],
+        Query(description="SharePoint site ID (required for SharePoint)"),
+    ] = None,
+    drive_id: Annotated[
+        Optional[str], Query(description="Drive ID (required for OneDrive)")
+    ] = None,
+    folder_id: Annotated[
+        Optional[str], Query(description="Folder ID (null for root)")
+    ] = None,
+    folder_path: Annotated[str, Query(description="Current folder path")] = "",
 ):
     """Get SharePoint/OneDrive folder tree with hybrid authentication support.
 
@@ -353,29 +385,10 @@ async def get_sharepoint_folder_tree(
             folder_path=folder_path,
         )
         return SharePointTreeResponse(**tree_data)
-    except ValueError as e:
-        # ValueError is raised by service for validation errors
-        # Convert to appropriate HTTP exceptions
-        error_msg = str(e)
-
-        if "not found" in error_msg.lower():
-            # Space or integration not found
-            raise NotFoundException(error_msg)
-        elif "not authenticated" in error_msg.lower():
-            # Integration not authenticated
-            raise BadRequestException(f"Integration authentication required: {error_msg}")
-        elif "no oauth token" in error_msg.lower():
-            # Missing OAuth token for user integration
-            raise BadRequestException(
-                f"OAuth authentication required. Please connect your SharePoint account first. "
-                f"Details: {error_msg}"
-            )
-        elif "failed to acquire" in error_msg.lower():
-            # Token acquisition failed
-            raise BadRequestException(f"Authentication failed: {error_msg}")
-        else:
-            # Generic validation error
-            raise BadRequestException(error_msg)
+    except (NotFoundException, BadRequestException):
+        # The service raises typed domain exceptions with the correct HTTP status;
+        # let them propagate to the global handlers instead of remapping by string.
+        raise
     except Exception as e:
         # Unexpected errors
         logger.error(
@@ -385,7 +398,7 @@ async def get_sharepoint_folder_tree(
                 "space_id": str(space_id),
                 "site_id": site_id,
             },
-            exc_info=True
+            exc_info=True,
         )
         raise BadRequestException(f"Failed to fetch SharePoint folder tree: {str(e)}")
 
@@ -394,10 +407,12 @@ async def get_sharepoint_folder_tree(
     "/{integration_id:uuid}/",
     response_model=Integration,
     status_code=200,
+    description="Get a single integration by ID.",
+    responses=responses.get_responses([404]),
 )
 async def get_integration_by_id(
     integration_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_service()
 

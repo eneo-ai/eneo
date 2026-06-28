@@ -42,9 +42,9 @@
     defaultSelected: { value: $state.snapshot(chat.partner) },
     onSelectedChange: ({ next }) => {
       if (next) {
-        goto(
-          `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: next.value })}`
-        );
+        const url = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: next.value })}`;
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with space id and chat query params
+        goto(url);
       }
       return next;
     }
@@ -91,7 +91,9 @@
             </div>
           {/if}
         {:else if partner.type === "group-chat"}
-          <div class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg">
+          <div
+            class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg"
+          >
             <IconPeople class="!h-5 !w-5" />
           </div>
         {:else}

@@ -10,7 +10,7 @@ export function initAudit(client) {
      * Sets HTTP-only cookie with session ID. Session expires after 1 hour.
      * Required before viewing audit logs.
      * @param {{category: string, description: string}} justification - Access justification (description: 10-500 chars)
-     * @returns {Promise<{status: string, message?: string}>}
+     * @returns {Promise<any>}
      * @throws {EneoError}
      * */
     createAccessSession: async (justification) => {
@@ -35,6 +35,7 @@ export function initAudit(client) {
      * */
     list: async (options) => {
       // Convert actions array to comma-separated string for query param
+      /** @type {any} */
       const queryParams = { ...options };
       if (queryParams.actions && Array.isArray(queryParams.actions)) {
         queryParams.actions = queryParams.actions.join(",");
@@ -70,7 +71,7 @@ export function initAudit(client) {
     /**
      * Export audit logs to CSV format.
      * @param {{user_id?: string, actor_id?: string, action?: import('../types/schema').components["schemas"]["ActionType"], from_date?: string, to_date?: string}} [options]
-     * @returns {Promise<Blob>} CSV content as blob
+     * @returns {Promise<any>} CSV content
      * @throws {EneoError}
      * */
     export: async (options) => {
@@ -117,8 +118,9 @@ export function initAudit(client) {
 
     /**
      * Get audit category configuration for the current tenant. Requires admin privileges.
-     * Returns all 7 audit categories with their enabled status, descriptions, action counts, and example actions.
-     * @returns {Promise<{categories: Array<{category: string, enabled: boolean, description: string, action_count: number, example_actions: string[]}>}>}
+     * Returns all 7 audit categories with their enabled status, action counts, and example actions.
+     * Display text is translated client-side by category key (no Swedish metadata in the payload).
+     * @returns {Promise<import('../types/schema').components["schemas"]["AuditConfigResponse"]>}
      * @throws {EneoError}
      * */
     getConfig: async () => {
@@ -132,7 +134,7 @@ export function initAudit(client) {
      * Update audit category configuration for the current tenant. Requires admin privileges.
      * Changes take effect immediately for new audit events. Historical logs are unaffected.
      * @param {{updates: Array<{category: string, enabled: boolean}>}} config - Category updates
-     * @returns {Promise<{categories: Array<{category: string, enabled: boolean, description: string, action_count: number, example_actions: string[]}>}>}
+     * @returns {Promise<import('../types/schema').components["schemas"]["AuditConfigResponse"]>}
      * @throws {EneoError}
      * */
     updateConfig: async (config) => {
@@ -146,9 +148,10 @@ export function initAudit(client) {
     },
 
     /**
-     * Get per-action audit configuration for all 65 actions. Requires admin privileges.
-     * Returns actions grouped by category with Swedish metadata.
-     * @returns {Promise<{actions: Array<{action: string, enabled: boolean, category: string, name_sv: string, description_sv: string}>}>}
+     * Get per-action audit configuration for all action types. Requires admin privileges.
+     * Returns actions grouped by category. Display text is translated client-side by
+     * action key (no Swedish metadata in the payload).
+     * @returns {Promise<import('../types/schema').components["schemas"]["ActionConfigResponse"]>}
      * @throws {EneoError}
      * */
     getActionConfig: async () => {
@@ -162,7 +165,7 @@ export function initAudit(client) {
      * Update action-level audit configuration. Requires admin privileges.
      * Changes are stored in the action_overrides JSONB column.
      * @param {{updates: Array<{action: string, enabled: boolean}>}} config - Action updates
-     * @returns {Promise<{actions: Array<{action: string, enabled: boolean, category: string, name_sv: string, description_sv: string}>}>}
+     * @returns {Promise<import('../types/schema').components["schemas"]["ActionConfigResponse"]>}
      * @throws {EneoError}
      * */
     updateActionConfig: async (config) => {

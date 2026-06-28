@@ -3,32 +3,27 @@
 
     Licensed under the MIT License.
 */
-
 export const load = async (event) => {
   const { eneo, user } = await event.parent();
 
   // Only fetch org space if user has admin permission
-  const orgPromise = user?.predefined_roles?.some((role) =>
-    role.permissions?.includes('admin')
-  )
-    ? eneo.spaces
-        .getOrganizationSpace()
-        .catch((e) => {
-          if (e?.status === 403 || e?.response?.status === 403) return null;
-          throw e;
-        })
+  const orgPromise = user?.roles?.some((role) => role.permissions?.includes("admin"))
+    ? eneo.spaces.getOrganizationSpace().catch((e) => {
+        if (e?.status === 403 || e?.response?.status === 403) return null;
+        throw e;
+      })
     : Promise.resolve(null);
 
   const [spaces, currentSpace, organizationSpace] = await Promise.all([
     eneo.spaces.list(),
     eneo.spaces.getPersonalSpace(),
-    orgPromise,
+    orgPromise
   ]);
 
   return {
     spaces,
     currentSpace,
     organizationSpace,
-    loadedAt: new Date().toUTCString(),
+    loadedAt: new Date().toUTCString()
   };
 };

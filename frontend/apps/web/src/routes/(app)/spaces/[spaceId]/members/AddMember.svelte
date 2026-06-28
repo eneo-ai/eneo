@@ -12,10 +12,10 @@
   import type { UserSparse } from "@eneo/eneo-js";
   import { createCombobox } from "@melt-ui/svelte";
   import MemberChip from "$lib/features/spaces/components/MemberChip.svelte";
-  import { UserList } from "./AddMember.svelte.ts";
+  import { UserList } from "$lib/features/users/user-list.svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte.ts";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const {
     refreshCurrentSpace,
@@ -34,7 +34,7 @@
     }
   });
 
-  let userList = new UserList();
+  let userList = new UserList({});
   let selectedRole = $state.raw($currentSpace.available_roles[0]);
   const memberIds = $derived($currentSpace.members.map((member) => member.id));
   const eneo = getEneo();
@@ -60,7 +60,7 @@
       $showDialog = false;
       $selected = undefined;
     } catch (e) {
-      toast.error(m.could_not_add_new_member());
+      toastError(e, m.could_not_add_new_member());
       console.error(e);
     }
   });

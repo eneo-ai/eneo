@@ -2,18 +2,27 @@
 #
 # Licensed under the MIT License.
 
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
 from eneo.storage.presentation.storage_models import StorageInfoModel, StorageModel
 
 router = APIRouter()
 
 
-@router.get("/", response_model=StorageModel)
-async def get_storage(container: Container = Depends(get_container(with_user=True))):
+@router.get(
+    "/",
+    response_model=StorageModel,
+    description="Get aggregated storage usage for the tenant.",
+    responses=responses.get_responses([]),
+)
+async def get_storage(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> StorageModel:
     service = container.storage_service()
     assembler = container.storage_assembler()
 
@@ -23,8 +32,15 @@ async def get_storage(container: Container = Depends(get_container(with_user=Tru
     return model
 
 
-@router.get("/spaces/", response_model=StorageInfoModel)
-async def get_spaces(container: Container = Depends(get_container(with_user=True))):
+@router.get(
+    "/spaces/",
+    response_model=StorageInfoModel,
+    description="Get per-space storage usage breakdown for the tenant.",
+    responses=responses.get_responses([]),
+)
+async def get_spaces(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> StorageInfoModel:
     service = container.storage_service()
     assembler = container.storage_assembler()
 

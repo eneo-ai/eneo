@@ -6,12 +6,13 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconSearch } from "@eneo/icons/search";
-  import { EneoError, type IntegrationKnowledgePreview } from "@eneo/eneo-js";
+  import { type IntegrationKnowledgePreview } from "@eneo/eneo-js";
   import { Button, Dialog } from "@eneo/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   type PreviewOption = {
     label: string;
@@ -88,9 +89,7 @@
       $inputValue = ""; // Reset input in case something else should be added
       $openController = false;
     } catch (error) {
-      const errorMessage =
-        error instanceof EneoError ? error.getReadableMessage() : String(error);
-      toast.error(errorMessage);
+      toastError(error);
     }
   });
 

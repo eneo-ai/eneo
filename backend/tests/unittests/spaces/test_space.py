@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -34,7 +35,8 @@ def space():
 
 def test_get_latest_available_embedding_model(space: Space):
     embedding_models = [
-        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True) for i in range(3)
+        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True)
+        for i in range(3)
     ]
     space.embedding_models = embedding_models
 
@@ -45,7 +47,8 @@ def test_get_latest_available_embedding_model(space: Space):
 
 def test_get_latest_available_embedding_model_when_not_ordered(space: Space):
     embedding_models = [
-        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True) for i in range(3)
+        MagicMock(created_at=datetime(2024, 1, 3 - i), can_access=True)
+        for i in range(3)
     ]
     embedding_models = list(reversed(embedding_models))
     space.embedding_models = embedding_models
@@ -97,7 +100,9 @@ def test_space_update_completion_models(space: Space):
 
 
 def test_get_latest_completion_model(space: Space):
-    completion_models = [MagicMock(created_at=datetime(2024, 1, 3 - i)) for i in range(3)]
+    completion_models = [
+        MagicMock(created_at=datetime(2024, 1, 3 - i)) for i in range(3)
+    ]
     completion_models = list(reversed(completion_models))
 
     space.completion_models = completion_models
@@ -253,6 +258,24 @@ def test_cannot_change_completion_models_of_personal_space(space: Space):
 
     with pytest.raises(BadRequestException):
         space.update(completion_models=[MagicMock()])
+
+
+def test_remove_assistant_removes_group_chat_membership_by_id(space: Space):
+    assistant = MagicMock(id=uuid4())
+    other_assistant = MagicMock(id=uuid4())
+    group_chat_assistant = SimpleNamespace(assistant=assistant)
+    other_group_chat_assistant = SimpleNamespace(assistant=other_assistant)
+    group_chat = SimpleNamespace(
+        assistants=[group_chat_assistant, other_group_chat_assistant]
+    )
+
+    space.assistants = [assistant]
+    space.group_chats = [group_chat]
+
+    space.remove_assistant(assistant)
+
+    assert space.assistants == []
+    assert group_chat.assistants == [other_group_chat_assistant]
 
 
 # Group Member Tests

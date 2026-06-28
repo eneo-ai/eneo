@@ -25,29 +25,23 @@ def test_settings() -> Settings:
         mistral_api_key=None,
         ovhcloud_api_key=None,
         vllm_api_key=None,
-
         # Minimal database settings (not used in unit tests)
         postgres_user="unit_test_user",
         postgres_host="localhost",
         postgres_password="unit_test_password",
         postgres_port=5432,
         postgres_db="unit_test_db",
-
         # Redis settings (not used in unit tests)
         redis_host="localhost",
         redis_port=6379,
-
         # Security
         encryption_key="yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=",
-
         # Feature flags - default to single-tenant mode for unit tests
         tenant_credentials_enabled=False,
         federation_enabled=False,
-
         # Crawler settings - ensure TTL > max_length to pass validation
         crawl_max_length=1800,  # 30 minutes
         tenant_worker_semaphore_ttl_seconds=3600,  # 1 hour (must be > crawl_max_length)
-
         # Testing mode
         testing=True,
         dev=True,

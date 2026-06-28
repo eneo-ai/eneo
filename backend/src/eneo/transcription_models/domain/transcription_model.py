@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from eneo.ai_models.ai_model import AIModel
@@ -35,11 +36,13 @@ class TranscriptionModel(AIModel):
         is_deprecated: bool,
         is_org_enabled: bool,
         is_org_default: bool,
+        cost_per_minute: Optional[Decimal] = None,
         security_classification: Optional["SecurityClassification"] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        migrated_to_model_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -61,11 +64,13 @@ class TranscriptionModel(AIModel):
 
         self.base_url = base_url
         self.is_org_default = is_org_default
+        self.cost_per_minute = cost_per_minute
         self.security_classification = security_classification
         self.tenant_id = tenant_id
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.migrated_to_model_id = migrated_to_model_id
 
     @property
     def model_name(self) -> str:
@@ -90,19 +95,24 @@ class TranscriptionModel(AIModel):
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
             updated_at=transcription_model_db.updated_at,
-            nickname=transcription_model_db.name,
+            # Display name now lives in `nickname` (parity with
+            # completion/embedding); fall back to `name` for rows written
+            # before nickname was synced. The DB `name`/`model_name` inversion
+            # is left untouched until a later normalization phase.
+            nickname=transcription_model_db.nickname or transcription_model_db.name,
             name=transcription_model_db.model_name,
             family=transcription_model_db.family,
             hosting=transcription_model_db.hosting,
             org=transcription_model_db.org,
             stability=transcription_model_db.stability,
-            open_source=transcription_model_db.open_source,
+            open_source=transcription_model_db.open_source or False,
             description=transcription_model_db.description,
             hf_link=transcription_model_db.hf_link,
             base_url=transcription_model_db.base_url,
             is_deprecated=transcription_model_db.is_deprecated,
             is_org_enabled=transcription_model_db.is_enabled,
             is_org_default=transcription_model_db.is_default,
+            cost_per_minute=transcription_model_db.cost_per_minute,
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=transcription_model_db.security_classification
             ),
@@ -110,4 +120,5 @@ class TranscriptionModel(AIModel):
             provider_id=transcription_model_db.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            migrated_to_model_id=transcription_model_db.migrated_to_model_id,
         )

@@ -8,10 +8,10 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.apps.apps.api import app_assembler as app_assembler_module
 from eneo.apps.apps.api.app_assembler import (
-    AppAssembler,
     _AUDIO_MAX_FILES,
     _IMAGE_MAX_FILES,
     _TEXT_MAX_FILES,
+    AppAssembler,
 )
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
 from eneo.apps.apps.app import App
@@ -38,16 +38,23 @@ _FAKE_SETTINGS = SimpleNamespace(
 
 # ── Expected values derived from settings ────────────────────────────────
 
+
 def _text_uploads(limit: int = CUSTOM_TEXT_LIMIT):
-    return [AcceptedFileType(mimetype=m, size_limit=limit) for m in TextMimeTypes.values()]
+    return [
+        AcceptedFileType(mimetype=m, size_limit=limit) for m in TextMimeTypes.values()
+    ]
 
 
 def _image_uploads(limit: int = CUSTOM_IMAGE_LIMIT):
-    return [AcceptedFileType(mimetype=m, size_limit=limit) for m in ImageMimeTypes.values()]
+    return [
+        AcceptedFileType(mimetype=m, size_limit=limit) for m in ImageMimeTypes.values()
+    ]
 
 
 def _audio_uploads(limit: int = CUSTOM_AUDIO_LIMIT):
-    return [AcceptedFileType(mimetype=m, size_limit=limit) for m in AudioMimeTypes.values()]
+    return [
+        AcceptedFileType(mimetype=m, size_limit=limit) for m in AudioMimeTypes.values()
+    ]
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -101,7 +108,10 @@ TEST_TRANSCRIPTION_MODEL = TranscriptionModel(
 @pytest.fixture
 def assembler(monkeypatch):
     monkeypatch.setattr(app_assembler_module, "get_settings", lambda: _FAKE_SETTINGS)
-    return AppAssembler(prompt_assembler=MagicMock())
+    return AppAssembler(
+        user=SimpleNamespace(can_view_model_pricing=True),
+        prompt_assembler=MagicMock(),
+    )
 
 
 @pytest.fixture
@@ -146,7 +156,9 @@ def test_get_accepted_file_types(
 
     app_public = assembler.from_app_to_model(app)
 
-    assert app_public.input_fields[0].accepted_file_types == expected_accepted_file_types
+    assert (
+        app_public.input_fields[0].accepted_file_types == expected_accepted_file_types
+    )
 
 
 # ── Tests: limits come from config ───────────────────────────────────────
@@ -158,19 +170,30 @@ def test_get_accepted_file_types(
         [InputFieldType.TEXT_FIELD, Limit(max_files=0, max_size=0)],
         [
             InputFieldType.TEXT_UPLOAD,
-            Limit(max_files=_TEXT_MAX_FILES, max_size=_TEXT_MAX_FILES * CUSTOM_TEXT_LIMIT),
+            Limit(
+                max_files=_TEXT_MAX_FILES, max_size=_TEXT_MAX_FILES * CUSTOM_TEXT_LIMIT
+            ),
         ],
         [
             InputFieldType.AUDIO_UPLOAD,
-            Limit(max_files=_AUDIO_MAX_FILES, max_size=_AUDIO_MAX_FILES * CUSTOM_AUDIO_LIMIT),
+            Limit(
+                max_files=_AUDIO_MAX_FILES,
+                max_size=_AUDIO_MAX_FILES * CUSTOM_AUDIO_LIMIT,
+            ),
         ],
         [
             InputFieldType.AUDIO_RECORDER,
-            Limit(max_files=_AUDIO_MAX_FILES, max_size=_AUDIO_MAX_FILES * CUSTOM_AUDIO_LIMIT),
+            Limit(
+                max_files=_AUDIO_MAX_FILES,
+                max_size=_AUDIO_MAX_FILES * CUSTOM_AUDIO_LIMIT,
+            ),
         ],
         [
             InputFieldType.IMAGE_UPLOAD,
-            Limit(max_files=_IMAGE_MAX_FILES, max_size=_IMAGE_MAX_FILES * CUSTOM_IMAGE_LIMIT),
+            Limit(
+                max_files=_IMAGE_MAX_FILES,
+                max_size=_IMAGE_MAX_FILES * CUSTOM_IMAGE_LIMIT,
+            ),
         ],
     ],
 )
@@ -213,12 +236,17 @@ def test_limits_change_when_settings_change(monkeypatch, app):
     )
     monkeypatch.setattr(app_assembler_module, "get_settings", lambda: settings)
 
-    assembler = AppAssembler(prompt_assembler=MagicMock())
+    assembler = AppAssembler(
+        user=SimpleNamespace(can_view_model_pricing=True),
+        prompt_assembler=MagicMock(),
+    )
     app.input_fields = [InputField(type=InputFieldType.AUDIO_UPLOAD)]
 
     app_public = assembler.from_app_to_model(app)
 
-    assert app_public.input_fields[0].accepted_file_types == _audio_uploads(new_audio_limit)
+    assert app_public.input_fields[0].accepted_file_types == _audio_uploads(
+        new_audio_limit
+    )
     assert app_public.input_fields[0].limit == Limit(
         max_files=_AUDIO_MAX_FILES,
         max_size=_AUDIO_MAX_FILES * new_audio_limit,

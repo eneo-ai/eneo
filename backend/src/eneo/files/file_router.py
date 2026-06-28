@@ -1,11 +1,17 @@
 import io
 import re
 import time
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
+# Audit logging - module level imports for consistency
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.signed_urls import generate_signed_token, verify_signed_token
 from eneo.files.file_models import (
     ContentDisposition,
@@ -26,20 +32,19 @@ from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
-# Audit logging - module level imports for consistency
-from eneo.audit.application.audit_metadata import AuditMetadata
-from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.entity_types import EntityType
-
 router = APIRouter()
 
 
 @router.post(
-    "/", response_model=FilePublic, responses=responses.get_responses([415, 413])
+    "/",
+    response_model=FilePublic,
+    responses=responses.get_responses([400, 403, 413, 415]),
+    description="Upload a file; rejects unsupported media types and oversized files.",
 )
 async def upload_file(
     upload_file: UploadFile,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.file_service()
     current_user = container.user()
@@ -60,7 +65,7 @@ async def upload_file(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,
@@ -79,9 +84,11 @@ async def upload_file(
     "/",
     response_model=PaginatedResponse[FilePublic],
     status_code=200,
+    responses=responses.get_responses([]),
+    description="List the current user's uploaded files.",
 )
 async def get_files(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     files = await service.get_files()
@@ -95,25 +102,38 @@ async def get_files(
     "/{id}/",
     response_model=FilePublic,
     status_code=200,
+    responses=responses.get_responses([403, 404]),
+    description="Fetch a single file's metadata by id.",
 )
 async def get_file(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     return await service.get_file_by_id(file_id=id)
 
 
-@router.delete("/{id}/", status_code=204)
+@router.delete(
+    "/{id}/",
+    status_code=204,
+    response_class=Response,
+    description="Delete a file owned by the current user.",
+    responses={
+        204: {
+            "description": "File deleted successfully. No response body is returned."
+        },
+        **responses.get_responses([403, 404]),
+    },
+)
 async def delete_file(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.file_service()
     current_user = container.user()
 
-    # Get file details BEFORE deletion (snapshot pattern)
-    file = await service.get_file_by_id(file_id=id)
+    # Delete atomically by owner; the returned row is kept for audit metadata.
+    file = await service.delete_file(id)
 
     # Build extra context capturing what was deleted
     extra = {
@@ -127,14 +147,11 @@ async def delete_file(
         else None,
     }
 
-    # Delete file
-    await service.delete_file(id)
-
     # Audit logging
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_DELETED,
         entity_type=EntityType.FILE,
         entity_id=id,
@@ -151,6 +168,7 @@ async def delete_file(
     "/{id}/signed-url/",
     response_model=SignedURLResponse,
     status_code=200,
+    responses=responses.get_responses([403, 404]),
     summary="Generate a signed URL for file download",
     description="""
     Generates a signed URL that can be used to download a file without authentication.
@@ -163,7 +181,7 @@ async def generate_signed_url(
     id: UUID,
     request: Request,
     signed_url_req: SignedURLRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Verify the file exists and the user has access to it
     service = container.file_service()
@@ -191,6 +209,7 @@ async def generate_signed_url(
     "/{id}/download/",
     status_code=200,
     response_class=Response,
+    response_model=None,
     summary="Download a file using a signed URL",
     description="""
     Allows downloading a file using a pre-signed URL token.
@@ -212,9 +231,9 @@ async def generate_signed_url(
 )
 async def download_file_signed(
     id: UUID,
-    token: str = Query(..., description="The signed token for file access"),
-    range: str = Header(None),
-    container: Container = Depends(get_container()),
+    token: Annotated[str, Query(description="The signed token for file access")],
+    container: Annotated[Container, Depends(get_container())],
+    range: Annotated[str | None, Header()] = None,
 ):
     payload = verify_signed_token(token)
     if not payload:
@@ -255,7 +274,7 @@ async def download_file_signed(
 
     total_size = len(content_bytes)
     headers = {
-        "Content-Disposition": f"{content_disposition.value}; filename=\"{response_filename}\"",
+        "Content-Disposition": f'{content_disposition.value}; filename="{response_filename}"',
         "Accept-Ranges": "bytes",
     }
 

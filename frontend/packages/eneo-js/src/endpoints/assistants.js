@@ -134,7 +134,7 @@ export function initAssistants(client) {
      * @param  {{id: string} | Assistant} params.assistant Which assistant to ask
      * @param {{id: string | null} | AssistantSession | undefined} params.session Session Id of a session to continue, `null` to start a new session
      * @param {string} params.question Question to ask
-     * @param {{id: string}[] | undefined} params.files Question to ask
+     * @param {string[] | undefined} params.files IDs of files to attach to the question
      * @param {(partialResponse: AssistantResponse, controller: AbortController) => void} [params.onAnswer] Callback to run when a new token/word of the answer is received
      * @param {(response: Response) => Promise<void>} [params.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
@@ -149,15 +149,24 @@ export function initAssistants(client) {
       /** @type AssistantResponse */
       let response = {};
 
-      const endpoint = session_id
-        ? "/api/v1/assistants/{id}/sessions/{session_id}/"
-        : "/api/v1/assistants/{id}/sessions/";
+      // Split into two branches so the path type narrows correctly per endpoint
+      const streamArgs = session_id
+        ? /** @type {const} */ ({
+            endpoint: "/api/v1/assistants/{id}/sessions/{session_id}/",
+            path: { id, session_id }
+          })
+        : /** @type {const} */ ({
+            endpoint: "/api/v1/assistants/{id}/sessions/",
+            path: { id }
+          });
 
       await client.stream(
-        endpoint,
+        streamArgs.endpoint,
         {
-          params: { path: { id, session_id }, query: { version: 2 } },
-          requestBody: { "application/json": { question, files, stream: true } }
+          params: { path: streamArgs.path, query: { version: 2 } },
+          requestBody: {
+            "application/json": { question, files, stream: true }
+          }
         },
         {
           onOpen: async (response) => {
@@ -244,11 +253,12 @@ export function initAssistants(client) {
      * */
     listPrompts: async (assistant) => {
       const { id } = assistant;
+      // @ts-ignore - endpoint exists in backend but not yet in generated schema
       const res = await client.fetch("/api/v1/assistants/{id}/prompts/", {
         method: "get",
         params: { path: { id } }
       });
-      return res.items;
+      return /** @type {{items: import('../types/resources').PromptSparse[]}} */ (res).items;
     },
 
     /**
@@ -290,7 +300,7 @@ export function initAssistants(client) {
     /**
      * Get all MCP servers associated with an assistant
      * @param {{id: string}} params
-     * @returns {Promise<{items: Array}>}
+     * @returns {Promise<any>}
      * */
     listMCPServers: async ({ id }) => {
       const res = await client.fetch("/api/v1/assistants/{id}/mcp-servers/", {
@@ -305,9 +315,8 @@ export function initAssistants(client) {
 
     /**
      * Add an MCP server to an assistant
-     * @param {{id: string}} assistant
-     * @param {{id: string}} mcpServer
-     * @returns {Promise<{success: boolean}>}
+     * @param {{assistant: {id: string}, mcpServer: {id: string}}} params
+     * @returns {Promise<any>}
      * */
     addMCPServer: async ({ assistant, mcpServer }) => {
       const res = await client.fetch("/api/v1/assistants/{id}/mcp-servers/{mcp_server_id}/", {
@@ -325,8 +334,7 @@ export function initAssistants(client) {
 
     /**
      * Remove an MCP server from an assistant
-     * @param {{id: string}} assistant
-     * @param {{id: string}} mcpServer
+     * @param {{assistant: {id: string}, mcpServer: {id: string}}} params
      * @returns {Promise<void>}
      * */
     removeMCPServer: async ({ assistant, mcpServer }) => {

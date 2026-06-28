@@ -1,9 +1,11 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast, overload
+
+from typing_extensions import override
 
 from eneo.base.base_entity import Entity
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
-from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
 from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
 
@@ -11,7 +13,12 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from eneo.database.tables.websites_table import Websites as WebsitesTable
+    from eneo.database.tables.websites_table import (
+        CrawlRuns as CrawlRunsTable,
+    )
+    from eneo.database.tables.websites_table import (
+        Websites as WebsitesTable,
+    )
     from eneo.users.user import UserInDB
 
 
@@ -115,6 +122,7 @@ class Website(Entity):
         self.http_auth = None
         return self
 
+    @overload
     @classmethod
     def create(
         cls,
@@ -128,7 +136,70 @@ class Website(Entity):
         embedding_model: "EmbeddingModel",
         http_auth_username: Optional[str] = None,
         http_auth_password: Optional[str] = None,
-    ) -> "Website":
+        /,
+    ) -> "Website": ...
+
+    @overload
+    @classmethod
+    def create(
+        cls,
+        *,
+        space_id: "UUID",
+        user: "UserInDB",
+        url: str,
+        name: Optional[str],
+        download_files: bool,
+        crawl_type: CrawlType,
+        update_interval: UpdateInterval,
+        embedding_model: "EmbeddingModel",
+        http_auth_username: Optional[str] = None,
+        http_auth_password: Optional[str] = None,
+    ) -> "Website": ...
+
+    @override
+    @classmethod
+    def create(cls, *args: object, **kwargs: object) -> "Website":
+        if args:
+            (
+                space_id,
+                user,
+                url,
+                name,
+                download_files,
+                crawl_type,
+                update_interval,
+                embedding_model,
+                *optional_auth,
+            ) = args
+            http_auth_username = cast(
+                Optional[str], optional_auth[0] if optional_auth else None
+            )
+            http_auth_password = cast(
+                Optional[str], optional_auth[1] if len(optional_auth) > 1 else None
+            )
+        else:
+            space_id = kwargs["space_id"]
+            user = kwargs["user"]
+            url = kwargs["url"]
+            name = kwargs.get("name")
+            download_files = kwargs["download_files"]
+            crawl_type = kwargs["crawl_type"]
+            update_interval = kwargs["update_interval"]
+            embedding_model = kwargs["embedding_model"]
+            http_auth_username = kwargs.get("http_auth_username")
+            http_auth_password = kwargs.get("http_auth_password")
+
+        space_id = cast("UUID", space_id)
+        user = cast("UserInDB", user)
+        url = cast(str, url)
+        name = cast(Optional[str], name)
+        download_files = cast(bool, download_files)
+        crawl_type = cast(CrawlType, crawl_type)
+        update_interval = cast(UpdateInterval, update_interval)
+        embedding_model = cast("EmbeddingModel", embedding_model)
+        http_auth_username = cast(Optional[str], http_auth_username)
+        http_auth_password = cast(Optional[str], http_auth_password)
+
         website = cls(
             id=None,
             created_at=None,
@@ -155,28 +226,62 @@ class Website(Entity):
         return website
 
     @classmethod
+    @overload
     def to_domain(
         cls,
+        db_model: "WebsitesTable",
+        *,
+        embedding_model: "EmbeddingModel",
+        http_auth: Optional[HttpAuthCredentials] = None,
+    ) -> "Website": ...
+
+    @overload
+    @classmethod
+    def to_domain(
+        cls,
+        *,
         record: "WebsitesTable",
         embedding_model: "EmbeddingModel",
         http_auth: Optional[HttpAuthCredentials] = None,
+    ) -> "Website": ...
+
+    @override
+    @classmethod
+    def to_domain(
+        cls,
+        db_model: object = None,
+        *args: object,
+        **kwargs: object,
     ) -> "Website":
+        del args
+        record = cast(
+            "WebsitesTable",
+            db_model if db_model is not None else kwargs["record"],
+        )
+        embedding_model = cast("EmbeddingModel", kwargs["embedding_model"])
+        http_auth = cast(Optional[HttpAuthCredentials], kwargs.get("http_auth"))
+        latest_crawl = cast(
+            "CrawlRunsTable | None", getattr(record, "latest_crawl", None)
+        )
+
         return cls(
             id=record.id,
             created_at=record.created_at,
             updated_at=record.updated_at,
-            space_id=record.space_id,
+            space_id=cast(
+                "UUID", record.space_id
+            ),  # DB invariant: space_id is non-null for persisted websites
             user_id=record.user_id,
             tenant_id=record.tenant_id,
             url=record.url,
             name=record.name,
             download_files=record.download_files,
             crawl_type=record.crawl_type,
-            update_interval=record.update_interval,
+            update_interval=UpdateInterval(record.update_interval),
             embedding_model=embedding_model,
             size=record.size,
-            latest_crawl=CrawlRun.to_domain(record.latest_crawl)
-            if record.latest_crawl
+            latest_crawl=CrawlRun.to_domain(db_model=latest_crawl)
+            if latest_crawl
             else None,
             last_crawled_at=record.last_crawled_at,
             http_auth=http_auth,
@@ -187,22 +292,22 @@ class Website(Entity):
     def update(
         self,
         url: Union[str, NotProvided] = NOT_PROVIDED,
-        name: Union[str, NotProvided] = NOT_PROVIDED,
+        name: Union[str, None, NotProvided] = NOT_PROVIDED,
         download_files: Union[bool, NotProvided] = NOT_PROVIDED,
         crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED,
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
-        if url is not NOT_PROVIDED:
+        if is_provided(url):
             self.url = url
-        if name is not NOT_PROVIDED:
+        if is_provided(name):
             self.name = name
-        if download_files is not NOT_PROVIDED:
+        if is_provided(download_files):
             self.download_files = download_files
-        if crawl_type is not NOT_PROVIDED:
+        if is_provided(crawl_type):
             self.crawl_type = crawl_type
-        if update_interval is not NOT_PROVIDED:
+        if is_provided(update_interval):
             self.update_interval = update_interval
             # Reset circuit breaker when user manually changes schedule
             # Why: User action indicates intent to retry, regardless of past failures
@@ -211,18 +316,12 @@ class Website(Entity):
                 self.next_retry_at = None
 
         # Handle auth updates (both must be provided together or both None)
-        if (
-            http_auth_username is not NOT_PROVIDED
-            or http_auth_password is not NOT_PROVIDED
-        ):
+        if is_provided(http_auth_username) or is_provided(http_auth_password):
             # If either is explicitly None, remove auth
             if http_auth_username is None or http_auth_password is None:
                 self.remove_http_auth()
             # If both provided, set/update auth
-            elif (
-                http_auth_username is not NOT_PROVIDED
-                and http_auth_password is not NOT_PROVIDED
-            ):
+            elif is_provided(http_auth_username) and is_provided(http_auth_password):
                 self.set_http_auth(http_auth_username, http_auth_password)
             # If only one provided, that's an error
             else:
@@ -281,7 +380,31 @@ class WebsiteSparse(Entity):
         self.next_retry_at = next_retry_at
 
     @classmethod
-    def to_domain(cls, record: "WebsitesTable") -> "WebsiteSparse":
+    @overload
+    def to_domain(cls, db_model: "WebsitesTable") -> "WebsiteSparse": ...
+
+    @overload
+    @classmethod
+    def to_domain(
+        cls,
+        *,
+        record: "WebsitesTable",
+    ) -> "WebsiteSparse": ...
+
+    @override
+    @classmethod
+    def to_domain(
+        cls,
+        db_model: object = None,
+        *args: object,
+        **kwargs: object,
+    ) -> "WebsiteSparse":
+        del args
+        record = cast(
+            "WebsitesTable",
+            db_model if db_model is not None else kwargs["record"],
+        )
+
         return cls(
             id=record.id,
             created_at=record.created_at,
@@ -289,12 +412,16 @@ class WebsiteSparse(Entity):
             user_id=record.user_id,
             tenant_id=record.tenant_id,
             embedding_model_id=record.embedding_model_id,
-            space_id=record.space_id,
-            name=record.name,
+            space_id=cast(
+                "UUID", record.space_id
+            ),  # DB invariant: space_id is non-null for persisted websites
+            name=cast(
+                str, record.name
+            ),  # DB invariant: name is non-null for sparse website records
             url=record.url,
             download_files=record.download_files,
             crawl_type=record.crawl_type,
-            update_interval=record.update_interval,
+            update_interval=UpdateInterval(record.update_interval),
             size=record.size,
             last_crawled_at=record.last_crawled_at,
             consecutive_failures=record.consecutive_failures,

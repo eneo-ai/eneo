@@ -2,7 +2,6 @@
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.category_mappings import (
-    CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
@@ -18,17 +17,17 @@ class TestCategoryMappings:
 
         # Check if any action types are missing from mappings
         unmapped_actions = all_action_values - mapped_actions
-        assert (
-            not unmapped_actions
-        ), f"The following action types are not mapped to categories: {unmapped_actions}"
+        assert not unmapped_actions, (
+            f"The following action types are not mapped to categories: {unmapped_actions}"
+        )
 
     def test_all_mappings_are_valid_action_types(self):
         """Verify that all mapped keys are valid ActionType string values."""
         all_action_values = set(action.value for action in ActionType)
         for action in CATEGORY_MAPPINGS.keys():
-            assert (
-                action in all_action_values
-            ), f"{action} is not a valid ActionType value"
+            assert action in all_action_values, (
+                f"{action} is not a valid ActionType value"
+            )
 
     def test_all_categories_are_valid(self):
         """Verify that all mapped categories are one of the 7 valid categories."""
@@ -43,9 +42,9 @@ class TestCategoryMappings:
         }
 
         for category in CATEGORY_MAPPINGS.values():
-            assert (
-                category in valid_categories
-            ), f"Invalid category '{category}' found in mappings"
+            assert category in valid_categories, (
+                f"Invalid category '{category}' found in mappings"
+            )
 
     def test_admin_actions_count(self):
         """Verify that admin_actions category has correct number of action types."""
@@ -54,9 +53,9 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert (
-            len(admin_actions) == 13
-        ), f"Expected 13 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 46, (
+            f"Expected 46 admin actions, got {len(admin_actions)}"
+        )
 
     def test_admin_actions_mapping(self):
         """Verify specific admin action types are correctly mapped."""
@@ -69,6 +68,18 @@ class TestCategoryMappings:
             ActionType.ROLE_DELETED,
             ActionType.PERMISSION_CHANGED,
             ActionType.API_KEY_GENERATED,
+            ActionType.API_KEY_CREATED,
+            ActionType.API_KEY_UPDATED,
+            ActionType.API_KEY_REVOKED,
+            ActionType.API_KEY_SUSPENDED,
+            ActionType.API_KEY_REACTIVATED,
+            ActionType.API_KEY_ROTATED,
+            ActionType.API_KEY_EXPIRATION_EXTENDED,
+            ActionType.API_KEY_PURGED,
+            ActionType.API_KEY_EXPIRED,
+            ActionType.API_KEY_USED,
+            ActionType.API_KEY_AUTH_FAILED,
+            ActionType.TENANT_POLICY_UPDATED,
             ActionType.TENANT_SETTINGS_UPDATED,
             ActionType.CREDENTIALS_UPDATED,
             ActionType.FEDERATION_UPDATED,
@@ -77,18 +88,26 @@ class TestCategoryMappings:
         ]
 
         for action_type in admin_action_types:
-            assert (
-                CATEGORY_MAPPINGS[action_type] == "admin_actions"
-            ), f"{action_type} should be mapped to 'admin_actions'"
+            assert CATEGORY_MAPPINGS[action_type] == "admin_actions", (
+                f"{action_type} should be mapped to 'admin_actions'"
+            )
 
     def test_user_actions_count(self):
         """Verify that user_actions category has correct number of action types."""
         user_actions = [
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
         ]
+        assert len(user_actions) == 37, (
+            f"Expected 37 user actions, got {len(user_actions)}"
+        )
+        assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
+
+    def test_completion_model_migrated_maps_to_user_actions(self):
+        """Verify completion model migration is tracked as a user action."""
         assert (
-            len(user_actions) == 28
-        ), f"Expected 28 user actions, got {len(user_actions)}"
+            CATEGORY_MAPPINGS[ActionType.COMPLETION_MODEL_MIGRATED.value]
+            == "user_actions"
+        )
 
     def test_security_events_mapping(self):
         """Verify security event action types are correctly mapped."""
@@ -102,9 +121,9 @@ class TestCategoryMappings:
         ]
 
         for action_type in security_actions:
-            assert (
-                CATEGORY_MAPPINGS[action_type] == "security_events"
-            ), f"{action_type} should be mapped to 'security_events'"
+            assert CATEGORY_MAPPINGS[action_type] == "security_events", (
+                f"{action_type} should be mapped to 'security_events'"
+            )
 
     def test_file_operations_mapping(self):
         """Verify file operation action types are correctly mapped."""
@@ -114,9 +133,9 @@ class TestCategoryMappings:
         ]
 
         for action_type in file_actions:
-            assert (
-                CATEGORY_MAPPINGS[action_type] == "file_operations"
-            ), f"{action_type} should be mapped to 'file_operations'"
+            assert CATEGORY_MAPPINGS[action_type] == "file_operations", (
+                f"{action_type} should be mapped to 'file_operations'"
+            )
 
     def test_integration_events_count(self):
         """Verify that integration_events category has correct number of action types."""
@@ -125,9 +144,9 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert (
-            len(integration_actions) == 19
-        ), f"Expected 19 integration events, got {len(integration_actions)}"
+        assert len(integration_actions) == 19, (
+            f"Expected 19 integration events, got {len(integration_actions)}"
+        )
 
     def test_mcp_events_mapping(self):
         """Verify MCP action types are correctly mapped to integration_events."""
@@ -142,9 +161,9 @@ class TestCategoryMappings:
         ]
 
         for action_type in mcp_actions:
-            assert (
-                CATEGORY_MAPPINGS[action_type] == "integration_events"
-            ), f"{action_type} should be mapped to 'integration_events'"
+            assert CATEGORY_MAPPINGS[action_type] == "integration_events", (
+                f"{action_type} should be mapped to 'integration_events'"
+            )
 
     def test_system_actions_mapping(self):
         """Verify system action types are correctly mapped."""
@@ -155,9 +174,9 @@ class TestCategoryMappings:
         ]
 
         for action_type in system_actions:
-            assert (
-                CATEGORY_MAPPINGS[action_type] == "system_actions"
-            ), f"{action_type} should be mapped to 'system_actions'"
+            assert CATEGORY_MAPPINGS[action_type] == "system_actions", (
+                f"{action_type} should be mapped to 'system_actions'"
+            )
 
     def test_audit_access_mapping(self):
         """Verify audit access action types are correctly mapped."""
@@ -168,9 +187,9 @@ class TestCategoryMappings:
         ]
 
         for action_type in audit_actions:
-            assert (
-                CATEGORY_MAPPINGS[action_type] == "audit_access"
-            ), f"{action_type} should be mapped to 'audit_access'"
+            assert CATEGORY_MAPPINGS[action_type] == "audit_access", (
+                f"{action_type} should be mapped to 'audit_access'"
+            )
 
 
 class TestGetCategoryForAction:
@@ -202,58 +221,6 @@ class TestGetCategoryForAction:
         assert get_category_for_action("file_uploaded") == "file_operations"
 
 
-class TestCategoryDescriptions:
-    """Test suite for category descriptions."""
-
-    def test_all_seven_categories_have_descriptions(self):
-        """Verify that all 7 categories have descriptions."""
-        expected_categories = {
-            "admin_actions",
-            "user_actions",
-            "security_events",
-            "file_operations",
-            "integration_events",
-            "system_actions",
-            "audit_access",
-        }
-
-        assert set(CATEGORY_DESCRIPTIONS.keys()) == expected_categories
-
-    def test_descriptions_are_non_empty_strings(self):
-        """Verify that all descriptions are non-empty strings."""
-        for category, description in CATEGORY_DESCRIPTIONS.items():
-            assert isinstance(
-                description, str
-            ), f"Description for {category} should be a string"
-            assert (
-                len(description) > 0
-            ), f"Description for {category} should not be empty"
-
-    def test_specific_category_descriptions(self):
-        """Verify specific category descriptions are correct."""
-        assert CATEGORY_DESCRIPTIONS["admin_actions"] == (
-            "User management, role changes, API keys, tenant settings"
-        )
-        assert CATEGORY_DESCRIPTIONS["user_actions"] == (
-            "Assistant, space, app operations, templates, model configs"
-        )
-        assert CATEGORY_DESCRIPTIONS["security_events"] == (
-            "Security classification lifecycle events"
-        )
-        assert CATEGORY_DESCRIPTIONS["file_operations"] == (
-            "File uploads and deletions"
-        )
-        assert CATEGORY_DESCRIPTIONS["integration_events"] == (
-            "Integration connections, knowledge sources, website crawling, MCP servers"
-        )
-        assert CATEGORY_DESCRIPTIONS["system_actions"] == (
-            "Retention policies, encryption, maintenance"
-        )
-        assert CATEGORY_DESCRIPTIONS["audit_access"] == (
-            "Viewing and exporting audit logs"
-        )
-
-
 class TestCategoryDistribution:
     """Test suite for verifying balanced distribution of action types across categories."""
 
@@ -263,9 +230,9 @@ class TestCategoryDistribution:
         total_mapped = len(CATEGORY_MAPPINGS)
         total_action_types = len(ActionType)
 
-        assert (
-            total_mapped == total_action_types
-        ), f"Expected {total_action_types} mappings, got {total_mapped}"
+        assert total_mapped == total_action_types, (
+            f"Expected {total_action_types} mappings, got {total_mapped}"
+        )
 
     def test_no_category_is_empty(self):
         """Verify that no category has zero action types mapped to it."""
@@ -286,8 +253,8 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 13,
-            "user_actions": 28,
+            "admin_actions": 46,
+            "user_actions": 37,
             "security_events": 6,
             "file_operations": 2,
             "integration_events": 19,

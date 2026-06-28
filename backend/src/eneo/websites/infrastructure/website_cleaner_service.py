@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 class WebsiteCleanerService:
     def __init__(self, session: "AsyncSession"):
+        super().__init__()
         self.session = session
 
     async def remove_website_from_all_assistants(

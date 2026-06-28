@@ -2,26 +2,40 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelProviderCreate(BaseModel):
     """Request model for creating a model provider."""
 
     name: str = Field(..., description="User-defined name for this provider instance")
-    provider_type: str = Field(..., description="Provider type: openai, azure, or anthropic")
-    credentials: dict[str, Any] = Field(..., description="Provider credentials (will be encrypted)")
-    config: dict[str, Any] = Field(default_factory=dict, description="Additional configuration")
+    provider_type: str = Field(
+        ..., description="Provider type: openai, azure, or anthropic"
+    )
+    credentials: dict[str, Any] = Field(
+        ..., description="Provider credentials (will be encrypted)"
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict, description="Additional configuration"
+    )
     is_active: bool = Field(default=True, description="Whether the provider is active")
 
 
 class ModelProviderUpdate(BaseModel):
     """Request model for updating a model provider."""
 
-    name: Optional[str] = Field(None, description="User-defined name for this provider instance")
-    credentials: Optional[dict[str, Any]] = Field(None, description="Provider credentials (will be encrypted)")
-    config: Optional[dict[str, Any]] = Field(None, description="Additional configuration")
-    is_active: Optional[bool] = Field(None, description="Whether the provider is active")
+    name: Optional[str] = Field(
+        None, description="User-defined name for this provider instance"
+    )
+    credentials: Optional[dict[str, Any]] = Field(
+        None, description="Provider credentials (will be encrypted)"
+    )
+    config: Optional[dict[str, Any]] = Field(
+        None, description="Additional configuration"
+    )
+    is_active: Optional[bool] = Field(
+        None, description="Whether the provider is active"
+    )
 
 
 class ValidateModelRequest(BaseModel):
@@ -55,5 +69,4 @@ class ModelProviderPublic(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

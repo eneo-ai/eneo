@@ -9,9 +9,8 @@ import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
 import type { Eneo, Space } from "@eneo/eneo-js";
 
-const [getSpaceSettingsEditor, setSpaceSettingsEditor] = createContext<
-  ReturnType<typeof createSpaceSettingsEditor>
->("Space Settings Editor");
+const [getSpaceSettingsEditor, setSpaceSettingsEditor] =
+  createContext<ReturnType<typeof createSpaceSettingsEditor>>("Space Settings Editor");
 
 type SpaceSettingsEditorParams = {
   space: Space;
@@ -29,7 +28,7 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
     updateResource: async (resource, changes) => {
       const updated = await data.eneo.spaces.update({
         space: { id: resource.id },
-        update: changes
+        update: changes as Parameters<typeof data.eneo.spaces.update>[0]["update"]
       });
       data.onUpdateDone?.(updated);
       return updated;

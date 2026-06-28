@@ -13,9 +13,16 @@ from eneo.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture(autouse=True)
-def enable_tenant_credentials(test_settings, monkeypatch):
+def enable_tenant_credentials(test_settings):
     """Enable tenant credentials feature for all tests in this module."""
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+    from eneo.main.config import set_settings
+
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    yield
+    set_settings(test_settings)
 
 
 async def _put_tenant_credential(
@@ -187,8 +194,12 @@ async def test_resolver_isolates_credentials_between_tenants(
 ):
     repo = TenantRepository(async_session)
 
-    tenant_a_data = await _create_tenant(client, super_admin_token, f"tenant-a-{uuid4().hex[:6]}")
-    tenant_b_data = await _create_tenant(client, super_admin_token, f"tenant-b-{uuid4().hex[:6]}")
+    tenant_a_data = await _create_tenant(
+        client, super_admin_token, f"tenant-a-{uuid4().hex[:6]}"
+    )
+    tenant_b_data = await _create_tenant(
+        client, super_admin_token, f"tenant-b-{uuid4().hex[:6]}"
+    )
 
     tenant_a_id = UUID(tenant_a_data["id"])
     tenant_b_id = UUID(tenant_b_data["id"])

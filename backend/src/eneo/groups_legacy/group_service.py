@@ -1,7 +1,9 @@
-from typing import TYPE_CHECKING
+from tempfile import SpooledTemporaryFile
+from typing import TYPE_CHECKING, BinaryIO, cast
 from uuid import UUID
 
 from eneo.ai_models.ai_models_service import AIModelsService
+from eneo.collections.domain.collection import Collection
 from eneo.groups_legacy.api.group_models import (
     CreateGroupRequest,
     CreateSpaceGroup,
@@ -19,8 +21,6 @@ from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from tempfile import SpooledTemporaryFile
-
     from eneo.actors import ActorManager
     from eneo.jobs.task_service import TaskService
     from eneo.spaces.space_repo import SpaceRepository
@@ -48,18 +48,11 @@ class GroupService:
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.task_service = task_service
-
-    async def check_space_embedding_model(self, group: Group):
-        space = await self.space_service.get_space(group.space_id)
-
-        if not space.is_embedding_model_in_space(group.embedding_model_id):
-            raise BadRequestException(
-                f"Space does not have embedding model {group.embedding_model.name} enabled."
-            )
+        super().__init__()
 
     async def _validate_embedding_model(self, group: GroupCreate | GroupUpdate):
-        if group.embedding_model_id is not None:
-            await self.ai_models_service.get_embedding_model(group.embedding_model_id)
+        if group.embedding_model_id is not None:  # type: ignore[attr-defined]
+            await self.ai_models_service.get_embedding_model(group.embedding_model_id)  # type: ignore[attr-defined]
 
     @validate_permissions(Permission.COLLECTIONS)
     async def create_group(self, group: CreateGroupRequest):
@@ -83,11 +76,21 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to create groups in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if embedding_model_id is None:
             if space.is_personal():
-                embedding_model = await self.ai_models_service.get_latest_available_embedding_model()
+                embedding_model = (
+                    await self.ai_models_service.get_latest_available_embedding_model()
+                )
             else:
                 embedding_model = space.get_latest_embedding_model()
             if embedding_model is None:
@@ -96,7 +99,15 @@ class GroupService:
                 )
             embedding_model_id = embedding_model.id
         elif not space.is_embedding_model_in_space(embedding_model_id):
-            raise UnauthorizedException("Embedding model is not available in the space")
+            raise UnauthorizedException(
+                "Embedding model is not available in the space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_create = CreateSpaceGroup(
             name=name,
@@ -112,16 +123,28 @@ class GroupService:
 
         return group
 
-    async def get_groups_for_user(self) -> list[Group]:
+    async def get_groups_for_user(
+        self, space_id_filter: UUID | None = None
+    ) -> list[Group]:
+        if space_id_filter is not None:
+            return await self.repo.get_groups_by_space(space_id_filter)
         return await self.repo.get_groups_by_user(self.user.id)
 
-    async def get_group(self, group_id: UUID) -> Group:
+    async def get_group(self, group_id: UUID) -> Collection:
         space = await self.space_repo.get_space_by_collection(collection_id=group_id)
         group = space.get_collection(collection_id=group_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return group
 
@@ -129,11 +152,21 @@ class GroupService:
         groups = await self.repo.get_groups_by_ids(ids)
 
         for group in groups:
+            if group.space_id is None:
+                continue
             space = await self.space_service.get_space(group.space_id)
             actor = self.actor_manager.get_space_actor_from_space(space)
 
             if not actor.can_read_collections():
-                raise UnauthorizedException()
+                raise UnauthorizedException(
+                    "You do not have permission to read one or more requested groups.",
+                    code="forbidden_action",
+                    context={
+                        "resource_type": "collection",
+                        "action": "read",
+                        "auth_layer": "domain_policy",
+                    },
+                )
 
         return groups
 
@@ -142,9 +175,19 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_edit_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
-        group_update = GroupUpdate(**group_update.model_dump(exclude_unset=True), id=group_id)
+        group_update = GroupUpdate(
+            **group_update.model_dump(exclude_unset=True), id=group_id
+        )
         group_in_db = await self.repo.update_group(group_update)
 
         return group_in_db
@@ -153,7 +196,7 @@ class GroupService:
         return await self.repo.update_group_size(group_id=group_id)
 
     async def add_file_to_group(
-        self, group_id: UUID, file: "SpooledTemporaryFile", mimetype: str, filename: str
+        self, group_id: UUID, file: BinaryIO, mimetype: str, filename: str
     ):
         space = await self.space_repo.get_space_by_collection(collection_id=group_id)
         group = space.get_collection(collection_id=group_id)
@@ -161,17 +204,27 @@ class GroupService:
 
         # Adding files to a group is considered editing the group
         if not actor.can_edit_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to upload files to this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "upload",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
                 f"Space does not have embedding model {group.embedding_model.name} enabled."
             )
 
-        return await self.task_service.queue_upload_file(
+        assert space.id is not None  # space from DB always has an id
+        return await self.task_service.queue_upload_file(  # pyright: ignore[reportUnknownMemberType]  # TaskService.queue_upload_file uses unparameterized SpooledTemporaryFile
             group_id=group_id,
             space_id=space.id,
-            file=file,
+            # FastAPI UploadFile.file is SpooledTemporaryFile at runtime
+            file=cast(SpooledTemporaryFile[bytes], file),
             mimetype=mimetype,
             filename=filename,
         )
@@ -182,9 +235,18 @@ class GroupService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to delete this group.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
-        count = await self.get_count_for_group(group)
+        assert group.id is not None  # collection from DB always has an id
+        count = await self.info_blob_repo.get_count_of_group(group.id)
 
         group_in_db = await self.repo.delete_group_by_id(group.id)
 
@@ -200,19 +262,41 @@ class GroupService:
         self,
         group_id: UUID,
         space_id: UUID,
-        assistant_ids: list[UUID] = [],
-        service_ids: list[UUID] = [],
+        assistant_ids: list[UUID] | None = None,
+        service_ids: list[UUID] | None = None,
     ):
-        source_space = await self.space_repo.get_space_by_collection(collection_id=group_id)
+        if assistant_ids is None:
+            assistant_ids = []
+        if service_ids is None:
+            service_ids = []
+        source_space = await self.space_repo.get_space_by_collection(
+            collection_id=group_id
+        )
         group = source_space.get_collection(collection_id=group_id)
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
         target_space = await self.space_service.get_space(space_id)
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
 
         if not source_actor.can_delete_collections():
-            raise UnauthorizedException("User does not have permissions to move group from space")
+            raise UnauthorizedException(
+                "User does not have permissions to move group from space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "move",
+                    "auth_layer": "domain_policy",
+                },
+            )
         if not target_actor.can_create_collections():
-            raise UnauthorizedException("User does not have permission to create groups in the space")
+            raise UnauthorizedException(
+                "User does not have permission to create groups in the destination space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(
                 f"Space does not have embedding model {group.embedding_model.name} enabled."
@@ -230,7 +314,9 @@ class GroupService:
         await self.repo.remove_group_from_all_assistants(
             group_id=group_id, assistant_ids=assistant_ids
         )
-        await self.repo.remove_group_from_all_services(group_id=group_id, service_ids=service_ids)
+        await self.repo.remove_group_from_all_services(
+            group_id=group_id, service_ids=service_ids
+        )
 
         return group_in_db
 
@@ -238,7 +324,15 @@ class GroupService:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_read_collections():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read groups in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
         return await self.repo.get_groups_by_space(space_id)
 
     async def import_group_to_space(
@@ -246,16 +340,34 @@ class GroupService:
         group_id: UUID,
         space_id: UUID,
     ):
-        source_space = await self.space_repo.get_space_by_collection(collection_id=group_id)
+        source_space = await self.space_repo.get_space_by_collection(
+            collection_id=group_id
+        )
         group = source_space.get_collection(collection_id=group_id)
         target_space = await self.space_service.get_space(space_id)
 
         source_actor = self.actor_manager.get_space_actor_from_space(source_space)
         target_actor = self.actor_manager.get_space_actor_from_space(target_space)
         if not source_actor.can_read_collections():
-            raise UnauthorizedException("User cannot read group in source space")
+            raise UnauthorizedException(
+                "User cannot read group in source space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
         if not target_actor.can_create_collections():
-            raise UnauthorizedException("User cannot import into target space")
+            raise UnauthorizedException(
+                "User cannot import into target space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "collection",
+                    "action": "import",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not target_space.is_embedding_model_in_space(group.embedding_model.id):
             raise BadRequestException(

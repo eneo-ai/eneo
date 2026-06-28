@@ -5,9 +5,12 @@ This worker handles:
 2. Orphaned subscription cleanup - runs daily to remove unused subscriptions
 """
 
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Optional, cast
 
-from eneo.integration.domain.entities.sharepoint_subscription import SharePointSubscription
+from eneo.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SimpleSharePointToken,
 )
@@ -15,9 +18,36 @@ from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.worker.worker import Worker
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 logger = get_logger(__name__)
 
 worker = Worker()
+
+
+async def record_renewal_failure(
+    subscription: SharePointSubscription,
+    container: Container,
+    error_message: str,
+) -> None:
+    """Persist renewal failure state without failing the maintenance job.
+
+    Runs in its own SAVEPOINT so a single failure can never poison the shared
+    cron transaction and silently drop later subscriptions' health writes.
+    """
+    try:
+        subscription.mark_renewal_failure(error_message)
+        session = cast("AsyncSession", container.session())
+        async with session.begin_nested():
+            await container.sharepoint_subscription_repo().update(subscription)
+    except Exception as exc:
+        logger.error(
+            "Failed to record renewal failure for subscription %s: %s",
+            subscription.subscription_id,
+            exc,
+            exc_info=True,
+        )
 
 
 async def get_token_for_subscription(
@@ -39,7 +69,9 @@ async def get_token_for_subscription(
     oauth_token_service = container.oauth_token_service()
 
     try:
-        user_integration = await user_integration_repo.one(id=subscription.user_integration_id)
+        user_integration = await user_integration_repo.one(
+            id=subscription.user_integration_id
+        )
     except Exception as e:
         logger.error(
             f"Failed to get user integration for subscription {subscription.subscription_id}: {e}"
@@ -56,19 +88,28 @@ async def get_token_for_subscription(
 
         try:
             tenant_sharepoint_app_repo = container.tenant_sharepoint_app_repo()
-            tenant_app = await tenant_sharepoint_app_repo.one(id=user_integration.tenant_app_id)
+            tenant_app = await tenant_sharepoint_app_repo.one(
+                id=user_integration.tenant_app_id
+            )
 
             if tenant_app.is_service_account():
                 service_account_auth_service = container.service_account_auth_service()
-                token_data = await service_account_auth_service.refresh_access_token(tenant_app)
+                token_data = await service_account_auth_service.refresh_access_token(
+                    tenant_app
+                )
                 new_refresh_token = token_data.get("refresh_token")
-                if new_refresh_token and new_refresh_token != tenant_app.service_account_refresh_token:
+                if (
+                    new_refresh_token
+                    and new_refresh_token != tenant_app.service_account_refresh_token
+                ):
                     tenant_app.update_refresh_token(new_refresh_token)
                     await tenant_sharepoint_app_repo.update(tenant_app)
                 access_token = token_data["access_token"]
             else:
                 tenant_app_auth_service = container.tenant_app_auth_service()
-                access_token = await tenant_app_auth_service.get_access_token(tenant_app)
+                access_token = await tenant_app_auth_service.get_access_token(
+                    tenant_app
+                )
 
             return SimpleSharePointToken(access_token=access_token)
 
@@ -97,8 +138,10 @@ async def get_token_for_subscription(
                 return None
 
             # Refresh token if needed
-            token = await oauth_token_service.refresh_and_update_token(token_id=token.id)
-            return token
+            token = await oauth_token_service.refresh_and_update_token(
+                token_id=token.id
+            )
+            return token  # type: ignore[return-value]
 
         except Exception as e:
             logger.error(
@@ -123,7 +166,9 @@ async def renew_expiring_subscriptions(container: Container):
     sharepoint_subscription_service = container.sharepoint_subscription_service()
 
     # Find subscriptions expiring in next 48 hours (2 days)
-    expiring = await sharepoint_subscription_service.list_expiring_subscriptions(hours=48)
+    expiring = await sharepoint_subscription_service.list_expiring_subscriptions(
+        hours=48
+    )
 
     if not expiring:
         logger.info("No subscriptions need renewal")
@@ -133,35 +178,38 @@ async def renew_expiring_subscriptions(container: Container):
 
     renewed_count = 0
     failed_count = 0
+    session = cast("AsyncSession", container.session())
 
     for subscription in expiring:
         try:
-            # Get token using unified helper (supports both OAuth and tenant app)
             token = await get_token_for_subscription(subscription, container)
-
             if not token:
-                logger.warning(
+                raise RuntimeError(
                     f"Could not get token for subscription {subscription.subscription_id}"
                 )
-                failed_count += 1
-                continue
 
-            # Renew subscription
-            success = await sharepoint_subscription_service.renew_subscription(
-                subscription=subscription,
-                token=token
-            )
-
-            if success:
-                renewed_count += 1
-            else:
-                failed_count += 1
+            # Isolate each renewal in a SAVEPOINT so one subscription's DB error
+            # cannot poison the shared cron transaction and drop the rest. Token
+            # refresh happens before this savepoint so a Graph renewal rollback
+            # cannot undo a rotated refresh token.
+            async with session.begin_nested():
+                success = await sharepoint_subscription_service.renew_subscription(
+                    subscription=subscription, token=token
+                )
+                if not success:
+                    raise RuntimeError(
+                        f"Renewal returned false for subscription {subscription.subscription_id}"
+                    )
+            renewed_count += 1
 
         except Exception as exc:
             logger.error(
                 f"Error renewing subscription {subscription.subscription_id}: {exc}",
-                exc_info=True
+                exc_info=True,
             )
+            # The savepoint above has rolled back, so the transaction is clean for
+            # this failure write (which uses its own savepoint).
+            await record_renewal_failure(subscription, container, str(exc))
             failed_count += 1
 
     logger.info(
@@ -232,9 +280,10 @@ async def cleanup_orphaned_subscriptions(container: Container):
                 continue
 
             # Delete subscription
-            success = await sharepoint_subscription_service.delete_subscription_if_unused(
-                subscription_id=subscription.id,
-                token=token
+            success = (
+                await sharepoint_subscription_service.delete_subscription_if_unused(
+                    subscription_id=subscription.id, token=token
+                )
             )
 
             if success:
@@ -245,7 +294,7 @@ async def cleanup_orphaned_subscriptions(container: Container):
         except Exception as exc:
             logger.error(
                 f"Error cleaning up subscription {subscription.subscription_id}: {exc}",
-                exc_info=True
+                exc_info=True,
             )
             failed_count += 1
 
@@ -255,3 +304,43 @@ async def cleanup_orphaned_subscriptions(container: Container):
     )
 
     return {"deleted": deleted_count, "skipped": skipped_count, "failed": failed_count}
+
+
+# SharePoint sync tasks that can leave a stuck Job if the worker dies mid-run (arq
+# does not retry these and there is no per-task finally that fails the Job). Each
+# task runs its whole body in ONE transaction committed only at the end, so a hard
+# crash rolls back the in-flight IN_PROGRESS write and the row reverts to its last
+# committed state (QUEUED). The reaper therefore targets BOTH QUEUED and IN_PROGRESS
+# (see JobRepository.mark_stale_jobs_failed). The timeout must exceed the longest
+# legitimate full sync of a large site AND any normal queue wait, so a slow-but-live
+# job is never killed.
+SHAREPOINT_SYNC_TASKS = ["pull_sharepoint_content", "sync_sharepoint_delta"]
+SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES = 120
+
+
+@worker.cron_job(minute={15, 45})  # Every 30 minutes, offset from renewal
+async def fail_stale_sharepoint_sync_jobs(container: Container):
+    """Fail SharePoint sync jobs stuck QUEUED/IN_PROGRESS past the stale timeout.
+
+    A hard crash mid-sync (worker killed, OOM) leaves a stuck Job that arq will not
+    retry and no finally fails. Because the sync commits its status only at the end,
+    a crashed job reverts to QUEUED, so the reaper covers both states. Mirrors the
+    crawl OrphanWatchdog so stuck syncs surface as failures instead of hanging.
+    """
+    stale_before = datetime.now(timezone.utc) - timedelta(
+        minutes=SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES
+    )
+    job_repo = container.job_repo()
+    failed_ids = await job_repo.mark_stale_jobs_failed(
+        tasks=SHAREPOINT_SYNC_TASKS,
+        stale_before=stale_before,
+    )
+
+    if failed_ids:
+        logger.warning(
+            "Failed %d stale SharePoint sync job(s) (QUEUED/IN_PROGRESS): %s",
+            len(failed_ids),
+            [str(job_id) for job_id in failed_ids],
+        )
+
+    return {"failed_stale_jobs": len(failed_ids)}

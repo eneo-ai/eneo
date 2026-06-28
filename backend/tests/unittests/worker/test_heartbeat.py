@@ -219,11 +219,18 @@ class TestHeartbeatMonitorPreemption:
         mock_repo = MagicMock()
         mock_repo.get_job = AsyncMock(return_value=mock_job)
 
-        with patch.dict("sys.modules", {
-            "eneo.database.database": MagicMock(sessionmanager=mock_sessionmanager),
-            "eneo.jobs.job_repo": MagicMock(JobRepository=MagicMock(return_value=mock_repo)),
-            "eneo.main.models": MagicMock(Status=MockStatus),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "eneo.database.database": MagicMock(
+                    sessionmanager=mock_sessionmanager
+                ),
+                "eneo.jobs.job_repo": MagicMock(
+                    JobRepository=MagicMock(return_value=mock_repo)
+                ),
+                "eneo.main.models": MagicMock(Status=MockStatus),
+            },
+        ):
             # Need to reload the module to pick up the patches
             # Instead, we'll patch directly at the point of use
             pass

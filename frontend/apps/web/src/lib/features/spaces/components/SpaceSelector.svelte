@@ -16,6 +16,7 @@
   import CreateSpaceDialog from "./CreateSpaceDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { getAppContext } from "$lib/core/AppContext";
 
   export let showSelectPrompt = false;
 
@@ -23,6 +24,8 @@
   const {
     state: { currentSpace, accessibleSpaces }
   } = spaces;
+  const { user } = getAppContext();
+  const canCreateSharedSpace = user.hasPermission("shared_spaces");
 
   const {
     elements: { trigger, menu, item, overlay, arrow },
@@ -71,7 +74,7 @@
         {$currentSpace.name}
       </span>
     {/if}
-    {#if (!$currentSpace.organization)}
+    {#if !$currentSpace.organization}
       <IconChevronUpDown class="text-muted group-hover:text-accent-stronger min-w-6" />
     {/if}
   </Button>
@@ -95,10 +98,12 @@
     <div
       class="border-default text-secondary flex items-baseline justify-between gap-4 border-b pt-1 pr-3 pb-2.5 pl-6 font-mono text-[0.85rem] font-medium tracking-[0.015rem]"
     >
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/spaces/list")} class="hover:underline">{m.your_spaces()}</a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
     </div>
 
-   <div class="relative max-h-[50vh] overflow-y-auto">
+    <div class="relative max-h-[50vh] overflow-y-auto">
       {#each $accessibleSpaces.filter((s) => !s.personal && !s.organization) as space (space.id)}
         <Button
           unstyled
@@ -116,21 +121,25 @@
         </Button>
       {/each}
     </div>
-    <Button
-      unstyled
-      on:click={() => {
-        $showCreateDialog = true;
-      }}
-      is={[$item]}
-      class="border-default bg-accent-default text-on-fill hover:bg-accent-stronger mt-1 !justify-center rounded-lg border !py-2 shadow-md focus:ring-offset-4 focus:outline-offset-4"
-      >{m.create_new_space()}</Button
-    >
+    {#if canCreateSharedSpace}
+      <Button
+        unstyled
+        on:click={() => {
+          $showCreateDialog = true;
+        }}
+        is={[$item]}
+        class="border-default bg-accent-default text-on-fill hover:bg-accent-stronger mt-1 !justify-center rounded-lg border !py-2 shadow-md focus:ring-offset-4 focus:outline-offset-4"
+        >{m.create_new_space()}</Button
+      >
+    {/if}
     <div {...$arrow} use:arrow class="border-stronger !z-10"></div>
   </div>
 {/if}
 
-<CreateSpaceDialog includeTrigger={false} forwardToNewSpace={true} bind:isOpen={showCreateDialog}
-></CreateSpaceDialog>
+{#if canCreateSharedSpace}
+  <CreateSpaceDialog includeTrigger={false} forwardToNewSpace={true} bind:isOpen={showCreateDialog}
+  ></CreateSpaceDialog>
+{/if}
 
 <style>
   .items {

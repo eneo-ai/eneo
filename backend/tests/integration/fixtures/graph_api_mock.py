@@ -49,7 +49,8 @@ def graph_api_mock(monkeypatch):
     def _install(
         *,
         token_responses: dict[tuple[str, str], tuple[dict, int] | dict] | None = None,
-        subscription_responses: dict[tuple[str, str], tuple[dict, int] | dict] | None = None,
+        subscription_responses: dict[tuple[str, str], tuple[dict, int] | dict]
+        | None = None,
         content_responses: dict[tuple[str, str], tuple[dict, int] | dict] | None = None,
         default_token_response: dict | None = None,
     ) -> Callable[[], dict[str, list[tuple[str, str, dict | None]]]]:
@@ -148,7 +149,9 @@ def graph_api_mock(monkeypatch):
                     if default_token_response:
                         return _FakeResponse(default_token_response, 200)
 
-                    raise AssertionError(f"Unmocked token request: {url} grant_type={grant_type}")
+                    raise AssertionError(
+                        f"Unmocked token request: {url} grant_type={grant_type}"
+                    )
 
                 # Subscription endpoint
                 if "/subscriptions" in url:
@@ -164,9 +167,20 @@ def graph_api_mock(monkeypatch):
                             "id": "mock-subscription-id",
                             "resource": "/sites/mock-site/drives/mock-drive/root",
                             "changeType": "updated",
-                            "notificationUrl": request_data.get("notificationUrl", "https://example.com/webhook") if request_data else "https://example.com/webhook",
-                            "expirationDateTime": (datetime.utcnow() + timedelta(hours=48)).isoformat() + "Z",
-                            "clientState": request_data.get("clientState", "mock-client-state") if request_data else "mock-client-state",
+                            "notificationUrl": request_data.get(
+                                "notificationUrl", "https://example.com/webhook"
+                            )
+                            if request_data
+                            else "https://example.com/webhook",
+                            "expirationDateTime": (
+                                datetime.utcnow() + timedelta(hours=48)
+                            ).isoformat()
+                            + "Z",
+                            "clientState": request_data.get(
+                                "clientState", "mock-client-state"
+                            )
+                            if request_data
+                            else "mock-client-state",
                         }
                         return _FakeResponse(default_sub, 201)
 
@@ -184,10 +198,15 @@ def graph_api_mock(monkeypatch):
 
                 # Generic subscription renewal response
                 if "/subscriptions/" in url:
-                    sub_id = url.split("/subscriptions/")[-1].split("/")[0].split("?")[0]
+                    sub_id = (
+                        url.split("/subscriptions/")[-1].split("/")[0].split("?")[0]
+                    )
                     default_renewal = {
                         "id": sub_id,
-                        "expirationDateTime": request_data.get("expirationDateTime") if request_data else (datetime.utcnow() + timedelta(hours=48)).isoformat() + "Z",
+                        "expirationDateTime": request_data.get("expirationDateTime")
+                        if request_data
+                        else (datetime.utcnow() + timedelta(hours=48)).isoformat()
+                        + "Z",
                     }
                     return _FakeResponse(default_renewal, 200)
 
@@ -264,14 +283,17 @@ def default_graph_token_response():
 @pytest.fixture
 def graph_token_url_factory():
     """Factory for creating Graph API token URLs."""
+
     def _create_url(tenant_domain: str = "contoso.onmicrosoft.com") -> str:
         return f"https://login.microsoftonline.com/{tenant_domain}/oauth2/v2.0/token"
+
     return _create_url
 
 
 @pytest.fixture
 def graph_subscription_factory():
     """Factory for creating Graph API subscription responses."""
+
     def _create_subscription(
         subscription_id: str = "mock-sub-id",
         site_id: str = "mock-site-id",
@@ -284,7 +306,11 @@ def graph_subscription_factory():
             "resource": f"/sites/{site_id}/drives/{drive_id}/root",
             "changeType": "updated",
             "notificationUrl": "https://example.com/webhook",
-            "expirationDateTime": (datetime.utcnow() + timedelta(hours=expiration_hours)).isoformat() + "Z",
+            "expirationDateTime": (
+                datetime.utcnow() + timedelta(hours=expiration_hours)
+            ).isoformat()
+            + "Z",
             "clientState": client_state,
         }
+
     return _create_subscription

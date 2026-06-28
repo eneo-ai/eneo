@@ -2,13 +2,17 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional, Sequence, cast
 from uuid import UUID
 
 import redis.exceptions
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+# Import config routes
+from eneo.api.audit.config_routes import router as config_router
 from eneo.api.audit.retention_schemas import (
     RetentionPolicyResponse,
     RetentionPolicyUpdateRequest,
@@ -24,6 +28,7 @@ from eneo.api.audit.schemas import (
 )
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.audit.infrastructure.rate_limiting import (
@@ -36,10 +41,7 @@ from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
-import sqlalchemy as sa
-
-# Import config routes
-from eneo.api.audit.config_routes import router as config_router
+from eneo.server.protocol import responses
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +49,12 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 
 
 def parse_action_list(
-    actions: Optional[list[str]] = Query(
-        None,
-        description="Filter by multiple action types (comma-separated or repeated)",
-    ),
+    actions: Annotated[
+        Optional[list[str]],
+        Query(
+            description="Filter by multiple action types (comma-separated or repeated)",
+        ),
+    ] = None,
 ) -> Optional[list[ActionType]]:
     """
     Parse query parameters that could be:
@@ -64,7 +68,7 @@ def parse_action_list(
     if not actions:
         return None
 
-    parsed_actions = []
+    parsed_actions: list[ActionType] = []
 
     for item in actions:
         # Split each item by comma in case it's comma-separated
@@ -87,7 +91,9 @@ def parse_action_list(
 router.include_router(config_router)
 
 
-async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
+async def _enrich_logs_with_actor_info(
+    logs: Sequence[AuditLog], session: AsyncSession
+) -> list[dict[str, object]]:
     """
     Enrich audit logs with actor information (name/email).
 
@@ -100,7 +106,7 @@ async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
     actor_ids = list(set(log.actor_id for log in logs if log.actor_id))
 
     # Fetch user information for all actors
-    user_map = {}
+    user_map: dict[UUID, dict[str, object]] = {}
     if actor_ids:
         query = sa.select(Users.id, Users.email, Users.username).where(
             Users.id.in_(actor_ids)
@@ -122,24 +128,33 @@ async def _enrich_logs_with_actor_info(logs: list, session) -> list[dict]:
             }
 
     # Convert logs to response models and enrich with actor info
-    enriched_logs = []
+    enriched_logs: list[dict[str, object]] = []
     for log in logs:
-        log_dict = AuditLogResponse.model_validate(log).model_dump()
+        log_model = AuditLogResponse.model_validate(log)
+        metadata = dict(log_model.metadata)
 
         # Add actor information to metadata if we have it
-        if log.actor_id in user_map:
-            if "metadata" not in log_dict:
-                log_dict["metadata"] = {}
-            log_dict["metadata"]["actor"] = user_map[log.actor_id]
+        actor_id = log.actor_id
+        if actor_id is not None and actor_id in user_map:
+            metadata["actor"] = user_map[actor_id]
 
-        enriched_logs.append(log_dict)
+        enriched_logs.append(
+            log_model.model_copy(update={"metadata": metadata}).model_dump(
+                mode="python"
+            )
+        )
 
     return enriched_logs
 
 
-@router.delete("/access-session/rate-limit", status_code=204)
+@router.delete(
+    "/access-session/rate-limit",
+    status_code=204,
+    description="Reset the audit session rate limit for the current user (testing only).",
+    responses=responses.get_responses([404, 503]),
+)
 async def reset_rate_limit(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Admin utility: Reset audit session rate limit for current user.
@@ -184,10 +199,15 @@ async def reset_rate_limit(
     return Response(status_code=204)
 
 
-@router.post("/access-session", response_model=AccessJustificationResponse)
+@router.post(
+    "/access-session",
+    response_model=AccessJustificationResponse,
+    description="Create an audit access session with justification, stored server-side.",
+    responses=responses.get_responses([400, 403, 429, 503]),
+)
 async def create_access_session(
     request: AccessJustificationRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Create an audit access session with justification.
@@ -268,7 +288,7 @@ async def create_access_session(
     try:
         await audit_service.log(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.AUDIT_SESSION_CREATED,
             entity_type=EntityType.AUDIT_LOG,
             entity_id=current_user.tenant_id,
@@ -321,25 +341,35 @@ async def create_access_session(
     return response
 
 
-@router.get("/logs", response_model=AuditLogListResponse)
+@router.get(
+    "/logs",
+    response_model=AuditLogListResponse,
+    description="List audit logs for the authenticated user's tenant.",
+    responses=responses.get_responses([401, 403]),
+)
 async def list_audit_logs(
     request: Request,
-    actor_id: Optional[UUID] = Query(None, description="Filter by actor"),
-    action: Optional[ActionType] = Query(
-        None, description="Filter by single action type (deprecated, use actions)"
-    ),
-    actions: Optional[list[ActionType]] = Depends(parse_action_list),
-    from_date: Optional[datetime] = Query(None, description="Filter from date"),
-    to_date: Optional[datetime] = Query(None, description="Filter to date"),
-    search: Optional[str] = Query(
-        None,
-        min_length=3,
-        max_length=100,
-        description="Search entity names in log descriptions (min 3 chars)",
-    ),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Page size"),
-    container: Container = Depends(get_container(with_user=True)),
+    actions: Annotated[Optional[list[ActionType]], Depends(parse_action_list)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    actor_id: Annotated[Optional[UUID], Query(description="Filter by actor")] = None,
+    action: Annotated[
+        Optional[ActionType],
+        Query(description="Filter by single action type (deprecated, use actions)"),
+    ] = None,
+    from_date: Annotated[
+        Optional[datetime], Query(description="Filter from date")
+    ] = None,
+    to_date: Annotated[Optional[datetime], Query(description="Filter to date")] = None,
+    search: Annotated[
+        Optional[str],
+        Query(
+            min_length=3,
+            max_length=100,
+            description="Search entity names in log descriptions (min 3 chars)",
+        ),
+    ] = None,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
 ):
     """
     List audit logs for the authenticated user's tenant.
@@ -359,7 +389,7 @@ async def list_audit_logs(
     from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-    session = container.session()
+    session = cast(AsyncSession, container.session())
 
     # DEBUG: Log user info before permission check
     logger.info(
@@ -430,7 +460,7 @@ async def list_audit_logs(
     records_returned = len(logs)
 
     # Build comprehensive metadata for compliance tracking
-    metadata = {
+    metadata: dict[str, object] = {
         # Core access information
         "records_returned": records_returned,
         "total_matching_records": total_count,
@@ -440,7 +470,7 @@ async def list_audit_logs(
     }
 
     # Add applied filters (only non-default values to show intent)
-    filters_applied = {}
+    filters_applied: dict[str, object] = {}
     if actor_id:
         filters_applied["actor_id"] = str(actor_id)
     if actions:
@@ -492,7 +522,7 @@ async def list_audit_logs(
     # Log the audit access with comprehensive metadata
     await audit_service.log(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_VIEWED,
         entity_type=EntityType.AUDIT_LOG,
         entity_id=current_user.tenant_id,  # Use tenant_id as entity_id for audit logs
@@ -504,12 +534,14 @@ async def list_audit_logs(
     enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
     # Create response object
-    response_data = AuditLogListResponse(
-        logs=enriched_logs,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
+    response_data = AuditLogListResponse.model_validate(
+        {
+            "logs": enriched_logs,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     )
 
     # Convert to JSON response so we can set cookie
@@ -536,14 +568,21 @@ async def list_audit_logs(
     return response
 
 
-@router.get("/logs/user/{user_id}", response_model=AuditLogListResponse)
+@router.get(
+    "/logs/user/{user_id}",
+    response_model=AuditLogListResponse,
+    description="Get all audit logs where the user is actor or target (GDPR Article 15 export).",
+    responses=responses.get_responses([403, 404]),
+)
 async def get_user_logs(
-    user_id: UUID = Path(..., description="User ID for GDPR export"),
-    from_date: Optional[datetime] = Query(None, description="Filter from date"),
-    to_date: Optional[datetime] = Query(None, description="Filter to date"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Page size"),
-    container: Container = Depends(get_container(with_user=True)),
+    user_id: Annotated[UUID, Path(..., description="User ID for GDPR export")],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    from_date: Annotated[
+        Optional[datetime], Query(description="Filter from date")
+    ] = None,
+    to_date: Annotated[Optional[datetime], Query(description="Filter to date")] = None,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
 ):
     """
     Get all logs where user is actor OR target (GDPR Article 15 export).
@@ -557,7 +596,7 @@ async def get_user_logs(
     from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-    session = container.session()
+    session = cast(AsyncSession, container.session())
 
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
@@ -578,7 +617,7 @@ async def get_user_logs(
     records_returned = len(logs)
 
     # Build comprehensive metadata for compliance tracking
-    metadata = {
+    metadata: dict[str, object] = {
         "target_user_id": str(user_id),
         "purpose": "GDPR Article 15 data subject access request",
         "records_returned": records_returned,
@@ -610,7 +649,7 @@ async def get_user_logs(
     # Log the GDPR export access
     await audit_service.log(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_VIEWED,
         entity_type=EntityType.USER,
         entity_id=user_id,
@@ -621,30 +660,49 @@ async def get_user_logs(
     # Enrich logs with actor information for UI display
     enriched_logs = await _enrich_logs_with_actor_info(logs, session)
 
-    return AuditLogListResponse(
-        logs=enriched_logs,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
+    return AuditLogListResponse.model_validate(
+        {
+            "logs": enriched_logs,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
     )
 
 
-@router.get("/logs/export")
-async def export_audit_logs(
-    user_id: Optional[UUID] = Query(None, description="User ID for GDPR export"),
-    actor_id: Optional[UUID] = Query(None, description="Filter by actor"),
-    action: Optional[ActionType] = Query(None, description="Filter by action type"),
-    from_date: Optional[datetime] = Query(None, description="Filter from date"),
-    to_date: Optional[datetime] = Query(None, description="Filter to date"),
-    format: str = Query("csv", description="Export format: csv or json"),
-    max_records: Optional[int] = Query(
-        None,
-        ge=1,
-        le=100000,
-        description="Maximum records to export (default: 50000, max: 100000)",
+@router.get(
+    "/logs/export",
+    response_model=None,
+    description=(
+        "Export audit logs to CSV or JSON Lines format. Default limit is 50,000 "
+        "records (configurable via max_records, max 100,000); the response includes "
+        "an X-Records-Truncated header when the limit is hit."
     ),
-    container: Container = Depends(get_container(with_user=True)),
+    responses=responses.get_responses([403, 413]),
+)
+async def export_audit_logs(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    user_id: Annotated[
+        Optional[UUID], Query(description="User ID for GDPR export")
+    ] = None,
+    actor_id: Annotated[Optional[UUID], Query(description="Filter by actor")] = None,
+    action: Annotated[
+        Optional[ActionType], Query(description="Filter by action type")
+    ] = None,
+    from_date: Annotated[
+        Optional[datetime], Query(description="Filter from date")
+    ] = None,
+    to_date: Annotated[Optional[datetime], Query(description="Filter to date")] = None,
+    format: Annotated[str, Query(description="Export format: csv or json")] = "csv",
+    max_records: Annotated[
+        Optional[int],
+        Query(
+            ge=1,
+            le=100000,
+            description="Maximum records to export (default: 50000, max: 100000)",
+        ),
+    ] = None,
 ):
     """
     Export audit logs to CSV or JSON Lines format.
@@ -688,13 +746,13 @@ async def export_audit_logs(
     )
 
     # Build comprehensive metadata for compliance tracking
-    metadata = {
+    metadata: dict[str, object] = {
         "export_format": export_format.upper(),
         "export_type": "GDPR_EXPORT" if user_id else "AUDIT_EXPORT",
     }
 
     # Add applied filters to show what was exported
-    filters_applied = {}
+    filters_applied: dict[str, object] = {}
     if user_id:
         filters_applied["user_id"] = str(user_id)
         metadata["purpose"] = "GDPR Article 15 data portability"
@@ -716,7 +774,7 @@ async def export_audit_logs(
 
     # Count records that will be exported (for compliance tracking)
     if user_id:
-        export_logs, export_count = await audit_service.get_user_logs(
+        _export_logs, export_count = await audit_service.get_user_logs(
             tenant_id=current_user.tenant_id,
             user_id=user_id,
             from_date=from_date,
@@ -725,7 +783,7 @@ async def export_audit_logs(
             page_size=1,  # Just get count
         )
     else:
-        export_logs, export_count = await audit_service.get_logs(
+        _export_logs, export_count = await audit_service.get_logs(
             tenant_id=current_user.tenant_id,
             actor_id=actor_id,
             action=action,
@@ -806,7 +864,7 @@ async def export_audit_logs(
     except ExportTooLargeError as exc:
         await audit_service.log(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.AUDIT_LOG_EXPORTED,
             entity_type=EntityType.AUDIT_LOG,
             entity_id=current_user.tenant_id,
@@ -819,7 +877,7 @@ async def export_audit_logs(
     except Exception as exc:
         await audit_service.log(
             tenant_id=current_user.tenant_id,
-            actor_id=current_user.id,
+            user=current_user,
             action=ActionType.AUDIT_LOG_EXPORTED,
             entity_type=EntityType.AUDIT_LOG,
             entity_id=current_user.tenant_id,
@@ -833,7 +891,7 @@ async def export_audit_logs(
     # Log the export after successful generation
     await audit_service.log(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_EXPORTED,
         entity_type=EntityType.AUDIT_LOG,
         entity_id=current_user.tenant_id,
@@ -849,10 +907,19 @@ async def export_audit_logs(
 # ============================================================================
 
 
-@router.post("/logs/export/async", response_model=ExportJobResponse)
+@router.post(
+    "/logs/export/async",
+    response_model=ExportJobResponse,
+    description=(
+        "Request an async background export of audit logs and receive a job ID. "
+        "Limited to 2 concurrent exports per tenant; generated files are "
+        "auto-deleted after 24 hours."
+    ),
+    responses=responses.get_responses([403, 429]),
+)
 async def request_async_export(
     request: ExportJobRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Request async export of audit logs.
@@ -881,6 +948,8 @@ async def request_async_export(
     )
     from eneo.audit.infrastructure.export_job_manager import ExportJobManager
     from eneo.jobs.job_manager import job_manager
+    from eneo.jobs.job_models import Task
+    from eneo.jobs.task_models import TaskParams
     from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
@@ -903,14 +972,7 @@ async def request_async_export(
         )
 
     # Validate and normalize format
-    export_format = request.format.lower().strip()
-    if export_format == "json":
-        export_format = "jsonl"  # Accept "json" as alias for "jsonl"
-    if export_format not in ["csv", "jsonl"]:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid export format: '{request.format}'. Supported formats: csv, json, jsonl",
-        )
+    export_format = "jsonl" if request.format == "json" else request.format
 
     # Generate job ID
     job_id = uuid4()
@@ -936,9 +998,9 @@ async def request_async_export(
 
     # Enqueue to ARQ
     await job_manager.enqueue(
-        "export_audit_logs",
-        job_id=str(job_id),
-        params=task_params.to_dict(),
+        Task.EXPORT_AUDIT_LOGS,
+        job_id=job_id,
+        params=cast(TaskParams, task_params.to_dict()),
     )
 
     # Log the export request
@@ -946,7 +1008,7 @@ async def request_async_export(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.AUDIT_LOG_EXPORTED,
         entity_type=EntityType.AUDIT_LOG,
         entity_id=job_id,
@@ -966,10 +1028,15 @@ async def request_async_export(
     )
 
 
-@router.get("/logs/export/{job_id}/status", response_model=ExportJobStatusResponse)
+@router.get(
+    "/logs/export/{job_id}/status",
+    response_model=ExportJobStatusResponse,
+    description="Get the status and progress of an async export job.",
+    responses=responses.get_responses([403, 404]),
+)
 async def get_export_status(
-    job_id: UUID = Path(..., description="Export job ID"),
-    container: Container = Depends(get_container(with_user=True)),
+    job_id: Annotated[UUID, Path(..., description="Export job ID")],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Get export job status with progress.
@@ -1022,10 +1089,18 @@ async def get_export_status(
     )
 
 
-@router.get("/logs/export/{job_id}/download")
+@router.get(
+    "/logs/export/{job_id}/download",
+    response_model=None,
+    description=(
+        "Download the completed export file for an async export job. "
+        "Files are auto-deleted after 24 hours."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def download_export(
-    job_id: UUID = Path(..., description="Export job ID"),
-    container: Container = Depends(get_container(with_user=True)),
+    job_id: Annotated[UUID, Path(..., description="Export job ID")],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Download completed export file.
@@ -1091,10 +1166,15 @@ async def download_export(
     )
 
 
-@router.post("/logs/export/{job_id}/cancel")
+@router.post(
+    "/logs/export/{job_id}/cancel",
+    response_model=None,
+    description="Cancel an in-progress async export job.",
+    responses=responses.get_responses([400, 403, 404]),
+)
 async def cancel_export(
-    job_id: UUID = Path(..., description="Export job ID"),
-    container: Container = Depends(get_container(with_user=True)),
+    job_id: Annotated[UUID, Path(..., description="Export job ID")],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Cancel an in-progress export.
@@ -1141,9 +1221,14 @@ async def cancel_export(
     }
 
 
-@router.get("/retention-policy", response_model=RetentionPolicyResponse)
+@router.get(
+    "/retention-policy",
+    response_model=RetentionPolicyResponse,
+    description="Get the current audit log retention policy for the tenant.",
+    responses=responses.get_responses([403]),
+)
 async def get_retention_policy(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Get the current retention policy for your tenant.
@@ -1157,7 +1242,7 @@ async def get_retention_policy(
     from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-    session = container.session()
+    session = cast(AsyncSession, container.session())
 
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
@@ -1169,10 +1254,15 @@ async def get_retention_policy(
     return RetentionPolicyResponse.model_validate(policy.model_dump())
 
 
-@router.put("/retention-policy", response_model=RetentionPolicyResponse)
+@router.put(
+    "/retention-policy",
+    response_model=RetentionPolicyResponse,
+    description="Update the audit log retention policy for the tenant.",
+    responses=responses.get_responses([403]),
+)
 async def update_retention_policy(
     request: RetentionPolicyUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """
     Update the audit log retention policy for your tenant.
@@ -1199,7 +1289,7 @@ async def update_retention_policy(
     from eneo.roles.permissions import Permission, validate_permission
 
     current_user = container.user()
-    session = container.session()
+    session = cast(AsyncSession, container.session())
 
     # Validate admin permissions
     validate_permission(current_user, Permission.ADMIN)
@@ -1222,7 +1312,7 @@ async def update_retention_policy(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=current_user.tenant_id,

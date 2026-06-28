@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, Boolean
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.base_class import BasePublic
@@ -10,6 +10,10 @@ from eneo.database.tables.base_class import BasePublic
 if TYPE_CHECKING:
     from eneo.database.tables.tenant_table import Tenants
     from eneo.database.tables.users_table import Users
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class TenantSharePointApp(BasePublic):
@@ -23,10 +27,13 @@ class TenantSharePointApp(BasePublic):
     - service_account: Delegated permissions via service account OAuth
     """
 
-    __tablename__ = "tenant_sharepoint_apps"
+    __tablename__ = "tenant_sharepoint_apps"  # type: ignore[assignment]
 
     tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False, unique=True
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+        unique=True,
     )
     client_id: Mapped[str] = mapped_column(String(255), nullable=False)
     client_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
@@ -45,16 +52,21 @@ class TenantSharePointApp(BasePublic):
     service_account_refresh_token_encrypted: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )
-    service_account_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service_account_email: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
 
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utc_now,
+        onupdate=_utc_now,
     )
 
     tenant: Mapped["Tenants"] = relationship("Tenants", back_populates="sharepoint_app")

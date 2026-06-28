@@ -37,7 +37,9 @@ class SecurityClassificationUpdatePublic(BaseModel):
 
 
 class SecurityClassificationLevelsUpdateRequest(BaseModel):
-    security_classifications: list[ModelId] = Field(..., description="Security classification IDs")
+    security_classifications: list[ModelId] = Field(
+        ..., description="Security classification IDs"
+    )
 
 
 class SecurityClassificationSingleUpdate(BaseModel):

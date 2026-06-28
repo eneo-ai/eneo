@@ -1,12 +1,20 @@
+import logging
 from collections import defaultdict
-import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import Any, Optional, Protocol, Sequence
+from uuid import UUID
+
+from typing_extensions import override
 
 from eneo.ai_models.completion_models.completion_model import (
     Context,
     FunctionDefinition,
     Message,
+    MessageToolCall,
+)
+from eneo.completion_models.infrastructure.message_payload import (
+    build_turn_messages,
+    countable_messages,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
@@ -14,63 +22,179 @@ from eneo.completion_models.infrastructure.static_prompts import (
     TRANSCRIPTION_PROMPT,
 )
 from eneo.files.file_models import File, FileType
-from eneo.main.exceptions import QueryException
+from eneo.main.config import get_settings
+from eneo.questions.question import ToolCallInfo
 from eneo.sessions.session import SessionInDB
-from eneo.tokens.token_utils import count_tokens  # noqa: F401 — re-exported for external callers
+from eneo.tokens.token_utils import (
+    count_image_tokens_from_blob,
+    count_message_tokens,
+    count_tokens,  # noqa: F401 — re-exported for external callers
+    count_tool_tokens,
+)
 
-if TYPE_CHECKING:
-    from uuid import UUID
+logger = logging.getLogger(__name__)
 
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
-    from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+
+def _replayable_tool_calls(
+    tool_calls: Optional[list[ToolCallInfo]],
+) -> list[MessageToolCall]:
+    """Filter persisted tool calls down to those that can be replayed to the LLM.
+
+    Replayable means the call has a stable id to pair with a result and a
+    concrete result payload. Denied calls are included — the result there is
+    the denial JSON, which lets the model see both the attempted invocation and
+    that the user refused it. Pending calls and legacy rows persisted before
+    `result` was captured have no payload and fall back to text-only replay.
+
+    The emitted `tool_name` is the prefixed MCP identifier (what the LLM sees
+    on the current turn's tool registration) — we prefer `mcp_tool_name` and
+    fall back to the split `tool_name` for legacy rows that predate this field.
+    """
+    if not tool_calls:
+        return []
+    replayable: list[MessageToolCall] = []
+    for tc in tool_calls:
+        if tc.tool_call_id is None or tc.tool_call_id == "":
+            continue
+        if tc.result is None:
+            continue
+        replayable.append(
+            MessageToolCall(
+                tool_call_id=tc.tool_call_id,
+                tool_name=tc.mcp_tool_name or tc.tool_name,
+                arguments=tc.arguments,
+                result=tc.result,
+            )
+        )
+    return replayable
+
+
+def _image_files_tokens(images: list[File], model_name: str) -> int:
+    """Image cost depends on pixel dimensions alone — price straight from the
+    stored blobs instead of building base64 payloads just to count them."""
+    return sum(count_image_tokens_from_blob(image.blob, model_name) for image in images)
+
+
+def count_attachment_tokens(
+    text_files: list[File], image_files: list[File], model_name: str = ""
+) -> int:
+    """Tokens a set of attachments adds to a request.
+
+    Text files are inlined into the user message; image files ride along as
+    image_url blocks priced by the provider's image-token formula.
+    """
+    text = build_files_string(text_files, model_name=model_name)
+    return count_tokens(text, model_name) + _image_files_tokens(image_files, model_name)
+
+
+def _turn_tokens(
+    question: str,
+    answer: str | None,
+    images: list[File],
+    tool_calls: list[MessageToolCall],
+    model_name: str,
+) -> int:
+    """Count one Q&A turn in the same shape the adapter replays it."""
+    turn = build_turn_messages(
+        question=question, answer=answer, images=[], tool_calls=tool_calls
+    )
+    return count_message_tokens(
+        countable_messages(turn), model_name
+    ) + _image_files_tokens(images, model_name)
+
 
 MIN_PERCENTAGE_KNOWLEDGE = (
     0.8  # Strive towards a minimum of 80% of the context as knowledge
 )
 
 
-def _build_files_string(files: list[File]):
-    if files:
-        # Use json.dumps() to properly escape special characters in filenames and text
-        # This prevents broken JSON if the content contains quotes or other special chars
-        files_string = "\n".join(
-            json.dumps({"filename": file.name, "text": file.text}) for file in files
-        )
+class _InfoBlobChunkLike(Protocol):
+    text: str
+    chunk_no: int
+    info_blob_id: UUID
+    info_blob_title: str | None
 
-        return (
-            "Below are files uploaded by the user. "
-            "You should act like you can see the files themselves, "
-            "and not reveal the specific formatting "
-            "you see below:"
-            f"\n\n{files_string}"
-        )
 
-    return ""
+class _InformationChunkLike(Protocol):
+    id: UUID
+    title: str
+    content: str
+
+
+ATTACHMENT_TRUNCATION_NOTICE = (
+    "[... the rest of this file was truncated because it exceeds the "
+    "attachment size budget — tell the user if the cut-off content matters]"
+)
+
+
+def _truncate_to_tokens(text: str, max_tokens: int, model_name: str = "") -> str:
+    tokens = count_tokens(text, model_name)
+    if tokens <= max_tokens:
+        return text
+
+    # The appended notice spends part of the budget too.
+    notice_tokens = count_tokens(ATTACHMENT_TRUNCATION_NOTICE, model_name)
+    budget = max(max_tokens - notice_tokens - 2, 1)
+    keep_chars = max(int(len(text) * budget / tokens), 0)
+    truncated = text[:keep_chars]
+    # The proportional ratio assumes uniform token density; token-dense text
+    # (CJK, base64 blobs) can survive the cut, so tighten until within budget.
+    while truncated and count_tokens(truncated, model_name) > budget:
+        keep_chars = int(keep_chars * 0.9)
+        truncated = text[:keep_chars]
+    return f"{truncated}\n{ATTACHMENT_TRUNCATION_NOTICE}"
+
+
+def build_files_string(files: list[File], model_name: str = "") -> str:
+    if not files:
+        return ""
+
+    max_tokens_per_file = get_settings().attachment_max_tokens_per_file
+    blocks: list[str] = []
+    for file in files:
+        header = f"FILE: {file.name}"
+        if file.mimetype:
+            header = f"{header} ({file.mimetype})"
+        text = _truncate_to_tokens(
+            file.text or "", max_tokens=max_tokens_per_file, model_name=model_name
+        )
+        blocks.append(f"{header}\n{text}")
+
+    files_string = "\n\n---\n\n".join(blocks)
+    return (
+        "Below are files uploaded by the user. "
+        "You should act like you can see the files themselves, "
+        "and not reveal the specific formatting "
+        "you see below:"
+        f"\n\n{files_string}"
+    )
 
 
 @dataclass
 class ChunkGrouping:
-    id: "UUID"
+    id: UUID
     title: str
     start_chunk: int
     end_chunk: int
     content: str
     chunk_count: int
-    relevance_score: Optional[float] = None
+    relevance_score: float = 0.0
 
 
 class _Prompt:
     def __init__(self, version: int = 1, model_name: str = ""):
-        self.prompt = None
-        self.knowledge = None
-        self.web_search_result = None
-        self.attachments = None
-        self._knowledge_tokens = 0
-        self.version = version
-        self.model_name = model_name
+        super().__init__()
+        self.prompt: str | None = None
+        self.knowledge: str | None = None
+        self.web_search_result: str | None = None
+        self.attachments: str | None = None
+        self._knowledge_tokens: int = 0
+        self.version: int = version
+        self.model_name: str = model_name
 
+    @override
     def __str__(self):
-        components = []
+        components: list[str] = []
 
         if self.prompt:
             components.append(self.prompt)
@@ -96,7 +220,7 @@ class _Prompt:
         return "\n\n".join(components)
 
     @staticmethod
-    def _common_overlap(text1: str, text2: str):
+    def _common_overlap(text1: str, text2: str) -> int:
         # Cache the text lengths to prevent multiple calls.
         text1_length = len(text1)
         text2_length = len(text2)
@@ -126,7 +250,7 @@ class _Prompt:
                 best = length
                 length += 1
 
-    def _join_overlapping_text(self, chunks: list["InfoBlobChunkInDBWithScore"]):
+    def _join_overlapping_text(self, chunks: list[_InfoBlobChunkLike]) -> str:
         if not chunks:
             return ""
 
@@ -144,14 +268,14 @@ class _Prompt:
 
     def _reconstruct_and_order_chunks(
         self,
-        chunks: list["InfoBlobChunkInDBWithScore"],
+        chunks: list[_InfoBlobChunkLike],
         max_tokens: int,
-    ):
+    ) -> str:
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
         # Group chunks by info_blob
-        chunks_by_info_blob = {}
+        chunks_by_info_blob: dict[UUID, list[_InfoBlobChunkLike]] = {}
         used_tokens = 0
         for chunk in chunks:
             chunk_tokens = count_tokens(chunk.text, self.model_name)
@@ -177,8 +301,8 @@ class _Prompt:
         self._knowledge_tokens = used_tokens
 
         # Process each document
-        chunk_groupings = []
-        grouping_scores = defaultdict(float)
+        chunk_groupings: list[ChunkGrouping] = []
+        grouping_scores: defaultdict[int, float] = defaultdict(float)
 
         for doc_id, doc_chunks in chunks_by_info_blob.items():
             # Edgecase if the first chunk of a new info-blob is the cutoff point
@@ -189,8 +313,8 @@ class _Prompt:
             doc_chunks.sort(key=lambda x: x.chunk_no)
 
             # Group coherent chunks
-            coherent_groups = []
-            current_group = [doc_chunks[0]]
+            coherent_groups: list[list[_InfoBlobChunkLike]] = []
+            current_group: list[_InfoBlobChunkLike] = [doc_chunks[0]]
 
             for i in range(1, len(doc_chunks)):
                 if doc_chunks[i].chunk_no == current_group[-1].chunk_no + 1:
@@ -207,7 +331,7 @@ class _Prompt:
 
                 chunk_grouping = ChunkGrouping(
                     id=doc_id,
-                    title=group[0].info_blob_title,
+                    title=group[0].info_blob_title or "",
                     start_chunk=group[0].chunk_no,
                     end_chunk=group[-1].chunk_no,
                     content=full_text,
@@ -215,7 +339,7 @@ class _Prompt:
                 )
 
                 # Calculate score based on the position of chunks in the original input
-                score = sum(1 / (chunk_indices[id(chunk)] + 1) for chunk in group)
+                score = sum(1.0 / (chunk_indices[id(chunk)] + 1) for chunk in group)
                 grouping_scores[id(chunk_grouping)] = score
 
                 chunk_groupings.append(chunk_grouping)
@@ -234,10 +358,14 @@ class _Prompt:
         elif self.version == 2:
             return self._create_information_string(information_chunks=chunk_groupings)
 
+        raise ValueError(f"Unsupported prompt version: {self.version}")
+
     @staticmethod
     def _create_information_string(
-        information_chunks: list[ChunkGrouping] | list["WebSearchResult"] = [],
-    ):
+        information_chunks: Sequence[_InformationChunkLike] | None = None,
+    ) -> str:
+        if information_chunks is None:
+            information_chunks = []
         if not information_chunks:
             return ""
 
@@ -251,45 +379,53 @@ class _Prompt:
         )
 
     @property
-    def num_tokens(self):
-        return count_tokens(str(self), self.model_name)
+    def num_tokens(self) -> int:
+        # The prompt is sent as a system message (when non-empty), so count it
+        # as one — message scaffolding included.
+        prompt_text = str(self)
+        if not prompt_text:
+            return 0
+        return count_message_tokens(
+            [{"role": "system", "content": prompt_text}], self.model_name
+        )
 
-    def add_prompt(
-        self,
-        prompt: str,
-        transcription: bool,
-    ):
+    def add_prompt(self, prompt: str, transcription: bool) -> None:
         if transcription and not prompt:
             prompt = TRANSCRIPTION_PROMPT
 
         self.prompt = prompt
 
-    def add_web_search_result(self, web_search_results: list["WebSearchResult"] = []):
+    def add_web_search_result(
+        self, web_search_results: Sequence[_InformationChunkLike] | None = None
+    ) -> None:
+        if web_search_results is None:
+            web_search_results = []
         self.web_search_result = self._create_information_string(
             information_chunks=web_search_results
         )
 
     def add_knowledge(
-        self, chunks: list["InfoBlobChunkInDBWithScore"], max_tokens: int
-    ):
+        self, chunks: Sequence[_InfoBlobChunkLike], max_tokens: int
+    ) -> None:
         if not chunks:
             return
 
+        chunk_list = list(chunks)
         self.knowledge = self._reconstruct_and_order_chunks(
-            chunks=chunks,
-            max_tokens=max_tokens - self.num_tokens,
+            chunks=chunk_list,
+            max_tokens=max_tokens,
         )
 
-    def add_attachments(self, files: list[File]):
-        self.attachments = _build_files_string(files=files)
+    def add_attachments(self, files: list[File]) -> None:
+        self.attachments = build_files_string(files=files, model_name=self.model_name)
 
-    def get_tokens_of_knowledge(self):
+    def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
 
 
 class ContextBuilder:
     @staticmethod
-    def _functions():
+    def _functions() -> list[FunctionDefinition]:
         return [
             FunctionDefinition(
                 name="generate_image",
@@ -313,11 +449,16 @@ class ContextBuilder:
     def _build_input(
         self,
         input_str: str,
-        files: list[File] = [],
-        transcription_inputs: list[str] = [],
-    ):
+        files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        model_name: str = "",
+    ) -> str:
+        if files is None:
+            files = []
+        if transcription_inputs is None:
+            transcription_inputs = []
         if files:
-            files_string = _build_files_string(files)
+            files_string = build_files_string(files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
 
         if transcription_inputs:
@@ -332,7 +473,7 @@ class ContextBuilder:
         return input_str.strip()
 
     @staticmethod
-    def _get_files_by_type(files: list[File], file_type: FileType):
+    def _get_files_by_type(files: list[File], file_type: FileType) -> list[File]:
         return [file for file in files if file.file_type == file_type]
 
     def _build_messages(
@@ -341,25 +482,40 @@ class ContextBuilder:
         max_tokens: int,
         min_len: int = 3,
         model_name: str = "",
-    ):
+        vision: bool = True,
+    ) -> tuple[list[Message], int]:
         if session is None:
             return [], 0
 
-        messages = []
+        messages: list[Message] = []
         total_tokens = 0
 
         for message in reversed(session.questions):
             question = self._build_input(
                 message.question,
                 self._get_files_by_type(message.files, FileType.TEXT),
+                model_name=model_name,
             )
             answer = message.answer
-            images = self._get_files_by_type(message.files, FileType.IMAGE)
-            generated_images = self._get_files_by_type(
-                message.generated_files, FileType.IMAGE
-            )
+            # History can contain images (e.g. after a model switch) — never
+            # replay them to a model without vision.
+            if vision:
+                images = self._get_files_by_type(message.files, FileType.IMAGE)
+                generated_images = self._get_files_by_type(
+                    message.generated_files, FileType.IMAGE
+                )
+            else:
+                images = []
+                generated_images = []
+            tool_calls = _replayable_tool_calls(message.tool_calls)
 
-            message_tokens = count_tokens(question, model_name) + count_tokens(answer, model_name)
+            message_tokens = _turn_tokens(
+                question=question,
+                answer=answer,
+                images=images + generated_images,
+                tool_calls=tool_calls,
+                model_name=model_name,
+            )
 
             if len(messages) > min_len and total_tokens + message_tokens > max_tokens:
                 break
@@ -371,6 +527,7 @@ class ContextBuilder:
                     answer=answer,
                     images=images,
                     generated_images=generated_images,
+                    tool_calls=tool_calls,
                 ),
             )
 
@@ -384,27 +541,80 @@ class ContextBuilder:
         *,
         max_tokens: int,
         model_name: str = "",
-        files: list[File] = [],
+        files: list[File] | None = None,
         prompt: str = "",
-        prompt_files: list[File] = [],
-        transcription_inputs: list[str] = [],
-        info_blob_chunks: list["InfoBlobChunkInDBWithScore"] = [],
+        prompt_files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        info_blob_chunks: Sequence[_InfoBlobChunkLike] | None = None,
         session: Optional[SessionInDB] = None,
         version: int = 1,
         use_image_generation: bool = False,
-        web_search_results: list["WebSearchResult"] = [],
-        mcp_tools: list[FunctionDefinition] = [],
-    ):
+        web_search_results: Sequence[_InformationChunkLike] | None = None,
+        mcp_tools: list[FunctionDefinition] | None = None,
+        extra_tool_dicts: list[dict[str, Any]] | None = None,
+        vision: bool = True,
+    ) -> Context:
+        if files is None:
+            files = []
+        if prompt_files is None:
+            prompt_files = []
+        if transcription_inputs is None:
+            transcription_inputs = []
+        if info_blob_chunks is None:
+            info_blob_chunks = []
+        if web_search_results is None:
+            web_search_results = []
+        if mcp_tools is None:
+            mcp_tools = []
         tokens_used = 0
 
-        # Create the input, count the tokens.
+        # Create the input, count the tokens. The current question is sent as
+        # a user message carrying both the text and any attached images, so it
+        # is counted in exactly that shape.
         _input_string = self._build_input(
             input_str=input_str,
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
+            model_name=model_name,
         )
-        tokens_used_input = count_tokens(_input_string, model_name)
+        # Attachment images (prompt_files) travel with every request, the same
+        # way attachment text does — they ride on the current user message.
+        current_images: list[File] = []
+        if vision:
+            current_images = self._get_files_by_type(files, FileType.IMAGE)
+            seen_image_ids = {file.id for file in current_images}
+            current_images += [
+                file
+                for file in self._get_files_by_type(prompt_files, FileType.IMAGE)
+                if file.id not in seen_image_ids
+            ]
+        tokens_used_input = count_message_tokens(
+            [{"role": "user", "content": _input_string}], model_name
+        ) + _image_files_tokens(current_images, model_name)
         tokens_used += tokens_used_input
+
+        # Tool definitions occupy context space too — count them up front so
+        # the history and knowledge budgets shrink accordingly. extra_tool_dicts
+        # carries definitions merged later by the adapter (MCP proxy tools).
+        functions: list[FunctionDefinition] = []
+        if use_image_generation:
+            functions.extend(self._functions())
+        functions.extend(mcp_tools)
+
+        tool_dicts: list[dict[str, Any]] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": func_def.name,
+                    "description": func_def.description,
+                    "parameters": func_def.schema,
+                },
+            }
+            for func_def in functions
+        ]
+        if extra_tool_dicts:
+            tool_dicts.extend(extra_tool_dicts)
+        tokens_used += count_tool_tokens(tool_dicts, model_name)
 
         # Create the necessary parts of the prompt.
         # Add the tokens used.
@@ -430,35 +640,38 @@ class ContextBuilder:
         else:
             max_tokens_messages = max_tokens - tokens_used
         messages, tokens_used_messages = self._build_messages(
-            session=session, max_tokens=max_tokens_messages, min_len=3, model_name=model_name
+            session=session,
+            max_tokens=max_tokens_messages,
+            min_len=3,
+            model_name=model_name,
+            vision=vision,
         )
         tokens_used += tokens_used_messages
 
-        # Check for worst case.
-        # Up until this point, all text will be
-        # assumed by the user to be there,
-        # and erroring is preferable to not
-        # including something.
+        # Local counting is an estimate. Do not reject a request solely because
+        # it crosses the configured limit: provider tokenization is authoritative
+        # and may accept it. Knowledge below receives no remaining budget, while
+        # the required prompt/input is still sent so the provider can decide.
         if tokens_used > max_tokens:
-            raise QueryException(tokens_used=tokens_used, token_limit=max_tokens)
+            logger.warning(
+                "Estimated context exceeds configured model limit: "
+                "%d estimated tokens vs %d configured tokens; sending request "
+                "to provider for authoritative validation",
+                tokens_used,
+                max_tokens,
+            )
 
         # Add the knowledge in all the space that is left.
-        tokens_left = max_tokens - tokens_used
+        tokens_left = max(max_tokens - tokens_used, 0)
         _prompt.add_knowledge(chunks=info_blob_chunks, max_tokens=tokens_left)
         prompt_text = str(_prompt)
         tokens_used += _prompt.get_tokens_of_knowledge()
-
-        # Combine image generation tools with MCP tools
-        functions = []
-        if use_image_generation:
-            functions.extend(self._functions())
-        functions.extend(mcp_tools)
 
         return Context(
             input=_input_string,
             prompt=prompt_text,
             messages=messages,
-            images=self._get_files_by_type(files, FileType.IMAGE),
+            images=current_images,
             token_count=tokens_used,
             function_definitions=functions,
         )

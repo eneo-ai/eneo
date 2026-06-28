@@ -12,7 +12,7 @@ export const load = async (event) => {
   const wrapperName =
     first && typeof first.wrapper_name === "string" && first.wrapper_name.trim().length > 0
       ? first.wrapper_name
-      : first?.name ?? "";
+      : (first?.name ?? "");
 
   return {
     wrapperId,

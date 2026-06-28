@@ -71,16 +71,16 @@
   function handlePopupFlow(code: string | null, state: string | null, rawParams: string): void {
     const opener = window.opener;
     if (opener) {
-      opener.postMessage(
-        { type: MESSAGE_TYPE, code, state, params: rawParams },
-        "*"
-      );
+      opener.postMessage({ type: MESSAGE_TYPE, code, state, params: rawParams }, "*");
       status = "popup_complete";
       window.close();
     }
   }
 
-  async function handleServiceAccountFlow(code: string | null, state: string | null): Promise<void> {
+  async function handleServiceAccountFlow(
+    code: string | null,
+    state: string | null
+  ): Promise<void> {
     // Validate required params
     if (!code || !state) {
       status = "error";
@@ -120,7 +120,7 @@
     // Store data for form submission
     serviceAccountFormData = {
       auth_code: code,
-      state: state,
+      state: state
     };
 
     // Trigger form submission programmatically
@@ -188,7 +188,7 @@
     <!-- Processing state -->
     {#if flowType === "service_account"}
       <IconLoadingSpinner class="h-12 w-12 animate-spin text-blue-500" />
-      <h1 class="text-xl font-semibold text-primary">
+      <h1 class="text-primary text-xl font-semibold">
         {m.completing_authentication()}
       </h1>
       <p class="text-secondary">
@@ -198,27 +198,15 @@
       <h1>{m.integration_callback_finishing_sign_in()}</h1>
       <p>{m.integration_callback_close_window()}</p>
     {/if}
-
   {:else if status === "popup_complete"}
     <!-- Popup complete state (fallback if window doesn't close) -->
     <h1>{m.integration_callback_finishing_sign_in()}</h1>
     <p>{m.integration_callback_close_window()}</p>
-
   {:else if status === "service_success"}
     <!-- Service account success -->
     <div class="rounded-full bg-green-100 p-4">
-      <svg
-        class="h-12 w-12 text-green-600"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M5 13l4 4L19 7"
-        />
+      <svg class="h-12 w-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
       </svg>
     </div>
     <h1 class="text-xl font-semibold text-green-700">
@@ -229,19 +217,13 @@
         {m.connected_as()}: <span class="font-medium">{serviceAccountEmail}</span>
       </p>
     {/if}
-    <p class="text-sm text-secondary">
+    <p class="text-secondary text-sm">
       {m.redirecting_back()}
     </p>
-
   {:else if status === "error"}
     <!-- Error state -->
     <div class="rounded-full bg-red-100 p-4">
-      <svg
-        class="h-12 w-12 text-red-600"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
+      <svg class="h-12 w-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -254,14 +236,16 @@
       {m.authentication_failed()}
     </h1>
     {#if errorMessage}
-      <p class="max-w-md text-center text-secondary">{errorMessage}</p>
+      <p class="text-secondary max-w-md text-center">{errorMessage}</p>
     {/if}
+    <!-- eslint-disable svelte/no-navigation-without-resolve -- static literal route, public callback layout -->
     <a
       href="/admin/integrations"
       class="mt-4 rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700"
     >
       {m.back_to_integrations()}
     </a>
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   {/if}
 
   <!-- Hidden form for service account OAuth completion -->
@@ -275,13 +259,14 @@
         return async ({ result }) => {
           if (result.type === "success" && result.data?.success) {
             status = "service_success";
-            serviceAccountEmail = result.data.service_account_email || null;
+            serviceAccountEmail = (result.data.service_account_email as string) || null;
             setTimeout(() => {
+              // eslint-disable-next-line svelte/no-navigation-without-resolve -- static literal route with query string
               goto("/admin/integrations?sharepoint_configured=true");
             }, 2000);
           } else if (result.type === "failure") {
             status = "error";
-            const data = (result as any).data || {};
+            const data = (result as { data?: Record<string, string> }).data || {};
             errorMessage = data.error
               ? data.error
               : getActionErrorMessage(data.error_key, data.error_detail);

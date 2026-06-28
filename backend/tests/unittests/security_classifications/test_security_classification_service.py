@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.roles.permissions import Permission
 from eneo.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
@@ -70,7 +74,9 @@ def service(user, security_repo, tenant_service):
 
 
 @pytest.fixture
-def service_without_permissions(user_without_permissions, security_repo, tenant_service):
+def service_without_permissions(
+    user_without_permissions, security_repo, tenant_service
+):
     return SecurityClassificationService(
         user=user_without_permissions,
         repo=security_repo,
@@ -85,13 +91,22 @@ class TestSecurityClassificationService:
 
         # Create test classifications
         sc1 = SecurityClassification(
-            id=uuid.uuid4(), tenant_id=tenant_id, name="Classification 1", security_level=0
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Classification 1",
+            security_level=0,
         )
         sc2 = SecurityClassification(
-            id=uuid.uuid4(), tenant_id=tenant_id, name="Classification 2", security_level=1
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Classification 2",
+            security_level=1,
         )
         sc3 = SecurityClassification(
-            id=uuid.uuid4(), tenant_id=tenant_id, name="Classification 3", security_level=2
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            name="Classification 3",
+            security_level=2,
         )
 
         # Configure repo mock to return all classifications
@@ -108,7 +123,9 @@ class TestSecurityClassificationService:
         model_ids = [sc3.id, sc1.id, sc2.id]
 
         # When updating security levels
-        result = await service.update_security_levels(security_classifications=model_ids)
+        result = await service.update_security_levels(
+            security_classifications=model_ids
+        )
 
         # Then the security levels should be updated based on new order
         assert len(result) == 3
@@ -137,7 +154,9 @@ class TestSecurityClassificationService:
 
         # When trying to update with a non-existent ID
         with pytest.raises(NotFoundException) as excinfo:
-            await service.update_security_levels(security_classifications=[uuid.uuid4()])
+            await service.update_security_levels(
+                security_classifications=[uuid.uuid4()]
+            )
 
         # Then a NotFoundException should be raised
         assert "not found" in str(excinfo.value)
@@ -145,7 +164,9 @@ class TestSecurityClassificationService:
         # And no updates should be performed
         service.repo.update.assert_not_called()
 
-    async def test_toggle_security_enabled_to_true(self, service, user, tenant_service, tenant_id):
+    async def test_toggle_security_enabled_to_true(
+        self, service, user, tenant_service, tenant_id
+    ):
         # Given the tenant has security_enabled=False (set in fixture)
         # And the tenant_service toggle_security method returns a tenant with security_enabled=True
         updated_tenant = TenantInDB(
@@ -164,7 +185,9 @@ class TestSecurityClassificationService:
         # And the result should be the updated tenant with security_enabled=True
         assert result.security_enabled is True
 
-    async def test_toggle_security_enabled_to_false(self, service, user, tenant_service, tenant_id):
+    async def test_toggle_security_enabled_to_false(
+        self, service, user, tenant_service, tenant_id
+    ):
         # Given the tenant has security_enabled=True
         user.tenant.security_enabled = True
 
@@ -202,3 +225,45 @@ class TestSecurityClassificationService:
 
         # And no tenant update should have been attempted
         tenant_service.toggle_security.assert_not_called()
+
+    async def test_delete_blocks_when_in_use(self, service, security_repo):
+        # The classification has 3 completion models + 1 space referencing it.
+        security_repo.count_usages.return_value = {
+            "completion_models": 3,
+            "embedding_models": 0,
+            "transcription_models": 0,
+            "spaces": 1,
+            "mcp_servers": 0,
+        }
+
+        with pytest.raises(BadRequestException) as excinfo:
+            await service.delete_security_classification(uuid.uuid4())
+
+        # The error should list the dependent resource counts so the admin
+        # can act on it without an extra round-trip.
+        assert "3 completion_models" in str(excinfo.value)
+        assert "1 space" in str(excinfo.value)
+        # And the actual delete must not have run.
+        security_repo.delete.assert_not_called()
+
+    async def test_delete_passes_through_when_unused(self, service, security_repo):
+        security_repo.count_usages.return_value = {
+            "completion_models": 0,
+            "embedding_models": 0,
+            "transcription_models": 0,
+            "spaces": 0,
+            "mcp_servers": 0,
+        }
+        security_repo.all.return_value = []
+
+        await service.delete_security_classification(uuid.uuid4())
+        security_repo.delete.assert_awaited_once()
+
+    async def test_delete_with_force_skips_usage_check(self, service, security_repo):
+        # Even with usages > 0, force=True bypasses the guard. We don't
+        # call count_usages at all on this path — verify that.
+        security_repo.all.return_value = []
+
+        await service.delete_security_classification(uuid.uuid4(), force=True)
+        security_repo.count_usages.assert_not_called()
+        security_repo.delete.assert_awaited_once()

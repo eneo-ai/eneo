@@ -19,7 +19,6 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
-from eneo.ai_models.model_enums import ModelOrg
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.main.exceptions import ProviderInactiveException, ProviderNotFoundException
@@ -89,7 +88,7 @@ async def test_model_without_provider_id_raises_value_error(
         vision=False,
         family="openai",
         hosting="usa",
-        org=ModelOrg.OPENAI,
+        org="OpenAI",
         stability="stable",
         open_source=False,
         description="OpenAI GPT-4 model",
@@ -159,7 +158,7 @@ async def test_model_with_inactive_provider_raises_error(
             vision=False,
             family="openai",
             hosting="usa",
-            org=ModelOrg.OPENAI,
+            org="OpenAI",
             stability="stable",
             open_source=False,
             description="OpenAI GPT-4 model",
@@ -217,7 +216,7 @@ async def test_model_with_nonexistent_provider_raises_error(
             vision=False,
             family="openai",
             hosting="usa",
-            org=ModelOrg.OPENAI,
+            org="OpenAI",
             stability="stable",
             open_source=False,
             description="OpenAI GPT-4 model",
@@ -245,6 +244,69 @@ async def test_model_with_nonexistent_provider_raises_error(
 
         assert "not found" in str(exc_info.value).lower()
         assert str(non_existent_provider_id) in str(exc_info.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_model_cannot_resolve_provider_from_another_tenant(
+    db_container,
+    test_tenant,
+    test_settings,
+    admin_user,
+):
+    """Provider IDs are scoped by tenant even if a model references a valid UUID."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    async with db_container() as container:
+        session = container.session()
+        provider = ModelProviders(
+            tenant_id=test_tenant.id,
+            name="Tenant-isolated Provider",
+            provider_type="openai",
+            credentials={"api_key": "sk-test-key-123"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        model = CompletionModel(
+            user=admin_user,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="cross-tenant",
+            name="gpt-4o",
+            max_input_tokens=8192,
+            max_output_tokens=4096,
+            vision=False,
+            family="openai",
+            hosting="usa",
+            org="OpenAI",
+            stability="stable",
+            open_source=False,
+            description=None,
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            base_url=None,
+            litellm_model_name=None,
+            provider_id=provider.id,
+        )
+        service = CompletionService(
+            context_builder=Mock(),
+            tenant=SimpleNamespace(id=uuid4()),
+            config=test_settings,
+            session=session,
+        )
+
+        with pytest.raises(ProviderNotFoundException):
+            await service._get_adapter(model)
 
 
 @pytest.mark.integration
@@ -286,7 +348,7 @@ async def test_adapter_creation_succeeds_with_valid_provider(
             vision=False,
             family="openai",
             hosting="usa",
-            org=ModelOrg.OPENAI,
+            org="OpenAI",
             stability="stable",
             open_source=False,
             description="OpenAI GPT-4 model",
@@ -326,9 +388,9 @@ async def test_different_provider_types_create_correct_adapters(
     from unittest.mock import Mock
 
     provider_configs = [
-        ("openai", "openai", ModelOrg.OPENAI),
-        ("anthropic", "claude", ModelOrg.ANTHROPIC),
-        ("azure", "azure", ModelOrg.MICROSOFT),
+        ("openai", "openai", "OpenAI"),
+        ("anthropic", "claude", "Anthropic"),
+        ("azure", "azure", "Microsoft"),
     ]
 
     async with db_container() as container:
@@ -356,7 +418,7 @@ async def test_different_provider_types_create_correct_adapters(
                 nickname=f"{provider_type}-model",
                 name=f"{provider_type.title()} Model",
                 max_input_tokens=8192,
-            max_output_tokens=4096,
+                max_output_tokens=4096,
                 vision=False,
                 family=family,
                 hosting="usa",

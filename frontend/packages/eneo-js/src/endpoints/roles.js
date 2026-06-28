@@ -19,6 +19,16 @@ export function initRoles(client) {
     },
 
     /**
+     * Lists available role templates (for creating roles from templates).
+     * @returns {Promise<Array<{name: string, permissions: string[]}>>}
+     * @throws {EneoError}
+     * */
+    listTemplates: async () => {
+      const res = await client.fetch("/api/v1/roles/templates/", { method: "get" });
+      return /** @type {Array<{name: string, permissions: string[]}>} */ (res);
+    },
+
+    /**
      * Lists all roles on this tenant.
      * @returns {Promise<{roles: Role[], predefined_roles: Role[]}>}
      * @throws {EneoError}
@@ -96,6 +106,36 @@ export function initRoles(client) {
         method: "post",
         params: { path: { role_id } },
         requestBody: { "application/json": update }
+      });
+      return res;
+    },
+
+    /**
+     * Reset a default role to its original permissions.
+     * @param {{id: string} | Role} role Role to reset
+     * @returns {Promise<Role>} Returns the reset role.
+     * @throws {EneoError}
+     * */
+    resetToDefault: async (role) => {
+      const role_id = typeof role === "string" ? role : role.id;
+      const res = await client.fetch("/api/v1/roles/{role_id}/reset/", {
+        method: "post",
+        params: { path: { role_id } }
+      });
+      return res;
+    },
+
+    /**
+     * Set a role as the default role for new users.
+     * @param {{id: string} | Role} role Role to set as default
+     * @returns {Promise<Role>} Returns the role.
+     * @throws {EneoError}
+     * */
+    setAsDefault: async (role) => {
+      const role_id = typeof role === "string" ? role : role.id;
+      const res = await client.fetch("/api/v1/roles/{role_id}/set-default/", {
+        method: "post",
+        params: { path: { role_id } }
       });
       return res;
     }

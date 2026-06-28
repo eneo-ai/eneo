@@ -106,7 +106,7 @@ export function initGroups(client) {
     /**
      * Delete the specified group.
      * @param {{id: string} | Group} group - Either provide the group to delete or a specified id.
-     * @returns {Promise<{id: string} & {deletion_info: {success: boolean}}>} The deleted group
+     * @returns {Promise<any>} The deleted group
      * */
     delete: async (group) => {
       const { id } = group;

@@ -6,6 +6,7 @@
 
 <script lang="ts">
   import MemberChip from "./MemberChip.svelte";
+  import { m } from "$lib/paraglide/messages";
 
   export let members: { id: string; email: string; role: string }[] = [];
 </script>
@@ -17,7 +18,7 @@
     {/each}
     {#if members.length > 3}
       <div class="ml-2 flex items-center justify-center">
-        +{members.length - 3} more
+        {m.spaces_more_members({ count: members.length - 3 })}
       </div>
     {/if}
   </div>

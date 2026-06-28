@@ -43,7 +43,9 @@ class TestAsyncExportAuthentication:
 class TestAsyncExportJobCreation:
     """Tests for async export job creation."""
 
-    async def test_request_export_returns_job_id(self, client, auth_headers, sample_audit_logs, redis_client):
+    async def test_request_export_returns_job_id(
+        self, client, auth_headers, sample_audit_logs, redis_client
+    ):
         """Verify async export request returns job_id immediately."""
         response = await client.post(
             "/api/v1/audit/logs/export/async",
@@ -63,14 +65,18 @@ class TestAsyncExportJobCreation:
         keys = []
         cursor = 0
         while True:
-            cursor, batch = await redis_client.scan(cursor, match="audit_export:*", count=100)
+            cursor, batch = await redis_client.scan(
+                cursor, match="audit_export:*", count=100
+            )
             keys.extend(batch)
             if cursor == 0:
                 break
         for key in keys:
             await redis_client.delete(key)
 
-    async def test_request_export_with_filters(self, client, auth_headers, sample_audit_logs, redis_client):
+    async def test_request_export_with_filters(
+        self, client, auth_headers, sample_audit_logs, redis_client
+    ):
         """Verify async export accepts filter parameters."""
         from_date = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
@@ -92,7 +98,9 @@ class TestAsyncExportJobCreation:
         keys = []
         cursor = 0
         while True:
-            cursor, batch = await redis_client.scan(cursor, match="audit_export:*", count=100)
+            cursor, batch = await redis_client.scan(
+                cursor, match="audit_export:*", count=100
+            )
             keys.extend(batch)
             if cursor == 0:
                 break
@@ -124,7 +132,9 @@ class TestAsyncExportJobStatus:
 
         assert response.status_code == 404
 
-    async def test_status_returns_job_details(self, client, auth_headers, redis_client, db_container):
+    async def test_status_returns_job_details(
+        self, client, auth_headers, redis_client, db_container
+    ):
         """Verify status endpoint returns job details."""
         # Create a job directly in Redis
         async with db_container() as container:
@@ -172,7 +182,9 @@ class TestAsyncExportJobStatus:
         finally:
             await redis_client.delete(key)
 
-    async def test_status_returns_download_url_when_complete(self, client, auth_headers, redis_client, db_container):
+    async def test_status_returns_download_url_when_complete(
+        self, client, auth_headers, redis_client, db_container
+    ):
         """Verify download_url is included when job is complete."""
         async with db_container() as container:
             user = container.user()
@@ -232,7 +244,9 @@ class TestAsyncExportJobCancellation:
 
         assert response.status_code == 404
 
-    async def test_cancel_processing_job(self, client, auth_headers, redis_client, db_container):
+    async def test_cancel_processing_job(
+        self, client, auth_headers, redis_client, db_container
+    ):
         """Verify cancellation of processing job."""
         async with db_container() as container:
             user = container.user()
@@ -278,7 +292,9 @@ class TestAsyncExportJobCancellation:
         finally:
             await redis_client.delete(key)
 
-    async def test_cancel_completed_job_fails(self, client, auth_headers, redis_client, db_container):
+    async def test_cancel_completed_job_fails(
+        self, client, auth_headers, redis_client, db_container
+    ):
         """Verify completed jobs cannot be cancelled."""
         async with db_container() as container:
             user = container.user()
@@ -334,7 +350,9 @@ class TestAsyncExportDownload:
 
         assert response.status_code == 404
 
-    async def test_download_fails_for_incomplete_job(self, client, auth_headers, redis_client, db_container):
+    async def test_download_fails_for_incomplete_job(
+        self, client, auth_headers, redis_client, db_container
+    ):
         """Verify download fails for non-completed jobs."""
         async with db_container() as container:
             user = container.user()
@@ -375,7 +393,9 @@ class TestAsyncExportDownload:
         finally:
             await redis_client.delete(key)
 
-    async def test_download_fails_for_missing_file(self, client, auth_headers, redis_client, db_container):
+    async def test_download_fails_for_missing_file(
+        self, client, auth_headers, redis_client, db_container
+    ):
         """Verify download fails when file doesn't exist."""
         async with db_container() as container:
             user = container.user()

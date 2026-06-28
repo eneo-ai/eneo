@@ -49,7 +49,13 @@ async def test_space(async_session: AsyncSession, test_tenant, admin_user) -> Sp
 
 
 @pytest.fixture
-async def test_assistant(async_session: AsyncSession, test_space, test_tenant, admin_user, completion_model_factory) -> Assistants:
+async def test_assistant(
+    async_session: AsyncSession,
+    test_space,
+    test_tenant,
+    admin_user,
+    completion_model_factory,
+) -> Assistants:
     """Create a test assistant with no retention policy."""
     completion_model = await completion_model_factory(async_session, "gpt-4")
 
@@ -71,7 +77,13 @@ async def test_assistant(async_session: AsyncSession, test_space, test_tenant, a
 
 
 @pytest.fixture
-async def test_app(async_session: AsyncSession, test_space, test_tenant, admin_user, completion_model_factory) -> Apps:
+async def test_app(
+    async_session: AsyncSession,
+    test_space,
+    test_tenant,
+    admin_user,
+    completion_model_factory,
+) -> Apps:
     """Create a test app with no retention policy."""
     completion_model = await completion_model_factory(async_session, "gpt-4")
 
@@ -92,11 +104,7 @@ async def test_app(async_session: AsyncSession, test_space, test_tenant, admin_u
 
 
 async def create_old_question(
-    async_session: AsyncSession,
-    assistant_id,
-    tenant_id,
-    user_id,
-    days_old: int
+    async_session: AsyncSession, assistant_id, tenant_id, user_id, days_old: int
 ) -> Questions:
     """Create a question with a specific age."""
     created_at = datetime.now(timezone.utc) - timedelta(days=days_old)
@@ -134,7 +142,7 @@ async def create_old_app_run(
     tenant_id,
     user_id,
     completion_model_id,
-    days_old: int
+    days_old: int,
 ) -> AppRuns:
     """Create an app run with a specific age."""
     created_at = datetime.now(timezone.utc) - timedelta(days=days_old)
@@ -174,8 +182,12 @@ async def test_assistant_level_retention_deletes_old_questions(
     user_id = admin_user.id
 
     # Create questions: one old (60 days), one recent (10 days)
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=60)
-    recent_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=10)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=60
+    )
+    recent_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=10
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -212,8 +224,12 @@ async def test_space_level_retention_fallback(
     user_id = admin_user.id
 
     # Create questions: one old (120 days), one recent (60 days)
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=120)
-    recent_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=60)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=120
+    )
+    recent_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=60
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -252,7 +268,9 @@ async def test_assistant_overrides_space_retention(
     user_id = admin_user.id
 
     # Create question that's 60 days old (older than assistant, newer than space)
-    question_60d = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=60)
+    question_60d = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=60
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -262,7 +280,9 @@ async def test_assistant_overrides_space_retention(
     assert deleted_count == 1
 
     exists = await async_session.get(Questions, question_60d.id)
-    assert exists is None, "Assistant retention (30d) should override space retention (90d)"
+    assert exists is None, (
+        "Assistant retention (30d) should override space retention (90d)"
+    )
 
 
 @pytest.mark.asyncio
@@ -291,8 +311,12 @@ async def test_tenant_level_retention_fallback(
     user_id = admin_user.id
 
     # Create questions: one old (200 days), one recent (100 days)
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=200)
-    recent_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=100)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=200
+    )
+    recent_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=100
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -325,7 +349,9 @@ async def test_no_retention_keeps_all_questions(
     user_id = admin_user.id
 
     # Create very old question (1000 days)
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=1000)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=1000
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -359,8 +385,12 @@ async def test_app_level_retention_deletes_old_runs(
     completion_model_id = test_app.completion_model_id
 
     # Create app runs: one old (60 days), one recent (10 days)
-    old_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=60)
-    recent_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=10)
+    old_run = await create_old_app_run(
+        async_session, app_id, tenant_id, user_id, completion_model_id, days_old=60
+    )
+    recent_run = await create_old_app_run(
+        async_session, app_id, tenant_id, user_id, completion_model_id, days_old=10
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_app_runs()
@@ -398,8 +428,12 @@ async def test_space_level_app_retention_fallback(
     completion_model_id = test_app.completion_model_id
 
     # Create app runs: one old (120 days), one recent (60 days)
-    old_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=120)
-    recent_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=60)
+    old_run = await create_old_app_run(
+        async_session, app_id, tenant_id, user_id, completion_model_id, days_old=120
+    )
+    recent_run = await create_old_app_run(
+        async_session, app_id, tenant_id, user_id, completion_model_id, days_old=60
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_app_runs()
@@ -435,7 +469,9 @@ async def test_multi_tenant_isolation(
     user_id = admin_user.id
 
     # Create old question for this tenant
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=60)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=60
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -463,14 +499,19 @@ async def test_get_affected_count_for_assistant(
     user_id = admin_user.id
 
     # Create questions at different ages
-    await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=100)
-    await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=50)
-    await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=10)
+    await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=100
+    )
+    await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=50
+    )
+    await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=10
+    )
 
     # Check affected count for 30-day retention
     count = await retention_service.get_affected_questions_count_for_assistant(
-        assistant_id=test_assistant.id,
-        retention_days=30
+        assistant_id=test_assistant.id, retention_days=30
     )
 
     # Should find 2 questions older than 30 days
@@ -493,22 +534,31 @@ async def test_get_affected_count_for_space(
     user_id = admin_user.id
 
     # Create questions for assistant without retention
-    await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=100)
-    await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=50)
-    await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=10)
+    await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=100
+    )
+    await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=50
+    )
+    await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=10
+    )
 
     # Check affected count for space 90-day retention
     count = await retention_service.get_affected_questions_count_for_space(
-        space_id=test_space.id,
-        retention_days=90
+        space_id=test_space.id, retention_days=90
     )
 
     # Should find 1 question older than 90 days
-    assert count == 1, "Should count questions older than 90 days without assistant retention"
+    assert count == 1, (
+        "Should count questions older than 90 days without assistant retention"
+    )
 
 
 @pytest.mark.asyncio
-async def test_retention_validation_constraints(async_session: AsyncSession, test_assistant: Assistants):
+async def test_retention_validation_constraints(
+    async_session: AsyncSession, test_assistant: Assistants
+):
     """Test that database constraints enforce valid retention ranges."""
     # Test invalid retention (too low)
     test_assistant.data_retention_days = 0
@@ -517,8 +567,9 @@ async def test_retention_validation_constraints(async_session: AsyncSession, tes
     with pytest.raises(Exception) as exc_info:
         await async_session.flush()
 
-    assert "ck_assistants_data_retention_days_range" in str(exc_info.value), \
+    assert "ck_assistants_data_retention_days_range" in str(exc_info.value), (
         "Should enforce minimum 1 day constraint"
+    )
 
     # After flush failure, object is expelled from session
     # Reset the value and test too high
@@ -528,8 +579,9 @@ async def test_retention_validation_constraints(async_session: AsyncSession, tes
     with pytest.raises(Exception) as exc_info:
         await async_session.flush()
 
-    assert "ck_assistants_data_retention_days_range" in str(exc_info.value), \
+    assert "ck_assistants_data_retention_days_range" in str(exc_info.value), (
         "Should enforce maximum 2555 days constraint"
+    )
 
 
 @pytest.mark.asyncio
@@ -551,7 +603,9 @@ async def test_hard_delete_not_soft_delete(
     user_id = admin_user.id
 
     # Create old question
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=60)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=60
+    )
     question_id = old_question.id
 
     # Run cleanup
@@ -568,7 +622,9 @@ async def test_hard_delete_not_soft_delete(
     assert found is None, "Question should be permanently deleted (hard delete)"
 
     # Verify no deleted_at column exists (Questions table doesn't support soft delete)
-    assert not hasattr(Questions, "deleted_at"), "Questions table should not have soft delete"
+    assert not hasattr(Questions, "deleted_at"), (
+        "Questions table should not have soft delete"
+    )
 
 
 @pytest.mark.asyncio
@@ -598,8 +654,12 @@ async def test_tenant_level_retention_fallback_for_app_runs(
     completion_model_id = test_app.completion_model_id
 
     # Create app runs: one old (200 days), one recent (100 days)
-    old_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=200)
-    recent_run = await create_old_app_run(async_session, app_id, tenant_id, user_id, completion_model_id, days_old=100)
+    old_run = await create_old_app_run(
+        async_session, app_id, tenant_id, user_id, completion_model_id, days_old=200
+    )
+    recent_run = await create_old_app_run(
+        async_session, app_id, tenant_id, user_id, completion_model_id, days_old=100
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_app_runs()
@@ -639,8 +699,12 @@ async def test_boundary_condition_exact_retention_days(
     user_id = admin_user.id
 
     # Create questions: one exactly at boundary (30 days), one just past (31 days)
-    boundary_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=30)
-    past_boundary_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=31)
+    boundary_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=30
+    )
+    past_boundary_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=31
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -652,7 +716,9 @@ async def test_boundary_condition_exact_retention_days(
     boundary_exists = await async_session.get(Questions, boundary_question.id)
     past_exists = await async_session.get(Questions, past_boundary_question.id)
 
-    assert boundary_exists is not None, "Question exactly at 30 days should be kept (< not <=)"
+    assert boundary_exists is not None, (
+        "Question exactly at 30 days should be kept (< not <=)"
+    )
     assert past_exists is None, "Question at 31 days should be deleted"
 
 
@@ -693,7 +759,9 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
     user_id = admin_user.id
 
     # Create very old question (1000 days)
-    old_question = await create_old_question(async_session, assistant_id, tenant_id, user_id, days_old=1000)
+    old_question = await create_old_question(
+        async_session, assistant_id, tenant_id, user_id, days_old=1000
+    )
 
     # Run cleanup
     deleted_count = await retention_service.delete_old_questions()
@@ -703,4 +771,6 @@ async def test_tenant_enabled_but_days_null_keeps_forever(
     assert deleted_count == 0
 
     exists = await async_session.get(Questions, old_question.id)
-    assert exists is not None, "Question should be kept when tenant has enabled=True but days=NULL"
+    assert exists is not None, (
+        "Question should be kept when tenant has enabled=True but days=NULL"
+    )

@@ -1,4 +1,8 @@
-from typing import TYPE_CHECKING, Any, Dict, List
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Sequence
+
+from typing_extensions import override
 
 from eneo.base.base_entity import EntityMapper
 from eneo.database.tables.integration_table import (
@@ -15,7 +19,10 @@ if TYPE_CHECKING:
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 
 
-class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationKnowledgeDBModel]):
+class IntegrationKnowledgeMapper(
+    EntityMapper[IntegrationKnowledge, IntegrationKnowledgeDBModel]
+):
+    @override
     def to_db_dict(self, entity: IntegrationKnowledge) -> Dict[str, Any]:
         return {
             "name": entity.name,
@@ -40,16 +47,28 @@ class IntegrationKnowledgeMapper(EntityMapper[IntegrationKnowledge, IntegrationK
             "wrapper_name": entity.wrapper_name,
         }
 
+    @override
     def to_entity(
-        self, db_model: IntegrationKnowledgeDBModel, embedding_model: "EmbeddingModel"
+        self,
+        db_model: IntegrationKnowledgeDBModel,
+        *,
+        embedding_model: EmbeddingModel | None = None,
     ) -> IntegrationKnowledge:
+        if embedding_model is None:
+            raise ValueError("embedding_model is required")
         return IntegrationKnowledgeFactory.create_entity(
             record=db_model, embedding_model=embedding_model
         )
 
+    @override
     def to_entities(
-        self, db_models: List[IntegrationKnowledgeDBModel], embedding_models: List["EmbeddingModel"]
+        self,
+        db_models: Sequence[IntegrationKnowledgeDBModel],
+        *,
+        embedding_models: Sequence[EmbeddingModel] | None = None,
     ) -> List[IntegrationKnowledge]:
+        if embedding_models is None:
+            raise ValueError("embedding_models is required")
         return IntegrationKnowledgeFactory.create_entities(
             records=db_models, embedding_models=embedding_models
         )

@@ -18,6 +18,20 @@ export function initSettings(client) {
     },
 
     /**
+     * Update user settings
+     * @param {import('../types/resources').Settings} settings
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    update: async (settings) => {
+      const res = await client.fetch("/api/v1/settings/", {
+        method: "post",
+        requestBody: { "application/json": settings }
+      });
+      return res;
+    },
+
+    /**
      * Update template feature setting for the tenant
      * @param {boolean} enabled Whether to enable templates
      * @throws {EneoError}
@@ -55,6 +69,34 @@ export function initSettings(client) {
       const res = await client.fetch("/api/v1/settings/provisioning", {
         method: "patch",
         requestBody: { "application/json": { enabled } }
+      });
+      return res;
+    },
+
+    /**
+     * Update API key expiry notifications setting for the tenant
+     * @param {boolean} enabled Whether to enable API key expiry notifications
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').Settings>}
+     */
+    updateApiKeyExpiryNotifications: async (enabled) => {
+      const res = await client.fetch("/api/v1/settings/api-key-expiry-notifications", {
+        method: "patch",
+        requestBody: { "application/json": { enabled } }
+      });
+      return res;
+    },
+
+    /**
+     * Set whether model input/output prices are shown to regular users (org-wide).
+     * @param {boolean} enabled Whether to show model pricing to users
+     * @throws {EneoError}
+     * @returns {Promise<{ show_model_pricing: boolean }>}
+     */
+    updateModelPricingVisibility: async (enabled) => {
+      const res = await client.fetch("/api/v1/admin/settings/model-pricing-visibility", {
+        method: "put",
+        requestBody: { "application/json": { show_model_pricing: enabled } }
       });
       return res;
     }

@@ -1,63 +1,87 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
+  import {
+    filterSupportedModelKwargs,
+    hasModelSpecificSettings
+  } from "$lib/features/ai-models/ModelKwargCapabilities";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import HelpTooltip from "../../../../models/components/HelpTooltip.svelte";
-  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
 
   let { data } = $props();
 
-  const eneo = data.eneo;
+  const eneo = $derived(data.eneo);
 
   // Initialize from template data
-  let name = $state(data.template.name || "");
-  let description = $state(data.template.description || "");
-  let category = $state(data.template.category || "");
-  let iconName = $state<string | null>(data.template.icon_name || null);
-  let promptText = $state(data.template.prompt_text || "");
+  let name = $state(untrack(() => data.template.name || ""));
+  let description = $state(untrack(() => data.template.description || ""));
+  let category = $state(untrack(() => data.template.category || ""));
+  let iconName = $state<string | null>(untrack(() => data.template.icon_name || null));
+  let promptText = $state(untrack(() => data.template.prompt_text || ""));
   let completionModel = $state(
-    data.completionModels?.find(m =>
-      m.id === data.template.completion_model_id ||
-      m.name === data.template.completion_model_name
-    ) || data.completionModels?.[0] || null
+    untrack(
+      () =>
+        data.completionModels?.find(
+          (m) =>
+            m.id === data.template.completion_model_id ||
+            m.name === data.template.completion_model_name
+        ) ||
+        data.completionModels?.[0] ||
+        null
+    )
   );
-  let completionModelKwargs = $state(data.template.completion_model_kwargs || {});
+  let completionModelKwargs = $state(untrack(() => data.template.completion_model_kwargs || {}));
   let isSaving = $state(false);
 
   // Parse wizard configuration from template
   // Handle both object format {attachments: {...}, collections: {...}}
   // and array format [{type: "attachments", ...}, {type: "collections", ...}]
-  const wizard = data.template.wizard_config || data.template.wizard || {};
+  const initialWizardConfigs = untrack(() => {
+    const templateRecord = data.template as Record<string, unknown>;
+    const wizard = (templateRecord.wizard_config || templateRecord.wizard || {}) as
+      | Record<string, unknown>
+      | Array<Record<string, unknown>>;
 
-  let attachmentsConfig, collectionsConfig;
+    let attachments: Record<string, unknown> | undefined;
+    let collections: Record<string, unknown> | undefined;
 
-  if (Array.isArray(wizard)) {
-    // Array format: [{type: "attachments", ...}, {type: "collections", ...}]
-    attachmentsConfig = wizard.find((c: any) => c.type === "attachments");
-    collectionsConfig = wizard.find((c: any) => c.type === "collections");
-  } else {
-    // Object format: {attachments: {...}, collections: {...}}
-    attachmentsConfig = wizard.attachments;
-    collectionsConfig = wizard.collections;
-  }
+    if (Array.isArray(wizard)) {
+      // Array format: [{type: "attachments", ...}, {type: "collections", ...}]
+      attachments = wizard.find((c) => c.type === "attachments");
+      collections = wizard.find((c) => c.type === "collections");
+    } else {
+      // Object format: {attachments: {...}, collections: {...}}
+      attachments = wizard.attachments as Record<string, unknown> | undefined;
+      collections = wizard.collections as Record<string, unknown> | undefined;
+    }
 
-  let wizardAttachmentsEnabled = $state(!!attachmentsConfig);
-  let wizardAttachmentsRequired = $state(attachmentsConfig?.required || false);
-  let wizardAttachmentsTitle = $state(attachmentsConfig?.title || "");
-  let wizardAttachmentsDescription = $state(attachmentsConfig?.description || "");
+    return { attachments, collections };
+  });
 
-  let wizardCollectionsEnabled = $state(!!collectionsConfig);
-  let wizardCollectionsRequired = $state(collectionsConfig?.required || false);
-  let wizardCollectionsTitle = $state(collectionsConfig?.title || "");
-  let wizardCollectionsDescription = $state(collectionsConfig?.description || "");
+  let wizardAttachmentsEnabled = $state(!!initialWizardConfigs.attachments);
+  let wizardAttachmentsRequired = $state(Boolean(initialWizardConfigs.attachments?.required));
+  let wizardAttachmentsTitle = $state(String(initialWizardConfigs.attachments?.title || ""));
+  let wizardAttachmentsDescription = $state(
+    String(initialWizardConfigs.attachments?.description || "")
+  );
+
+  let wizardCollectionsEnabled = $state(!!initialWizardConfigs.collections);
+  let wizardCollectionsRequired = $state(Boolean(initialWizardConfigs.collections?.required));
+  let wizardCollectionsTitle = $state(String(initialWizardConfigs.collections?.title || ""));
+  let wizardCollectionsDescription = $state(
+    String(initialWizardConfigs.collections?.description || "")
+  );
 
   async function handleUpdateTemplate() {
     if (!name || !category) {
@@ -70,34 +94,38 @@
       // Transform wizard configuration to backend format
       // IMPORTANT: Always send wizard object with both properties (backend requires non-null wizard)
       const wizard = {
-        attachments: wizardAttachmentsEnabled ? {
-          required: wizardAttachmentsRequired,
-          title: wizardAttachmentsTitle || undefined,
-          description: wizardAttachmentsDescription || undefined
-        } : null,
-        collections: wizardCollectionsEnabled ? {
-          required: wizardCollectionsRequired,
-          title: wizardCollectionsTitle || undefined,
-          description: wizardCollectionsDescription || undefined
-        } : null
+        attachments: wizardAttachmentsEnabled
+          ? {
+              required: wizardAttachmentsRequired,
+              title: wizardAttachmentsTitle || undefined,
+              description: wizardAttachmentsDescription || undefined
+            }
+          : null,
+        collections: wizardCollectionsEnabled
+          ? {
+              required: wizardCollectionsRequired,
+              title: wizardCollectionsTitle || undefined,
+              description: wizardCollectionsDescription || undefined
+            }
+          : null
       };
 
       const templateData = {
         name,
         description,
         category,
-        prompt: promptText,  // Backend expects string, not object
+        prompt: promptText, // Backend expects string, not object
         completion_model_id: completionModel?.id,
-        completion_model_kwargs: completionModelKwargs,
-        wizard,  // Always send wizard object, never undefined
-        icon_name: iconName || undefined  // Include icon if selected
+        completion_model_kwargs: filterSupportedModelKwargs(completionModelKwargs, completionModel),
+        wizard, // Always send wizard object, never undefined
+        icon_name: iconName || undefined // Include icon if selected
       };
 
       await eneo.templates.admin.updateAssistant(data.template.id, templateData);
-      goto("/admin/templates?success=template_updated");
+      goto(resolve("/admin/templates?success=template_updated"));
     } catch (error) {
       console.error("Failed to update template:", error);
-      toast.error("Failed to update template");
+      toastError(error);
     } finally {
       isSaving = false;
     }
@@ -112,17 +140,12 @@
   <Page.Header>
     <Page.Title
       title={m.edit_assistant_template()}
-      parent={{ href: "/admin/templates", label: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.templates() }}
     />
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-fit"
-        onclick={handleUpdateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-fit" onclick={handleUpdateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.save_changes()}
       </Button>
     </Page.Flex>
@@ -212,15 +235,15 @@
           <SelectBehaviourV2
             bind:kwArgs={completionModelKwargs}
             selectedModel={completionModel}
-            isDisabled={!supportsTemperature(completionModel?.name)}
+            isDisabled={!completionModel}
             {aria}
           />
         </Settings.Row>
 
-        {#if completionModel?.reasoning || completionModel?.litellm_model_name}
+        {#if hasModelSpecificSettings(completionModel)}
           <Settings.Row
-            title="Model settings"
-            description="Configure model-specific parameters for advanced control over the response."
+            title={m.model_settings()}
+            description={m.model_settings_description()}
             hasChanges={false}
           >
             <SelectModelSpecificSettings
@@ -247,10 +270,14 @@
             />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
-                  <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_attachments_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -260,7 +287,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-attachments-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}
@@ -288,10 +318,14 @@
             />
 
             {#if wizardCollectionsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardCollectionsRequired} />
-                  <span class="text-sm text-default">{m.wizard_collections_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_collections_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -301,7 +335,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-collections-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-collections-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-collections-description"
                     bind:value={wizardCollectionsDescription}

@@ -14,6 +14,7 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
+from typing_extensions import TypeIs, override
 
 from eneo.main.exceptions import ErrorCodes
 
@@ -25,7 +26,8 @@ _M = TypeVar("_M", bound=BaseModel)
 class NotProvided:
     """Sentinel value to indicate a parameter was not provided in a request."""
 
-    def __repr__(self):
+    @override
+    def __repr__(self) -> str:
         return "NOT_PROVIDED"
 
     @classmethod
@@ -44,8 +46,21 @@ class NotProvided:
 NOT_PROVIDED = NotProvided()
 
 
+_T_NP = TypeVar("_T_NP")
+
+
+def is_provided(value: _T_NP | NotProvided) -> TypeIs[_T_NP]:
+    """Check if a value was provided (is not the NOT_PROVIDED sentinel).
+
+    Use this instead of ``value is not NOT_PROVIDED`` so that pyright
+    can narrow ``T | NotProvided`` to ``T`` in the true branch.
+    """
+    return not isinstance(value, NotProvided)
+
+
 class MCPToolSetting(BaseModel):
     """MCP server tool enablement setting."""
+
     tool_id: UUID
     is_enabled: bool
 
@@ -69,7 +84,9 @@ def partial_model(model: Type[_M]) -> Type[_M]:
     ) -> Tuple[Any, FieldInfo]:
         new = deepcopy(field)
         new.default = default
-        new.default_factory = None  # Clear default_factory to avoid conflict with default
+        new.default_factory = (
+            None  # Clear default_factory to avoid conflict with default
+        )
         new.annotation = Optional[field.annotation]  # type: ignore
         return new.annotation, new
 
@@ -124,18 +141,21 @@ class CursorPaginatedResponse(PaginatedResponse[T], Generic[T]):
     total_count: int
 
 
-class PaginatedResponseWithPublicItems(PaginatedResponse):
+class PaginatedResponseWithPublicItems(PaginatedResponse[T], Generic[T]):
     public_count: int = Field(description="Number of items returned in the response")
     public_items: list[T] = Field(description="List of items returned in the response")
 
 
-class PaginatedPermissions(PaginatedResponse, ResourcePermissionsMixin):
+class PaginatedPermissions(PaginatedResponse[T], ResourcePermissionsMixin, Generic[T]):
     pass
 
 
 class GeneralError(BaseModel):
     message: str
     eneo_error_code: ErrorCodes
+    code: str | None = None
+    context: dict[str, object] | None = None
+    request_id: str | None = None
     details: dict[str, Any] | None = None
 
 
@@ -187,4 +207,4 @@ class Channel(BaseModel):
 class RedisMessage(BaseModel):
     id: UUID
     status: Status
-    additional_data: dict | None = None
+    additional_data: dict[str, object] | None = None

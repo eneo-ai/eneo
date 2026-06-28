@@ -3,13 +3,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
+from eneo.main.exceptions import NameCollisionException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
-from eneo.main.exceptions import UnauthorizedException
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -90,6 +92,7 @@ class MCPServerService:
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
@@ -109,7 +112,11 @@ class MCPServerService:
         self, config: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         """Encrypt sensitive values in auth config before storing."""
-        if not config or not self.encryption_service or not self.encryption_service.is_active():
+        if (
+            not config
+            or not self.encryption_service
+            or not self.encryption_service.is_active()
+        ):
             return config
 
         encrypted = dict(config)
@@ -137,12 +144,17 @@ class MCPServerService:
     async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
         """Get all MCP servers from global catalog with optional tag filtering."""
         if tags:
-            return await self.repo.query(tags=tags)
-        return await self.repo.all()
+            return await self.repo.query(tags=tags, tenant_id=self.user.tenant_id)
+        return await self.repo.query(tenant_id=self.user.tenant_id)
 
     async def get_mcp_server(self, mcp_server_id: UUID) -> MCPServer:
         """Get a single MCP server by ID."""
-        return await self.repo.one(id=mcp_server_id)
+        server = await self.repo.one(id=mcp_server_id)
+        if server.tenant_id != self.user.tenant_id:
+            from eneo.main.exceptions import UnauthorizedException
+
+            raise UnauthorizedException("MCP server not accessible")
+        return server
 
     @validate_permissions(Permission.ADMIN)
     async def create_mcp_server(
@@ -203,13 +215,19 @@ class MCPServerService:
             mcp_server.http_auth_config_schema = None
 
         # Connection succeeded - save to database
-        mcp_server = await self.repo.add(mcp_server)
+        try:
+            mcp_server = await self.repo.add(mcp_server)
+        except IntegrityError as e:
+            raise NameCollisionException(
+                "An MCP server with this name already exists."
+            ) from e
 
         # Save discovered tools
         for tool_def in tools:
             tool = MCPServerTool(
                 mcp_server_id=mcp_server.id,
                 name=tool_def["name"],
+                title=tool_def.get("title"),
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
                 is_enabled_by_default=True,
@@ -240,12 +258,10 @@ class MCPServerService:
         Returns MCPServerUpdateResult with connection info when validation occurs.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
-
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
         auth_type_changed = (
-            http_auth_type is not None
-            and http_auth_type != mcp_server.http_auth_type
+            http_auth_type is not None and http_auth_type != mcp_server.http_auth_type
         )
         credentials_changed = http_auth_config_schema is not None
 
@@ -297,7 +313,12 @@ class MCPServerService:
                 http_auth_config_schema
             )
 
-        mcp_server = await self.repo.update(mcp_server)
+        try:
+            mcp_server = await self.repo.update(mcp_server)
+        except IntegrityError as e:
+            raise NameCollisionException(
+                "An MCP server with this name already exists."
+            ) from e
         return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)
@@ -395,6 +416,7 @@ class MCPServerService:
 
             for tool_def in tool_defs:
                 name = tool_def["name"]
+                remote_title = tool_def.get("title")
                 remote_desc = tool_def.get("description")
                 remote_schema = tool_def.get("input_schema")
 
@@ -403,6 +425,7 @@ class MCPServerService:
                     tool = MCPServerTool(
                         mcp_server_id=mcp_server.id,
                         name=name,
+                        title=remote_title,
                         description=None,  # No active description yet
                         input_schema=None,  # No active schema yet
                         is_enabled_by_default=True,
@@ -421,8 +444,12 @@ class MCPServerService:
                     )
                 else:
                     existing = existing_by_name[name]
+                    title_changed = existing.title != remote_title
                     desc_changed = existing.description != remote_desc
                     schema_changed = existing.input_schema != remote_schema
+
+                    if title_changed:
+                        existing.title = remote_title
 
                     if desc_changed or schema_changed:
                         # Changed tool — store pending values, keep active values
@@ -443,7 +470,7 @@ class MCPServerService:
                         )
                     else:
                         # Unchanged — clear any stale removed flag
-                        if existing.removed_from_remote:
+                        if title_changed or existing.removed_from_remote:
                             existing.removed_from_remote = False
                             await self.tool_repo.update(existing)
                         result.unchanged_count += 1
@@ -568,7 +595,11 @@ class MCPServerService:
             if tool.mcp_server_id != mcp_server_id:
                 continue
 
-            if tool.requires_approval and tool.description is None and tool.input_schema is None:
+            if (
+                tool.requires_approval
+                and tool.description is None
+                and tool.input_schema is None
+            ):
                 # New tool that was never active — delete it
                 await self.tool_repo.delete(id=tool_id)
                 continue
@@ -638,6 +669,7 @@ class MCPServerService:
 
         # Upsert tenant tool setting
         from datetime import datetime, timezone
+
         from sqlalchemy.dialects.postgresql import insert
 
         now = datetime.now(timezone.utc)
@@ -680,6 +712,7 @@ class MCPServerService:
         await self._get_server_for_tenant(mcp_server_id)
 
         import sqlalchemy as sa
+
         from eneo.database.tables.mcp_server_table import MCPServerToolSettings
 
         # Get all tools for this server

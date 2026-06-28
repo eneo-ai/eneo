@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from eneo.files.file_models import FilePublic
+from eneo.files.file_models import FileInfo
 from eneo.jobs.job_models import JobInDb
 from eneo.users.user import UserSparse
 
@@ -16,7 +16,7 @@ class AppRun:
     app_id: UUID
     user_id: UUID
     tenant_id: UUID
-    input_files: list[FilePublic]
+    input_files: list[FileInfo]
     input_text: str | None
     output: str | None
     user: UserSparse | None
@@ -31,7 +31,7 @@ class AppRun:
         job_id: UUID | None = None,
         output: str | None = None,
         num_tokens_input: int | None = None,
-        num_tokens_output: int | None = None
+        num_tokens_output: int | None = None,
     ):
         if job_id is not None:
             self.job_id = job_id

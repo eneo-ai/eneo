@@ -1,6 +1,11 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from eneo.assistants.api.assistant_models import AssistantSparse
+from eneo.assistants.api.assistant_models import (
+    AssistantSparse,
+    AssistantType,
+    MCPServerPublicDict,
+)
+from eneo.authentication.auth_models import ResourcePermissions
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
@@ -10,10 +15,10 @@ from eneo.integration.presentation.assemblers.integration_knowledge_assembler im
     IntegrationKnowledgeAssembler,
 )
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.main.models import PaginatedPermissions, ResourcePermission
 from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
 )
-from eneo.main.models import PaginatedPermissions, ResourcePermission
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -28,6 +33,7 @@ from eneo.spaces.api.space_models import (
     SpaceMember,
     SpacePublic,
     SpaceRole,
+    SpaceRoleValue,
     SpaceSparse,
     UpdateSpaceDryRunResponse,
 )
@@ -43,6 +49,7 @@ if TYPE_CHECKING:
     from eneo.assistants.api.assistant_assembler import AssistantAssembler
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.presentation import CompletionModelAssembler
+    from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
     from eneo.group_chat.domain.entities.group_chat import GroupChat
 
 
@@ -54,22 +61,25 @@ class SpaceAssembler:
         completion_model_assembler: "CompletionModelAssembler",
         actor_manager: "ActorManager",
     ):
+        super().__init__()
         self.user = user
         self.assistant_assembler = assistant_assembler
         self.completion_model_assembler = completion_model_assembler
         self.actor_manager = actor_manager
 
-    def _set_permissions_on_resources(self, space: Space):
+    def _set_permissions_on_resources(self, space: Space) -> None:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         for assistant in space.assistants:
             assistant.permissions = actor.get_assistant_permissions(assistant=assistant)
 
-        for group_chat in space.group_chats:
-            group_chat.permissions = actor.get_group_chat_permissions(group_chat=group_chat)
+        for group_chat in space.group_chats or []:
+            group_chat.permissions = actor.get_group_chat_permissions(
+                group_chat=group_chat
+            )
 
         for app in space.apps:
-            app.permissions = actor.get_app_permissions()
+            app.permissions = actor.get_app_permissions()  # type: ignore[attr-defined]
 
         for service in space.services:
             service.permissions = actor.get_service_permissions()
@@ -83,9 +93,115 @@ class SpaceAssembler:
         for knowledge in space.integration_knowledge_list:
             knowledge.permissions = actor.get_integrations_permissions()
 
-    def _get_assistant_permissions(self, space: Space):
+    def _get_api_key_resource_permissions(self) -> ResourcePermissions | None:
+        """Return the effective fine-grained resource permissions from the API key, if any."""
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            return None
+        rp = key.resource_permissions
+        if rp is None:
+            return None
+        if isinstance(rp, dict):
+            return ResourcePermissions.model_validate(rp)
+        return rp
+
+    @staticmethod
+    def _cap_permissions(
+        permissions: list[ResourcePermission],
+        level: str,
+    ) -> list[ResourcePermission]:
+        """Filter a permissions list down to what the API key level allows.
+
+        Mapping from resource_permissions level to allowed actions:
+          none  → nothing
+          read  → READ, INSIGHT_VIEW
+          write → READ, CREATE, EDIT, DELETE, PUBLISH, INSIGHT_VIEW
+          admin → everything (no filtering)
+        """
+        if level == "admin":
+            return permissions
+        if level == "none":
+            return []
+
+        if level == "read":
+            allowed = {ResourcePermission.READ, ResourcePermission.INSIGHT_VIEW}
+        else:  # write
+            allowed = {
+                ResourcePermission.READ,
+                ResourcePermission.CREATE,
+                ResourcePermission.EDIT,
+                ResourcePermission.DELETE,
+                ResourcePermission.PUBLISH,
+                ResourcePermission.INSIGHT_VIEW,
+            }
+        return [p for p in permissions if p in allowed]
+
+    def _apply_api_key_resource_caps(
+        self, applications: "Applications", knowledge: "Knowledge"
+    ) -> None:
+        """Intersect reported permissions with API key resource_permissions.
+
+        Mutates the PaginatedPermissions objects in-place so the response
+        only advertises actions the caller can actually perform.
+        """
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return
+
+        cap = self._cap_permissions
+
+        applications.assistants.permissions = cap(
+            applications.assistants.permissions, rp.assistants.value
+        )
+        applications.group_chats.permissions = cap(
+            applications.group_chats.permissions, rp.assistants.value
+        )
+        applications.apps.permissions = cap(
+            applications.apps.permissions, rp.apps.value
+        )
+        applications.services.permissions = cap(
+            applications.services.permissions, rp.apps.value
+        )
+
+        knowledge.groups.permissions = cap(
+            knowledge.groups.permissions, rp.knowledge.value
+        )
+        knowledge.websites.permissions = cap(
+            knowledge.websites.permissions, rp.knowledge.value
+        )
+        knowledge.integration_knowledge_list.permissions = cap(
+            knowledge.integration_knowledge_list.permissions, rp.knowledge.value
+        )
+
+        # Also cap per-item permissions
+        for assistant in applications.assistants.items:
+            assistant.permissions = cap(assistant.permissions, rp.assistants.value)
+        for group_chat in applications.group_chats.items:
+            group_chat.permissions = cap(group_chat.permissions, rp.assistants.value)
+        for app in applications.apps.items:
+            app.permissions = cap(app.permissions, rp.apps.value)
+        for service in applications.services.items:
+            service.permissions = cap(service.permissions, rp.apps.value)
+
+        for collection in knowledge.groups.items:
+            if hasattr(collection, "permissions"):
+                collection.permissions = cap(collection.permissions, rp.knowledge.value)
+        for website in knowledge.websites.items:
+            if hasattr(website, "permissions"):
+                website.permissions = cap(website.permissions, rp.knowledge.value)
+
+    def _cap_space_permissions(
+        self, permissions: list[ResourcePermission]
+    ) -> list[ResourcePermission]:
+        """Cap space-level permissions using the API key's spaces resource permission."""
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return permissions
+        return self._cap_permissions(permissions, rp.spaces.value)
+
+    def _get_assistant_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_assistants():
             permissions.append(ResourcePermission.READ)
@@ -96,10 +212,10 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_group_chat_permissions(self, space: Space):
+    def _get_group_chat_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        permissions = []
+        permissions: list[ResourcePermission] = []
         if actor.can_read_group_chats():
             permissions.append(ResourcePermission.READ)
         if actor.can_create_group_chats():
@@ -109,9 +225,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_app_permissions(self, space: Space):
+    def _get_app_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_apps():
             permissions.append(ResourcePermission.READ)
@@ -122,9 +238,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_service_permissions(self, space: Space):
+    def _get_service_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_services():
             permissions.append(ResourcePermission.READ)
@@ -133,9 +249,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_collection_permissions(self, space: Space):
+    def _get_collection_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_collections():
             permissions.append(ResourcePermission.READ)
@@ -144,9 +260,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_website_permissions(self, space: Space):
+    def _get_website_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_websites():
             permissions.append(ResourcePermission.READ)
@@ -155,9 +271,11 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_integration_knowledge_permissions(self, space: Space):
+    def _get_integration_knowledge_permissions(
+        self, space: Space
+    ) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_integrations():
             permissions.append(ResourcePermission.READ)
@@ -168,9 +286,11 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_default_assistant_permissions(self, space: Space):
+    def _get_default_assistant_permissions(
+        self, space: Space
+    ) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_default_assistant():
             permissions.append(ResourcePermission.READ)
@@ -180,9 +300,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_member_permissions(self, space: Space):
+    def _get_member_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_members():
             permissions.append(ResourcePermission.READ)
@@ -198,9 +318,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_group_member_permissions(self, space: Space):
+    def _get_group_member_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_group_members():
             permissions.append(ResourcePermission.READ)
@@ -216,9 +336,9 @@ class SpaceAssembler:
 
         return permissions
 
-    def _get_space_permissions(self, space: Space):
+    def _get_space_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
-        permissions = []
+        permissions: list[ResourcePermission] = []
 
         if actor.can_read_space():
             permissions.append(ResourcePermission.READ)
@@ -231,7 +351,7 @@ class SpaceAssembler:
 
         return permissions
 
-    def _sort_members(self, space: Space):
+    def _sort_members(self, space: Space) -> list[SpaceMember]:
         if not space.members:
             return []
 
@@ -243,7 +363,8 @@ class SpaceAssembler:
             member for member in space.members.values() if member.id != self.user.id
         ]
 
-    def _get_assistant_model(self, assistant: "Assistant"):
+    def _get_assistant_model(self, assistant: "Assistant") -> AssistantSparse:
+        assert assistant.user is not None
         return AssistantSparse(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -255,13 +376,17 @@ class SpaceAssembler:
             published=assistant.published,
             permissions=assistant.permissions,
             description=assistant.description,
-            type="assistant",
+            type=AssistantType.ASSISTANT,
             metadata_json=assistant.metadata_json,
             icon_id=assistant.icon_id,
-            completion_model_id=assistant.completion_model.id if assistant.completion_model else None,
+            completion_model_id=assistant.completion_model.id
+            if assistant.completion_model
+            else None,
         )
 
-    def _get_group_chat_model(self, group_chat: "GroupChat"):
+    def _get_group_chat_model(self, group_chat: "GroupChat") -> GroupChatSparse:
+        assert group_chat.created_at is not None
+        assert group_chat.updated_at is not None
         return GroupChatSparse(
             created_at=group_chat.created_at,
             updated_at=group_chat.updated_at,
@@ -275,7 +400,8 @@ class SpaceAssembler:
             icon_id=group_chat.icon_id,
         )
 
-    def _get_app_model(self, app: "App"):
+    def _get_app_model(self, app: "App") -> AppSparse:
+        assert app.id is not None
         return AppSparse(
             created_at=app.created_at,
             updated_at=app.updated_at,
@@ -284,11 +410,13 @@ class SpaceAssembler:
             description=app.description,
             published=app.published,
             user_id=app.user_id,
-            permissions=app.permissions,
+            permissions=app.permissions,  # type: ignore[attr-defined]
             icon_id=app.icon_id,
         )
 
-    def _get_applications_model(self, space: Space, only_published: bool = False) -> Applications:
+    def _get_applications_model(
+        self, space: Space, only_published: bool = False
+    ) -> Applications:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         return Applications(
             assistants=PaginatedPermissions[AssistantSparse](
@@ -303,7 +431,7 @@ class SpaceAssembler:
             group_chats=PaginatedPermissions[GroupChatSparse](
                 items=[
                     self._get_group_chat_model(group_chat=group_chat)
-                    for group_chat in space.group_chats
+                    for group_chat in (space.group_chats or [])
                     if actor.can_read_group_chat(group_chat=group_chat)
                     and (not only_published or group_chat.published)
                 ],
@@ -313,16 +441,33 @@ class SpaceAssembler:
                 items=[
                     self._get_app_model(app)
                     for app in space.apps
-                    if actor.can_read_app(app=app) and (not only_published or app.published)
+                    if actor.can_read_app(app=app)
+                    and (not only_published or app.published)
                 ],
                 permissions=self._get_app_permissions(space),
             ),
             services=PaginatedPermissions[ServiceSparse](
-                items=[service for service in space.services if actor.can_read_services()]
+                items=[
+                    self._get_service_model(service)
+                    for service in space.services
+                    if actor.can_read_services()
+                ]
                 if not only_published
                 else [],
                 permissions=self._get_service_permissions(space),
             ),
+        )
+
+    def _get_service_model(self, service: Service) -> ServiceSparse:
+        return ServiceSparse(
+            created_at=service.created_at,
+            updated_at=service.updated_at,
+            id=service.id,
+            name=service.name,
+            prompt=service.prompt,
+            completion_model_kwargs=service.completion_model_kwargs,
+            user_id=service.user_id,
+            permissions=service.permissions,
         )
 
     def _get_knowledge_model(self, space: Space) -> Knowledge:
@@ -330,7 +475,10 @@ class SpaceAssembler:
         return Knowledge(
             groups=PaginatedPermissions[CollectionPublic](
                 items=(
-                    [CollectionPublic.from_domain(collection) for collection in space.collections]
+                    [
+                        CollectionPublic.from_domain(collection)
+                        for collection in space.collections
+                    ]
                     if actor.can_read_collections()
                     else []
                 ),
@@ -352,25 +500,36 @@ class SpaceAssembler:
             ),
         )
 
-    def _get_security_classification_model(self, space: Space):
+    def _get_security_classification_model(
+        self, space: Space
+    ) -> SecurityClassificationPublic | None:
         return (
             SecurityClassificationPublic.from_domain(space.security_classification)
             if space.security_classification
             else None
         )
 
-    def from_space_to_model(self, space: Space) -> SpacePublic:
+    def from_space_to_model(
+        self,
+        space: Space,
+        default_assistant_effective_config: "EffectiveConfig | None" = None,
+    ) -> SpacePublic:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         self._set_permissions_on_resources(space)
         applications = self._get_applications_model(space)
         knowledge = self._get_knowledge_model(space)
+        self._apply_api_key_resource_caps(applications, knowledge)
         members = PaginatedPermissions[SpaceMember](
             items=self._sort_members(space),
-            permissions=self._get_member_permissions(space),
+            permissions=self._cap_space_permissions(
+                self._get_member_permissions(space)
+            ),
         )
         group_members = PaginatedPermissions[SpaceGroupMember](
             items=list(space.group_members.values()),
-            permissions=self._get_group_member_permissions(space),
+            permissions=self._cap_space_permissions(
+                self._get_group_member_permissions(space)
+            ),
         )
         embedding_models = [
             EmbeddingModelPublic.from_domain(model)
@@ -378,9 +537,16 @@ class SpaceAssembler:
             if model.is_org_enabled
         ]
         completion_models = [
-            self.completion_model_assembler.from_completion_model_to_model(completion_model=model)
+            self.completion_model_assembler.from_completion_model_to_model(
+                completion_model=model,
+                show_pricing=self.user.can_view_model_pricing,
+            )
             for model in space.completion_models
-            if model.is_org_enabled
+            if (
+                model.is_org_enabled
+                and model.migrated_to_model_id is None
+                and model.deleted_at is None
+            )
         ]
 
         transcription_models = [
@@ -390,21 +556,35 @@ class SpaceAssembler:
         ]
 
         default_assistant = None
-        if getattr(space, "default_assistant", None) is not None:
-            default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
-                space.default_assistant,
-                permissions=self._get_default_assistant_permissions(space),
+        if space.default_assistant is not None:
+            space_default_assistant = space.default_assistant
+            da_permissions = self._get_default_assistant_permissions(space)
+            rp = self._get_api_key_resource_permissions()
+            if rp is not None:
+                da_permissions = self._cap_permissions(
+                    da_permissions, rp.assistants.value
+                )
+            default_assistant = (
+                self.assistant_assembler.from_assistant_to_default_assistant_model(
+                    space_default_assistant,
+                    permissions=da_permissions,
+                    effective_config=default_assistant_effective_config,
+                )
             )
-        available_roles = [SpaceRole(value=role) for role in actor.get_available_roles()]
+        available_roles = [
+            SpaceRole(value=cast("SpaceRoleValue", role))
+            for role in cast(list[object], actor.get_available_roles())
+        ]
         security_classification = None
         if self.user.tenant.security_enabled:
             security_classification = self._get_security_classification_model(space)
 
-        mcp_servers = [
-            MCPServerAssembler.to_dict_with_tools(server)
+        mcp_servers: list[MCPServerPublicDict] = [
+            cast(MCPServerPublicDict, MCPServerAssembler.to_dict_with_tools(server))
             for server in space.mcp_servers
         ]
 
+        assert space.id is not None
         return SpacePublic(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -422,14 +602,17 @@ class SpaceAssembler:
             group_members=group_members,
             personal=space.is_personal(),
             organization=space.is_organization(),
-            permissions=self._get_space_permissions(space),
+            permissions=self._cap_space_permissions(self._get_space_permissions(space)),
             available_roles=available_roles,
             security_classification=security_classification,
             data_retention_days=space.data_retention_days,
             icon_id=space.icon_id,
         )
 
-    def from_space_to_sparse_model(self, space: Space, include_applications: bool) -> SpaceSparse:
+    def from_space_to_sparse_model(
+        self, space: Space, include_applications: bool
+    ) -> SpaceSparse:
+        assert space.id is not None
         space_sparse = SpaceSparse(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -446,10 +629,13 @@ class SpaceAssembler:
         if include_applications:
             self._set_permissions_on_resources(space)
             default_assistant = None
-            if getattr(space, "default_assistant", None) is not None:
-                default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
-                    space.default_assistant,
-                    permissions=self._get_default_assistant_permissions(space),
+            if space.default_assistant is not None:
+                space_default_assistant = space.default_assistant
+                default_assistant = (
+                    self.assistant_assembler.from_assistant_to_default_assistant_model(
+                        space_default_assistant,
+                        permissions=self._get_default_assistant_permissions(space),
+                    )
                 )
             applications = self._get_applications_model(space, only_published=True)
             space_sparse.applications = applications
@@ -457,17 +643,25 @@ class SpaceAssembler:
 
         return space_sparse
 
-    def from_space_to_dashboard_model(self, space: Space, only_published: bool) -> SpaceDashboard:
+    def from_space_to_dashboard_model(
+        self, space: Space, only_published: bool
+    ) -> SpaceDashboard:
         self._set_permissions_on_resources(space)
-        applications = self._get_applications_model(space=space, only_published=only_published)
+        applications = self._get_applications_model(
+            space=space, only_published=only_published
+        )
 
         default_assistant = None
-        if getattr(space, "default_assistant", None) is not None:
-            default_assistant = self.assistant_assembler.from_assistant_to_default_assistant_model(
-                space.default_assistant,
-                permissions=self._get_default_assistant_permissions(space),
+        if space.default_assistant is not None:
+            space_default_assistant = space.default_assistant
+            default_assistant = (
+                self.assistant_assembler.from_assistant_to_default_assistant_model(
+                    space_default_assistant,
+                    permissions=self._get_default_assistant_permissions(space),
+                )
             )
 
+        assert space.id is not None
         return SpaceDashboard(
             created_at=space.created_at,
             updated_at=space.updated_at,
@@ -484,7 +678,9 @@ class SpaceAssembler:
         )
 
     @staticmethod
-    def from_service_to_model(service: Service, permissions: list[ResourcePermission] = None):
+    def from_service_to_model(
+        service: Service, permissions: list[ResourcePermission] | None = None
+    ) -> CreateSpaceServiceResponse:
         permissions = permissions or []
 
         # TODO: Look into how we surface permissions to the presentation layer
@@ -501,24 +697,36 @@ class SpaceAssembler:
             MCPServerAssembler,
         )
 
+        applications = space.applications
+        if applications is None:
+            applications = Applications(
+                assistants=PaginatedPermissions[AssistantSparse](items=[]),
+                group_chats=PaginatedPermissions[GroupChatSparse](items=[]),
+                apps=PaginatedPermissions[AppSparse](items=[]),
+                services=PaginatedPermissions[ServiceSparse](items=[]),
+            )
+
         return UpdateSpaceDryRunResponse(
-            assistants=space.applications.assistants.items,
-            group_chats=space.applications.group_chats.items,
-            apps=space.applications.apps.items,
-            services=space.applications.services.items,
+            assistants=applications.assistants.items,
+            group_chats=applications.group_chats.items,
+            apps=applications.apps.items,
+            services=applications.services.items,
             completion_models=[
-                self.completion_model_assembler.from_completion_model_to_model(cm)
+                self.completion_model_assembler.from_completion_model_to_model(
+                    cm, show_pricing=self.user.can_view_model_pricing
+                )
                 for cm in result.affected_completion_models
             ],
             embedding_models=[
-                EmbeddingModelPublic.from_domain(em) for em in result.affected_embedding_models
+                EmbeddingModelPublic.from_domain(em)
+                for em in result.affected_embedding_models
             ],
             transcription_models=[
                 TranscriptionModelPublic.from_domain(tm)
                 for tm in result.affected_transcription_models
             ],
             mcp_servers=[
-                MCPServerAssembler.to_dict_with_tools(s)
+                cast(MCPServerPublicDict, MCPServerAssembler.to_dict_with_tools(s))
                 for s in result.affected_mcp_servers
             ],
         )

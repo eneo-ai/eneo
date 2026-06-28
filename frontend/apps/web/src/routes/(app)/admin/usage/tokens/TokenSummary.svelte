@@ -6,7 +6,12 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
-  import type { TokenUsageSummary } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    TokenUsageSummary,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import TokenOverviewBar from "./TokenOverviewBar.svelte";
   import TokenOverviewTable from "./TokenOverviewTable.svelte";
   import UserTokenSummary from "../users/UserTokenSummary.svelte";
@@ -14,13 +19,28 @@
   import { getEneo } from "$lib/core/Eneo";
   import { Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
+  import { buildCostRateMap } from "$lib/features/ai-models/costRates";
+
+  type ModelsList = {
+    completionModels: CompletionModel[];
+    embeddingModels: EmbeddingModel[];
+    transcriptionModels: TranscriptionModel[];
+  };
 
   type Props = {
     tokenStats: TokenUsageSummary;
+    models: ModelsList;
   };
 
-  const { tokenStats }: Props = $props();
-  let detailedStats = $state(tokenStats);
+  const { tokenStats, models }: Props = $props();
+  let detailedStats = $state(untrack(() => tokenStats));
+
+  // Cost map is stable for the page lifetime — models change rarely. Building
+  // once here avoids re-walking the list on every row render. We untrack the
+  // read so $state doesn't warn that the initial value is captured (it is —
+  // intentionally; reactivity for live model edits is out of scope here).
+  const costRates = untrack(() => buildCostRateMap(models));
 
   const eneo = getEneo();
 
@@ -54,8 +74,8 @@
       <div slot="toolbar">
         <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
       </div>
-      <TokenOverviewTable tokenStats={detailedStats}></TokenOverviewTable>
+      <TokenOverviewTable tokenStats={detailedStats} {costRates}></TokenOverviewTable>
     </Settings.Row>
   </Settings.Group>
-  <UserTokenSummary />
+  <UserTokenSummary {costRates} />
 </Settings.Page>

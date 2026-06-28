@@ -23,7 +23,6 @@ def _size_of_text(text: str):
 async def test_add_fails_when_exceeding_quota_for_user(
     quota_service: QuotaService, user: UserInDB, tenant: TenantInDB
 ):
-
     user.quota_limit = 10
     tenant.quota_limit = 100
     text_to_add = "This is a string of bigger size than 5"
@@ -37,7 +36,6 @@ async def test_add_fails_when_exceeding_quota_for_user(
 async def test_add_fails_when_exceeding_quota_for_tenant(
     quota_service: QuotaService, user: UserInDB, tenant: TenantInDB
 ):
-
     user.quota_limit = 100
     tenant.quota_limit = 10
     text_to_add = "This is a string of bigger size than 5"

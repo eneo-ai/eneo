@@ -9,7 +9,7 @@ const ctxKey = Symbol("Message references");
 // and turning the explicit function call into a getter.
 export function initReferenceContext(params: {
   references: () => InfoBlob[];
-  renderer: CustomRenderers["inref"];
+  renderer: () => CustomRenderers["inref"];
 }) {
   const data = {
     state: {
@@ -19,7 +19,9 @@ export function initReferenceContext(params: {
         }
       }
     },
-    CustomRenderer: params.renderer
+    get CustomRenderer() {
+      return params.renderer();
+    }
   };
 
   setContext(ctxKey, data);

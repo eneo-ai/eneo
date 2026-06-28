@@ -15,6 +15,7 @@
   export let website: WebsiteSparse;
 
   // Set dayjs locale based on paraglide locale
+  // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
 
   const intervalLabels: Record<string, { label: string; color: Label.LabelColor }> = {

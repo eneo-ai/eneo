@@ -134,7 +134,9 @@ class TestIntegrationKnowledgeMapper(unittest.TestCase):
         mock_create_entity.return_value = mock_entity
 
         # Map to entity
-        entity = self.mapper.to_entity(db_model, embedding_model=self.embedding_model_mock)
+        entity = self.mapper.to_entity(
+            db_model, embedding_model=self.embedding_model_mock
+        )
 
         # Assert factory was called with db_model
         mock_create_entity.assert_called_once_with(
@@ -169,7 +171,9 @@ class TestIntegrationKnowledgeMapper(unittest.TestCase):
         mock_create_entities.return_value = mock_entities
 
         # Map to entities
-        entities = self.mapper.to_entities(db_models, embedding_models=[self.embedding_model_mock])
+        entities = self.mapper.to_entities(
+            db_models, embedding_models=[self.embedding_model_mock]
+        )
 
         # Assert factory was called with db_models
         mock_create_entities.assert_called_once_with(

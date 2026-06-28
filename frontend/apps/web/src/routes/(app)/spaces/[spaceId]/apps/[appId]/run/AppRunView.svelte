@@ -3,18 +3,20 @@
   import { Button, Tooltip } from "@eneo/ui";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getEneo } from "$lib/core/Eneo";
-  import { EneoError, type App, type AppRunInput } from "@eneo/eneo-js";
+  import { type App, type AppRunInput } from "@eneo/eneo-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { getAppAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
   import { derived, type Readable } from "svelte/store";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import AppInput from "./AppInput.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const eneo = getEneo();
   const {
@@ -70,11 +72,10 @@
       clearUploads();
       isSubmitting = false;
       // Forward to the newly created run
-      goto(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`);
+      goto(resolve(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`));
     } catch (err) {
-      const msg = err instanceof EneoError ? err.getReadableMessage() : err;
       console.error(err);
-      toast.error(m.error_running_app({ msg }));
+      toastError(err);
       isSubmitting = false;
     }
   }
@@ -96,7 +97,7 @@
     <div class="-mt-[2.5rem] flex flex-grow flex-col items-center justify-center rounded pb-2">
       <div class="bg-primary flex items-center gap-4 rounded-2xl pr-6 pl-4">
         <AppIcon app={$app} size="medium"></AppIcon>
-        <span class="text-2xl md:text-4xl font-extrabold">{formatEmojiTitle($app.name)}</span>
+        <span class="text-2xl font-extrabold md:text-4xl">{formatEmojiTitle($app.name)}</span>
       </div>
     </div>
 

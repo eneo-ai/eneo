@@ -60,10 +60,16 @@ class TestTextMimeTypes:
         assert TextMimeTypes.has_value("application/pdf") is True
         assert TextMimeTypes.has_value("text/plain") is True
         assert TextMimeTypes.has_value("text/markdown") is True
-        assert TextMimeTypes.has_value(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ) is True
+        assert (
+            TextMimeTypes.has_value(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            is True
+        )
         assert TextMimeTypes.has_value("application/vnd.ms-excel") is True
+        assert TextMimeTypes.has_value("application/json") is True
+        assert TextMimeTypes.has_value("text/xml") is True
+        assert TextMimeTypes.has_value("application/xml") is True
 
     def test_has_value_returns_false_for_invalid_mime(self):
         """has_value should return False for invalid MIME types."""
@@ -129,7 +135,9 @@ class TestTextExtractorPDF:
         with patch("eneo.files.text.pdfplumber.open") as mock_open:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Sample PDF text content"
-            mock_open.return_value.__enter__ = MagicMock(return_value=MagicMock(pages=[mock_page]))
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=[mock_page])
+            )
             mock_open.return_value.__exit__ = MagicMock(return_value=False)
 
             result = TextExtractor.extract_from_pdf(Path("test.pdf"))
@@ -159,12 +167,77 @@ class TestTextExtractorPDF:
             assert "Page 1 text" in result
             assert "Page 3 text" in result
 
+    def test_extract_from_pdf_adds_page_markers(self):
+        """Each page's text should be preceded by a [PAGE N] marker."""
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
+            mock_page1 = MagicMock(page_number=1)
+            mock_page1.extract_text.return_value = "First page"
+            mock_page1.find_tables.return_value = []
+            mock_page2 = MagicMock(page_number=2)
+            mock_page2.extract_text.return_value = "Second page"
+            mock_page2.find_tables.return_value = []
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=[mock_page1, mock_page2])
+            )
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = TextExtractor.extract_from_pdf(Path("dummy.pdf"))
+
+            assert "[PAGE 1]\nFirst page" in result
+            assert "[PAGE 2]\nSecond page" in result
+
+    def test_extract_from_pdf_renders_tables_as_markdown(self):
+        """Tables should be appended as markdown, with table text excluded
+        from the running text to avoid duplication."""
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
+            mock_table = MagicMock(bbox=(0, 100, 500, 200))
+            mock_table.extract.return_value = [
+                ["Name", "Value"],
+                ["Foo", "1"],
+                ["Bar", None],
+            ]
+            mock_page = MagicMock(page_number=1)
+            mock_page.find_tables.return_value = [mock_table]
+            filtered = MagicMock()
+            filtered.extract_text.return_value = "Body text outside the table"
+            mock_page.filter.return_value = filtered
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=[mock_page])
+            )
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = TextExtractor.extract_from_pdf(Path("dummy.pdf"))
+
+            assert "Body text outside the table" in result
+            assert "| Name | Value |" in result
+            assert "| --- | --- |" in result
+            assert "| Foo | 1 |" in result
+            assert "| Bar |  |" in result
+
+    def test_extract_from_pdf_image_only_returns_empty(self):
+        """A PDF without any text (scanned/image-only) returns empty string,
+        not bare page markers."""
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
+            mock_page = MagicMock(page_number=1)
+            mock_page.extract_text.return_value = None
+            mock_page.find_tables.return_value = []
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=[mock_page])
+            )
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = TextExtractor.extract_from_pdf(Path("dummy.pdf"))
+
+            assert result == ""
+
     def test_extract_from_pdf_sanitizes_null_bytes(self):
         """Should sanitize null bytes from extracted text."""
         with patch("eneo.files.text.pdfplumber.open") as mock_open:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Hello\x00World"
-            mock_open.return_value.__enter__ = MagicMock(return_value=MagicMock(pages=[mock_page]))
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=[mock_page])
+            )
             mock_open.return_value.__exit__ = MagicMock(return_value=False)
 
             result = TextExtractor.extract_from_pdf(Path("dummy.pdf"))
@@ -229,6 +302,24 @@ class TestTextExtractorPPTX:
         result = TextExtractor.extract_from_pptx(pptx_path)
 
         assert "Hello from PPTX!" in result
+
+    def test_extract_from_pptx_includes_speaker_notes(self, tmp_path):
+        """Speaker notes carry presentation context and must be extracted."""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        pptx_path = tmp_path / "with_notes.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(2), Inches(2))
+        txBox.text_frame.text = "Slide content"
+        slide.notes_slide.notes_text_frame.text = "Mention the budget constraints"
+        prs.save(pptx_path)
+
+        result = TextExtractor.extract_from_pptx(pptx_path)
+
+        assert "Slide content" in result
+        assert "Speaker notes: Mention the budget constraints" in result
 
     def test_extract_from_pptx_multiple_slides(self, tmp_path):
         """Should extract text from multiple slides."""
@@ -371,7 +462,9 @@ class TestTextExtractorExtractMethod:
     def test_extract_routes_pptx_correctly(self, tmp_path):
         """Should route PPTX files to PPTX extractor."""
         extractor = TextExtractor()
-        mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        mime = (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
 
         with patch.object(extractor, "extract_from_pptx", return_value="PPTX content"):
             result = extractor.extract(tmp_path / "test.pptx", mime)
@@ -405,6 +498,27 @@ class TestTextExtractorExtractMethod:
         result = extractor.extract(test_file, "text/plain")
         assert result == "Plain text content"
 
+    def test_extract_routes_json_correctly(self, tmp_path):
+        """Should route JSON files through plain text extraction."""
+        extractor = TextExtractor()
+
+        test_file = tmp_path / "test.json"
+        test_file.write_text('{"key": "value"}')
+
+        result = extractor.extract(test_file, "application/json")
+        assert result == '{"key": "value"}'
+
+    def test_extract_routes_xml_correctly(self, tmp_path):
+        """Should route XML files through plain text extraction for both spellings."""
+        extractor = TextExtractor()
+
+        test_file = tmp_path / "test.xml"
+        content = "<root><a>1</a></root>"
+        test_file.write_text(content)
+
+        assert extractor.extract(test_file, "text/xml") == content
+        assert extractor.extract(test_file, "application/xml") == content
+
     def test_extract_routes_markdown_correctly(self, tmp_path):
         """Should route markdown files correctly."""
         extractor = TextExtractor()
@@ -434,6 +548,22 @@ class TestTextExtractorExtractMethod:
 
         result = extractor.extract(test_file, "application/octet-stream")
         assert result == "Unknown format content"
+
+    def test_extract_rejects_binary_fallthrough(self, tmp_path):
+        """Binary data routed to the text fallback must be rejected, not decoded.
+
+        Regression for issue #431: WebP/AVIF (and any binary) reaching the
+        unknown-mimetype fallback used to be cp1252-decoded into garbage and
+        written to the TEXT column, crashing Postgres. It must raise instead.
+        """
+        extractor = TextExtractor()
+
+        test_file = tmp_path / "image.webp"
+        # NUL byte marks the content as binary.
+        test_file.write_bytes(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+
+        with pytest.raises(UnsupportedFormatError):
+            extractor.extract(test_file, "image/webp")
 
     def test_extract_strips_whitespace(self, tmp_path):
         """Should strip leading/trailing whitespace from result."""
@@ -483,7 +613,10 @@ class TestTextExtractorErrorHandling:
             TextExtractor.extract_from_docx(bad_docx)
 
         assert exc_info.value.code == "CORRUPT"
-        assert "ZIP" in exc_info.value.message or "corrupt" in exc_info.value.message.lower()
+        assert (
+            "ZIP" in exc_info.value.message
+            or "corrupt" in exc_info.value.message.lower()
+        )
 
     def test_extract_from_pptx_raises_corrupt_error_on_bad_zip(self, tmp_path):
         """Should raise CorruptFileError for invalid PPTX (bad ZIP)."""
@@ -495,7 +628,10 @@ class TestTextExtractorErrorHandling:
             TextExtractor.extract_from_pptx(bad_pptx)
 
         assert exc_info.value.code == "CORRUPT"
-        assert "ZIP" in exc_info.value.message or "corrupt" in exc_info.value.message.lower()
+        assert (
+            "ZIP" in exc_info.value.message
+            or "corrupt" in exc_info.value.message.lower()
+        )
 
     def test_extract_raises_unsupported_format_for_legacy_doc(self, tmp_path):
         """Should raise UnsupportedFormatError for .doc files."""
@@ -532,7 +668,9 @@ class TestTextExtractorErrorHandling:
         test_file = tmp_path / "noperm.txt"
         test_file.write_text("content")
 
-        with patch("pathlib.Path.read_text", side_effect=PermissionError("Access denied")):
+        with patch(
+            "pathlib.Path.read_text", side_effect=PermissionError("Access denied")
+        ):
             with pytest.raises(ExtractionError) as exc_info:
                 TextExtractor.extract_from_plain_text(test_file)
 

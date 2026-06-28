@@ -3,26 +3,28 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from eneo.apps.app_runs.api.app_run_models import AppRunPublic
-from eneo.main.container.container import Container
-from eneo.server.dependencies.container import get_container
-from eneo.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.main.container.container import Container
+from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
 
 router = APIRouter()
+_WITH_USER = Depends(get_container(with_user=True))
 
 
 @router.get(
     "/{id}/",
     response_model=AppRunPublic,
+    description="Get an app run by id.",
     responses=responses.get_responses([403, 404]),
 )
 async def get_app_run(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
@@ -35,11 +37,12 @@ async def get_app_run(
 @router.delete(
     "/{id}/",
     status_code=204,
+    description="Delete an app run by id.",
     responses=responses.get_responses([403, 404]),
 )
 async def delete_app_run(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     service = container.app_run_service()
     user = container.user()
@@ -54,7 +57,7 @@ async def delete_app_run(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_RUN_DELETED,
         entity_type=EntityType.APP_RUN,
         entity_id=id,

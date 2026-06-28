@@ -4,28 +4,34 @@
   import UserEditor from "./editor/UserEditor.svelte";
   import UserTable from "./UserTable.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { goto, invalidate } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import ServerPagination from "$lib/components/ServerPagination.svelte";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
+  import { untrack } from "svelte";
 
   // Svelte 5 runes mode: use $props() instead of export let
   let { data } = $props();
 
-  // Get search value and tab from URL params
-  const searchValue = $derived($page.url.searchParams.get('search') || '');
-  const currentTab = $derived($page.url.searchParams.get('tab') || 'active');
+  // Get search value and tab from URL params.
+  // Support both canonical `search` and legacy `search_email` links.
+  const searchValue = $derived(
+    $page.url.searchParams.get("search") || $page.url.searchParams.get("search_email") || ""
+  );
+  const currentTab = $derived($page.url.searchParams.get("tab") || "active");
 
   // Swedish number formatting for counts (e.g., 2828 → "2 828", 50000 → "50 000")
-  const numberFormatter = new Intl.NumberFormat('sv-SE');
+  const numberFormatter = new Intl.NumberFormat("sv-SE");
 
-  setAdminUserCtx({
-    customRoles: data.customRoles,
-    defaultRoles: data.defaultRoles,
-    userGroups: data.userGroups
-  });
+  untrack(() =>
+    setAdminUserCtx({
+      roles: data.roles,
+      userGroups: data.userGroups
+    })
+  );
 
   // Reference to UserTable component to access filterValue
-  let userTableRef: any;
+  let userTableRef: UserTable;
 
   function goToPage(newPage: number) {
     const url = new URL($page.url);
@@ -34,7 +40,10 @@
     } else {
       url.searchParams.delete("page");
     }
-    goto(url.toString(), { noScroll: true });
+    // resolve() requires a typed RouteId literal — for dynamic URLs we build the
+    // URL by hand and skip resolve(), see eslint-disable below.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    goto(url, { noScroll: true });
   }
 
   // Watch built-in table filter and trigger server-side search with debouncing
@@ -45,7 +54,16 @@
       const filterVal = userTableRef.filterValue;
 
       // Subscribe to filter changes
+      let isInitialEmission = true;
       const unsubscribe = filterVal.subscribe((value: string) => {
+        if (isInitialEmission) {
+          isInitialEmission = false;
+          // Prevent initial empty table state from wiping URL-driven searches.
+          if (!value.trim() && searchValue.trim()) {
+            return;
+          }
+        }
+
         // Debounce navigation (250ms delay)
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
@@ -57,15 +75,24 @@
 
           // Only trigger search if empty OR >= 3 characters (matches backend validation)
           // Prevents unnecessary network requests and 400 errors for short searches
-          if (trimmed === '' || trimmed.length >= 3) {
+          if (trimmed === "" || trimmed.length >= 3) {
             // Preserve current tab when searching, reset page to 1
-            const params = new URLSearchParams();
-            if (currentTab) params.set('tab', currentTab);
-            if (trimmed) params.set('search', trimmed);
+            const params = new SvelteURLSearchParams();
+            if (currentTab) params.set("tab", currentTab);
+            if (trimmed) params.set("search", trimmed);
 
-            const url = params.toString() ? `/admin/users?${params.toString()}` : '/admin/users';
+            const nextUrl = params.toString()
+              ? `/admin/users?${params.toString()}`
+              : "/admin/users";
+            const currentUrl = `${$page.url.pathname}${$page.url.search}`;
+            if (nextUrl === currentUrl) {
+              return;
+            }
 
-            goto(url, { noScroll: true, keepFocus: true, replaceState: true });
+            // resolve() requires a typed RouteId literal — for dynamic URLs we build the
+            // URL by hand and skip resolve().
+            // eslint-disable-next-line svelte/no-navigation-without-resolve
+            goto(nextUrl, { noScroll: true, keepFocus: true, replaceState: true });
           }
           // If 1-2 chars: silently ignore (no request, no error, better UX)
         }, 250);
@@ -112,7 +139,7 @@
     <UserEditor mode="create"></UserEditor>
   </Page.Header>
   <Page.Main>
-    <UserTable bind:this={userTableRef} users={data.users ?? []} />
+    <UserTable bind:this={userTableRef} users={data.users ?? []} initialFilterValue={searchValue} />
 
     {#if data.pagination}
       <ServerPagination

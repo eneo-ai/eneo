@@ -1,0 +1,17 @@
+{
+  "src/lib/Chart/theme.ts": {
+    "eneo/no-raw-color": {
+      "count": 90
+    }
+  },
+  "src/lib/CodeBlock/CodeBlock.svelte": {
+    "eneo/no-raw-color": {
+      "count": 35
+    }
+  },
+  "src/lib/Dialog/Content.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  }
+}

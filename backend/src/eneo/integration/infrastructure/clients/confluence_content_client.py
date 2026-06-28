@@ -9,7 +9,9 @@ class ConfluenceContentClient(BaseClient):
         super().__init__(base_url=base_url)
         self.headers = {"Authorization": f"Bearer {api_token}"}
 
-    async def get_page(self, page_id: str, expand: str | None = None, **kwargs) -> dict:
+    async def get_page(
+        self, page_id: str, expand: str | None = None, **kwargs: str
+    ) -> dict[str, object]:
         """
         Fetches a page's content by its ID.
 
@@ -18,13 +20,14 @@ class ConfluenceContentClient(BaseClient):
             expand (str): A comma-separated list of fields to expand for detailed content.
                           Example: "body.storage,version,metadata".
         """
-        params = kwargs.copy()
+        params: dict[str, str | int] = dict(kwargs)
         if expand is None:
             params["expand"] = "body.storage"
 
-        return await self.client.get(
+        result: dict[str, object] = await self.client.get(
             f"rest/api/content/{page_id}", headers=self.headers, params=params
         )
+        return result
 
     async def get_content(
         self,
@@ -32,7 +35,7 @@ class ConfluenceContentClient(BaseClient):
         space_key: str | None = None,
         limit: int = 50,
         start: int = 0,
-    ) -> dict:
+    ) -> dict[str, object]:
         """
         Fetches pages content from Confluence.
 
@@ -44,7 +47,7 @@ class ConfluenceContentClient(BaseClient):
         Returns:
             List of pages with optional expanded fields.
         """
-        params = {"type": "page", "limit": limit, "start": start}
+        params: dict[str, str | int] = {"type": "page", "limit": limit, "start": start}
 
         if expand is None:
             params["expand"] = "body.storage"
@@ -52,13 +55,15 @@ class ConfluenceContentClient(BaseClient):
         if space_key:
             params["spaceKey"] = space_key
 
-        return await self.client.get(
+        result: dict[str, object] = await self.client.get(
             "rest/api/content", headers=self.headers, params=params
         )
+        return result
 
-    async def get_spaces(self, limit: int = 50, start: int = 0) -> dict:
+    async def get_spaces(self, limit: int = 50, start: int = 0) -> dict[str, object]:
         """Fetches spaces info from Confluence"""
-        params = {"limit": limit, "start": start}
-        return await self.client.get(
+        params: dict[str, str | int] = {"limit": limit, "start": start}
+        result: dict[str, object] = await self.client.get(
             "rest/api/space", headers=self.headers, params=params
         )
+        return result

@@ -9,10 +9,63 @@ Tests the system-wide AI model management endpoints that require super admin API
 - POST /sysadmin/embedding-models/{id}/metadata
 - DELETE /sysadmin/embedding-models/{id}
 """
+
 import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_duplicate_display_name_race_returns_409(
+    client, super_admin_token, monkeypatch
+):
+    """The display-name pre-check normally returns a 409 before the DB. If a
+    concurrent request slips past it (the validate-then-insert race), the active
+    nickname unique index fires at flush; that IntegrityError must surface as the
+    same clean 409 NAME_COLLISION, not a 500. Bypass the pre-check to reach it.
+    """
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "eneo.sysadmin.sysadmin_router.validate_unique_display_name", _noop
+    )
+
+    payload = {
+        "name": "race-collision-model",
+        "nickname": "Race Collision Display Name",
+        "family": "openai",
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
+        "is_deprecated": False,
+        "stability": "stable",
+        "hosting": "usa",
+        "open_source": False,
+        "description": "Race test model",
+        "org": "OpenAI",
+        "vision": False,
+        "reasoning": False,
+        "base_url": "https://api.openai.com/v1",
+        "litellm_model_name": "gpt-4",
+    }
+
+    first = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json=payload,
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json=payload,
+    )
+    assert second.status_code == 409
+    assert second.json().get("eneo_error_code") == 9017
 
 
 @pytest.mark.integration
@@ -130,7 +183,9 @@ async def test_create_completion_model_with_invalid_auth(client):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_update_completion_model_metadata(client, super_admin_token, db_container):
+async def test_update_completion_model_metadata(
+    client, super_admin_token, db_container
+):
     """Test updating an existing completion model's metadata."""
     # First create a model
     create_data = {
@@ -214,7 +269,7 @@ async def test_update_nonexistent_completion_model(client, super_admin_token):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_delete_completion_model(client, super_admin_token, db_container):
-    """Test deleting a completion model."""
+    """Test soft-deleting a completion model."""
     # First create a model
     create_data = {
         "name": "model-to-delete",
@@ -245,14 +300,15 @@ async def test_delete_completion_model(client, super_admin_token, db_container):
 
     assert response.status_code == 200
 
-    # Verify model was deleted from database
+    # Verify model was soft-deleted in database
     async with db_container() as container:
         session = container.session()
         stmt = sa.select(CompletionModels).where(CompletionModels.id == model_id)
         result = await session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
-        assert db_model is None
+        assert db_model is not None
+        assert db_model.deleted_at is not None
 
 
 @pytest.mark.integration
@@ -270,6 +326,112 @@ async def test_delete_nonexistent_completion_model(client, super_admin_token):
 
     # Note: Current implementation returns 200 even for non-existent models (idempotent)
     assert response.status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_force_delete_completion_model_without_history(
+    client, super_admin_token, db_container
+):
+    """force=true hard-deletes a model that has no historical attribution."""
+    create_data = {
+        "name": "model-to-force-delete",
+        "nickname": "Model to Force Delete",
+        "family": "openai",
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
+        "is_deprecated": False,
+        "stability": "stable",
+        "hosting": "usa",
+        "vision": False,
+        "reasoning": False,
+    }
+    create_response = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json=create_data,
+    )
+    assert create_response.status_code == 200
+    model_id = create_response.json()["id"]
+
+    response = await client.delete(
+        f"/api/v1/sysadmin/completion-models/{model_id}?force=true",
+        headers={"X-API-Key": super_admin_token},
+    )
+    assert response.status_code == 200
+
+    # Hard-delete, not soft-delete — the row must be physically gone.
+    async with db_container() as container:
+        session = container.session()
+        result = await session.execute(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_force_delete_completion_model_with_history_returns_400(
+    client, super_admin_token, db_container
+):
+    """20260402_lifecycle switched questions.completion_model_id to RESTRICT,
+    so hard-deleting a model with question history must fail. The router
+    converts the IntegrityError into MODEL_IN_USE (400) instead of letting
+    it surface as a 500.
+    """
+    from eneo.database.tables.questions_table import Questions
+
+    create_data = {
+        "name": "model-with-history",
+        "nickname": "Model With History",
+        "family": "openai",
+        "max_input_tokens": 8000,
+        "max_output_tokens": 4096,
+        "is_deprecated": False,
+        "stability": "stable",
+        "hosting": "usa",
+        "vision": False,
+        "reasoning": False,
+    }
+    create_response = await client.post(
+        "/api/v1/sysadmin/completion-models/create",
+        headers={"X-API-Key": super_admin_token},
+        json=create_data,
+    )
+    assert create_response.status_code == 200
+    model_id = create_response.json()["id"]
+
+    async with db_container() as container:
+        session = container.session()
+        tenant = container.tenant()
+        await session.execute(
+            sa.insert(Questions).values(
+                tenant_id=tenant.id,
+                question="hello",
+                answer="world",
+                num_tokens_question=1,
+                num_tokens_answer=1,
+                completion_model_id=model_id,
+            )
+        )
+
+    response = await client.delete(
+        f"/api/v1/sysadmin/completion-models/{model_id}?force=true",
+        headers={"X-API-Key": super_admin_token},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    from eneo.main.exceptions import ErrorCodes
+
+    assert body["eneo_error_code"] == ErrorCodes.MODEL_IN_USE
+
+    # The model must still exist after the failed delete.
+    async with db_container() as container:
+        session = container.session()
+        result = await session.execute(
+            sa.select(CompletionModels).where(CompletionModels.id == model_id)
+        )
+        assert result.scalar_one_or_none() is not None
 
 
 @pytest.mark.integration
@@ -497,14 +659,17 @@ async def test_delete_embedding_model(client, super_admin_token, db_container):
 
     assert response.status_code == 200
 
-    # Verify model was deleted from database
+    # The normal sysadmin delete soft-deletes (parity with completion): the row
+    # is kept as a tombstone with deleted_at set so historical info_blob
+    # attribution survives. Use force=true for a hard delete.
     async with db_container() as container:
         session = container.session()
         stmt = sa.select(EmbeddingModels).where(EmbeddingModels.id == model_id)
         result = await session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
-        assert db_model is None
+        assert db_model is not None
+        assert db_model.deleted_at is not None
 
 
 @pytest.mark.integration
@@ -529,7 +694,9 @@ async def test_delete_nonexistent_embedding_model(client, super_admin_token):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_completion_model_missing_required_fields(client, super_admin_token):
+async def test_create_completion_model_missing_required_fields(
+    client, super_admin_token
+):
     """Test that creating a model with missing required fields fails."""
     incomplete_data = {
         "name": "incomplete-model",

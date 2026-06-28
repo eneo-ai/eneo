@@ -1,24 +1,25 @@
-from fastapi import APIRouter, Depends
 from uuid import UUID
 
-from eneo.main.container.container import Container
-from eneo.server.dependencies.container import get_container
-from eneo.server.protocol import responses
+from fastapi import APIRouter, Depends
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-
+from eneo.main.container.container import Container
+from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
 from eneo.templates.app_template.api.app_template_models import (
-    AppTemplateAdminPublic,
-    AppTemplateAdminListPublic,
     AppTemplateAdminCreate,
+    AppTemplateAdminListPublic,
+    AppTemplateAdminPublic,
     AppTemplateAdminUpdate,
     AppTemplateToggleDefaultRequest,
 )
 
 router = APIRouter(prefix="/admin/templates/apps", tags=["admin-templates"])
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
 
 
 @router.get(
@@ -29,43 +30,49 @@ router = APIRouter(prefix="/admin/templates/apps", tags=["admin-templates"])
     description="Returns all active app templates for your tenant (admin only)",
     responses=responses.get_responses([401, 403]),
 )
-async def list_templates(
-    container: Container = Depends(get_container(with_user=True))
-):
+async def list_templates(container: Container = USER_CONTAINER):
     """List all active app templates for the tenant with usage counts."""
     service = container.app_template_service()
     user = container.user()
 
-    templates_with_usage = await service.get_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_templates_for_tenant(
+        tenant_id=user.tenant_id
+    )
 
-    items = [
-        AppTemplateAdminPublic(
-            id=t.id,
-            name=t.name,
-            description=t.description,
-            category=t.category,
-            prompt_text=t.prompt_text,
-            completion_model_kwargs=t.completion_model_kwargs or {},
-            completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name if t.completion_model else None,
-            wizard=t.wizard,
-            input_type=t.input_type,
-            input_description=t.input_description,
-            organization=t.organization,
-            tenant_id=t.tenant_id,
-            deleted_at=t.deleted_at,
-            deleted_by_user_id=t.deleted_by_user_id,
-            restored_at=t.restored_at,
-            restored_by_user_id=t.restored_by_user_id,
-            original_snapshot=t.original_snapshot,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
-            usage_count=usage_count,
-            is_default=t.is_default,
-            icon_name=t.icon_name,
+    items: list[AppTemplateAdminPublic] = []
+    for t, usage_count in templates_with_usage:
+        assert t.tenant_id is not None  # tenant templates always have a tenant_id
+        items.append(
+            AppTemplateAdminPublic(
+                id=t.id,
+                name=t.name,
+                description=t.description or "",
+                category=t.category,
+                prompt_text=t.prompt_text,
+                completion_model_kwargs=t.completion_model_kwargs or {},
+                completion_model_id=t.completion_model.id
+                if t.completion_model
+                else None,
+                completion_model_name=t.completion_model.name
+                if t.completion_model
+                else None,
+                wizard=t.wizard,
+                input_type=t.input_type,
+                input_description=t.input_description,
+                organization=t.organization,
+                tenant_id=t.tenant_id,
+                deleted_at=t.deleted_at,
+                deleted_by_user_id=t.deleted_by_user_id,
+                restored_at=t.restored_at,
+                restored_by_user_id=t.restored_by_user_id,
+                original_snapshot=t.original_snapshot,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                usage_count=usage_count,
+                is_default=t.is_default,
+                icon_name=t.icon_name,
+            )
         )
-        for t, usage_count in templates_with_usage
-    ]
 
     return AppTemplateAdminListPublic(items=items)
 
@@ -110,14 +117,20 @@ Create a new app template for your tenant.
 )
 async def create_template(
     data: AppTemplateAdminCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Create a new app template for the tenant."""
     service = container.app_template_service()
     user = container.user()
 
-    from eneo.templates.app_template.api.app_template_models import AppTemplateCreate
+    from eneo.templates.app_template.api.app_template_models import (
+        AppTemplateCreate,
+    )
+    from eneo.templates.app_template.api.app_template_models import (
+        AppTemplateWizard as _AppTemplateWizard,
+    )
 
+    wizard = data.wizard or _AppTemplateWizard(attachments=None, collections=None)
     create_data = AppTemplateCreate(
         name=data.name,
         description=data.description or "",
@@ -125,7 +138,7 @@ async def create_template(
         prompt=data.prompt or "",
         completion_model_kwargs=data.completion_model_kwargs or {},
         completion_model_id=data.completion_model_id,
-        wizard=data.wizard,
+        wizard=wizard,
         input_type=data.input_type,
         input_description=data.input_description,
         icon_name=data.icon_name,
@@ -140,7 +153,7 @@ async def create_template(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TEMPLATE_CREATED,
         entity_type=EntityType.TEMPLATE,
         entity_id=template.id,
@@ -155,15 +168,20 @@ async def create_template(
         ),
     )
 
+    assert template.tenant_id is not None  # created under a tenant
     return AppTemplateAdminPublic(
         id=template.id,
         name=template.name,
-        description=template.description,
+        description=template.description or "",
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -191,7 +209,7 @@ async def create_template(
 async def update_template(
     template_id: "UUID",
     data: AppTemplateAdminUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Update an app template."""
     service = container.app_template_service()
@@ -222,7 +240,7 @@ async def update_template(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TEMPLATE_UPDATED,
         entity_type=EntityType.TEMPLATE,
         entity_id=template_id,
@@ -234,15 +252,20 @@ async def update_template(
         ),
     )
 
+    assert template.tenant_id is not None  # updated under a tenant
     return AppTemplateAdminPublic(
         id=template.id,
         name=template.name,
-        description=template.description,
+        description=template.description or "",
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -291,7 +314,7 @@ Toggle an app template as featured/default.
 async def toggle_default(
     template_id: UUID,
     data: AppTemplateToggleDefaultRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Toggle template as featured/default."""
     service = container.app_template_service()
@@ -303,15 +326,20 @@ async def toggle_default(
         tenant_id=user.tenant_id,
     )
 
+    assert template.tenant_id is not None  # tenant template always has tenant_id
     return AppTemplateAdminPublic(
         id=template.id,
         name=template.name,
-        description=template.description,
+        description=template.description or "",
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -338,7 +366,7 @@ async def toggle_default(
 )
 async def delete_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Soft-delete an app template."""
     service = container.app_template_service()
@@ -355,7 +383,7 @@ async def delete_template(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TEMPLATE_DELETED,
         entity_type=EntityType.TEMPLATE,
         entity_id=template_id,
@@ -378,7 +406,7 @@ async def delete_template(
 )
 async def rollback_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Rollback an app template to its original state."""
     service = container.app_template_service()
@@ -389,15 +417,20 @@ async def rollback_template(
         tenant_id=user.tenant_id,
     )
 
+    assert template.tenant_id is not None  # tenant template always has tenant_id
     return AppTemplateAdminPublic(
         id=template.id,
         name=template.name,
-        description=template.description,
+        description=template.description or "",
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -424,7 +457,7 @@ async def rollback_template(
 )
 async def restore_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Restore a soft-deleted app template."""
     service = container.app_template_service()
@@ -436,15 +469,20 @@ async def restore_template(
         user_id=user.id,
     )
 
+    assert template.tenant_id is not None  # tenant template always has tenant_id
     return AppTemplateAdminPublic(
         id=template.id,
         name=template.name,
-        description=template.description,
+        description=template.description or "",
         category=template.category,
         prompt_text=template.prompt_text,
         completion_model_kwargs=template.completion_model_kwargs or {},
-        completion_model_id=template.completion_model.id if template.completion_model else None,
-        completion_model_name=template.completion_model.name if template.completion_model else None,
+        completion_model_id=template.completion_model.id
+        if template.completion_model
+        else None,
+        completion_model_name=template.completion_model.name
+        if template.completion_model
+        else None,
         wizard=template.wizard,
         input_type=template.input_type,
         input_description=template.input_description,
@@ -470,7 +508,7 @@ async def restore_template(
 )
 async def permanent_delete_template(
     template_id: "UUID",
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     """Permanently delete a soft-deleted app template (hard delete)."""
     service = container.app_template_service()
@@ -491,41 +529,49 @@ async def permanent_delete_template(
     responses=responses.get_responses([401, 403]),
 )
 async def list_deleted_templates(
-    container: Container = Depends(get_container(with_user=True))
+    container: Container = USER_CONTAINER,
 ):
     """List all deleted app templates for audit purposes with usage counts."""
     service = container.app_template_service()
     user = container.user()
 
-    templates_with_usage = await service.get_deleted_templates_for_tenant(tenant_id=user.tenant_id)
+    templates_with_usage = await service.get_deleted_templates_for_tenant(
+        tenant_id=user.tenant_id
+    )
 
-    items = [
-        AppTemplateAdminPublic(
-            id=t.id,
-            name=t.name,
-            description=t.description,
-            category=t.category,
-            prompt_text=t.prompt_text,
-            completion_model_kwargs=t.completion_model_kwargs or {},
-            completion_model_id=t.completion_model.id if t.completion_model else None,
-            completion_model_name=t.completion_model.name if t.completion_model else None,
-            wizard=t.wizard,
-            input_type=t.input_type,
-            input_description=t.input_description,
-            organization=t.organization,
-            tenant_id=t.tenant_id,
-            deleted_at=t.deleted_at,
-            deleted_by_user_id=t.deleted_by_user_id,
-            restored_at=t.restored_at,
-            restored_by_user_id=t.restored_by_user_id,
-            original_snapshot=t.original_snapshot,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
-            usage_count=usage_count,
-            is_default=t.is_default,
-            icon_name=t.icon_name,
+    items: list[AppTemplateAdminPublic] = []
+    for t, usage_count in templates_with_usage:
+        assert t.tenant_id is not None  # deleted tenant templates always have tenant_id
+        items.append(
+            AppTemplateAdminPublic(
+                id=t.id,
+                name=t.name,
+                description=t.description or "",
+                category=t.category,
+                prompt_text=t.prompt_text,
+                completion_model_kwargs=t.completion_model_kwargs or {},
+                completion_model_id=t.completion_model.id
+                if t.completion_model
+                else None,
+                completion_model_name=t.completion_model.name
+                if t.completion_model
+                else None,
+                wizard=t.wizard,
+                input_type=t.input_type,
+                input_description=t.input_description,
+                organization=t.organization,
+                tenant_id=t.tenant_id,
+                deleted_at=t.deleted_at,
+                deleted_by_user_id=t.deleted_by_user_id,
+                restored_at=t.restored_at,
+                restored_by_user_id=t.restored_by_user_id,
+                original_snapshot=t.original_snapshot,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                usage_count=usage_count,
+                is_default=t.is_default,
+                icon_name=t.icon_name,
+            )
         )
-        for t, usage_count in templates_with_usage
-    ]
 
     return AppTemplateAdminListPublic(items=items)

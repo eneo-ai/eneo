@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
@@ -39,6 +40,9 @@ from eneo.server.protocol import responses
 
 router = APIRouter()
 
+_WITH_USER = Depends(get_container(with_user=True))
+_TAGS_QUERY = Query(None)
+
 
 # ============================================================================
 # Global MCP Server Catalog Endpoints (Admin)
@@ -51,8 +55,8 @@ router = APIRouter()
     responses=responses.get_responses([404]),
 )
 async def get_mcp_servers(
-    tags: list[str] | None = Query(None),
-    container: Container = Depends(get_container(with_user=True)),
+    tags: list[str] | None = _TAGS_QUERY,
+    container: Container = _WITH_USER,
 ):
     """Get all MCP servers from global catalog with optional tag filtering."""
     service = container.mcp_server_service()
@@ -73,7 +77,7 @@ async def get_mcp_servers(
     responses=responses.get_responses([404]),
 )
 async def get_tenant_mcp_settings(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Get all available MCP servers with tenant enablement status."""
     service = container.mcp_server_settings_service()
@@ -85,13 +89,14 @@ async def get_tenant_mcp_settings(
 
 @router.post(
     "/settings/{mcp_server_id}/",
+    description="Enable an MCP server for the current tenant with optional credentials.",
     response_model=MCPServerSettingsPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def enable_mcp_for_tenant(
     mcp_server_id: UUID,
     data: MCPServerSettingsCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Enable an MCP server for the current tenant with optional credentials."""
     service = container.mcp_server_settings_service()
@@ -108,7 +113,7 @@ async def enable_mcp_for_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_ENABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=settings.id,
@@ -121,13 +126,14 @@ async def enable_mcp_for_tenant(
 
 @router.put(
     "/settings/{mcp_server_id}/",
+    description="Update MCP server settings for the current tenant.",
     response_model=MCPServerSettingsPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_mcp_settings(
     mcp_server_id: UUID,
     data: MCPServerSettingsUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update MCP server settings for the current tenant."""
     service = container.mcp_server_settings_service()
@@ -143,12 +149,13 @@ async def update_mcp_settings(
 
 @router.delete(
     "/settings/{mcp_server_id}/",
+    description="Disable an MCP server for the current tenant.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
 async def disable_mcp_for_tenant(
     mcp_server_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Disable an MCP server for the current tenant."""
     service = container.mcp_server_settings_service()
@@ -167,7 +174,7 @@ async def disable_mcp_for_tenant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_DISABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=mcp_server_id,
@@ -178,13 +185,14 @@ async def disable_mcp_for_tenant(
 
 @router.put(
     "/settings/tools/{tool_id}/",
+    description="Update tenant-level enablement for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([403, 404]),
 )
 async def update_tenant_tool_enabled(
     tool_id: UUID,
     data: MCPServerToolUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update tenant-level enablement for a tool (admin only)."""
     service = container.mcp_server_service()
@@ -200,10 +208,14 @@ async def update_tenant_tool_enabled(
     # Audit logging
     user = container.user()
     audit_service = container.audit_service()
-    action = ActionType.MCP_SERVER_TOOL_ENABLED if data.is_enabled else ActionType.MCP_SERVER_TOOL_DISABLED
+    action = (
+        ActionType.MCP_SERVER_TOOL_ENABLED
+        if data.is_enabled
+        else ActionType.MCP_SERVER_TOOL_DISABLED
+    )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.MCP_SERVER_TOOL,
         entity_id=tool.id,
@@ -211,7 +223,10 @@ async def update_tenant_tool_enabled(
         metadata=AuditMetadata.standard(
             actor=user,
             target=tool,
-            extra={"mcp_server_id": str(mcp_server.id), "mcp_server_name": mcp_server.name},
+            extra={
+                "mcp_server_id": str(mcp_server.id),
+                "mcp_server_name": mcp_server.name,
+            },
         ),
     )
 
@@ -230,7 +245,7 @@ async def update_tenant_tool_enabled(
 )
 async def get_mcp_server(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Get a single MCP server by ID."""
     service = container.mcp_server_service()
@@ -242,12 +257,14 @@ async def get_mcp_server(
 
 @router.post(
     "/",
+    description="Create a new MCP server in global catalog (admin only).",
     response_model=MCPServerCreateResponse,
-    responses=responses.get_responses([400, 403]),
+    responses=responses.get_responses([400, 403, 409]),
 )
 async def create_mcp_server(
     data: MCPServerCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Create a new MCP server in global catalog (admin only).
 
@@ -272,7 +289,9 @@ async def create_mcp_server(
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
-        documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
         security_classification=security_classification,
     )
 
@@ -287,7 +306,7 @@ async def create_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_CREATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=result.server.id,
@@ -307,13 +326,14 @@ async def create_mcp_server(
 
 @router.post(
     "/{id}/",
+    description="Update an MCP server in global catalog (admin only).",
     response_model=MCPServerPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def update_mcp_server(
     id: UUID,
     data: MCPServerUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update an MCP server in global catalog (admin only)."""
     service = container.mcp_server_service()
@@ -343,7 +363,9 @@ async def update_mcp_server(
         http_auth_config_schema=data.http_auth_config_schema,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
-        documentation_url=str(data.documentation_url) if data.documentation_url else None,
+        documentation_url=str(data.documentation_url)
+        if data.documentation_url
+        else None,
         security_classification=security_classification,
     )
 
@@ -362,9 +384,18 @@ async def update_mcp_server(
     if data.http_url is not None and str(data.http_url) != old_server.http_url:
         changes["http_url"] = {"old": old_server.http_url, "new": str(data.http_url)}
     if data.description is not None and data.description != old_server.description:
-        changes["description"] = {"old": old_server.description, "new": data.description}
-    if data.http_auth_type is not None and data.http_auth_type != old_server.http_auth_type:
-        changes["http_auth_type"] = {"old": old_server.http_auth_type, "new": data.http_auth_type}
+        changes["description"] = {
+            "old": old_server.description,
+            "new": data.description,
+        }
+    if (
+        data.http_auth_type is not None
+        and data.http_auth_type != old_server.http_auth_type
+    ):
+        changes["http_auth_type"] = {
+            "old": old_server.http_auth_type,
+            "new": data.http_auth_type,
+        }
     if data.tags is not None and data.tags != old_server.tags:
         changes["tags"] = {"old": old_server.tags, "new": data.tags}
     if data.http_auth_config_schema is not None:
@@ -375,7 +406,7 @@ async def update_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=mcp_server.id,
@@ -388,12 +419,13 @@ async def update_mcp_server(
 
 @router.delete(
     "/{id}/",
+    description="Delete an MCP server from global catalog (admin only).",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
 async def delete_mcp_server(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Delete an MCP server from global catalog (admin only)."""
     service = container.mcp_server_service()
@@ -408,7 +440,7 @@ async def delete_mcp_server(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_DELETED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -429,7 +461,7 @@ async def delete_mcp_server(
 )
 async def get_mcp_server_tools(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Get all tools for an MCP server with tenant-level settings applied."""
     service = container.mcp_server_service()
@@ -442,12 +474,13 @@ async def get_mcp_server_tools(
 
 @router.post(
     "/{id}/tools/sync/",
+    description="Sync tools from remote MCP server (admin only).",
     response_model=MCPServerToolSyncResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
 async def sync_mcp_server_tools(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Sync tools from remote MCP server (admin only).
 
@@ -493,13 +526,14 @@ async def sync_mcp_server_tools(
 
 @router.post(
     "/{id}/tools/review/approve/",
+    description="Approve pending tool changes (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
 async def approve_tool_changes(
     id: UUID,
     data: ToolReviewRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Approve pending tool changes (admin only).
 
@@ -517,7 +551,7 @@ async def approve_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -537,13 +571,14 @@ async def approve_tool_changes(
 
 @router.post(
     "/{id}/tools/review/reject/",
+    description="Reject pending tool changes (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
 async def reject_tool_changes(
     id: UUID,
     data: ToolReviewRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Reject pending tool changes (admin only).
 
@@ -562,7 +597,7 @@ async def reject_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -582,12 +617,13 @@ async def reject_tool_changes(
 
 @router.post(
     "/{id}/tools/review/approve-all/",
+    description="Approve all pending tool changes for an MCP server (admin only).",
     response_model=ToolReviewResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
 async def approve_all_tool_changes(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Approve all pending tool changes for an MCP server (admin only)."""
     service = container.mcp_server_service()
@@ -601,7 +637,7 @@ async def approve_all_tool_changes(
     mcp_server = await service.get_mcp_server(id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.MCP_SERVER_UPDATED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=id,
@@ -616,6 +652,7 @@ async def approve_all_tool_changes(
 
 @router.put(
     "/{id}/tools/{tool_id}/",
+    description="Update global default enabled status for a tool (admin only).",
     response_model=MCPServerToolPublic,
     responses=responses.get_responses([403, 404]),
 )
@@ -623,7 +660,7 @@ async def update_tool_default_enabled(
     id: UUID,
     tool_id: UUID,
     data: MCPServerToolUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     """Update global default enabled status for a tool (admin only)."""
     service = container.mcp_server_service()
@@ -638,10 +675,14 @@ async def update_tool_default_enabled(
     # Audit logging
     user = container.user()
     audit_service = container.audit_service()
-    action = ActionType.MCP_SERVER_TOOL_ENABLED if data.is_enabled else ActionType.MCP_SERVER_TOOL_DISABLED
+    action = (
+        ActionType.MCP_SERVER_TOOL_ENABLED
+        if data.is_enabled
+        else ActionType.MCP_SERVER_TOOL_DISABLED
+    )
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.MCP_SERVER_TOOL,
         entity_id=tool.id,
@@ -649,7 +690,10 @@ async def update_tool_default_enabled(
         metadata=AuditMetadata.standard(
             actor=user,
             target=tool,
-            extra={"mcp_server_id": str(mcp_server.id), "mcp_server_name": mcp_server.name},
+            extra={
+                "mcp_server_id": str(mcp_server.id),
+                "mcp_server_name": mcp_server.name,
+            },
         ),
     )
 

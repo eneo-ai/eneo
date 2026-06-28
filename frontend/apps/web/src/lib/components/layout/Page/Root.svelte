@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { writable, type Writable } from "svelte/store";
   import { createContentTabs } from "./ctx";
   import { page } from "$app/state";
@@ -13,7 +14,9 @@
 
   const {
     elements: { root }
-  } = createContentTabs(page.url.searchParams.get("tab") ?? undefined, tabController, onTabChange);
+  } = untrack(() =>
+    createContentTabs(page.url.searchParams.get("tab") ?? undefined, tabController, onTabChange)
+  );
 
   $effect(() => {
     const stateTab = page.state.tab;

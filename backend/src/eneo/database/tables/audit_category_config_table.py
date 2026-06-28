@@ -1,7 +1,18 @@
 """Database table for audit category configuration."""
 
-from sqlalchemy import Boolean, Column, String, TIMESTAMP, CheckConstraint, Index, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from datetime import datetime
+
+from sqlalchemy import (
+    TIMESTAMP,
+    Boolean,
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    Index,
+    String,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BasePublic
 
@@ -13,7 +24,7 @@ class AuditCategoryConfig(BasePublic):
     Allows admins to control which categories of audit events are logged.
     """
 
-    __tablename__ = "audit_category_config"
+    __tablename__ = "audit_category_config"  # type: ignore[assignment]
 
     # Composite Primary Key
     tenant_id = Column(
@@ -46,12 +57,12 @@ class AuditCategoryConfig(BasePublic):
     )
 
     # Timestamps
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default="NOW()",
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default="NOW()",

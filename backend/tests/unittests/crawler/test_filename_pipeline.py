@@ -10,7 +10,7 @@ class TestTruncateFilename:
         """Short filenames should pass through unchanged (but decoded)."""
         result = _truncate_filename("document.pdf")
         assert result == "document.pdf"
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
 
     def test_url_encoded_filename_decoded(self):
         """URL-encoded filenames should be decoded."""
@@ -27,7 +27,7 @@ class TestTruncateFilename:
 
         # Should be decoded Arabic
         assert "يمكنك" in result  # Arabic text present
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
         assert result.endswith(".pdf")
 
     def test_farsi_url_encoded_filename_decoded(self):
@@ -39,14 +39,14 @@ class TestTruncateFilename:
         # Should be decoded
         assert "برای" in result  # Farsi text present
         assert "vända" in result  # Swedish text present
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
 
     def test_very_long_filename_truncated(self):
         """Filenames exceeding max bytes should be truncated with hash."""
         long_name = "a" * 250 + ".pdf"
         result = _truncate_filename(long_name)
 
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
         assert result.endswith(".pdf")  # Extension preserved
         assert "_" in result  # Has hash separator
         # Hash is 8 chars
@@ -73,7 +73,7 @@ class TestTruncateFilename:
         long_name = "a" * 250
         result = _truncate_filename(long_name)
 
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
         assert "_" in result  # Has hash
 
     def test_multibyte_truncation_safe(self):
@@ -84,9 +84,9 @@ class TestTruncateFilename:
         result = _truncate_filename(arabic_name)
 
         # Should not raise UnicodeDecodeError
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
         # Should be valid UTF-8 (no truncated chars)
-        result.encode('utf-8').decode('utf-8')  # Should not raise
+        result.encode("utf-8").decode("utf-8")  # Should not raise
 
     def test_exact_boundary(self):
         """Filename exactly at boundary should not be truncated."""
@@ -95,7 +95,7 @@ class TestTruncateFilename:
         stem_length = MAX_FILENAME_BYTES - len(extension)
         exact_name = "a" * stem_length + extension
 
-        assert len(exact_name.encode('utf-8')) == MAX_FILENAME_BYTES
+        assert len(exact_name.encode("utf-8")) == MAX_FILENAME_BYTES
         result = _truncate_filename(exact_name)
         assert result == exact_name  # Unchanged
 
@@ -105,9 +105,9 @@ class TestTruncateFilename:
         stem_length = MAX_FILENAME_BYTES - len(extension) + 1
         over_name = "a" * stem_length + extension
 
-        assert len(over_name.encode('utf-8')) == MAX_FILENAME_BYTES + 1
+        assert len(over_name.encode("utf-8")) == MAX_FILENAME_BYTES + 1
         result = _truncate_filename(over_name)
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
         assert "_" in result  # Has hash
 
 
@@ -171,7 +171,7 @@ class TestEdgeCases:
         filename = "file" + long_ext
 
         result = _truncate_filename(filename)
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
         # Extension should be capped
         assert "_" in result  # Has hash
 
@@ -180,7 +180,7 @@ class TestEdgeCases:
         result = _truncate_filename(".pdf")
         # stem is empty, so we get file_{hash}.pdf pattern
         assert result.endswith(".pdf")
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
 
     def test_double_dots_in_filename(self):
         """Filename with double dots (like production error) should work."""
@@ -188,7 +188,7 @@ class TestEdgeCases:
         result = _truncate_filename("مراجعه-کنید..pdf")
         assert result.endswith(".pdf")
         # The ".." before extension gets treated as part of stem
-        assert len(result.encode('utf-8')) <= MAX_FILENAME_BYTES
+        assert len(result.encode("utf-8")) <= MAX_FILENAME_BYTES
 
     def test_special_characters_preserved(self):
         """Non-path special characters should be preserved."""

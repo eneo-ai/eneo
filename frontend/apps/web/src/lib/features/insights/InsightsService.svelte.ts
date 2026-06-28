@@ -10,11 +10,10 @@ import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { getEneo } from "$lib/core/Eneo";
 import { CalendarDate } from "@internationalized/date";
+import { SvelteSet } from "svelte/reactivity";
 import type { ChatPartner, Conversation, ConversationSparse, Eneo } from "@eneo/eneo-js";
 
-type InsightStatistics = Awaited<
-  ReturnType<Eneo["analytics"]["insights"]["statistics"]>
->;
+type InsightStatistics = Awaited<ReturnType<Eneo["analytics"]["insights"]["statistics"]>>;
 
 class InsightsService {
   #eneo: Eneo;
@@ -253,7 +252,7 @@ class InsightsService {
         }
 
         if (append) {
-          const seen = new Set(this.conversations.map((conversation) => conversation.id));
+          const seen = new SvelteSet(this.conversations.map((conversation) => conversation.id));
           const merged = [...this.conversations];
           for (const conversation of conversations.items) {
             if (!seen.has(conversation.id)) {

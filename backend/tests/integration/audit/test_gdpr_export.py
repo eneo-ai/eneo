@@ -13,7 +13,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_gdpr_export_includes_actor_and_target(db_session, test_tenant, test_user):
+async def test_gdpr_export_includes_actor_and_target(
+    db_session, test_tenant, test_user
+):
     """Test that GDPR export includes logs where user is both actor and target."""
     async with db_session() as session:
         repository = AuditLogRepositoryImpl(session)

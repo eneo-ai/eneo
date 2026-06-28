@@ -10,7 +10,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   export let website: WebsiteSparse;
 
@@ -21,7 +21,7 @@
   } = getSpacesManager();
 
   $: isOrgSpace = $currentSpace.organization === true;
-  
+
   async function deleteWebsite() {
     isProcessing = true;
     try {
@@ -29,7 +29,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      toast.error(m.could_not_delete_crawl());
+      toastError(e, m.could_not_delete_crawl());
       console.error(e);
     }
     isProcessing = false;
@@ -43,7 +43,7 @@
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;

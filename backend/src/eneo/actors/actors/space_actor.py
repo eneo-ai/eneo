@@ -1,6 +1,7 @@
 from enum import Enum
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
+from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.models import ResourcePermission
 from eneo.modules.module import Modules
 from eneo.roles.permissions import Permission
@@ -284,43 +285,81 @@ ORG_SPACE_PERMISSIONS = {
     },
     SpaceRole.ADMIN: {
         SpaceResourceType.ASSISTANT: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
-            SpaceAction.PUBLISH, SpaceAction.INSIGHT_TOGGLE, SpaceAction.INSIGHT_VIEW,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+            SpaceAction.INSIGHT_TOGGLE,
+            SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.GROUP_CHAT: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
-            SpaceAction.PUBLISH, SpaceAction.INSIGHT_TOGGLE, SpaceAction.INSIGHT_VIEW,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+            SpaceAction.INSIGHT_TOGGLE,
+            SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.APP: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE, SpaceAction.PUBLISH,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
         },
         SpaceResourceType.SERVICE: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE, SpaceAction.PUBLISH,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
         },
         SpaceResourceType.COLLECTION: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.WEBSITE: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.INTEGRATION_KNOWLEDGE: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.INFO_BLOB: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
-            SpaceAction.READ, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.MEMBER: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         SpaceResourceType.GROUP_MEMBER: {
-            SpaceAction.READ, SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE,
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
         },
         # Chat / default-assistenten synlig & redigerbar endast för admin:
         SpaceResourceType.DEFAULT_ASSISTANT: {
-            SpaceAction.READ, SpaceAction.EDIT,
+            SpaceAction.READ,
+            SpaceAction.EDIT,
         },
     },
 }
@@ -357,6 +396,7 @@ class SpaceActor:
         personal_space_permissions: AccessControlList = PERSONAL_SPACE_PERMISSIONS,
         org_space_permissions: AccessControlList = ORG_SPACE_PERMISSIONS,
     ):
+        super().__init__()
         self.user = user
         self.space = space
         self._shared_space_permissions = shared_space_permissions
@@ -377,20 +417,81 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
-        # 1. Personal space → OWNER
+        # Service keys have no user membership — the key is the only access
+        # path into any space.
+        if self._is_service_api_key():
+            return self._get_api_key_role()
+
+        # User-owned API key whose scope does not cover this space: deny.
+        # The credential used to authenticate this request does not extend
+        # to this space, so the user's membership here is irrelevant.
+        key = getattr(self.user, "active_api_key", None)
+        if key is not None and self._get_api_key_role() is None:
+            return None
+
+        # Personal space → OWNER for the owning user.
         if self.space.is_personal():
             if self.user.id == self.space.user_id:
                 return SpaceRole.OWNER
             return None
 
-        # 2. Check direct membership
         direct_role = self._get_direct_role()
-
-        # 3. Check group membership
         group_role = self._get_highest_group_role()
-
-        # 4. Return the highest role
         return self._get_highest_role(direct_role, group_role)
+
+    def _is_service_api_key(self) -> bool:
+        return is_service_api_key(self.user)
+
+    def _get_api_key_role(self) -> SpaceRole | None:
+        """Derive a space role from the active API key's scope and permission.
+
+        Applies to both service and user-owned keys. Returns None when no
+        key is active, or when the key's scope does not cover this space.
+
+        Scope → access:
+          - tenant-scoped     → every space in the tenant
+          - space-scoped      → only the matching space
+          - assistant/app     → only the parent space of that resource
+
+        Permission → role:
+          - read  → VIEWER
+          - write → EDITOR
+          - admin → ADMIN
+        """
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            return None
+
+        scope_type = key.scope_type
+        if hasattr(scope_type, "value"):
+            scope_type = scope_type.value
+
+        if scope_type == "tenant":
+            pass  # tenant keys cover every space
+        elif scope_type == "space":
+            if key.scope_id != self.space.id:
+                return None
+        elif scope_type in ("assistant", "app"):
+            resource_ids: set[object] = set()
+            if scope_type == "assistant":
+                resource_ids = {a.id for a in (self.space.assistants or [])}
+            elif scope_type == "app":
+                resource_ids = {a.id for a in (self.space.apps or [])}
+            if key.scope_id not in resource_ids:
+                return None
+        else:
+            return None
+
+        permission = key.permission
+        if hasattr(permission, "value"):
+            permission = permission.value
+
+        _PERMISSION_TO_ROLE = {
+            "read": SpaceRole.VIEWER,
+            "write": SpaceRole.EDITOR,
+            "admin": SpaceRole.ADMIN,
+        }
+        return _PERMISSION_TO_ROLE.get(permission)
 
     def _get_direct_role(self) -> SpaceRole | None:
         """Get the user's role from direct membership."""
@@ -411,6 +512,30 @@ class SpaceActor:
 
         return highest
 
+    _ROLE_PRIORITY = {
+        SpaceRole.OWNER: 4,
+        SpaceRole.ADMIN: 3,
+        SpaceRole.EDITOR: 2,
+        SpaceRole.VIEWER: 1,
+    }
+
+    # Actions a user-owned API key is allowed to exercise, per key permission
+    # level. Aligned with the HTTP method→permission map: ``read`` covers
+    # GET-equivalent actions, ``write`` covers POST/PUT/PATCH-equivalent, and
+    # ``admin`` lifts the constraint entirely (DELETE included). Applied on
+    # top of the user's role so the effective permissions are the intersection.
+    _KEY_PERMISSION_ACTIONS: dict[str, set[SpaceAction]] = {
+        "read": {SpaceAction.READ, SpaceAction.INSIGHT_VIEW},
+        "write": {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.PUBLISH,
+            SpaceAction.INSIGHT_VIEW,
+            SpaceAction.INSIGHT_TOGGLE,
+        },
+    }
+
     def _get_highest_role(
         self, role1: SpaceRole | None, role2: SpaceRole | None
     ) -> SpaceRole | None:
@@ -423,46 +548,84 @@ class SpaceActor:
         if role2 is None:
             return role1
 
-        role_priority = {
-            SpaceRole.OWNER: 4,
-            SpaceRole.ADMIN: 3,
-            SpaceRole.EDITOR: 2,
-            SpaceRole.VIEWER: 1,
-        }
+        return (
+            role1
+            if self._ROLE_PRIORITY.get(role1, 0) >= self._ROLE_PRIORITY.get(role2, 0)
+            else role2
+        )
 
-        return role1 if role_priority.get(role1, 0) >= role_priority.get(role2, 0) else role2
+    def _get_api_key_action_constraint(self) -> set[SpaceAction] | None:
+        """Return the action set a user-owned API key permits, or None for
+        no constraint (service key, admin key, or no active key)."""
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            return None
+        if self._is_service_api_key():
+            return None
 
-    def _get_permissions(self, role: SpaceRole):
+        permission = key.permission
+        if hasattr(permission, "value"):
+            permission = permission.value
+        if permission == "admin":
+            return None
+        return self._KEY_PERMISSION_ACTIONS.get(permission, set())
+
+    def _get_permissions(
+        self, role: SpaceRole | None
+    ) -> dict[SpaceResourceType, set[SpaceAction]]:
+        if role is None:
+            return {}
         if self.space.is_personal():
-            return self._personal_space_permissions.get(role, {})
-        if self.space.is_organization(): 
-            return self._org_space_permissions.get(role, {})
-        return self._shared_space_permissions.get(role, {})
-    
+            base = self._personal_space_permissions.get(role, {})
+        elif self.space.is_organization():
+            base = self._org_space_permissions.get(role, {})
+        else:
+            base = self._shared_space_permissions.get(role, {})
+
+        allowed = self._get_api_key_action_constraint()
+        if allowed is None:
+            return base
+        return {resource: actions & allowed for resource, actions in base.items()}
+
     def can_perform_action(
         self,
         action: SpaceAction,
         resource_type: SpaceResourceType,
-        resource: Union["Assistant", "GroupChat", "App"] = None,
+        resource: Optional[Union["Assistant", "GroupChat", "App"]] = None,
     ):
         role = self._get_role()
         permissions = self._get_permissions(role=role)
 
-        if (
-            self.space.is_personal()
-            and resource_type in PERMISSION_RESOURCES
-        ):
+        # Check tenant-level permissions for all spaces (personal and shared).
+        # Service API keys authorize via scope+permission, not user roles —
+        # their synthetic user has no roles, so skip this gate for them.
+        if resource_type in PERMISSION_RESOURCES and not self._is_service_api_key():
             permission = self._to_permisson(resource_type=resource_type)
-            has_permission = permission in self.user.permissions if permission else False
+            has_permission = (
+                permission in self.user.permissions if permission else False
+            )
             if not has_permission and not (
-                resource_type in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
+                resource_type
+                in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
                 and action == SpaceAction.READ
             ):
                 return False
 
+        # The personal chat (personal space default assistant) is gated by its
+        # own tenant permission, decoupled from ASSISTANTS so a baseline role can
+        # grant chat without management of assistants. Service keys authorize via
+        # scope, not user roles, so they bypass this gate (as above).
+        if (
+            resource_type == SpaceResourceType.DEFAULT_ASSISTANT
+            and self.space.is_personal()
+            and not self._is_service_api_key()
+            and Permission.PERSONAL_CHAT not in self.user.permissions
+        ):
+            return False
+
         if (
             resource_type == SpaceResourceType.SERVICE
-            and Modules.ENEO_APPLICATIONS not in self.user.modules
+            and Modules.INTRIC_APPLICATIONS not in self.user.modules
         ):
             return False
 
@@ -471,7 +634,7 @@ class SpaceActor:
                 return False
 
         if resource_type in INSIGHT_RESOURCES and action == SpaceAction.INSIGHT_VIEW:
-            if resource is not None and not resource.insight_enabled:
+            if resource is not None and not resource.insight_enabled:  # type: ignore[attr-defined]
                 return False
 
         allowed_actions = permissions.get(resource_type, set())
@@ -810,8 +973,8 @@ class SpaceActor:
         can_publish: bool,
         can_access_insight: bool,
         can_toggle_insight: bool,
-    ):
-        permissions = []
+    ) -> list[ResourcePermission]:
+        permissions: list[ResourcePermission] = []
 
         if can_edit:
             permissions.append(ResourcePermission.EDIT)
@@ -830,8 +993,10 @@ class SpaceActor:
 
         return permissions
 
-    def get_assistant_permissions(self, assistant: "Assistant"):
-        permissions = []
+    def get_assistant_permissions(
+        self, assistant: "Assistant"
+    ) -> list[ResourcePermission]:
+        permissions: list[ResourcePermission] = []
 
         # TODO: Getting permissions should be revisited after
         # Space is the aggregate root
@@ -855,16 +1020,20 @@ class SpaceActor:
             can_toggle_insight=self.can_toggle_insight(),
         )
 
-    def get_group_chat_permissions(self, group_chat: "GroupChat"):
+    def get_group_chat_permissions(
+        self, group_chat: "GroupChat"
+    ) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_group_chats(),
             can_delete=self.can_delete_group_chats(),
             can_publish=self.can_publish_group_chats(),
-            can_access_insight=self.can_access_insight_group_chat(group_chat=group_chat),
+            can_access_insight=self.can_access_insight_group_chat(
+                group_chat=group_chat
+            ),
             can_toggle_insight=self.can_toggle_insight(),
         )
 
-    def get_app_permissions(self):
+    def get_app_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_apps(),
             can_delete=self.can_delete_apps(),
@@ -873,7 +1042,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_collection_permissions(self):
+    def get_collection_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_collections(),
             can_delete=self.can_delete_collections(),
@@ -882,7 +1051,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_website_permissions(self):
+    def get_website_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_websites(),
             can_delete=self.can_delete_websites(),
@@ -891,7 +1060,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_integrations_permissions(self):
+    def get_integrations_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_integrations(),
             can_delete=self.can_delete_integrations(),
@@ -900,7 +1069,7 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_service_permissions(self):
+    def get_service_permissions(self) -> list[ResourcePermission]:
         return self._get_resource_permissions(
             can_edit=self.can_edit_services(),
             can_delete=self.can_delete_services(),
@@ -909,10 +1078,8 @@ class SpaceActor:
             can_toggle_insight=False,
         )
 
-    def get_available_roles(self):
+    def get_available_roles(self) -> list[SpaceRole]:
         if self.space.is_personal():
             return []
 
-        roles = [SpaceRole.ADMIN, SpaceRole.EDITOR, SpaceRole.VIEWER]
-
-        return roles
+        return [SpaceRole.ADMIN, SpaceRole.EDITOR, SpaceRole.VIEWER]

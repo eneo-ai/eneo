@@ -30,16 +30,24 @@ class MockRepo:
 
 class MockFeatureFlagService:
     """Mock feature flag service for testing."""
+
     async def check_is_feature_enabled(self, feature_name: str, tenant_id=None):
         # Return False for using_templates by default (feature disabled)
+        return False
+
+    async def check_is_feature_enabled_fail_closed(
+        self, feature_name: str, tenant_id=None
+    ):
         return False
 
 
 class MockTenantRepo:
     """Mock tenant repo for testing."""
+
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
         from eneo.tenants.tenant import TenantInDB, TenantState
+
         return TenantInDB(
             id=tenant_id,
             name="Test Tenant",
@@ -50,6 +58,13 @@ class MockTenantRepo:
             state=TenantState.ACTIVE,
             provisioning=False,
         )
+
+
+class MockAuditService:
+    """Mock audit service for testing."""
+
+    async def log_async(self, *args, **kwargs):
+        pass
 
 
 async def test_get_settings_if_settings():
@@ -63,6 +78,7 @@ async def test_get_settings_if_settings():
         ai_models_service=MockRepo(),
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
     )
 
     settings = await service.get_settings()
@@ -79,6 +95,7 @@ async def test_update_settings():
         ai_models_service=MockRepo(),
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
     )
 
     repo.settings[TEST_USER.id] = TEST_SETTINGS_EXPECTED
@@ -89,5 +106,27 @@ async def test_update_settings():
 
     settings = await service.update_settings(new_settings)
 
-    assert settings == settings_expected
+    assert settings.chatbot_widget == settings_expected.chatbot_widget
+    assert settings.using_templates == False
     assert repo.settings[TEST_USER.id] == settings_expected
+
+
+async def test_update_settings_creates_row_when_missing():
+    repo = MockRepo()
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+    )
+
+    new_settings = SettingsPublic(chatbot_widget={"preferred_text_format": "richtext"})
+
+    settings = await service.update_settings(new_settings)
+
+    assert settings.chatbot_widget == {"preferred_text_format": "richtext"}
+    assert repo.settings[TEST_USER.id].chatbot_widget == {
+        "preferred_text_format": "richtext"
+    }

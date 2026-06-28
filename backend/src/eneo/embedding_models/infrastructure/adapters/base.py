@@ -23,7 +23,8 @@ class EmbeddingModelAdapter(abc.ABC):
     including both ORM EmbeddingModel and frozen EmbeddingModelSpec DTO.
     """
 
-    def __init__(self, model: "EmbeddingModelLike"):
+    def __init__(self, model: "EmbeddingModelLike") -> None:
+        super().__init__()
         self.model = model
 
     def _chunk_chunks(self, chunks: list["InfoBlobChunk"]):
@@ -85,7 +86,7 @@ class EmbeddingModelAdapter(abc.ABC):
         )
 
     @abstractmethod
-    async def get_embedding_for_query(self, query: str):
+    async def get_embedding_for_query(self, query: str) -> list[float]:
         raise NotImplementedError
 
     @abstractmethod

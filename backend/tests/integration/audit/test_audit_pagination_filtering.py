@@ -9,7 +9,9 @@ pytestmark = pytest.mark.integration
 class TestPaginationBasics:
     """Tests for basic pagination functionality."""
 
-    async def test_first_page_returns_correct_count(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_first_page_returns_correct_count(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify first page returns correct number of items."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -24,7 +26,9 @@ class TestPaginationBasics:
         assert data["page"] == 1
         assert data["page_size"] == 10
 
-    async def test_second_page_returns_different_items(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_second_page_returns_different_items(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify second page contains different items than first page."""
         headers, cookies = auth_headers_with_session
 
@@ -50,7 +54,9 @@ class TestPaginationBasics:
         overlap = set(page1_ids) & set(page2_ids)
         assert len(overlap) == 0, "Pages should contain different items"
 
-    async def test_total_count_is_consistent(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_total_count_is_consistent(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify total_count is same across different pages."""
         headers, cookies = auth_headers_with_session
 
@@ -69,7 +75,9 @@ class TestPaginationBasics:
 
         assert response1.json()["total_count"] == response2.json()["total_count"]
 
-    async def test_total_pages_calculated_correctly(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_total_pages_calculated_correctly(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify total_pages is calculated correctly."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -86,7 +94,9 @@ class TestPaginationBasics:
 class TestPaginationEdgeCases:
     """Tests for pagination edge cases."""
 
-    async def test_page_size_of_one(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_page_size_of_one(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify page_size=1 works correctly."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -99,7 +109,9 @@ class TestPaginationEdgeCases:
         assert len(data["logs"]) <= 1
         assert data["page_size"] == 1
 
-    async def test_page_beyond_total_returns_empty(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_page_beyond_total_returns_empty(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify requesting page beyond total returns empty list."""
         headers, cookies = auth_headers_with_session
 
@@ -121,7 +133,9 @@ class TestPaginationEdgeCases:
 
         assert len(data["logs"]) == 0
 
-    async def test_large_page_size(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_large_page_size(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify maximum page_size (1000) works."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -159,7 +173,9 @@ class TestPaginationEdgeCases:
 class TestFilteringByAction:
     """Tests for action type filtering."""
 
-    async def test_filter_user_created(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_user_created(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify filtering by user_created action."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -173,7 +189,9 @@ class TestFilteringByAction:
         for log in data["logs"]:
             assert log["action"] == "user_created"
 
-    async def test_filter_assistant_created(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_assistant_created(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify filtering by assistant_created action."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -187,7 +205,9 @@ class TestFilteringByAction:
         for log in data["logs"]:
             assert log["action"] == "assistant_created"
 
-    async def test_filter_file_uploaded(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_file_uploaded(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify filtering by file_uploaded action."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -201,7 +221,9 @@ class TestFilteringByAction:
 class TestFilteringByDateRange:
     """Tests for date range filtering."""
 
-    async def test_filter_from_date(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_from_date(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify from_date filter excludes older logs."""
         headers, cookies = auth_headers_with_session
 
@@ -218,12 +240,14 @@ class TestFilteringByDateRange:
         data = response.json()
 
         # All logs should be after from_date
-        from_dt = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+        from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
         for log in data["logs"]:
-            log_dt = datetime.fromisoformat(log["created_at"].replace('Z', '+00:00'))
+            log_dt = datetime.fromisoformat(log["created_at"].replace("Z", "+00:00"))
             assert log_dt >= from_dt
 
-    async def test_filter_to_date(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_to_date(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify to_date filter excludes newer logs."""
         headers, cookies = auth_headers_with_session
 
@@ -238,7 +262,9 @@ class TestFilteringByDateRange:
         )
         assert response.status_code == 200
 
-    async def test_filter_date_range(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_filter_date_range(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify combined from_date and to_date filter."""
         headers, cookies = auth_headers_with_session
 
@@ -257,7 +283,9 @@ class TestFilteringByDateRange:
 class TestCombinedFiltersAndPagination:
     """Tests for combining filters with pagination."""
 
-    async def test_action_filter_with_pagination(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_action_filter_with_pagination(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify action filter works with pagination."""
         headers, cookies = auth_headers_with_session
 
@@ -277,7 +305,9 @@ class TestCombinedFiltersAndPagination:
         # total_count should only include filtered items
         assert data["total_count"] <= 55  # sample_audit_logs creates 55
 
-    async def test_date_filter_with_pagination(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_date_filter_with_pagination(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify date filter works with pagination."""
         headers, cookies = auth_headers_with_session
 
@@ -296,7 +326,9 @@ class TestCombinedFiltersAndPagination:
         assert data["page"] == 1
         assert data["page_size"] == 5
 
-    async def test_multiple_filters_with_pagination(self, client, auth_headers_with_session, sample_audit_logs, test_user):
+    async def test_multiple_filters_with_pagination(
+        self, client, auth_headers_with_session, sample_audit_logs, test_user
+    ):
         """Verify multiple filters combined with pagination."""
         headers, cookies = auth_headers_with_session
 
@@ -309,7 +341,7 @@ class TestCombinedFiltersAndPagination:
                 "action": "user_created",
                 "from_date": from_date,
                 "page": 1,
-                "page_size": 5
+                "page_size": 5,
             },
             headers=headers,
             cookies=cookies,
@@ -320,7 +352,9 @@ class TestCombinedFiltersAndPagination:
 class TestResultOrdering:
     """Tests for result ordering."""
 
-    async def test_results_ordered_by_timestamp_desc(self, client, auth_headers_with_session, sample_audit_logs):
+    async def test_results_ordered_by_timestamp_desc(
+        self, client, auth_headers_with_session, sample_audit_logs
+    ):
         """Verify results are ordered by timestamp descending (newest first)."""
         headers, cookies = auth_headers_with_session
         # Filter by user_created to avoid interference from audit_log_viewed entries
@@ -334,15 +368,23 @@ class TestResultOrdering:
 
         if len(data["logs"]) >= 2:
             for i in range(len(data["logs"]) - 1):
-                current_time = datetime.fromisoformat(data["logs"][i]["created_at"].replace('Z', '+00:00'))
-                next_time = datetime.fromisoformat(data["logs"][i + 1]["created_at"].replace('Z', '+00:00'))
-                assert current_time >= next_time, "Results should be ordered newest first"
+                current_time = datetime.fromisoformat(
+                    data["logs"][i]["created_at"].replace("Z", "+00:00")
+                )
+                next_time = datetime.fromisoformat(
+                    data["logs"][i + 1]["created_at"].replace("Z", "+00:00")
+                )
+                assert current_time >= next_time, (
+                    "Results should be ordered newest first"
+                )
 
 
 class TestSearchFiltering:
     """Tests for entity name search filtering using pg_trgm."""
 
-    async def test_search_filters_by_description(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_filters_by_description(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search term matches logs where description contains the term."""
         headers, cookies = auth_headers_with_session
         response = await client.get(
@@ -357,9 +399,13 @@ class TestSearchFiltering:
         # All results should contain "Sales Bot" in description
         assert len(data["logs"]) > 0, "Should find logs matching 'Sales Bot'"
         for log in data["logs"]:
-            assert "sales bot" in log["description"].lower(), f"Expected 'Sales Bot' in description: {log['description']}"
+            assert "sales bot" in log["description"].lower(), (
+                f"Expected 'Sales Bot' in description: {log['description']}"
+            )
 
-    async def test_search_is_case_insensitive(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_is_case_insensitive(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search works regardless of case."""
         headers, cookies = auth_headers_with_session
 
@@ -388,11 +434,17 @@ class TestSearchFiltering:
         assert response_mixed.status_code == 200
 
         # All should return the same count
-        assert response_lower.json()["total_count"] == response_upper.json()["total_count"]
-        assert response_lower.json()["total_count"] == response_mixed.json()["total_count"]
+        assert (
+            response_lower.json()["total_count"] == response_upper.json()["total_count"]
+        )
+        assert (
+            response_lower.json()["total_count"] == response_mixed.json()["total_count"]
+        )
         assert response_lower.json()["total_count"] > 0
 
-    async def test_search_combines_with_action_filter(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_combines_with_action_filter(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search AND action filter both apply."""
         headers, cookies = auth_headers_with_session
 
@@ -411,7 +463,9 @@ class TestSearchFiltering:
             assert "sales bot" in log["description"].lower()
             assert log["action"] == "assistant_created"
 
-    async def test_search_combines_with_actor_filter(self, client, auth_headers_with_session, searchable_audit_logs, test_user):
+    async def test_search_combines_with_actor_filter(
+        self, client, auth_headers_with_session, searchable_audit_logs, test_user
+    ):
         """Search AND actor filter both apply."""
         headers, cookies = auth_headers_with_session
 
@@ -429,7 +483,9 @@ class TestSearchFiltering:
             assert "documents" in log["description"].lower()
             assert log["actor_id"] == str(test_user)
 
-    async def test_search_minimum_length_validation(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_minimum_length_validation(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search requires minimum 3 characters."""
         headers, cookies = auth_headers_with_session
 
@@ -440,9 +496,13 @@ class TestSearchFiltering:
             headers=headers,
             cookies=cookies,
         )
-        assert response.status_code == 422, "Search with < 3 chars should return validation error"
+        assert response.status_code == 422, (
+            "Search with < 3 chars should return validation error"
+        )
 
-    async def test_search_no_results_returns_empty(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_no_results_returns_empty(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search that matches nothing returns empty list."""
         headers, cookies = auth_headers_with_session
 
@@ -458,7 +518,9 @@ class TestSearchFiltering:
         assert data["logs"] == []
         assert data["total_count"] == 0
 
-    async def test_search_partial_match(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_partial_match(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search finds partial matches in description."""
         headers, cookies = auth_headers_with_session
 
@@ -476,7 +538,9 @@ class TestSearchFiltering:
         for log in data["logs"]:
             assert "sales" in log["description"].lower()
 
-    async def test_search_with_pagination(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_with_pagination(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search works correctly with pagination."""
         headers, cookies = auth_headers_with_session
 
@@ -500,7 +564,9 @@ class TestSearchFiltering:
         for log in data["logs"]:
             assert "sales bot" in log["description"].lower()
 
-    async def test_search_escapes_wildcard_characters(self, client, auth_headers_with_session, searchable_audit_logs):
+    async def test_search_escapes_wildcard_characters(
+        self, client, auth_headers_with_session, searchable_audit_logs
+    ):
         """Search properly escapes SQL wildcards (% and _) to treat them as literals."""
         headers, cookies = auth_headers_with_session
 
@@ -531,4 +597,6 @@ class TestSearchFiltering:
         data = response.json()
 
         # Should find nothing since "Sales Bot" uses space, not underscore
-        assert data["total_count"] == 0, "Literal _ should not act as single-char wildcard"
+        assert data["total_count"] == 0, (
+            "Literal _ should not act as single-char wildcard"
+        )

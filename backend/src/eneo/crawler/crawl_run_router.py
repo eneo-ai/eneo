@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path
@@ -12,10 +13,14 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-@router.get("/{id}/", response_model=CrawlRunPublic, responses=responses.get_responses([404]))
+@router.get(
+    "/{id}/", response_model=CrawlRunPublic, responses=responses.get_responses([404])
+)
 async def get_crawl_run(
-    id: UUID = Path(description="Unique identifier of the crawl run to retrieve"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[
+        UUID, Path(description="Unique identifier of the crawl run to retrieve")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
 ):
     service = container.website_crud_service()
     return await service.get_crawl_run(id=id)

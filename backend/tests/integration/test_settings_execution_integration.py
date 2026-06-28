@@ -256,11 +256,15 @@ class TestMultiTenantSettingsIsolation:
             tenant_2 = await tenant_repo.get(tenant_2_id)
 
             # Tenant 1 settings
-            t1_timeout = get_crawler_setting("download_timeout", tenant_1.crawler_settings)
+            t1_timeout = get_crawler_setting(
+                "download_timeout", tenant_1.crawler_settings
+            )
             t1_retries = get_crawler_setting("retry_times", tenant_1.crawler_settings)
 
             # Tenant 2 settings
-            t2_timeout = get_crawler_setting("download_timeout", tenant_2.crawler_settings)
+            t2_timeout = get_crawler_setting(
+                "download_timeout", tenant_2.crawler_settings
+            )
             t2_retries = get_crawler_setting("retry_times", tenant_2.crawler_settings)
 
             # Verify complete isolation
@@ -294,7 +298,9 @@ class TestBooleanAndRangeSettings:
             tenant = await tenant_repo.get(test_tenant.id)
 
             obey_robots = get_crawler_setting("obey_robots", tenant.crawler_settings)
-            autothrottle = get_crawler_setting("autothrottle_enabled", tenant.crawler_settings)
+            autothrottle = get_crawler_setting(
+                "autothrottle_enabled", tenant.crawler_settings
+            )
 
             assert obey_robots is False
             assert autothrottle is False

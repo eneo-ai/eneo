@@ -53,6 +53,7 @@ class MCPServerAssembler:
         self,
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.encryption_service = encryption_service
 
     @staticmethod
@@ -81,6 +82,7 @@ class MCPServerAssembler:
                 {
                     "id": str(tool.id),
                     "name": tool.name,
+                    "title": tool.title,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
                     "is_enabled": tool.is_enabled_by_default,
@@ -122,6 +124,7 @@ class MCPServerSettingsAssembler:
         self,
         encryption_service: "EncryptionService | None" = None,
     ):
+        super().__init__()
         self.encryption_service = encryption_service
 
     def from_domain_to_model(self, mcp_server: MCPServer) -> MCPServerSettingsPublic:
@@ -133,6 +136,7 @@ class MCPServerSettingsAssembler:
                 id=tool.id,
                 mcp_server_id=tool.mcp_server_id,
                 name=tool.name,
+                title=tool.title,
                 description=tool.description,
                 input_schema=tool.input_schema,
                 is_enabled_by_default=tool.is_enabled_by_default,

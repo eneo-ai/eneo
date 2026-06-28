@@ -39,26 +39,28 @@ async def test_can_create_access_token_successfully(auth_service: AuthService):
 
 
 async def test_token_missing_user_is_invalid(auth_service: AuthService):
-    access_token = auth_service.create_access_token_for_user(
-        user=None,
-        secret_key=str(JWT_SECRET),
-        audience=JWT_AUDIENCE,
-        expires_in=JWT_EXPIRY_TIME_MINUTES,
-    )
-    with pytest.raises(jwt.PyJWTError):
-        jwt.decode(
-            access_token,
-            str(JWT_SECRET),
+    with pytest.raises(ValueError, match="user is required"):
+        auth_service.create_access_token_for_user(
+            user=None,
+            secret_key=str(JWT_SECRET),
             audience=JWT_AUDIENCE,
-            algorithms=[JWT_ALGORITHM],
+            expires_in=JWT_EXPIRY_TIME_MINUTES,
         )
 
 
 @pytest.mark.parametrize(
     "secret_key, jwt_audience, exception",
     (
-        ("wrong-secret", JWT_AUDIENCE, jwt.InvalidSignatureError),
-        (None, JWT_AUDIENCE, jwt.InvalidSignatureError),
+        (
+            "wrong-secret-padded-to-the-hs256-minimum-length",
+            JWT_AUDIENCE,
+            jwt.InvalidSignatureError,
+        ),
+        (
+            "another-wrong-secret-of-sufficient-key-length",
+            JWT_AUDIENCE,
+            jwt.InvalidSignatureError,
+        ),
         (JWT_SECRET, "othersite:auth", jwt.InvalidAudienceError),
         (JWT_SECRET, None, ValidationError),
     ),
@@ -95,7 +97,10 @@ async def test_invalid_token_content_raises_error(
         (JWT_SECRET, "asdf"),  # use wrong token
         (JWT_SECRET, ""),  # use wrong token
         (JWT_SECRET, None),  # use wrong token
-        ("ABC123", "use correct token"),  # use wrong secret
+        (
+            "wrong-decode-secret-of-sufficient-key-length",
+            "use correct token",
+        ),  # use wrong secret
     ),
 )
 async def test_error_when_token_or_secret_is_wrong(

@@ -1,13 +1,16 @@
 from typing import TYPE_CHECKING, Optional, Union
 
+from typing_extensions import override
+
 from eneo.ai_models.ai_model import AIModel
-from eneo.main.models import NOT_PROVIDED
+from eneo.main.models import is_provided
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
 
 if TYPE_CHECKING:
     from datetime import datetime
+    from decimal import Decimal
     from uuid import UUID
 
     from eneo.database.tables.ai_models_table import (
@@ -35,11 +38,13 @@ class EmbeddingModel(AIModel):
         hf_link: Optional[str],
         is_deprecated: bool,
         is_org_enabled: bool,
-        max_input: int,
+        max_input: Optional[int],
         dimensions: Optional[int],
         security_classification: Optional[SecurityClassification],
         max_batch_size: Optional[int] = None,
         litellm_model_name: Optional[str] = None,
+        input_cost_per_token: Optional["Decimal"] = None,
+        output_cost_per_token: Optional["Decimal"] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
@@ -64,15 +69,18 @@ class EmbeddingModel(AIModel):
             security_classification=security_classification,
         )
 
-        self.max_input = max_input
+        self.max_input: Optional[int] = max_input
         self.dimensions = dimensions
         self.max_batch_size = max_batch_size
         self.litellm_model_name = litellm_model_name
+        self.input_cost_per_token = input_cost_per_token
+        self.output_cost_per_token = output_cost_per_token
         self.tenant_id = tenant_id
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
 
+    @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
         # If litellm_model_name is set, extract provider from prefix (e.g. "azure/gpt-4" → "azure")
@@ -82,14 +90,15 @@ class EmbeddingModel(AIModel):
         # Fall back to base implementation (checks family)
         return super().get_credential_provider_name()
 
+    @override
     @classmethod
-    def to_domain(
+    def to_domain(  # type: ignore[override]  # noqa: PYI019 – parent uses generic DB TypeVar, we specialize
         cls,
         db_model: "EmbeddingModelDB",
         user: "UserInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
-    ):
+    ) -> "EmbeddingModel":
         # Settings are now directly on the model table
         return cls(
             id=db_model.id,
@@ -114,6 +123,8 @@ class EmbeddingModel(AIModel):
                 db_security_classification=db_model.security_classification
             ),
             litellm_model_name=db_model.litellm_model_name,
+            input_cost_per_token=db_model.input_cost_per_token,
+            output_cost_per_token=db_model.output_cost_per_token,
             tenant_id=db_model.tenant_id,
             provider_id=db_model.provider_id,
             provider_name=provider_name,
@@ -121,5 +132,5 @@ class EmbeddingModel(AIModel):
         )
 
     def update(self, is_org_enabled: Union[bool, "NotProvided"]):
-        if is_org_enabled is not NOT_PROVIDED:
+        if is_provided(is_org_enabled):
             self.is_org_enabled = is_org_enabled

@@ -1,16 +1,18 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from eneo.templates.templates import Templates
 
-
 if TYPE_CHECKING:
-    from eneo.database.tables.app_template_table import AppTemplates
-    from eneo.database.tables.assistant_template_table import AssistantTemplates
+    from eneo.templates.app_template.app_template import AppTemplate
+    from eneo.templates.assistant_template.assistant_template import (
+        AssistantTemplate,
+    )
 
 
 class TemplatesFactory:
     @staticmethod
     def create_templates(
-        apps: list["AppTemplates"], assistants: list["AssistantTemplates"]
+        apps: Sequence["AppTemplate"],
+        assistants: Sequence["AssistantTemplate"],
     ) -> Templates:
         return Templates(apps=apps, assistants=assistants)

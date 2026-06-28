@@ -1,44 +1,59 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-
-from eneo.embedding_models.presentation.embedding_model_models import (
-    EmbeddingModelPublic,
-    EmbeddingModelUpdate,
-)
-from eneo.main.container.container import Container
-from eneo.main.models import NOT_PROVIDED, PaginatedResponse
-from eneo.roles.permissions import Permission, validate_permission
-from eneo.server.dependencies.container import get_container
-from eneo.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
+    EmbeddingModelUpdate,
+)
+from eneo.main.container.container import Container
+from eneo.main.models import PaginatedResponse, is_provided
+from eneo.roles.permissions import Permission, validate_permission
+from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
+from eneo.users.user import UserInDB
 
 router = APIRouter()
 
 
-@router.get("/", response_model=PaginatedResponse[EmbeddingModelPublic])
+@router.get(
+    "/",
+    response_model=PaginatedResponse[EmbeddingModelPublic],
+    description="List all embedding models for the tenant.",
+    responses=responses.get_responses([403]),
+)
 async def get_embedding_models(
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    validate_permission(user, Permission.ADMIN)
+
     service = container.embedding_model_crud_service()
     models = await service.get_embedding_models()
 
-    return PaginatedResponse(items=[EmbeddingModelPublic.from_domain(model) for model in models])
+    return PaginatedResponse(
+        items=[EmbeddingModelPublic.from_domain(model) for model in models]
+    )
 
 
 @router.get(
     "/{id}/",
     response_model=EmbeddingModelPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_embedding_model(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    validate_permission(user, Permission.ADMIN)
+
     service = container.embedding_model_crud_service()
     model = await service.get_embedding_model(model_id=id)
 
@@ -48,12 +63,13 @@ async def get_embedding_model(
 @router.post(
     "/{id}/",
     response_model=EmbeddingModelPublic,
-    responses=responses.get_responses([404]),
+    description="Update an embedding model's settings.",
+    responses=responses.get_responses([403, 404]),
 )
 async def update_embedding_model(
     id: UUID,
     update: EmbeddingModelUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.embedding_model_crud_service()
     user = container.user()
@@ -73,10 +89,10 @@ async def update_embedding_model(
     )
 
     # Build consolidated changes dict (one API call = one audit log)
-    changes = {}
+    changes: dict[str, object] = {}
 
     # Track is_org_enabled changes
-    if update.is_org_enabled is not NOT_PROVIDED:
+    if is_provided(update.is_org_enabled):
         if old_model.is_org_enabled != model.is_org_enabled:
             changes["is_org_enabled"] = {
                 "old": old_model.is_org_enabled,
@@ -84,9 +100,17 @@ async def update_embedding_model(
             }
 
     # Track security classification changes
-    if update.security_classification is not NOT_PROVIDED:
-        old_sc_name = old_model.security_classification.name if old_model.security_classification else None
-        new_sc_name = model.security_classification.name if model.security_classification else None
+    if is_provided(update.security_classification):
+        old_sc_name = (
+            old_model.security_classification.name
+            if old_model.security_classification
+            else None
+        )
+        new_sc_name = (
+            model.security_classification.name
+            if model.security_classification
+            else None
+        )
         if old_sc_name != new_sc_name:
             changes["security_classification"] = {
                 "old": old_sc_name,
@@ -98,7 +122,7 @@ async def update_embedding_model(
         audit_service = container.audit_service()
         await audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.EMBEDDING_MODEL_UPDATED,
             entity_type=EntityType.EMBEDDING_MODEL,
             entity_id=id,

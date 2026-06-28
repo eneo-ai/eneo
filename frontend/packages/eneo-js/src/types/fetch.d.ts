@@ -1,15 +1,18 @@
 import { type paths as EneoEndpoints } from "./schema";
 
+// In openapi-typescript v7, every operation has a `parameters` property
+// where unused locations (path/query/header/cookie) are typed as `never`.
+// We only treat the operation as having params if at least one location has
+// an actual value type; otherwise the call site can omit `params` entirely.
 type EneoParams<
   Endpoint extends keyof EneoEndpoints,
   Method extends keyof EneoEndpoints[Endpoint]
 > = EneoEndpoints[Endpoint][Method] extends {
-  parameters: {
-    path?: any;
-    query?: any;
-  };
+  parameters: infer P;
 }
-  ? EneoEndpoints[Endpoint][Method]["parameters"]
+  ? Exclude<P[keyof P], undefined> extends never
+    ? never
+    : P
   : never;
 
 type EneoRequestBody<

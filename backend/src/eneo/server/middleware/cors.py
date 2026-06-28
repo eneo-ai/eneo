@@ -31,8 +31,11 @@ class CORSMiddleware:
         allow_private_network: bool = False,
         expose_headers: Sequence[str] = (),
         max_age: int = 600,
-        callback: typing.Optional[typing.Callable[[str], typing.Awaitable[bool]]] = None,
+        callback: typing.Optional[
+            typing.Callable[[str], typing.Awaitable[bool]]
+        ] = None,
     ) -> None:
+        super().__init__()
         if "*" in allow_methods:
             allow_methods = ALL_METHODS
 

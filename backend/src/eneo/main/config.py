@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -247,6 +246,16 @@ class Settings(BaseSettings):
     redis_socket_keepalive: bool = True
     redis_health_check_interval: int = 30
     redis_max_connections: int | None = None
+    # MCP tool approval configuration
+    mcp_tool_approval_timeout_seconds: int = 300
+    mcp_tool_approval_ttl_seconds: int = 305
+    mcp_tool_approval_denial_reason_max_length: int = 200
+    mcp_client_connect_timeout_seconds: int = 30
+    mcp_client_list_tools_timeout_seconds: int = 30
+    mcp_client_call_timeout_seconds: int = 60
+    mcp_tool_output_max_chars: int = 32768
+    mcp_circuit_breaker_failure_threshold: int = 5
+    mcp_circuit_breaker_cooldown_seconds: int = 60
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
@@ -257,9 +266,7 @@ class Settings(BaseSettings):
         20  # Base pool size (permanent connections) - default: current behavior
     )
     db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
-    db_pool_timeout: int = (
-        30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
-    )
+    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
     db_pool_pre_ping: bool = (
         True  # Verify connections before use - prevents stale connection errors
     )
@@ -357,6 +364,16 @@ class Settings(BaseSettings):
     upload_max_file_size: int
     transcription_max_file_size: int
 
+    # Visual content in document attachments (PDF pages with images/graphics,
+    # DOCX/PPTX embedded images) is extracted as derived image files so vision
+    # models can read it (capped per document to bound token cost)
+    attachment_image_extraction: bool = True
+    attachment_max_extracted_images: int = 8
+
+    # Per-file token cap when attachments are inlined into the prompt; larger
+    # files are cut with a visible truncation notice instead of erroring
+    attachment_max_tokens_per_file: int = 20000
+
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
 
@@ -379,6 +396,20 @@ class Settings(BaseSettings):
     api_prefix: str
     api_key_length: int
     api_key_header_name: str
+    api_key_hash_secret: Optional[str] = None
+    api_key_last_used_min_interval_seconds: int = 900
+    api_key_used_audit_sample_rate: float = 1.0
+    api_key_rotation_grace_hours: int = 24
+    api_key_legacy_endpoints_enabled: bool = True
+    api_key_rate_limit_window_seconds: int = 3600
+    api_key_rate_limit_fail_open: bool = False
+    api_key_rate_limit_tenant_default: int = 10000
+    api_key_rate_limit_space_default: int = 5000
+    api_key_rate_limit_assistant_default: int = 1000
+    api_key_rate_limit_app_default: int = 1000
+    api_key_enforce_resource_permissions: bool = True
+    trusted_proxy_count: int = 0
+    trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str
     jwt_issuer: str
     jwt_expiry_time: int
@@ -445,7 +476,7 @@ class Settings(BaseSettings):
 
     @field_validator("export_dir", mode="before")
     @classmethod
-    def validate_export_dir_not_empty(cls, v):
+    def validate_export_dir_not_empty(cls, v: object) -> object:
         """
         Handle empty EXPORT_DIR env var by falling back to default.
 
@@ -503,9 +534,7 @@ class Settings(BaseSettings):
         - FEDERATION_ENABLED=true (tenant-specific IdPs)
         - Worker/crawler HTTP authentication
         """
-        encryption_required = (
-            self.tenant_credentials_enabled or self.federation_enabled
-        )
+        encryption_required = self.tenant_credentials_enabled or self.federation_enabled
 
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
@@ -543,7 +572,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_vars(cls, values):
+    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
         """Auto-migrate legacy env vars with deprecation warnings.
 
         MOBILITYGUARD_* → OIDC_*
@@ -688,6 +717,77 @@ class Settings(BaseSettings):
             logging.error(
                 "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
                 self.redis_max_connections,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_timeout_seconds <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_ttl_seconds <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TTL_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_ttl_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_ttl_seconds < self.mcp_tool_approval_timeout_seconds:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TTL_SECONDS (%s) must be >= MCP_TOOL_APPROVAL_TIMEOUT_SECONDS (%s).",
+                self.mcp_tool_approval_ttl_seconds,
+                self.mcp_tool_approval_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_denial_reason_max_length <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_DENIAL_REASON_MAX_LENGTH must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_denial_reason_max_length,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_connect_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_CONNECT_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_connect_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_list_tools_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_LIST_TOOLS_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_list_tools_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_call_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_CALL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_call_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_output_max_chars <= 0:
+            logging.error(
+                "MCP_TOOL_OUTPUT_MAX_CHARS must be greater than zero. Current value: %s",
+                self.mcp_tool_output_max_chars,
+            )
+            sys.exit(1)
+
+        if self.mcp_circuit_breaker_failure_threshold <= 0:
+            logging.error(
+                "MCP_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be greater than zero. Current value: %s",
+                self.mcp_circuit_breaker_failure_threshold,
+            )
+            sys.exit(1)
+
+        if self.mcp_circuit_breaker_cooldown_seconds <= 0:
+            logging.error(
+                "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_circuit_breaker_cooldown_seconds,
             )
             sys.exit(1)
 

@@ -87,7 +87,9 @@ class TestHeartbeatConfiguration:
 
             # Verify it's a reasonable heartbeat interval (should be from env settings)
             assert isinstance(default_interval, int)
-            assert 30 <= default_interval <= 3600, "Default should be within valid range"
+            assert 30 <= default_interval <= 3600, (
+                "Default should be within valid range"
+            )
 
 
 @pytest.mark.asyncio
@@ -288,7 +290,9 @@ class TestHeartbeatUseCases:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            max_length = get_crawler_setting("crawl_max_length", tenant.crawler_settings)
+            max_length = get_crawler_setting(
+                "crawl_max_length", tenant.crawler_settings
+            )
             interval = get_crawler_setting(
                 "crawl_heartbeat_interval_seconds", tenant.crawler_settings
             )
@@ -296,7 +300,9 @@ class TestHeartbeatUseCases:
             # Verify configuration makes sense
             assert max_length == 300
             assert interval == 30
-            assert interval < max_length, "Heartbeat should fire multiple times during crawl"
+            assert interval < max_length, (
+                "Heartbeat should fire multiple times during crawl"
+            )
 
     async def test_long_crawls_use_infrequent_heartbeats(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
@@ -316,7 +322,9 @@ class TestHeartbeatUseCases:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            max_length = get_crawler_setting("crawl_max_length", tenant.crawler_settings)
+            max_length = get_crawler_setting(
+                "crawl_max_length", tenant.crawler_settings
+            )
             interval = get_crawler_setting(
                 "crawl_heartbeat_interval_seconds", tenant.crawler_settings
             )
@@ -324,9 +332,13 @@ class TestHeartbeatUseCases:
             # Verify configuration makes sense
             assert max_length == 7200
             assert interval == 600
-            assert interval < max_length, "Heartbeat should fire multiple times during crawl"
+            assert interval < max_length, (
+                "Heartbeat should fire multiple times during crawl"
+            )
             expected_heartbeats = max_length // interval
-            assert expected_heartbeats >= 5, "Should have reasonable number of heartbeats"
+            assert expected_heartbeats >= 5, (
+                "Should have reasonable number of heartbeats"
+            )
 
 
 @pytest.mark.asyncio

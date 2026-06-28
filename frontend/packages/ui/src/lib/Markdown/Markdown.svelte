@@ -38,7 +38,7 @@
 
   initReferenceContext({
     references: () => references,
-    renderer: customRenderers.inref
+    renderer: () => customRenderers.inref
   });
 
   const tokens = $derived(lexer.lex(source));

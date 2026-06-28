@@ -45,7 +45,7 @@ async def test_get_error_when_user_not_owner_of_session(service: SessionService)
         id=TEST_UUID,
     )
 
-    with pytest.raises(UnauthorizedException, match="belongs to other user"):
+    with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.get_session_by_uuid(1)
 
 
@@ -95,7 +95,7 @@ async def test_update_error_when_user_is_not_owner_of_session(service: SessionSe
     )
     session_upsert = SessionUpdate(name="new_test_name", id=TEST_UUID)
 
-    with pytest.raises(UnauthorizedException, match="belongs to other user"):
+    with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.update_session(session_upsert)
 
 
@@ -113,5 +113,29 @@ async def test_delete_error_when_user_not_owner_of_session(service: SessionServi
         id=TEST_UUID,
     )
 
-    with pytest.raises(UnauthorizedException, match="belongs to other user"):
+    with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.delete(1)
+
+
+async def test_delete_terminates_remote_mcp_sessions_before_local_delete():
+    session = SessionInDB(
+        user_id=TEST_USER.id,
+        name="test_session",
+        id=TEST_UUID,
+    )
+    session_repo = AsyncMock()
+    session_repo.get.return_value = session
+    session_repo.delete.return_value = session
+    lifecycle_service = AsyncMock()
+    service = SessionService(
+        session_repo=session_repo,
+        question_repo=AsyncMock(),
+        user=TEST_USER,
+        mcp_session_lifecycle_service=lifecycle_service,
+    )
+
+    deleted = await service.delete(TEST_UUID)
+
+    assert deleted == session
+    lifecycle_service.terminate_for_chat_session.assert_awaited_once_with(TEST_UUID)
+    session_repo.delete.assert_awaited_once_with(TEST_UUID)

@@ -8,8 +8,8 @@ The frozen=True ensures immutability during the crawl lifecycle.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
 

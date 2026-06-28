@@ -1,10 +1,12 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets.websocket_manager import websocket_manager
 from eneo.server.websockets.websocket_models import (
-    ENEO_SUBPROTOCOL,
+    INTRIC_SUBPROTOCOL,
     ParsedMessage,
 )
 from eneo.users.user import UserInDB
@@ -18,9 +20,9 @@ router = APIRouter()
 @router.websocket("/ws")
 async def connect(
     websocket: WebSocket,
-    user: UserInDB = Depends(get_user_from_websocket),
+    user: Annotated[UserInDB, Depends(get_user_from_websocket)],
 ):
-    await websocket.accept(subprotocol=ENEO_SUBPROTOCOL)
+    await websocket.accept(subprotocol=INTRIC_SUBPROTOCOL)
     logger.debug(f"User {user.email} connected to websocket.")
 
     while True:

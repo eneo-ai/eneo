@@ -1,17 +1,26 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Generic, Literal, Optional, TypeVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, computed_field
 
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
+from eneo.integration.domain.value_objects import (
+    IntegrationType,
+    SkippedDetail,
+    SyncMetadata,
+)
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import ResourcePermission
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _empty_resource_permissions() -> list[ResourcePermission]:
+    return []
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -20,19 +29,6 @@ class BaseListModel(BaseModel, Generic[T]):
     @computed_field
     def count(self) -> int:
         return len(self.items)
-
-
-class IntegrationType(str, Enum):
-    Confluence = "confluence"
-    Sharepoint = "sharepoint"
-
-    @property
-    def is_confluence(self) -> bool:
-        return self == IntegrationType.Confluence
-
-    @property
-    def is_sharepoint(self) -> bool:
-        return self == IntegrationType.Sharepoint
 
 
 class Integration(BaseModel):
@@ -47,12 +43,12 @@ class IntegrationList(BaseListModel[Integration]):
 
 
 class TenantIntegration(Integration):
-    id: Optional[UUID] = None
+    id: UUID = Field(default_factory=uuid4)
     integration_id: UUID
 
     @computed_field
     def is_linked_to_tenant(self) -> bool:
-        return self.id is not None
+        return True
 
 
 class TenantIntegrationList(BaseListModel[TenantIntegration]):
@@ -65,7 +61,7 @@ class TenantIntegrationFilter(Enum):
 
 
 class UserIntegration(Integration):
-    id: Optional[UUID] = None
+    id: UUID = Field(default_factory=uuid4)
     tenant_integration_id: UUID
     connected: bool
     auth_type: str = "user_oauth"  # "user_oauth" or "tenant_app"
@@ -85,11 +81,13 @@ class IntegrationCreate(BaseModel):
 
 class AuthUrlPublic(BaseModel):
     auth_url: str
+    state: str
 
 
 class AuthCallbackParams(BaseModel):
     auth_code: str
     tenant_integration_id: UUID
+    state: str
 
 
 class ConfluenceContentTaskParam(ResourceTaskParams):
@@ -110,7 +108,7 @@ class SharepointContentTaskParam(ResourceTaskParams):
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):
-    results: list
+    results: list[dict[str, Any]]
 
 
 class IntegrationPreviewData(BaseModel):
@@ -150,7 +148,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
     last_synced_at: Optional[datetime] = None
     sharepoint_subscription_expires_at: Optional[datetime] = Field(
         None,
-        description="When the SharePoint webhook subscription expires (only for SharePoint integrations)"
+        description="When the SharePoint webhook subscription expires (only for SharePoint integrations)",
     )
 
     @property
@@ -163,7 +161,8 @@ class IntegrationKnowledgeMetaData(BaseModel):
         if not self.sharepoint_subscription_expires_at:
             return None
 
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         now = datetime.now(timezone.utc)
         expires_at = self.sharepoint_subscription_expires_at
 
@@ -185,6 +184,7 @@ class IntegrationKnowledgeMetaData(BaseModel):
             return None
 
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         delta = self.sharepoint_subscription_expires_at - now
         return max(0, int(delta.total_seconds() / 3600))
@@ -201,14 +201,18 @@ class IntegrationKnowledgePublic(BaseModel):
     embedding_model: EmbeddingModelPublicLegacy
     site_id: Optional[str] = None
     drive_id: Optional[str] = None  # For OneDrive direct access
-    resource_type: Optional[str] = None  # "site" for SharePoint, "onedrive" for OneDrive
+    resource_type: Optional[str] = (
+        None  # "site" for SharePoint, "onedrive" for OneDrive
+    )
     sharepoint_subscription_id: Optional[UUID] = None
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     selected_item_type: Optional[str] = None
     wrapper_id: Optional[UUID] = None
     wrapper_name: Optional[str] = None
-    permissions: list[ResourcePermission] = []
+    permissions: list[ResourcePermission] = Field(
+        default_factory=_empty_resource_permissions
+    )
     metadata: IntegrationKnowledgeMetaData
     integration_type: Literal["confluence", "sharepoint"]
     task: Enum
@@ -221,7 +225,7 @@ class SyncLog(BaseModel):
     integration_knowledge_id: UUID
     sync_type: str  # "full" or "delta"
     status: str  # "success", "error", "in_progress"
-    metadata: Optional[dict] = None
+    metadata: Optional[SyncMetadata] = None
     error_message: Optional[str] = None
     started_at: datetime
     completed_at: Optional[datetime] = None
@@ -230,32 +234,32 @@ class SyncLog(BaseModel):
     @computed_field
     def files_processed(self) -> int:
         """Get files_processed from metadata."""
-        return (self.metadata or {}).get("files_processed", 0)
+        return int((self.metadata or {}).get("files_processed", 0))
 
     @computed_field
     def files_deleted(self) -> int:
         """Get files_deleted from metadata."""
-        return (self.metadata or {}).get("files_deleted", 0)
+        return int((self.metadata or {}).get("files_deleted", 0))
 
     @computed_field
     def pages_processed(self) -> int:
         """Get pages_processed from metadata."""
-        return (self.metadata or {}).get("pages_processed", 0)
+        return int((self.metadata or {}).get("pages_processed", 0))
 
     @computed_field
     def folders_processed(self) -> int:
         """Get folders_processed from metadata."""
-        return (self.metadata or {}).get("folders_processed", 0)
+        return int((self.metadata or {}).get("folders_processed", 0))
 
     @computed_field
     def skipped_items(self) -> int:
         """Get skipped_items from metadata."""
-        return (self.metadata or {}).get("skipped_items", 0)
+        return int((self.metadata or {}).get("skipped_items", 0))
 
     @computed_field
-    def skipped_details(self) -> list[dict]:
+    def skipped_details(self) -> list[SkippedDetail]:
         """Get skipped file details from metadata."""
-        return (self.metadata or {}).get("skipped_details", [])
+        return list((self.metadata or {}).get("skipped_details", []))
 
     @computed_field
     def duration_seconds(self) -> Optional[float]:
@@ -267,7 +271,7 @@ class SyncLog(BaseModel):
     @computed_field
     def total_items_processed(self) -> int:
         """Total items processed in this sync."""
-        return self.files_processed + self.pages_processed + self.folders_processed
+        return self.files_processed + self.pages_processed + self.folders_processed  # type: ignore[operator]
 
 
 class SyncLogList(BaseListModel[SyncLog]):

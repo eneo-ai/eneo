@@ -5,17 +5,13 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-import sqlalchemy as sa
-
-from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import File
 from eneo.main.config import SETTINGS, Settings
-from eneo.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from eneo.main.logging import get_logger
-from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
-    TenantModelCredentialResolver,
+from eneo.model_providers.infrastructure.litellm_provider import (
+    load_active_litellm_provider,
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
@@ -42,6 +38,7 @@ class Transcriber:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
+        super().__init__()
         self.file_repo = file_repo
         self.tenant = tenant
         self.config = config or SETTINGS
@@ -49,13 +46,15 @@ class Transcriber:
         self.session = session
 
     async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
-        if file.blob is None or not AudioMimeTypes.has_value(file.mimetype):
+        mimetype: str = file.mimetype or ""
+        if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
         # If file already has a transcription, return it
         if file.transcription:
             return file.transcription
 
+        temp_file_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
                 temp_file_path = Path(temp_file.name)
@@ -72,8 +71,9 @@ class Transcriber:
             if self.file_repo:
                 await self.file_repo.update(file)
         finally:
-            with contextlib.suppress(FileNotFoundError):
-                temp_file_path.unlink()
+            if temp_file_path is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    temp_file_path.unlink()
 
         return result
 
@@ -108,30 +108,26 @@ class Transcriber:
                 "Please ensure the Transcriber is initialized with a database session."
             )
 
-        # Load provider data from database
-        stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-        result = await self.session.execute(stmt)
-        provider_db = result.scalar_one_or_none()
-
-        if provider_db is None:
-            raise ProviderNotFoundException(
-                f"Model provider '{model.provider_id}' not found. "
-                "The provider may have been deleted or is not accessible."
+        if self.encryption_service is None:
+            raise ValueError(
+                f"Transcription model '{model.name}' requires an encryption service "
+                "to decrypt provider credentials. Please ensure the Transcriber is "
+                "initialized with an encryption_service."
             )
 
-        if not provider_db.is_active:
-            raise ProviderInactiveException(
-                f"The model provider '{provider_db.name}' is currently inactive. "
-                "Please contact your administrator to enable the provider."
+        if self.tenant is None:
+            raise ValueError(
+                f"Transcription model '{model.name}' requires tenant context "
+                "to load its provider."
             )
 
-        # Create credential resolver
-        credential_resolver = TenantModelCredentialResolver(
-            provider_id=provider_db.id,
-            provider_type=provider_db.provider_type,
-            credentials=provider_db.credentials,
-            config=provider_db.config,
-            encryption_service=self.encryption_service,
+        provider = await load_active_litellm_provider(
+            session=self.session,
+            provider_id=model.provider_id,
+            tenant_id=self.tenant.id,
+        )
+        credential_resolver = provider.create_credential_resolver(
+            self.encryption_service
         )
 
         logger.info(
@@ -140,7 +136,7 @@ class Transcriber:
                 "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
-                "provider_type": provider_db.provider_type,
+                "provider_type": provider.provider_type,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
             },
         )
@@ -148,7 +144,7 @@ class Transcriber:
         return LiteLLMTranscriptionAdapter(
             model=model,
             credential_resolver=credential_resolver,
-            provider_type=provider_db.provider_type,
+            provider_type=provider.provider_type,
         )
 
     async def transcribe_from_filepath(
@@ -156,5 +152,5 @@ class Transcriber:
     ):
         adapter = await self._get_adapter(transcription_model)
 
-        async with audio.to_wav(filepath) as wav_file:
+        async with audio.to_wav(str(filepath)) as wav_file:
             return await adapter.get_text_from_file(wav_file)

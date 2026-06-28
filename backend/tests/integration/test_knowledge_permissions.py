@@ -6,6 +6,7 @@ Tests cover:
 - Permission enforcement (create, read, delete)
 - VIEWER, EDITOR, ADMIN permission differences
 """
+
 import pytest
 from sqlalchemy import select
 
@@ -44,7 +45,12 @@ class TestOrganizationKnowledgePermissions:
 
     @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_only_org_admin_can_create_knowledge(
-        self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify only ADMIN role can create knowledge on org space."""
         async with db_container() as container:
@@ -113,7 +119,12 @@ class TestOrganizationKnowledgePermissions:
 
     @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_only_org_admin_can_delete_knowledge(
-        self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify only ADMIN role can delete knowledge from org space."""
         async with db_container() as container:
@@ -186,7 +197,12 @@ class TestChildSpaceKnowledgePermissions:
 
     @pytest.mark.skip(reason="Requires database fixtures - not a unit test")
     async def test_viewer_can_read_distributed_knowledge(
-        self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify VIEWER role can read knowledge distributed to their space."""
         async with db_container() as container:
@@ -240,7 +256,12 @@ class TestChildSpaceKnowledgePermissions:
             assert viewer_actor.can_read_integrations() is True
 
     async def test_viewer_cannot_delete_distributed_knowledge(
-        self, db_container, tenant_factory, user_factory, user_integration_factory, embedding_model_factory
+        self,
+        db_container,
+        tenant_factory,
+        user_factory,
+        user_integration_factory,
+        embedding_model_factory,
     ):
         """Verify VIEWER role cannot delete distributed knowledge."""
         async with db_container() as container:

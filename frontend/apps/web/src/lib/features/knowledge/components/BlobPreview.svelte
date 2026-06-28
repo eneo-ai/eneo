@@ -16,7 +16,7 @@
   let loadedBlobText: string | undefined = blob.text;
   let loadingBlob = false;
   let loadError = false;
-  
+
   async function loadBlob() {
     if (!loadedBlobText) {
       loadingBlob = true;
@@ -110,9 +110,9 @@
     <Dialog.Section scrollable>
       <div class="p-4">
         {#if loadingBlob}
-          <pre>Loading...</pre>
+          <pre>{m.loading()}</pre>
         {:else if loadError}
-          <pre>Error loading content. Please try again.</pre>
+          <pre>{m.attachment_error_loading_content()}</pre>
         {:else}
           <Markdown source={loadedBlobText ?? ""}></Markdown>
         {/if}

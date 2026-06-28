@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Union
 
-from eneo.main.models import NOT_PROVIDED, ModelId
+from eneo.main.models import NOT_PROVIDED, ModelId, is_provided
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -22,7 +22,8 @@ class EmbeddingModelCRUDService:
         user: "UserInDB",
         embedding_model_repo: "EmbeddingModelRepository",
         security_classification_repo: "SecurityClassificationRepoImpl",
-    ):
+    ) -> None:
+        super().__init__()
         self.embedding_model_repo = embedding_model_repo
         self.security_classification_repo = security_classification_repo
         self.user = user
@@ -42,12 +43,14 @@ class EmbeddingModelCRUDService:
     ):
         embedding_model = await self.embedding_model_repo.one(model_id=model_id)
 
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if security_classification is None:
                 embedding_model.security_classification = None
             else:
-                em_security_classification = await self.security_classification_repo.one(
-                    id=security_classification.id
+                em_security_classification = (
+                    await self.security_classification_repo.one(
+                        id=security_classification.id
+                    )
                 )
                 embedding_model.security_classification = em_security_classification
 

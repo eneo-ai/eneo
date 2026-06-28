@@ -6,6 +6,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import { Tooltip } from "@eneo/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let data;
 
@@ -22,7 +23,7 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? "Personal" : data.currentSpace.name} – Knowledge</title
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {m.knowledge()}</title
   >
 </svelte:head>
 
@@ -40,7 +41,8 @@
       placement="left"
     >
       <Page.Flex>
-        <BlobCreate disabled={$disabledModelInUse || data.readonly} collection={data.collection}></BlobCreate>
+        <BlobCreate disabled={$disabledModelInUse || data.readonly} collection={data.collection}
+        ></BlobCreate>
         <BlobUpload
           disabled={$disabledModelInUse || data.readonly}
           collection={data.collection}

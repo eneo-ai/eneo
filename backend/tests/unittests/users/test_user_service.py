@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.authentication.auth_models import AccessToken, ApiKeyCreated
+from eneo.authentication.auth_models import AccessToken
 from eneo.main.exceptions import AuthenticationException, UniqueUserException
-from eneo.settings.settings import SettingsUpsert
 from eneo.main.models import ModelId
+from eneo.settings.settings import SettingsUpsert
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -24,6 +24,9 @@ def service_with_mocks():
     return UserService(
         user_repo=AsyncMock(),
         auth_service=AsyncMock(),
+        api_key_auth_resolver=AsyncMock(),
+        api_key_v2_repo=AsyncMock(),
+        audit_service=AsyncMock(),
         settings_repo=AsyncMock(),
         tenant_repo=AsyncMock(),
         info_blob_repo=AsyncMock(),
@@ -32,6 +35,7 @@ def service_with_mocks():
 
 async def test_login_user_fails_with_no_user_with_that_email(service: UserService):
     service.repo.get_user_by_email.return_value = None
+    service.auth_service.verify_password = MagicMock(return_value=False)
 
     with pytest.raises(AuthenticationException, match="Invalid credentials"):
         await service.login(email="hacker@notindatabase.com", password="password?")
@@ -112,12 +116,9 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
         state="active",
     )
     expected_user_in_db = UserInDB(
-        **expected_user_upsert.model_dump(
-            exclude_none=True, exclude={"predefined_roles"}
-        ),
+        **expected_user_upsert.model_dump(exclude_none=True, exclude={"roles"}),
         id=uuid4(),
         tenant=TEST_TENANT,
-        predefined_roles=[],
     )
 
     expected_settings = SettingsUpsert(
@@ -129,9 +130,6 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
     service.auth_service.create_salt_and_hashed_password.return_value = (
         test_salt,
         hashed_password,
-    )
-    service.auth_service._create_and_hash_api_key.return_value = ApiKeyCreated(
-        key="api_key", truncated_key="ey", hashed_key="4p1 k3y"
     )
     service.auth_service.create_access_token_for_user = MagicMock()
     service.auth_service.create_access_token_for_user.return_value = (
@@ -146,12 +144,15 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
         tenant_id=TEST_TENANT.id,
     )
 
-    user, access_token, api_key = await service.register(new_user)
+    user, access_token = await service.register(new_user)
 
     assert user == expected_user_in_db
 
     service.repo.add.assert_awaited_with(expected_user_upsert)
     service.settings_repo.add.assert_awaited_with(expected_settings)
+    # Personal API keys are no longer auto-provisioned at user creation —
+    # users mint their own via POST /api/v1/api-keys when they need one.
+    service.auth_service.create_user_api_key_v2.assert_not_called()
 
 
 async def test_update_used_tokens(service: UserService):
@@ -175,23 +176,18 @@ async def test_invite_user_creates_user_and_settings(service: UserService):
     service.tenant_repo.get.return_value = TEST_TENANT
 
     role_id = uuid4()
-    user_invite = PropUserInvite(
-        email="invitee@test.com", predefined_role=ModelId(id=role_id)
-    )
+    user_invite = PropUserInvite(email="invitee@test.com", role=ModelId(id=role_id))
 
     expected_user_upsert = UserAdd(
         email="invitee@test.com",
         tenant_id=TEST_TENANT.id,
         state=UserState.INVITED,
-        predefined_roles=[ModelId(id=role_id)],
+        roles=[ModelId(id=role_id)],
     )
     expected_user_in_db = UserInDB(
-        **expected_user_upsert.model_dump(
-            exclude_none=True, exclude={"predefined_roles"}
-        ),
+        **expected_user_upsert.model_dump(exclude_none=True, exclude={"roles"}),
         id=uuid4(),
         tenant=TEST_TENANT,
-        predefined_roles=[],
     )
 
     service.repo.add.return_value = expected_user_in_db

@@ -1,16 +1,14 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from eneo.main.exceptions import BadRequestException
 from eneo.spaces.api.space_models import WizardType
 
-
 if TYPE_CHECKING:
-    from uuid import UUID
     from datetime import datetime
-    from eneo.ai_models.completion_models.completion_model import (
-        CompletionModelPublic,
-    )
+    from uuid import UUID
 
+    from eneo.database.tables.ai_models_table import CompletionModels
     from eneo.spaces.api.space_models import TemplateCreate
     from eneo.templates.app_template.api.app_template_models import AppTemplateWizard
 
@@ -20,26 +18,27 @@ class AppTemplate:
         self,
         id: "UUID",
         name: str,
-        description: str,
+        description: Optional[str],
         category: str,
-        prompt_text: str,
+        prompt_text: Optional[str],
         created_at: "datetime",
         updated_at: "datetime",
-        completion_model: "CompletionModelPublic",
-        completion_model_kwargs: dict,
-        wizard: "AppTemplateWizard",
+        completion_model: Optional["CompletionModels"],
+        completion_model_kwargs: Optional[dict[str, object]],
+        wizard: Optional["AppTemplateWizard"],
         input_description: str | None,
         input_type: str,
         organization: str,
         tenant_id: Optional["UUID"] = None,
         deleted_at: Optional["datetime"] = None,
-        original_snapshot: Optional[dict] = None,
+        original_snapshot: Optional[dict[str, object]] = None,
         deleted_by_user_id: Optional["UUID"] = None,
         restored_by_user_id: Optional["UUID"] = None,
         restored_at: Optional["datetime"] = None,
         is_default: bool = False,
         icon_name: Optional[str] = None,
     ):
+        super().__init__()
         self.id = id
         self.name = name
         self.description = description
@@ -54,9 +53,13 @@ class AppTemplate:
         self.input_type = input_type
         self.organization = organization
         # New fields for tenant-scoped template management
-        self.tenant_id = tenant_id  # NULL = global/system template, NOT NULL = tenant-specific
+        self.tenant_id = (
+            tenant_id  # NULL = global/system template, NOT NULL = tenant-specific
+        )
         self.deleted_at = deleted_at  # NULL = active, NOT NULL = soft-deleted
-        self.original_snapshot = original_snapshot  # Snapshot for rollback functionality
+        self.original_snapshot = (
+            original_snapshot  # Snapshot for rollback functionality
+        )
         # Audit trail fields
         self.deleted_by_user_id = deleted_by_user_id
         self.restored_by_user_id = restored_by_user_id
@@ -67,13 +70,15 @@ class AppTemplate:
         self.icon_name = icon_name  # NULL = no custom icon (first letter fallback), e.g., "rocket", "building"
 
     def validate_wizard_data(self, template_data: "TemplateCreate") -> None:
+        assert template_data.additional_fields is not None
         for data in template_data.additional_fields:
             # App only supports attachment atm
             if data.type != WizardType.attachments:
                 raise BadRequestException("Unsupported type")
 
             if (
-                self.wizard.attachments is None
+                self.wizard is None
+                or self.wizard.attachments is None
                 or self.wizard.attachments.required is False
             ):
                 raise BadRequestException(
@@ -81,7 +86,7 @@ class AppTemplate:
                 )
 
     def is_from_eneo(self) -> bool:
-        return self.organization == 'default'
+        return self.organization == "default"
 
     def belongs_to_tenant(self, tenant_id: "UUID") -> bool:
         """Check if template belongs to given tenant (ignoring global templates)."""
@@ -96,7 +101,7 @@ class AppTemplate:
         return self.tenant_id is None
 
     @classmethod
-    def create_snapshot(cls, template_data: dict) -> dict:
+    def create_snapshot(cls, template_data: dict[str, object]) -> dict[str, object]:
         """Create original_snapshot from template data for rollback functionality.
 
         Args:
@@ -116,16 +121,15 @@ class AppTemplate:
             "input_description": template_data.get("input_description"),
             "completion_model_kwargs": template_data.get("completion_model_kwargs"),
             "wizard": template_data.get("wizard"),
-            "completion_model_id": str(template_data.get("completion_model_id")) if template_data.get("completion_model_id") else None,
+            "completion_model_id": str(template_data.get("completion_model_id"))
+            if template_data.get("completion_model_id")
+            else None,
         }
 
-        # Add created_at if available (should be datetime object)
-        if template_data.get("created_at"):
-            created_at = template_data.get("created_at")
-            # Convert to ISO format string if datetime object
-            if hasattr(created_at, 'isoformat'):
-                snapshot["created_at"] = created_at.isoformat()
-            else:
-                snapshot["created_at"] = created_at
+        created_at = template_data.get("created_at")
+        if isinstance(created_at, datetime):
+            snapshot["created_at"] = created_at.isoformat()
+        elif created_at is not None:
+            snapshot["created_at"] = created_at
 
         return snapshot

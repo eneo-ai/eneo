@@ -1,136 +1,106 @@
 # MIT License
 
+from decimal import Decimal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from eneo.completion_models.presentation import CompletionModelPublic
 from eneo.database.database import AsyncSession, get_session_with_transaction
 from eneo.main.container.container import Container
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.tenant_models.application.tenant_model_service import (
+    TenantCompletionModelService,
+)
 from eneo.users.user import UserInDB
 
 router = APIRouter()
 
 
 class TenantCompletionModelCreate(BaseModel):
-    provider_id: UUID = Field(..., description="Model provider ID")
-    name: str = Field(
-        ...,
-        description="Model identifier (e.g., 'gpt-4o', 'meta-llama/Meta-Llama-3-70B-Instruct')",
-    )
-    display_name: str = Field(..., description="User-friendly display name")
-    max_input_tokens: int = Field(..., description="Maximum input context tokens")
-    max_output_tokens: int = Field(..., description="Maximum output tokens")
-    vision: bool = Field(default=False, description="Supports vision/image inputs")
-    reasoning: bool = Field(default=False, description="Supports extended reasoning")
-    supports_tool_calling: bool = Field(default=False, description="Supports function/tool calling")
-    hosting: str = Field(default="swe", description="Hosting location (swe, eu, usa)")
-    family: str = Field(default="openai", description="Model family (e.g., 'openai', 'anthropic', 'deepseek')")
-    is_active: bool = Field(default=True, description="Enable in organization")
-    is_default: bool = Field(default=False, description="Set as default model")
+    provider_id: UUID
+    name: str
+    display_name: str
+    max_input_tokens: int
+    max_output_tokens: int
+    vision: bool = False
+    reasoning: bool = False
+    supports_tool_calling: bool = False
+    hosting: str = "swe"
+    family: str = "openai"
+    is_active: bool = True
+    is_default: bool = False
+    description: str | None = None
+    # Indicative USD per token. Pulled from LiteLLM by the wizard, or entered
+    # manually by the admin. NULL = not tracked.
+    input_cost_per_token: Decimal | None = None
+    output_cost_per_token: Decimal | None = None
+    model_kwargs_capabilities: SupportedModelKwargs | None = None
+    security_classification: ModelId | None = None
 
 
 class TenantCompletionModelUpdate(BaseModel):
-    name: str | None = Field(None, description="Model identifier (e.g., 'gpt-4o', 'claude-3-sonnet')")
-    display_name: str | None = Field(None, description="User-friendly display name")
-    description: str | None = Field(None, description="Model description")
-    max_input_tokens: int | None = Field(None, description="Maximum input context tokens")
-    max_output_tokens: int | None = Field(None, description="Maximum output tokens")
-    vision: bool | None = Field(None, description="Supports vision/image inputs")
-    reasoning: bool | None = Field(None, description="Supports extended reasoning")
-    supports_tool_calling: bool | None = Field(None, description="Supports function/tool calling")
-    hosting: str | None = Field(None, description="Hosting location (swe, eu, usa)")
-    open_source: bool | None = Field(None, description="Is the model open source")
-    stability: str | None = Field(None, description="Model stability (stable, experimental)")
+    name: str | None = None
+    display_name: str | None = None
+    description: str | None = None
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    vision: bool | None = None
+    reasoning: bool | None = None
+    supports_tool_calling: bool | None = None
+    hosting: str | None = None
+    open_source: bool | None = None
+    stability: str | None = None
+    input_cost_per_token: Decimal | None = None
+    output_cost_per_token: Decimal | None = None
+    model_kwargs_capabilities: SupportedModelKwargs | None = None
+    # Cross-cutting fields that used to live on the legacy /models/{id} update
+    # endpoint. Folded in so the edit dialog can save everything in one round
+    # trip — partial-success ("display name saved, classification didn't")
+    # was the worst-case before. `is_default=True` unsets sibling defaults in
+    # the same transaction; `security_classification` is validated against
+    # the caller's tenant.
+    is_default: bool | None = None
+    security_classification: ModelId | None = None
+
+
+def _service(
+    session: AsyncSession, user: UserInDB, container: Container
+) -> TenantCompletionModelService:
+    return TenantCompletionModelService(
+        session=session,
+        user=user,
+        audit_service=container.audit_service(),
+    )
 
 
 @router.post(
     "/",
     response_model=CompletionModelPublic,
-    responses=responses.get_responses([400, 404]),
+    description="Create a new tenant-specific completion model.",
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 async def create_tenant_completion_model(
     model_create: TenantCompletionModelCreate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Create a new tenant-specific completion model."""
-    from eneo.database.tables.ai_models_table import CompletionModels
-    from eneo.database.tables.model_providers_table import ModelProviders
-    import sqlalchemy as sa
-    from eneo.main.exceptions import BadRequestException, NotFoundException
-
+    validate_permission(user, Permission.ADMIN)
     assembler = container.completion_model_assembler()
 
-    # Verify provider exists and belongs to user's tenant
-    stmt = sa.select(ModelProviders).where(
-        ModelProviders.id == model_create.provider_id,
-        ModelProviders.tenant_id == user.tenant_id,
-    )
-    result = await session.execute(stmt)
-    provider = result.scalar_one_or_none()
-
-    if not provider:
-        raise NotFoundException("Model provider not found or does not belong to your organization")
-
-    if not provider.is_active:
-        raise BadRequestException("Model provider is not active")
-
-    # If setting as default, unset all other defaults first
-    if model_create.is_default:
-        stmt = (
-            sa.update(CompletionModels)
-            .where(CompletionModels.tenant_id == user.tenant_id)
-            .values(is_default=False)
-        )
-        await session.execute(stmt)
-
-    # Create the completion model with settings directly on it
-    # Note: litellm_model_name is set to None - TenantModelAdapter constructs it
-    # at runtime as f"{provider.provider_type}/{model.name}"
-    new_model = CompletionModels(
-        tenant_id=user.tenant_id,
-        provider_id=model_create.provider_id,
-        name=model_create.name,  # Model identifier (may contain slashes)
-        nickname=model_create.display_name,
-        litellm_model_name=None,  # Constructed at runtime by TenantModelAdapter
-        max_input_tokens=model_create.max_input_tokens,  # type: ignore[call-arg]
-        max_output_tokens=model_create.max_output_tokens,  # type: ignore[call-arg]
-        vision=model_create.vision,
-        reasoning=model_create.reasoning,
-        supports_tool_calling=model_create.supports_tool_calling,  # type: ignore[call-arg]
-        # Simplified defaults - these fields don't matter for tenant models (grouped by provider in UI)
-        family=model_create.family,
-        hosting=model_create.hosting,
-        org=None,
-        stability="stable",
-        open_source=False,
-        description=f"Tenant model: {model_create.display_name}",
-        nr_billion_parameters=None,
-        hf_link=None,
-        is_deprecated=False,
-        deployment_name=None,
-        base_url=None,
-        # Settings (now directly on model)
-        is_enabled=model_create.is_active,
-        is_default=model_create.is_default,
-        security_classification_id=None,
-    )
-
-    session.add(new_model)
-    await session.flush()
-
-    # Load the model BEFORE committing
-    from eneo.completion_models.domain.completion_model_repo import CompletionModelRepository
-    repo = CompletionModelRepository(session, user)
-    completion_model = await repo.one(new_model.id)
-
-    # Commit the transaction
+    service = _service(session, user, container)
+    completion_model = await service.create(model_create)
     await session.commit()
 
     return assembler.from_completion_model_to_model(completion_model=completion_model)
@@ -139,68 +109,22 @@ async def create_tenant_completion_model(
 @router.put(
     "/{model_id}/",
     response_model=CompletionModelPublic,
-    responses=responses.get_responses([403, 404]),
+    description="Update a tenant-specific completion model.",
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_tenant_completion_model(
     model_id: UUID,
     model_update: TenantCompletionModelUpdate,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
-    container: Container = Depends(get_container(with_user=True)),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Update a tenant-specific completion model."""
-    from eneo.database.tables.ai_models_table import CompletionModels
-    import sqlalchemy as sa
-    from eneo.main.exceptions import UnauthorizedException, NotFoundException
-
+    validate_permission(user, Permission.ADMIN)
     assembler = container.completion_model_assembler()
 
-    # Verify model exists and belongs to user's tenant
-    stmt = sa.select(CompletionModels).where(
-        CompletionModels.id == model_id,
-        CompletionModels.tenant_id == user.tenant_id,
-    )
-    result = await session.execute(stmt)
-    model = result.scalar_one_or_none()
-
-    if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
-
-    # Cannot update global models
-    if model.tenant_id is None:
-        raise UnauthorizedException("Cannot update global models")
-
-    # Update fields that were provided
-    if model_update.name is not None:
-        model.name = model_update.name
-    if model_update.display_name is not None:
-        model.nickname = model_update.display_name
-    if model_update.description is not None:
-        model.description = model_update.description
-    if model_update.max_input_tokens is not None:
-        model.max_input_tokens = model_update.max_input_tokens
-    if model_update.max_output_tokens is not None:
-        model.max_output_tokens = model_update.max_output_tokens
-    if model_update.vision is not None:
-        model.vision = model_update.vision
-    if model_update.reasoning is not None:
-        model.reasoning = model_update.reasoning
-    if model_update.supports_tool_calling is not None:
-        model.supports_tool_calling = model_update.supports_tool_calling
-    if model_update.hosting is not None:
-        model.hosting = model_update.hosting
-    if model_update.open_source is not None:
-        model.open_source = model_update.open_source
-    if model_update.stability is not None:
-        model.stability = model_update.stability
-
-    await session.flush()
-
-    # Load the updated model
-    from eneo.completion_models.domain.completion_model_repo import CompletionModelRepository
-    repo = CompletionModelRepository(session, user)
-    completion_model = await repo.one(model.id)
-
+    service = _service(session, user, container)
+    completion_model = await service.update(model_id, model_update)
     await session.commit()
 
     return assembler.from_completion_model_to_model(completion_model=completion_model)
@@ -208,39 +132,21 @@ async def update_tenant_completion_model(
 
 @router.delete(
     "/{model_id}/",
+    response_model=None,
+    description="Soft-delete a tenant-specific completion model.",
     responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_completion_model(
     model_id: UUID,
-    user: UserInDB = Depends(get_current_active_user),
-    session: AsyncSession = Depends(get_session_with_transaction),
+    user: Annotated[UserInDB, Depends(get_current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    """Delete a tenant-specific completion model."""
-    from eneo.database.tables.ai_models_table import CompletionModels
-    import sqlalchemy as sa
-    from eneo.main.exceptions import UnauthorizedException, NotFoundException, BadRequestException
+    """Soft-delete a tenant-specific completion model."""
+    validate_permission(user, Permission.ADMIN)
 
-    # Verify model exists and belongs to user's tenant
-    stmt = sa.select(CompletionModels).where(
-        CompletionModels.id == model_id,
-        CompletionModels.tenant_id == user.tenant_id,
-    )
-    result = await session.execute(stmt)
-    model = result.scalar_one_or_none()
-
-    if not model:
-        raise NotFoundException("Model not found or does not belong to your organization")
-
-    # Cannot delete global models
-    if model.tenant_id is None:
-        raise UnauthorizedException("Cannot delete global models")
-
-    # Delete the model (settings are now on the model itself)
-    try:
-        await session.delete(model)
-        await session.commit()
-    except sa.exc.IntegrityError:
-        await session.rollback()
-        raise BadRequestException("MODEL_IN_USE")
+    service = _service(session, user, container)
+    await service.delete(model_id)
+    await session.commit()
 
     return {"success": True}

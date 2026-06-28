@@ -17,6 +17,7 @@ class MCPServerTool(Entity):
         self,
         mcp_server_id: UUID,
         name: str,
+        title: Optional[str] = None,
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
         is_enabled_by_default: bool = True,
@@ -31,6 +32,7 @@ class MCPServerTool(Entity):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.mcp_server_id = mcp_server_id
         self.name = name
+        self.title = title
         self.description = description
         self.input_schema = input_schema
         self.is_enabled_by_default = is_enabled_by_default

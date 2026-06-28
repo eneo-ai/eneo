@@ -26,18 +26,21 @@ class TenantModelCredentialResolver:
         config: dict[str, Any],
         encryption_service: EncryptionService,
     ):
+        super().__init__()
         self.provider_id = provider_id
         self.provider_type = provider_type
         self.encryption = encryption_service
         self._credentials = credentials
         self._config = config
 
-    def get_api_key(self) -> str:
+    def get_api_key(self, *, required: bool = True) -> Optional[str]:
         """
         Get API key for the provider.
         """
         api_key = self._credentials.get("api_key")
         if not api_key:
+            if not required:
+                return None
             raise ValueError(
                 f"No API key found in credentials for provider {self.provider_id}"
             )

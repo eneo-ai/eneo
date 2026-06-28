@@ -2,7 +2,7 @@
   import { fade, fly, scale } from "svelte/transition";
   import { getDialog } from "./ctx.js";
   import { cubicOut } from "svelte/easing";
-  import { cva } from "class-variance-authority";
+  import { cva, cx } from "class-variance-authority";
 
   const {
     elements: { overlay, content, portalled },
@@ -13,6 +13,10 @@
   export let width: "small" | "medium" | "large" | "dynamic" = "small";
   /** Render Dialog into a form element, useful for input validation */
   export let form = false;
+
+  /** Additional classes to apply to the dialog */
+  let className: string = "";
+  export { className as class };
 
   const dialog = cva(
     [
@@ -65,7 +69,7 @@
 
     <svelte:element
       this={form ? "form" : "div"}
-      class={dialog({ width })}
+      class={cx(dialog({ width }), className)}
       {...$content}
       transition:dialogTransition
       use:content
@@ -76,14 +80,14 @@
 {/if}
 
 <style>
-  /* TODO maybe move this to tailwind? */
+  /* Shadow pseudo-element inherits border-radius from parent */
   .dialog-shadow::before {
     content: "";
     position: absolute;
     inset: 0px;
     z-index: -10;
     mix-blend-mode: multiply;
-    border-radius: 0.125rem;
+    border-radius: inherit;
     box-shadow:
       0px 1px 5px 1px rgb(0, 0, 0, 0.2),
       0px 10px 20px 0px rgba(0, 0, 0, 0.1);

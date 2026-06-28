@@ -2,10 +2,15 @@
 #
 # Licensed under the MIT License.
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+# Audit logging - module level imports for consistency
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.main.container.container import Container
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationCreatePublic,
@@ -20,24 +25,22 @@ from eneo.security_classifications.presentation.security_classification_models i
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
-# Audit logging - module level imports for consistency
-from eneo.audit.application.audit_metadata import AuditMetadata
-from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.entity_types import EntityType
-
 router = APIRouter()
+
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 
 
 @router.post(
     "/",
     response_model=SecurityClassificationPublic,
     status_code=201,
-    responses=responses.get_responses([400]),
+    description="Create a new security classification for the current tenant.",
+    responses=responses.get_responses([400, 403]),
 )
 async def create_security_classification(
     request: SecurityClassificationCreatePublic,
-    container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+    container: ContainerDep,
+) -> SecurityClassificationPublic | None:
     """Create a new security classification for the current tenant.
     Args:
         request: The security classification creation request.
@@ -60,7 +63,7 @@ async def create_security_classification(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_CREATED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=security_classification.id,
@@ -86,8 +89,8 @@ async def create_security_classification(
     responses=responses.get_responses([403]),
 )
 async def list_security_classifications(
-    container: Container = Depends(get_container(with_user=True)),
-) -> list[SecurityClassificationPublic]:
+    container: ContainerDep,
+) -> SecurityClassificationResponse:
     """List all security classifications ordered by security classification level.
     Returns:
         List of security classifications ordered by security classification level.
@@ -99,9 +102,15 @@ async def list_security_classifications(
     security_classifications = await service.list_security_classifications()
     user = container.user()
 
-    scs = [
-        SecurityClassificationPublic.from_domain(sc, return_none_if_not_enabled=False)
+    scs: list[SecurityClassificationPublic] = [
+        pub
         for sc in security_classifications
+        if (
+            pub := SecurityClassificationPublic.from_domain(
+                sc, return_none_if_not_enabled=False
+            )
+        )
+        is not None
     ]
 
     return SecurityClassificationResponse(
@@ -117,8 +126,8 @@ async def list_security_classifications(
 )
 async def get_security_classification(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+    container: ContainerDep,
+) -> SecurityClassificationPublic | None:
     """Get a security classification by ID.
     Args:
         id: The ID of the security classification.
@@ -138,12 +147,13 @@ async def get_security_classification(
 @router.patch(
     "/",
     response_model=SecurityClassificationsListPublic,
+    description="Update the security levels (ordering) of security classifications.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_security_classification_levels(
     request: SecurityClassificationLevelsUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+    container: ContainerDep,
+) -> SecurityClassificationsListPublic:
     """Update the security levels of security classifications.
     Args:
         request: Security classifications to update.
@@ -158,13 +168,15 @@ async def update_security_classification_levels(
     user = container.user()
 
     sc_ids = [model.id for model in request.security_classifications]
-    security_classifications = await service.update_security_levels(security_classifications=sc_ids)
+    security_classifications = await service.update_security_levels(
+        security_classifications=sc_ids
+    )
 
     # Audit logging
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=user.tenant_id,  # Use tenant as entity since multiple classifications affected
@@ -189,8 +201,14 @@ async def update_security_classification_levels(
 
     return SecurityClassificationsListPublic(
         security_classifications=[
-            SecurityClassificationPublic.from_domain(sc, return_none_if_not_enabled=False)
+            pub
             for sc in security_classifications
+            if (
+                pub := SecurityClassificationPublic.from_domain(
+                    sc, return_none_if_not_enabled=False
+                )
+            )
+            is not None
         ]
     )
 
@@ -198,16 +216,27 @@ async def update_security_classification_levels(
 @router.delete(
     "/{id}/",
     status_code=204,
-    responses=responses.get_responses([403, 404]),
+    description="Delete a security classification, optionally forcing if still referenced.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_security_classification(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    force: bool = False,
 ) -> None:
     """Delete a security classification.
+
+    Refuses if any model, space or MCP server still references it — the
+    FK is `ON DELETE SET NULL`, so dropping a referenced classification
+    would silently downgrade every dependent row to "no classification".
+    Pass `?force=true` to override after reviewing the usage report.
+
     Args:
         id: The ID of the security classification to delete.
+        force: When true, delete even if rows still reference this
+            classification. Those rows will be downgraded to NULL.
     Raises:
+        400: If the classification is referenced and `force` is false.
         403: If the user doesn't have permission to delete the security classification.
         404: If the security classification doesn't exist.
     """
@@ -218,13 +247,14 @@ async def delete_security_classification(
     security_classification = await service.get_security_classification(id)
 
     # Delete security classification
-    await service.delete_security_classification(id)
+    await service.delete_security_classification(id, force=force)
 
-    # Audit logging
+    # Audit logging — flag forced deletes prominently so a reader can
+    # tell when an admin overrode the in-use guard.
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_DELETED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=id,
@@ -232,7 +262,10 @@ async def delete_security_classification(
         metadata=AuditMetadata.standard(
             actor=user,
             target=security_classification,
-            extra={"security_level": security_classification.security_level},
+            extra={
+                "security_level": security_classification.security_level,
+                "forced": force,
+            },
         ),
     )
 
@@ -240,13 +273,14 @@ async def delete_security_classification(
 @router.patch(
     "/{id}/",
     response_model=SecurityClassificationPublic,
+    description="Update a single security classification's name and/or description.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_security_classification(
     id: UUID,
     request: SecurityClassificationSingleUpdate,
-    container: Container = Depends(get_container(with_user=True)),
-) -> SecurityClassificationPublic:
+    container: ContainerDep,
+) -> SecurityClassificationPublic | None:
     """Update a single security classification's name and/or description.
 
     This endpoint allows updating just the name and description of a security classification
@@ -264,7 +298,7 @@ async def update_security_classification(
         403: If the user doesn't have permission to update the classification
         404: If the security classification doesn't exist
     """
-    from eneo.main.models import NOT_PROVIDED
+    from eneo.main.models import is_provided
 
     service = container.security_classification_service()
     user = container.user()
@@ -276,19 +310,20 @@ async def update_security_classification(
     security_classification = await service.update_security_classification(
         id=id, name=request.name, description=request.description
     )
+    assert security_classification is not None
 
     # Track changes
-    changes = {}
-    if request.name is not NOT_PROVIDED and request.name != old_sc.name:
+    changes: dict[str, object] = {}
+    if is_provided(request.name) and request.name != old_sc.name:
         changes["name"] = {"old": old_sc.name, "new": request.name}
-    if request.description is not NOT_PROVIDED and request.description != old_sc.description:
+    if is_provided(request.description) and request.description != old_sc.description:
         changes["description"] = {"old": old_sc.description, "new": request.description}
 
     # Audit logging
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SECURITY_CLASSIFICATION_UPDATED,
         entity_type=EntityType.SECURITY_CLASSIFICATION,
         entity_id=id,
@@ -308,11 +343,12 @@ async def update_security_classification(
 @router.post(
     "/enable/",
     response_model=SecurityEnableResponse,
+    description="Enable or disable security classifications for the current tenant.",
     responses=responses.get_responses([400, 403]),
 )
 async def toggle_security_classifications(
     request: SecurityEnableRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ) -> SecurityEnableResponse:
     """Enable or disable security classifications for the current tenant.
 
@@ -331,6 +367,7 @@ async def toggle_security_classifications(
 
     # Toggle security classifications
     tenant = await service.toggle_security_on_tenant(enabled=request.enabled)
+    assert tenant is not None
 
     # Audit logging
     audit_service = container.audit_service()
@@ -342,7 +379,7 @@ async def toggle_security_classifications(
 
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,
@@ -355,6 +392,8 @@ async def toggle_security_classifications(
     )
 
     return SecurityEnableResponse(
-        tenant_id=tenant.id,
-        security_enabled=tenant.security_enabled,
+        **dict(  # type: ignore[arg-type]
+            tenant_id=tenant.id,
+            security_enabled=tenant.security_enabled,
+        )
     )

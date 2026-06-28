@@ -71,6 +71,7 @@ class InfoBlobInDBNoText(InDB):
     website_id: Optional[UUID] = None
     integration_knowledge_id: Optional[UUID] = None
     sharepoint_item_id: Optional[str] = None
+    content_hash: Optional[bytes] = None
 
     group: Optional[GroupInDBBase] = None
     website: Optional[WebsiteInDBBase] = None
@@ -85,7 +86,7 @@ class InfoBlobInDBWithScore(InfoBlobInDB):
 
 
 class InfoBlobAddPublic(InfoBlobBase):
-    metadata: InfoBlobMetadataUpsertPublic = None
+    metadata: InfoBlobMetadataUpsertPublic = None  # type: ignore[assignment]
 
 
 class InfoBlobPublicNoText(InDB):
@@ -108,8 +109,7 @@ class InfoBlobMetadataFilterPublic(BaseModel):
 
 
 class InfoBlobMetadataFilter(InfoBlobMetadataFilterPublic):
-    user_id: Optional[int] = None
-    group_ids: Optional[list[int]] = None
+    user_id: Optional[UUID] = None
 
 
 class InfoBlobChunk(BaseModel):

@@ -1,8 +1,9 @@
 # MIT License
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -18,7 +19,12 @@ from eneo.main.exceptions import UniqueException
 from eneo.user_groups.user_group import (
     UserGroupCreate,
     UserGroupInDB,
+    UserGroupState,
     UserGroupUpdate,
+)
+
+_NOT_DELETED = sa.or_(
+    UserGroups.state.is_(None), UserGroups.state != UserGroupState.DELETED
 )
 
 
@@ -26,7 +32,8 @@ class UserGroupsRepository:
     UNIQUE_EXCEPTION_MSG = "User group name already exists."
 
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        super().__init__()
+        self.delegate: BaseRepositoryDelegate[UserGroupInDB] = BaseRepositoryDelegate(
             session,
             UserGroups,
             UserGroupInDB,
@@ -36,15 +43,19 @@ class UserGroupsRepository:
     def _get_options(self):
         return [
             selectinload(UserGroups.users).selectinload(Users.roles),
-            selectinload(UserGroups.users).selectinload(Users.predefined_roles),
             selectinload(UserGroups.users)
             .selectinload(Users.tenant)
             .selectinload(Tenants.modules),
             selectinload(UserGroups.users).selectinload(Users.api_key),
         ]
 
-    async def get_user_group(self, id: UUID) -> UserGroupInDB:
-        return await self.delegate.get(id)
+    async def get_user_group(self, id: UUID) -> UserGroupInDB | None:
+        query = (
+            sa.select(UserGroups)
+            .where(UserGroups.id == id, _NOT_DELETED)
+            .options(*self._get_options())
+        )
+        return await self.delegate.get_model_from_query(query)
 
     async def create_user_group(self, user_group: UserGroupCreate) -> UserGroupInDB:
         try:
@@ -60,14 +71,15 @@ class UserGroupsRepository:
                 table=Users,
                 options=[
                     selectinload(Users.roles),
-                    selectinload(Users.predefined_roles),
                     selectinload(Users.tenant).selectinload(Tenants.modules),
                     selectinload(Users.api_key),
                 ],
             ),
         ]
 
-    async def update_user_group(self, user_group: UserGroupUpdate) -> UserGroupInDB:
+    async def update_user_group(
+        self, user_group: UserGroupUpdate
+    ) -> UserGroupInDB | None:
         try:
             return await self.delegate.update(
                 user_group,
@@ -77,10 +89,15 @@ class UserGroupsRepository:
         except IntegrityError as e:
             raise UniqueException(self.UNIQUE_EXCEPTION_MSG) from e
 
-    async def delete_user_group(self, id: UUID) -> UserGroupInDB:
+    async def delete_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.delete(id)
 
-    async def get_all_user_groups(self, tenant_id: UUID = None) -> List[UserGroupInDB]:
-        return await self.delegate.filter_by(
-            conditions={UserGroups.tenant_id: tenant_id}
+    async def get_all_user_groups(
+        self, tenant_id: Optional[UUID] = None
+    ) -> List[UserGroupInDB]:
+        query = (
+            sa.select(UserGroups)
+            .where(UserGroups.tenant_id == tenant_id, _NOT_DELETED)
+            .options(*self._get_options())
         )
+        return await self.delegate.get_models_from_query(query)

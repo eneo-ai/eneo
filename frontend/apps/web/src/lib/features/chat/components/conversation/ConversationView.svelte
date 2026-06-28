@@ -1,12 +1,13 @@
 <script lang="ts">
   import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import { getAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
+  import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { Markdown } from "@eneo/ui";
   import Message from "./Message.svelte";
-  import ConversationAttachments from "./ConversationAttachments.svelte";
-  import ConversationInput from "./ConversationInput.svelte";
+  import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
   import { Tooltip } from "@eneo/ui";
@@ -16,14 +17,30 @@
 
   type Props = {
     children?: Snippet;
+    onNewConversation?: () => void;
   };
 
-  let { children }: Props = $props();
+  let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
 
-  const attachmentRules = undefined; // getAttachmentRulesStore(toStore(() => chat.partner));
-  initAttachmentManager({ eneo: getEneo(), options: { rules: attachmentRules } });
+  // Validate uploads client-side against the backend's per-format size limits
+  // (and the partner model's vision support) so oversized or unsupported files
+  // are rejected instantly with a clear message instead of silently failing the
+  // server-side request. Group-chat partners have no completion_model, so vision
+  // formats are simply omitted from the accepted set.
+  const attachmentRules = getAttachmentRulesStore(
+    toStore(() => {
+      const partner = chat.partner;
+      return {
+        completion_model: partner && "completion_model" in partner ? partner.completion_model : null
+      };
+    })
+  );
+  initAttachmentManager({
+    eneo: getEneo(),
+    options: { rules: attachmentRules, inlineErrors: true }
+  });
 
   let scrollContainer = $state() as HTMLDivElement;
   let showScrollToBottom = $state(false);
@@ -120,12 +137,11 @@
         </Tooltip>
       </div>
     {/if}
-    <ConversationAttachments></ConversationAttachments>
-    <ConversationInput {scrollToBottom}></ConversationInput>
+    <ChatComposer {scrollToBottom} {onNewConversation}></ChatComposer>
   </div>
 </div>
 {#if isDragging}
-  <AttachmentDropArea bind:isDragging label={m.drop_files_here_conversation()} />
+  <AttachmentDropArea bind:isDragging label={m.drop_files_here_conversation()} inlineErrors />
 {/if}
 
 <style></style>

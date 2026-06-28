@@ -3,5 +3,12 @@
   "version": "1.15.0",
   "type": "module",
   "module": "index.js",
-  "main": "index.js"
+  "main": "index.js",
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "eslint": "^9.28.0",
+    "svelte-eslint-parser": "^1.1.2"
+  }
 }

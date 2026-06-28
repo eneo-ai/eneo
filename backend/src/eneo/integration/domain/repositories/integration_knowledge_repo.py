@@ -12,12 +12,12 @@ if TYPE_CHECKING:
 class IntegrationKnowledgeRepository(ABC):
     @abstractmethod
     async def one_or_none(
-        self, id: "UUID | None" = None, **filters
+        self, id: "UUID | None" = None, **filters: object
     ) -> "IntegrationKnowledge | None": ...
 
     @abstractmethod
     async def one(
-        self, id: "UUID | None" = None, **filters
+        self, id: "UUID | None" = None, **filters: object
     ) -> "IntegrationKnowledge": ...
 
     @abstractmethod

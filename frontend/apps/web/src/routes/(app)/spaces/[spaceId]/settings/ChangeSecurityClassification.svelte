@@ -6,11 +6,11 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconCheck } from "@eneo/icons/check";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { EneoError, type Eneo, type SecurityClassification } from "@eneo/eneo-js";
+  import { type Eneo, type SecurityClassification } from "@eneo/eneo-js";
   import { Button, Dialog } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
 
@@ -47,6 +47,7 @@
   });
   let affectedMcpServers = $derived.by(() => {
     if (!result) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (result.mcp_servers ?? []).map((s: any) => ({ name: s.name }));
   });
   let hasAnyImpact = $derived(affectedModels.length > 0 || affectedMcpServers.length > 0);
@@ -69,7 +70,7 @@
       onUpdateDone?.();
       $showDryRunDialog = false;
     } catch (error) {
-      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

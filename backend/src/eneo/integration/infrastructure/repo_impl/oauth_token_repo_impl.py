@@ -4,16 +4,18 @@ from sqlalchemy.orm import selectinload
 
 from eneo.database.tables.integration_table import (
     OauthToken as OauthTokenDBModel,
+)
+from eneo.database.tables.integration_table import (
     UserIntegration,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.repositories.oauth_token_repo import (
     OauthTokenRepository,
 )
-from eneo.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 from eneo.integration.infrastructure.mappers.oauth_token_mapper import (
     OauthTokenMapper,
 )
+from eneo.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

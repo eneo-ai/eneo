@@ -3,10 +3,12 @@
 # Licensed under the MIT License.
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast, overload
+
+from typing_extensions import override
 
 from eneo.base.base_entity import Entity
-from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -27,7 +29,8 @@ class GroupChatAssistant:
         self,
         assistant: "Assistant",
         user_description: Optional[str] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.assistant = assistant
         self.user_description = user_description
 
@@ -51,9 +54,9 @@ class GroupChat(Entity):
         show_response_label: bool,
         published: bool,
         insight_enabled: bool = False,
-        metadata_json: Optional[dict] = None,
+        metadata_json: Optional[dict[str, object]] = None,
         icon_id: Optional["UUID"] = None,
-    ):
+    ) -> None:
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
         self.space_id = space_id
@@ -67,20 +70,47 @@ class GroupChat(Entity):
         self._metadata_json = metadata_json
         self.icon_id = icon_id
 
+    @overload
     @classmethod
     def create(
         cls,
         name: str,
         space_id: "UUID",
         user_id: "UUID",
+        /,
+    ) -> "GroupChat": ...
+
+    @overload
+    @classmethod
+    def create(
+        cls,
+        *,
+        name: str,
+        space_id: "UUID",
+        user_id: "UUID",
+    ) -> "GroupChat": ...
+
+    @override
+    @classmethod
+    def create(
+        cls,
+        *args: object,
+        **kwargs: object,
     ) -> "GroupChat":
+        if args:
+            name, space_id, user_id = args
+        else:
+            name = kwargs["name"]
+            space_id = kwargs["space_id"]
+            user_id = kwargs["user_id"]
+
         return cls(
             id=None,
             created_at=None,
             updated_at=None,
-            user_id=user_id,
-            space_id=space_id,
-            name=name,
+            user_id=cast("UUID", user_id),
+            space_id=cast("UUID", space_id),
+            name=cast(str, name),
             assistants=[],
             allow_mentions=False,
             show_response_label=False,
@@ -88,23 +118,25 @@ class GroupChat(Entity):
         )
 
     @property
-    def metadata_json(self) -> Optional[dict]:
+    def metadata_json(self) -> Optional[dict[str, object]]:
         return self._metadata_json
 
     @metadata_json.setter
-    def metadata_json(self, metadata_json: Optional[dict]):
+    def metadata_json(self, metadata_json: Optional[dict[str, object]]):
         self._metadata_json = metadata_json
 
     @property
-    def assistant_ids(self) -> list["UUID"]:
-        assistant_ids = []
+    def assistant_ids(self) -> "list[UUID]":
+        assistant_ids: list["UUID"] = []
         for group_chat_assistant in self.assistants:
             assistant_ids.append(group_chat_assistant.assistant.id)
         return assistant_ids
 
     def get_assistant_by_id(self, assistant_id: "UUID") -> Optional[GroupChatAssistant]:
         """Get an assistant in this group chat by ID"""
-        return next((a for a in self.assistants if a.assistant.id == assistant_id), None)
+        return next(
+            (a for a in self.assistants if a.assistant.id == assistant_id), None
+        )
 
     def get_assistants(self):
         return [assistant.assistant for assistant in self.assistants]
@@ -117,7 +149,7 @@ class GroupChat(Entity):
         published: Optional[bool] = None,
         new_assistants: Optional[list[GroupChatAssistant]] = None,
         insight_enabled: Optional[bool] = None,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
@@ -132,9 +164,9 @@ class GroupChat(Entity):
             self.assistants = new_assistants
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
-        if metadata_json is not NOT_PROVIDED:
+        if is_provided(metadata_json):
             self.metadata_json = metadata_json
-        if icon_id is not NOT_PROVIDED:
+        if is_provided(icon_id):
             self.icon_id = icon_id
 
         return self

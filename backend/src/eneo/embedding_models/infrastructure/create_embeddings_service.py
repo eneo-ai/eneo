@@ -8,7 +8,6 @@ from eneo.embedding_models.infrastructure.adapters.litellm_embeddings import (
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import InfoBlobChunk
 from eneo.main.config import SETTINGS, Settings
-from eneo.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -26,12 +25,13 @@ class EmbeddingModelLike(Protocol):
     to be used interchangeably via duck typing. The adapters only access
     these attributes, so any object providing them will work.
     """
+
     id: UUID
     name: str
     provider_id: UUID | None
     litellm_model_name: str | None
     family: str | None
-    max_input: int
+    max_input: int | None
     max_batch_size: int | None
     dimensions: int | None
     open_source: bool
@@ -44,7 +44,8 @@ class CreateEmbeddingsService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
@@ -65,24 +66,32 @@ class CreateEmbeddingsService:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
                    Both satisfy the EmbeddingModelLike protocol.
         """
+        from eneo.model_providers.infrastructure.litellm_provider import (
+            build_litellm_model_name,
+            load_active_litellm_provider,
+        )
         from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
         )
 
         # All models must have provider_id
-        if not hasattr(model, 'provider_id') or not model.provider_id:
+        if not hasattr(model, "provider_id") or not model.provider_id:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
             )
 
         # Check if provider data is pre-resolved on the model (e.g. from crawl bootstrap)
-        provider_type = getattr(model, 'provider_type', None)
-        provider_credentials = getattr(model, 'provider_credentials', None)
-        provider_config = getattr(model, 'provider_config', None)
+        provider_type = getattr(model, "provider_type", None)
+        provider_credentials = getattr(model, "provider_credentials", None)
+        provider_config = getattr(model, "provider_config", None)
 
         if provider_type and provider_credentials is not None:
             # Pre-resolved path: no DB session needed
+            if self.encryption_service is None:
+                raise ValueError(
+                    "CreateEmbeddingsService requires an encryption_service to resolve credentials."
+                )
             credential_resolver = TenantModelCredentialResolver(
                 provider_id=model.provider_id,
                 provider_type=provider_type,
@@ -90,63 +99,55 @@ class CreateEmbeddingsService:
                 config=provider_config or {},
                 encryption_service=self.encryption_service,
             )
-            litellm_model_name = f"{provider_type}/{model.name}"
+            litellm_model_name = build_litellm_model_name(provider_type, model.name)
         else:
             # DB lookup path: requires active session
-            import sqlalchemy as sa
-            from eneo.database.tables.model_providers_table import ModelProviders
-
             if not self.session:
                 logger.error(
                     "Model requires database session but none available",
                     extra={
-                        "model_id": str(model.id) if hasattr(model, 'id') else None,
+                        "model_id": str(model.id) if hasattr(model, "id") else None,
                         "model_name": model.name,
                         "provider_id": str(model.provider_id),
                         "tenant_id": str(self.tenant.id) if self.tenant else None,
-                    }
+                    },
                 )
                 raise ValueError(
                     f"Model '{model.name}' requires database session to load provider credentials. "
                     "Please ensure the CreateEmbeddingsService is initialized with a database session."
                 )
 
-            stmt = sa.select(ModelProviders).where(ModelProviders.id == model.provider_id)
-            result = await self.session.execute(stmt)
-            provider_db = result.scalar_one_or_none()
-
-            if provider_db is None:
-                raise ProviderNotFoundException(
-                    f"Model provider '{model.provider_id}' not found. "
-                    "The provider may have been deleted or is not accessible."
+            if self.encryption_service is None:
+                raise ValueError(
+                    "CreateEmbeddingsService requires an encryption_service to resolve credentials."
                 )
-
-            if not provider_db.is_active:
-                raise ProviderInactiveException(
-                    f"The model provider '{provider_db.name}' is currently inactive. "
-                    "Please contact your administrator to enable the provider."
+            if self.tenant is None:
+                raise ValueError(
+                    f"Model '{model.name}' requires tenant context to load its provider."
                 )
-
-            credential_resolver = TenantModelCredentialResolver(
-                provider_id=provider_db.id,
-                provider_type=provider_db.provider_type,
-                credentials=provider_db.credentials,
-                config=provider_db.config,
-                encryption_service=self.encryption_service,
+            provider = await load_active_litellm_provider(
+                session=self.session,
+                provider_id=model.provider_id,
+                tenant_id=self.tenant.id,
             )
-            litellm_model_name = f"{provider_db.provider_type}/{model.name}"
-            provider_type = provider_db.provider_type
+            credential_resolver = provider.create_credential_resolver(
+                self.encryption_service
+            )
+            litellm_model_name = build_litellm_model_name(
+                provider.provider_type, model.name
+            )
+            provider_type = provider.provider_type
 
         logger.info(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_type,
                 "litellm_model_name": litellm_model_name,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
-            }
+            },
         )
 
         return LiteLLMEmbeddingAdapter(

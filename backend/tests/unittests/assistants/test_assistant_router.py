@@ -19,10 +19,17 @@ from eneo.assistants.api.assistant_models import (
     AskAssistant,
     AssistantResponse,
 )
-from eneo.assistants.api.assistant_router import ask_assistant
+from eneo.assistants.api.assistant_router import (
+    ask_assistant,
+    delete_assistant_session,
+    get_assistant_session,
+    get_assistant_sessions,
+    leave_feedback,
+)
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.sessions.session import SessionInDB
+from eneo.main.exceptions import UnauthorizedException
+from eneo.sessions.session import SessionFeedback, SessionInDB
 
 
 @pytest.fixture
@@ -108,12 +115,6 @@ def mock_container(mock_user, mock_assistant, mock_response, mock_space):
 
 
 @pytest.fixture
-def mock_db_session():
-    """Create a mock database session."""
-    return AsyncMock()
-
-
-@pytest.fixture
 def mock_assistant_protocol(mock_response):
     """Create a mock for assistant_protocol.to_response."""
     return AsyncMock()
@@ -123,7 +124,7 @@ class TestAskAssistant:
     """Tests for the POST /{id}/sessions/ endpoint."""
 
     async def test_extracts_session_id_from_session_object(
-        self, mock_container, mock_db_session, monkeypatch
+        self, mock_container, monkeypatch
     ):
         """Verify that response.session.id is used, not response.session_id.
 
@@ -149,7 +150,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         # Verify audit_service.log_async was called
@@ -163,14 +163,14 @@ class TestAskAssistant:
         # This is the key assertion - if code uses response.session_id, it would fail
         # because MagicMock(spec=AssistantResponse) won't have that attribute
         metadata = call_kwargs["metadata"]
-        expected_session_id = mock_container.assistant_service.return_value.ask.return_value.session.id
+        expected_session_id = (
+            mock_container.assistant_service.return_value.ask.return_value.session.id
+        )
 
         # The metadata.extra dict should contain the correct session_id
         assert str(expected_session_id) in str(metadata)
 
-    async def test_audit_logs_session_started_action(
-        self, mock_container, mock_db_session, monkeypatch
-    ):
+    async def test_audit_logs_session_started_action(self, mock_container, monkeypatch):
         """Verify SESSION_STARTED is logged with correct action type and entity type."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
@@ -186,7 +186,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         audit_service = mock_container.audit_service.return_value
@@ -197,7 +196,7 @@ class TestAskAssistant:
         assert call_kwargs["entity_id"] == assistant_id
 
     async def test_audit_logs_with_correct_user_context(
-        self, mock_container, mock_user, mock_db_session, monkeypatch
+        self, mock_container, mock_user, monkeypatch
     ):
         """Verify audit logging includes correct tenant_id and actor_id from user."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -214,7 +213,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         audit_service = mock_container.audit_service.return_value
@@ -223,9 +221,7 @@ class TestAskAssistant:
         assert call_kwargs["tenant_id"] == mock_user.tenant_id
         assert call_kwargs["actor_id"] == mock_user.id
 
-    async def test_audit_logs_file_metadata(
-        self, mock_container, mock_db_session, monkeypatch
-    ):
+    async def test_audit_logs_file_metadata(self, mock_container, monkeypatch):
         """Verify file count is captured in audit metadata when files are provided."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
@@ -241,7 +237,7 @@ class TestAskAssistant:
         assistant_id = uuid.uuid4()
         ask = AskAssistant(
             question="Analyze this file",
-            files=[file1],
+            files=[file1.id],
         )
 
         await ask_assistant(
@@ -249,7 +245,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         audit_service = mock_container.audit_service.return_value
@@ -261,7 +256,7 @@ class TestAskAssistant:
         assert "file_count" in str(metadata) or hasattr(metadata, "extra")
 
     async def test_space_service_called_for_context(
-        self, mock_container, mock_assistant, mock_db_session, monkeypatch
+        self, mock_container, mock_assistant, monkeypatch
     ):
         """Verify space_service is called to get space context when assistant has space_id."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -278,14 +273,13 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         space_service = mock_container.space_service.return_value
         space_service.get_space.assert_called_once_with(mock_assistant.space_id)
 
     async def test_space_service_exception_handled_gracefully(
-        self, mock_container, mock_db_session, monkeypatch
+        self, mock_container, monkeypatch
     ):
         """Verify space_service exceptions don't break the endpoint."""
         mock_to_response = AsyncMock(return_value=MagicMock())
@@ -307,7 +301,6 @@ class TestAskAssistant:
             ask=ask,
             version=1,
             container=mock_container,
-            db_session=mock_db_session,
         )
 
         # Audit logging should still happen
@@ -362,3 +355,77 @@ class TestAssistantResponseStructure:
         # - Return the mock's default (if not using spec)
         # - Raise AttributeError (if using strict spec)
         # Our mock uses spec=AssistantResponse, so session_id won't be a real attribute
+
+
+class TestAssistantSessionPagination:
+    async def test_missing_cursor_stays_none_in_paginated_response(
+        self, mock_container
+    ):
+        assistant_id = uuid.uuid4()
+        session = SessionInDB(
+            id=uuid.uuid4(),
+            name="Session",
+            user_id=uuid.uuid4(),
+            created_at=None,
+        )
+        session_service = AsyncMock()
+        session_service.get_sessions_by_assistant.return_value = ([session], 1)
+        mock_container.session_service.return_value = session_service
+
+        response = await get_assistant_sessions(
+            id=assistant_id,
+            container=mock_container,
+            limit=10,
+            cursor=None,
+            previous=False,
+        )
+
+        assert response.previous_cursor is None
+
+
+class TestLegacyAssistantSessionAuthorization:
+    @pytest.fixture
+    def unauthorized_container(self, mock_container):
+        assistant_service = mock_container.assistant_service.return_value
+        assistant_service.get_assistant.side_effect = UnauthorizedException(
+            "Personal chat access has been revoked"
+        )
+        mock_container.session_service.return_value = AsyncMock()
+        return mock_container
+
+    async def test_get_authorizes_assistant_before_loading_session(
+        self, unauthorized_container
+    ):
+        with pytest.raises(UnauthorizedException):
+            await get_assistant_session(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                container=unauthorized_container,
+            )
+
+        unauthorized_container.session_service.return_value.get_session_by_uuid.assert_not_awaited()
+
+    async def test_delete_authorizes_assistant_before_deleting_session(
+        self, unauthorized_container
+    ):
+        with pytest.raises(UnauthorizedException):
+            await delete_assistant_session(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                container=unauthorized_container,
+            )
+
+        unauthorized_container.session_service.return_value.delete.assert_not_awaited()
+
+    async def test_feedback_authorizes_assistant_before_writing_feedback(
+        self, unauthorized_container
+    ):
+        with pytest.raises(UnauthorizedException):
+            await leave_feedback(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                feedback=SessionFeedback(value=1),
+                container=unauthorized_container,
+            )
+
+        unauthorized_container.session_service.return_value.leave_feedback.assert_not_awaited()

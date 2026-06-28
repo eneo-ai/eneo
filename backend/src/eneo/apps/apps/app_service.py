@@ -6,11 +6,14 @@ from eneo.apps.apps.api.app_models import InputField, InputFieldType
 from eneo.apps.apps.app import App
 from eneo.apps.apps.app_factory import AppFactory
 from eneo.apps.apps.app_repo import AppRepository
+from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import Transcriber
 from eneo.icons.icon_repo import IconRepository
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
-from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
+from eneo.main.logging import get_logger
+from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, ResourcePermission
 from eneo.prompts.prompt_service import PromptService
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space import Space
@@ -18,6 +21,9 @@ from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.ai_models.completion_models.completion_model import (
+        CompletionModelResponse,
+    )
     from eneo.completion_models.application import CompletionModelCRUDService
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.infrastructure.completion_service import (
@@ -51,7 +57,9 @@ class AppService:
         transcription_model_crud_service: "TranscriptionModelCRUDService",
         completion_service: "CompletionService",
         icon_repo: IconRepository,
+        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
+        super().__init__()
         self.user = user
         self.repo = repo
         self.space_repo = space_repo
@@ -65,14 +73,24 @@ class AppService:
         self.transcription_model_crud_service = transcription_model_crud_service
         self.completion_service = completion_service
         self.icon_repo = icon_repo
+        self.api_key_scope_revoker = api_key_scope_revoker
+        self._logger = get_logger(__name__)
 
     async def create_app(
         self, name: str, space: Space, template_data: Optional["TemplateCreate"] = None
-    ) -> App:
+    ) -> tuple[App, list[ResourcePermission]]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to create apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         completion_model = await self.get_completion_model(space=space)
         transcription_model = await self.get_transcription_model(space=space)
@@ -98,15 +116,15 @@ class AppService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
-        return app_in_db, permissions
+        return app_in_db, permissions  # type: ignore[return-value]
 
     async def _create_from_template(
         self,
         space: "Space",
         template_data: "TemplateCreate",
-        completion_model: Optional["CompletionModel"],
+        completion_model: "CompletionModel",
         name: str | None = None,
-        transcription_model: Optional["TranscriptionModel"] = None,
+        transcription_model: "TranscriptionModel | None" = None,
     ):
         template = await self.app_template_service.get_app_template(
             app_template_id=template_data.id
@@ -115,14 +133,14 @@ class AppService:
         if (
             template.completion_model
             and template.completion_model.id
-            and space.is_completion_model_in_space(template.completion_model.id)
+            and space.is_completion_model_available(template.completion_model.id)
         ):
             completion_model = space.get_completion_model(template.completion_model.id)
 
         # Validate incoming data
         template.validate_wizard_data(template_data=template_data)
 
-        attachments = await self.file_service.get_file_infos(
+        attachments = await self.file_service.get_files_by_ids(
             file_ids=template_data.get_ids_by_type(wizard_type=WizardType.attachments)
         )
 
@@ -151,24 +169,29 @@ class AppService:
 
         return await self.repo.add(app)
 
-    async def get_completion_model(self, space: Space) -> Optional["CompletionModel"]:
-        """Get a completion model for the space. Returns None if no model is available."""
+    async def get_completion_model(self, space: Space) -> "CompletionModel":
+        """Get a completion model for the space."""
         completion_model = space.get_default_completion_model() or (
             space.get_latest_completion_model()
             if not space.is_personal()
             else await self.completion_model_crud_service.get_default_completion_model()
         )
 
+        if completion_model is None:
+            raise BadRequestException(
+                "No completion model available. Please enable a completion model in the space before creating an app."
+            )
+
         return completion_model
 
-    async def get_transcription_model(self, space: Space) -> Optional["TranscriptionModel"]:
-        """Get a transcription model for the space. Returns None if no model is available."""
-        transcription_model = space.get_latest_transcription_model()
+    async def get_transcription_model(self, space: Space) -> "TranscriptionModel":
+        """Get a transcription model for the space."""
+        transcription_model: "TranscriptionModel | None" = (
+            space.get_latest_transcription_model()
+        )
         if not transcription_model:
             # Get default from tenant (for both personal and non-personal spaces)
-            transcription_model = (
-                await self.transcription_model_crud_service.get_default_transcription_model()
-            )
+            transcription_model = await self.transcription_model_crud_service.get_default_transcription_model()
 
         if transcription_model is None:
             raise BadRequestException(
@@ -177,13 +200,21 @@ class AppService:
 
         return transcription_model
 
-    async def get_app(self, app_id: UUID) -> tuple[App, list[str]]:
+    async def get_app(self, app_id: UUID) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
@@ -204,22 +235,36 @@ class AppService:
         transcription_model_id: UUID | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-    ) -> App:
+    ) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_edit_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         completion_model = None
         if completion_model_id is not None:
-            if not space.is_completion_model_in_space(completion_model_id=completion_model_id):
-                raise BadRequestException("The completion model is not enabled in the space.")
+            if not space.is_completion_model_available(
+                completion_model_id=completion_model_id
+            ):
+                raise BadRequestException(
+                    "The completion model is not enabled in the space."
+                )
 
             else:
-                completion_model = await self.completion_model_crud_service.get_completion_model(
-                    completion_model_id
+                completion_model = (
+                    await self.completion_model_crud_service.get_completion_model(
+                        completion_model_id
+                    )
                 )
 
         transcription_model = None
@@ -227,7 +272,9 @@ class AppService:
             if not space.is_transcription_model_in_space(
                 transcription_model_id=transcription_model_id
             ):
-                raise BadRequestException("The transcription model is not enabled in the space.")
+                raise BadRequestException(
+                    "The transcription model is not enabled in the space."
+                )
             else:
                 transcription_model = (
                     await self.transcription_model_crud_service.get_transcription_model(
@@ -237,14 +284,20 @@ class AppService:
 
         attachments = None
         if attachment_ids is not None:
-            attachments = await self.file_service.get_file_infos(
+            attachments = await self.file_service.get_files_by_ids(
                 [attachment.id for attachment in attachment_ids]
             )
 
         prompt = None
         if prompt_text is not None:
+            # Attribute the prompt to the app's owner, not the caller.
+            # Keeps service-key edits FK-safe (synthetic id has no `users`
+            # row) and makes admin edits to others' apps attribute
+            # correctly.
             prompt = await self.prompt_service.create_prompt(
-                text=prompt_text, description=prompt_description
+                text=prompt_text,
+                description=prompt_description,
+                owner_user_id=app.user_id,
             )
 
         app.update(
@@ -265,37 +318,87 @@ class AppService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
-        return app_in_db, permissions
+        return app_in_db, permissions  # type: ignore[return-value]
 
     async def delete_app(self, app_id: UUID):
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to delete apps in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         app = space.get_app(app_id=app_id)
         icon_id = app.icon_id
+
+        if self.api_key_scope_revoker is not None:
+            try:
+                await self.api_key_scope_revoker.revoke_scope(
+                    scope_type=ApiKeyScopeType.APP,
+                    scope_id=app_id,
+                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                    reason_text="App deleted",
+                )
+            except Exception:
+                self._logger.exception(
+                    "Failed to revoke API keys for deleted app",
+                    extra={"app_id": str(app_id)},
+                )
 
         await self.repo.delete(app_id)
 
         if icon_id:
             await self.icon_repo.delete(icon_id)
 
-    async def run_app(self, app_id: UUID, file_ids: list[UUID], text: str | None):
+    async def run_app(
+        self, app_id: UUID, file_ids: list[UUID], text: str | None
+    ) -> "CompletionModelResponse":
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_app(app=app):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to run this app.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "run",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if not space.can_run_app(app=app):
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "This app cannot be run in the current space configuration.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "run",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         files = await self.file_service.get_files_by_ids(
             file_ids=file_ids, include_transcription=True
         )
+
+        # Document-derived images (e.g. rendered PDF pages) enrich the
+        # completion payload only — the run's recorded input files stay the
+        # user's own uploads.
+        if app.completion_model is not None and app.completion_model.vision:
+            files = await self.file_service.with_derived_images(files)
+            if app.attachments:
+                app.attachments = await self.file_service.with_derived_images(
+                    app.attachments
+                )
 
         return await app.run(
             files=files,
@@ -309,17 +412,35 @@ class AppService:
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_prompts_of_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read prompts for this app.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "prompt",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return await self.prompt_service.get_prompts_by_app(app_id=app_id)
 
-    async def publish_app(self, app_id: "UUID", publish: bool):
+    async def publish_app(
+        self, app_id: "UUID", publish: bool
+    ) -> tuple[App, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
         app = space.get_app(app_id=app_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_publish_apps():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "Publishing apps is not allowed for your current space role.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app",
+                    "action": "publish",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         app.update(published=publish)
 

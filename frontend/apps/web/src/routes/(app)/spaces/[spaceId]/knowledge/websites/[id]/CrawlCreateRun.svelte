@@ -5,7 +5,7 @@
   import type { Website } from "@eneo/eneo-js";
   import { Button, Dialog, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   export let website: Website;
   export let isDisabled = false;
@@ -25,7 +25,7 @@
       $showDialog = false;
     } catch (error) {
       console.error(error);
-      toast.error(m.error_creating_crawl_run());
+      toastError(error, m.error_creating_crawl_run());
     }
   }
 </script>

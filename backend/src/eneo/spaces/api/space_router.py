@@ -1,22 +1,31 @@
+import logging
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
-import logging
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from eneo.apps.apps.api.app_models import AppPublic
+from eneo.assistants.api.assistant_models import AssistantPublic
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-
-from eneo.apps.apps.api.app_models import AppPublic
-from eneo.assistants.api.assistant_models import AssistantPublic
-from eneo.authentication.auth_dependencies import require_permission
+from eneo.authentication.auth_dependencies import (
+    get_scope_filter,
+    require_permission,
+    require_user_for_creation,
+)
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
+    IntegrationKnowledgeAssembler,
+)
+from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
-from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse
+from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -24,13 +33,13 @@ from eneo.spaces.api.space_models import (
     AddSpaceGroupMemberRequest,
     AddSpaceMemberRequest,
     Applications,
-    CreateSpaceIntegrationKnowledgeBatchRequest,
-    CreateSpaceIntegrationKnowledgeBatchResponse,
-    CreateSpaceIntegrationKnowledgeBatchResult,
     CreateSpaceAppRequest,
     CreateSpaceAssistantRequest,
     CreateSpaceGroupsRequest,
     CreateSpaceIntegrationKnowledge,
+    CreateSpaceIntegrationKnowledgeBatchRequest,
+    CreateSpaceIntegrationKnowledgeBatchResponse,
+    CreateSpaceIntegrationKnowledgeBatchResult,
     CreateSpaceRequest,
     CreateSpaceServiceRequest,
     CreateSpaceServiceResponse,
@@ -46,21 +55,43 @@ from eneo.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
-from eneo.integration.presentation.models import IntegrationKnowledgePublic
-from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
-    IntegrationKnowledgeAssembler,
-)
-
 from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
-from eneo.roles.permissions import Permission
+
+if TYPE_CHECKING:
+    from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+async def _space_response(container: Container, space: "Space") -> SpacePublic:
+    """Single serialization path for a full space response.
+
+    Resolves and attaches the personal default assistant's governance
+    effective_config (None for non-personal spaces or non-default assistants),
+    so the chat UI keeps governance filtering. Use this for any endpoint that
+    returns a full SpacePublic for a space that may be personal.
+    """
+    assembler = container.space_assembler()
+    effective_config = None
+    if (
+        space.default_assistant is not None
+        and space.default_assistant.is_default
+        and space.is_personal()
+    ):
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(
+            space.default_assistant, space_is_personal=space.is_personal()
+        )
+    return assembler.from_space_to_model(
+        space, default_assistant_effective_config=effective_config
+    )
+
+
 async def forbid_org_space(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     logger.warning(f"forbid_org_space called with space_id={id}")
     try:
@@ -78,26 +109,38 @@ async def forbid_org_space(
         raise
 
 
-@router.post("/", response_model=SpacePublic, status_code=201)
+@router.post(
+    "/",
+    response_model=SpacePublic,
+    status_code=201,
+    description="Create a new shared space.",
+    responses=responses.get_responses([403]),
+)
 async def create_space(
     create_space_req: CreateSpaceRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_creation_service = container.space_init_service()
     space_assembler = container.space_assembler()
     current_user = container.user()
 
+    validate_permission(current_user, Permission.SHARED_SPACES)
+
     # Create space
     space = await space_creation_service.create_space(name=create_space_req.name)
 
     # Audit logging
+    space_id = space.id
+    assert space_id is not None
+
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_CREATED,
         entity_type=EntityType.SPACE,
-        entity_id=space.id,
+        entity_id=space_id,
         description=f"Created space '{space.name}'",
         metadata=AuditMetadata.standard(actor=current_user, target=space),
     )
@@ -113,32 +156,33 @@ async def create_space(
 )
 async def get_space(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_space(id)
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)
 
 
 @router.patch(
     "/{id}/",
     response_model=SpacePublic,
     status_code=200,
+    description=(
+        "Update a space's settings (name, description, models, MCP servers, "
+        "security classification, data retention)."
+    ),
     responses=responses.get_responses([400, 403, 404]),
 )
 async def update_space(
     id: UUID,
     update_space_req: UpdateSpaceRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
-    assembler = container.space_assembler()
     current_user = container.user()
 
-    # Get old state
     old_space = await service.get_space(id)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
@@ -172,7 +216,9 @@ async def update_space(
         description=update_space_req.description,
         embedding_model_ids=_get_model_ids_or_none(update_space_req.embedding_models),
         completion_model_ids=_get_model_ids_or_none(update_space_req.completion_models),
-        transcription_model_ids=_get_model_ids_or_none(update_space_req.transcription_models),
+        transcription_model_ids=_get_model_ids_or_none(
+            update_space_req.transcription_models
+        ),
         mcp_server_ids=_get_model_ids_or_none(update_space_req.mcp_servers),
         mcp_tools=update_space_req.mcp_tools,
         security_classification=security_classification,
@@ -181,49 +227,84 @@ async def update_space(
     )
 
     # Track changes
-    changes = {}
-    if update_space_req.name and update_space_req.name != old_space.name:
+    changes: dict[str, object] = {}
+    if update_space_req.name != old_space.name:
         changes["name"] = {"old": old_space.name, "new": update_space_req.name}
-    if update_space_req.description is not None and update_space_req.description != old_space.description:
-        changes["description"] = {"old": old_space.description, "new": update_space_req.description}
-    if data_retention_days is not NOT_PROVIDED and data_retention_days != old_space.data_retention_days:
+    if (
+        "description" in original_request
+        and update_space_req.description != old_space.description
+    ):
+        changes["description"] = {
+            "old": old_space.description,
+            "new": update_space_req.description,
+        }
+    if (
+        is_provided(data_retention_days)
+        and data_retention_days != old_space.data_retention_days
+    ):
         changes["data_retention_days"] = {
             "old": old_space.data_retention_days,
-            "new": data_retention_days
+            "new": data_retention_days,
         }
 
     # Track model changes using SET comparison (avoids false positives from ordering)
-    if update_space_req.completion_models is not None:
-        old_model_set = {(str(m.id), m.name) for m in (old_space.completion_models or [])}
+    if "completion_models" in original_request:
+        old_model_set = {
+            (str(m.id), m.name) for m in (old_space.completion_models or [])
+        }
         new_model_set = {(str(m.id), m.name) for m in (space.completion_models or [])}
         if old_model_set != new_model_set:
             changes["completion_models"] = {
-                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.completion_models or [])],
-                "new": [{"id": str(m.id), "name": m.name} for m in (space.completion_models or [])]
+                "old": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (old_space.completion_models or [])
+                ],
+                "new": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (space.completion_models or [])
+                ],
             }
 
-    if update_space_req.embedding_models is not None:
-        old_model_set = {(str(m.id), m.name) for m in (old_space.embedding_models or [])}
+    if "embedding_models" in original_request:
+        old_model_set = {
+            (str(m.id), m.name) for m in (old_space.embedding_models or [])
+        }
         new_model_set = {(str(m.id), m.name) for m in (space.embedding_models or [])}
         if old_model_set != new_model_set:
             changes["embedding_models"] = {
-                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.embedding_models or [])],
-                "new": [{"id": str(m.id), "name": m.name} for m in (space.embedding_models or [])]
+                "old": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (old_space.embedding_models or [])
+                ],
+                "new": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (space.embedding_models or [])
+                ],
             }
 
-    if update_space_req.transcription_models is not None:
-        old_model_set = {(str(m.id), m.name) for m in (old_space.transcription_models or [])}
-        new_model_set = {(str(m.id), m.name) for m in (space.transcription_models or [])}
+    if "transcription_models" in original_request:
+        old_model_set = {
+            (str(m.id), m.name) for m in (old_space.transcription_models or [])
+        }
+        new_model_set = {
+            (str(m.id), m.name) for m in (space.transcription_models or [])
+        }
         if old_model_set != new_model_set:
             changes["transcription_models"] = {
-                "old": [{"id": str(m.id), "name": m.name} for m in (old_space.transcription_models or [])],
-                "new": [{"id": str(m.id), "name": m.name} for m in (space.transcription_models or [])]
+                "old": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (old_space.transcription_models or [])
+                ],
+                "new": [
+                    {"id": str(m.id), "name": m.name}
+                    for m in (space.transcription_models or [])
+                ],
             }
 
     # Track security classification changes
     if security_classification is not NOT_PROVIDED:
-        old_sc = old_space.security_classification.name if old_space.security_classification else None
-        new_sc = space.security_classification.name if space.security_classification else None
+        old_sc = getattr(old_space.security_classification, "name", None)
+        new_sc = getattr(space.security_classification, "name", None)
         if old_sc != new_sc:
             changes["security_classification"] = {"old": old_sc, "new": new_sc}
 
@@ -231,15 +312,21 @@ async def update_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_UPDATED,
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Updated space '{space.name}'",
-        metadata=AuditMetadata.standard(actor=current_user, target=space, changes=changes),
+        metadata=AuditMetadata.standard(
+            actor=current_user, target=space, changes=changes
+        ),
     )
 
-    return assembler.from_space_to_model(space)
+    # Serialize through the shared path so a patched personal space keeps the
+    # default assistant's governance effective_config — frontend SpacesManager
+    # overwrites currentSpace with this response, and a None effective_config
+    # makes the chat UI drop policy filtering until the next full GET.
+    return await _space_response(container, space)
 
 
 @router.get(
@@ -247,11 +334,12 @@ async def update_space(
     response_model=UpdateSpaceDryRunResponse,
     status_code=200,
     description="Get a preview of the impact of changing the security classification of a space.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_security_classification_impact_analysis(
     id: UUID,
     security_classification_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
     assembler = container.space_assembler()
@@ -267,17 +355,17 @@ async def get_security_classification_impact_analysis(
 @router.delete(
     "/{id}/",
     status_code=204,
+    description="Delete a space. Organization spaces cannot be deleted.",
     responses=responses.get_responses([403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def delete_space(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
     user = container.user()
 
-    # Get space info before deletion (for audit log context)
     space = await service.get_space(id)
 
     # Delete space
@@ -287,7 +375,7 @@ async def delete_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.SPACE_DELETED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -300,28 +388,49 @@ async def delete_space(
     "/",
     response_model=PaginatedResponse[SpaceSparse],
     status_code=200,
+    description="List spaces the current user can access.",
+    responses=responses.get_responses([]),
 )
 async def get_spaces(
-    include_applications: bool = Query(default=False, description="Includes published applications on each space"),
-    include_personal: bool = Query(default=False,  description="Includes your personal space"),
-    container: Container = Depends(get_container(with_user=True)),
+    request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    include_applications: Annotated[
+        bool, Query(description="Includes published applications on each space")
+    ] = False,
+    include_personal: Annotated[
+        bool, Query(description="Includes your personal space")
+    ] = False,
 ):
     service = container.space_service()
     assembler = container.space_assembler()
 
-    spaces = await service.get_spaces(include_personal=include_personal, include_applications=include_applications)
-    spaces = [assembler.from_space_to_sparse_model(space, include_applications=include_applications) for space in spaces]
+    spaces = await service.get_spaces(
+        include_personal=include_personal,
+        include_applications=include_applications,
+    )
+
+    # Scope filtering: space-scoped key sees only its scoped space
+    scope_filter = get_scope_filter(request)
+    if scope_filter.space_id is not None:
+        spaces = [s for s in spaces if s.id == scope_filter.space_id]
+
+    spaces = [
+        assembler.from_space_to_sparse_model(
+            space, include_applications=include_applications
+        )
+        for space in spaces
+    ]
 
     return protocol.to_paginated_response(spaces)
+
 
 @router.get(
     "/{id}/applications/",
     response_model=Applications,
     responses=responses.get_responses([404]),
-    dependencies=[Depends(forbid_org_space)],
 )
 async def get_space_applications(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
     service = container.space_service()
     assembler = container.space_assembler()
@@ -335,13 +444,15 @@ async def get_space_applications(
     "/{id}/applications/assistants/",
     response_model=AssistantPublic,
     status_code=201,
+    description="Create an assistant in a space, optionally from a template.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def create_space_assistant(
     id: UUID,
     assistant_in: CreateSpaceAssistantRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.assistant_service()
     assembler = container.assistant_assembler()
@@ -364,12 +475,14 @@ async def create_space_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_CREATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=assistant.id,
         description=f"Created assistant '{assistant.name}' in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=current_user, target=assistant, space=space),
+        metadata=AuditMetadata.standard(
+            actor=current_user, target=assistant, space=space
+        ),
     )
 
     return assembler.from_assistant_to_model(assistant, permissions=permissions)
@@ -387,7 +500,8 @@ async def create_space_assistant(
 async def create_group_chat(
     id: UUID,
     group_chat_in: GroupChatCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.group_chat_service()
     assembler = container.group_chat_assembler()
@@ -408,7 +522,7 @@ async def create_group_chat(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.GROUP_CHAT_CREATED,
         entity_type=EntityType.GROUP_CHAT,
         entity_id=group_chat.id,
@@ -423,13 +537,15 @@ async def create_group_chat(
     "/{id}/applications/apps/",
     response_model=AppPublic,
     status_code=201,
+    description="Create an app in a space, optionally from a template.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def create_app(
     id: UUID,
     create_service_req: CreateSpaceAppRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()
     app_service = container.app_service()
@@ -444,10 +560,11 @@ async def create_app(
     )
 
     # Audit logging
+    assert app.id is not None
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_CREATED,
         entity_type=EntityType.APP,
         entity_id=app.id,
@@ -462,18 +579,24 @@ async def create_app(
     "/{id}/applications/services/",
     response_model=CreateSpaceServiceResponse,
     status_code=201,
+    description="Create a service in a space.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def create_space_services(
     id: UUID,
     service_in: CreateSpaceServiceRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
-    service = container.service_service()
+    service_service = container.service_service()
     assembler = container.space_assembler()
 
-    service, permissions = await service.create_space_service(name=service_in.name, space_id=id)
+    result = await service_service.create_space_service(
+        name=service_in.name, space_id=id
+    )
+    service, permissions = result[0], list(result[1])
+    assert service is not None
 
     return assembler.from_service_to_model(service=service, permissions=permissions)
 
@@ -484,7 +607,7 @@ async def create_space_services(
     responses=responses.get_responses([404]),
 )
 async def get_space_knowledge(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
     space_service = container.space_service()
     assembler = container.space_assembler()
@@ -498,16 +621,19 @@ async def get_space_knowledge(
 
     return assembler.from_space_to_model(space).knowledge
 
+
 @router.post(
     "/{id}/knowledge/groups/",
     response_model=CollectionPublic,
     status_code=201,
+    description="Create a knowledge collection in a space.",
     responses=responses.get_responses([400, 403, 404]),
 )
 async def create_space_groups(
     id: UUID,
     group: CreateSpaceGroupsRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     svc = container.collection_crud_service()
     user = container.user()
@@ -542,12 +668,14 @@ async def create_space_groups(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.COLLECTION_CREATED,
         entity_type=EntityType.COLLECTION,
         entity_id=created_collection.id,
         description=f"Created collection '{created_collection.name}' in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=created_collection, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=created_collection, space=space, extra=extra
+        ),
     )
 
     return CollectionPublic.from_domain(created_collection)
@@ -585,7 +713,8 @@ async def create_space_groups(
 async def create_space_websites(
     id: UUID,
     website: WebsiteCreate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.website_crud_service()
     user = container.user()
@@ -598,7 +727,9 @@ async def create_space_websites(
         download_files=website.download_files,
         crawl_type=website.crawl_type,
         update_interval=website.update_interval,
-        embedding_model_id=(website.embedding_model.id if website.embedding_model else None),
+        embedding_model_id=(
+            website.embedding_model.id if website.embedding_model else None
+        ),
         http_auth_username=website.http_auth_username,
         http_auth_password=website.http_auth_password,
     )
@@ -612,10 +743,12 @@ async def create_space_websites(
         pass
 
     # Build extra context with URL, crawl settings, and optional embedding model
-    extra = {
+    extra: dict[str, object] = {
         "url": created_website.url,
         "crawl_type": str(website.crawl_type) if website.crawl_type else None,
-        "update_interval": str(website.update_interval) if website.update_interval else None,
+        "update_interval": str(website.update_interval)
+        if website.update_interval
+        else None,
     }
     if website.embedding_model:
         extra["embedding_model"] = {
@@ -627,12 +760,14 @@ async def create_space_websites(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_CREATED,
         entity_type=EntityType.WEBSITE,
         entity_id=created_website.id,
         description=f"Created website crawler '{created_website.name}' ({created_website.url}) in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=created_website, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=created_website, space=space, extra=extra
+        ),
     )
 
     return WebsitePublic.from_domain(created_website)
@@ -642,12 +777,14 @@ async def create_space_websites(
     "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
     status_code=202,  # Changed to 202 Accepted since job is queued
+    description="Add integration knowledge to a space. Returns a job to track import progress.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_space_integration_knowledge(
     id: UUID,
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledge,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     user = container.user()
@@ -687,12 +824,14 @@ async def create_space_integration_knowledge(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=knowledge.id,
         description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=knowledge, space=space, extra=extra
+        ),
     )
 
     # Return job for frontend to track progress (like file upload does)
@@ -704,12 +843,14 @@ async def create_space_integration_knowledge(
     "/{id}/knowledge/integrations/add/{user_integration_id}/batch/",
     response_model=CreateSpaceIntegrationKnowledgeBatchResponse,
     status_code=202,
+    description="Add multiple integration knowledge items to a space in a single batch.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_space_integration_knowledge_batch(
     id: UUID,
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledgeBatchRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     user = container.user()
@@ -778,7 +919,7 @@ async def create_space_integration_knowledge_batch(
 
             await audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
                 entity_type=EntityType.INTEGRATION_KNOWLEDGE,
                 entity_id=knowledge.id,
@@ -814,11 +955,13 @@ async def create_space_integration_knowledge_batch(
 @router.delete(
     "/{id}/knowledge/integrations/remove/{integration_knowledge_id}/",
     status_code=204,
+    description="Remove integration knowledge from a space.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_space_integration_knowledge(
     id: UUID,
     integration_knowledge_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     user = container.user()
@@ -826,10 +969,14 @@ async def delete_space_integration_knowledge(
     # Get integration knowledge info BEFORE deletion (for audit log context)
     space_repo = container.space_repo()
     space = await space_repo.one(id=id)
-    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+    knowledge = space.get_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
 
     # Delete integration knowledge
-    await service.remove_knowledge(space_id=id, integration_knowledge_id=integration_knowledge_id)
+    await service.remove_knowledge(
+        space_id=id, integration_knowledge_id=integration_knowledge_id
+    )
 
     # Build extra context with integration-specific information
     extra = {
@@ -840,24 +987,28 @@ async def delete_space_integration_knowledge(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_KNOWLEDGE_DELETED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
         description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space '{space.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=user, target=knowledge, space=space, extra=extra
+        ),
     )
 
 
 @router.patch(
     "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
     response_model=list[IntegrationKnowledgePublic],
+    description="Rename an integration knowledge wrapper in a space.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def update_integration_knowledge_wrapper(
     id: UUID,
     wrapper_id: UUID,
     data: UpdateIntegrationKnowledgeWrapperRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     updated_items = await service.update_wrapper_name(
@@ -874,11 +1025,13 @@ async def update_integration_knowledge_wrapper(
 @router.delete(
     "/{id}/knowledge/integrations/wrappers/{wrapper_id}/",
     status_code=204,
+    description="Remove an integration knowledge wrapper and its items from a space.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_integration_knowledge_wrapper(
     id: UUID,
     wrapper_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     await service.remove_wrapper_knowledge(
@@ -890,12 +1043,14 @@ async def delete_integration_knowledge_wrapper(
 @router.patch(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/",
     response_model=IntegrationKnowledgePublic,
+    description="Rename integration knowledge in a space.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def update_integration_knowledge(
     id: UUID,
     integration_knowledge_id: UUID,
     data: UpdateIntegrationKnowledgeRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     knowledge = await service.update_knowledge_name(
@@ -910,11 +1065,13 @@ async def update_integration_knowledge(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
     response_model=JobPublic,
     status_code=202,
+    description="Trigger a full re-sync of integration knowledge. Returns a job to track progress.",
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def trigger_integration_full_sync(
     id: UUID,
     integration_knowledge_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
     user = container.user()
@@ -927,12 +1084,14 @@ async def trigger_integration_full_sync(
     # Audit logging
     space_repo = container.space_repo()
     space = await space_repo.one(id=id)
-    knowledge = space.get_integration_knowledge(integration_knowledge_id=integration_knowledge_id)
+    knowledge = space.get_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
 
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_KNOWLEDGE_SYNCED,
         entity_type=EntityType.INTEGRATION_KNOWLEDGE,
         entity_id=integration_knowledge_id,
@@ -946,13 +1105,14 @@ async def trigger_integration_full_sync(
 @router.post(
     "/{id}/members/",
     response_model=SpaceMember,
-    responses=responses.get_responses([403, 404]),
+    description="Add a user as a member of a space with a given role.",
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def add_space_member(
     id: UUID,
     add_space_member_req: AddSpaceMemberRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
     current_user = container.user()
@@ -988,16 +1148,23 @@ async def add_space_member(
     }
 
     # Audit logging
-    member_display = member_user.username or member_user.email if member_user else "member"
+    member_display = (
+        member_user.username or member_user.email if member_user else "member"
+    )
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Added {member_display} to space '{space.name if space else 'unknown'}' with role '{add_space_member_req.role}'",
-        metadata=AuditMetadata.standard(actor=current_user, target=space if space else member, space=space, extra=extra),
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=space if space else member,
+            space=space,
+            extra=extra,
+        ),
     )
 
     return member
@@ -1006,6 +1173,7 @@ async def add_space_member(
 @router.patch(
     "/{id}/members/{user_id}/",
     response_model=SpaceMember,
+    description="Change a space member's role.",
     responses=responses.get_responses([403, 404, 400]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1013,7 +1181,7 @@ async def change_role_of_member(
     id: UUID,
     user_id: UUID,
     update_space_member_req: UpdateSpaceMemberRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
     current_user = container.user()
@@ -1038,7 +1206,9 @@ async def change_role_of_member(
     old_role = current_member.role
 
     # Change role
-    updated_member = await service.change_role_of_member(id, user_id, update_space_member_req.role)
+    updated_member = await service.change_role_of_member(
+        id, user_id, update_space_member_req.role
+    )
 
     # Build extra context with member-specific information
     extra = {
@@ -1064,7 +1234,7 @@ async def change_role_of_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1084,13 +1254,14 @@ async def change_role_of_member(
 @router.delete(
     "/{id}/members/{user_id}/",
     status_code=204,
+    description="Remove a member from a space.",
     responses=responses.get_responses([403, 404, 400]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def remove_space_member(
     id: UUID,
     user_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_service()
     current_user = container.user()
@@ -1131,14 +1302,16 @@ async def remove_space_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_REMOVED,
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Removed {member_name} from {space_name}",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            target=space
+            if space
+            else type("FallbackTarget", (), {"id": id, "name": None})(),
             space=space,
             extra=extra,
         ),
@@ -1156,7 +1329,7 @@ async def remove_space_member(
 )
 async def get_space_group_members(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """List all user groups that are members of this space."""
     service = container.space_service()
@@ -1171,29 +1344,25 @@ async def get_space_group_members(
     "/{id}/group-members/",
     response_model=SpaceGroupMember,
     status_code=201,
+    description="Attach a user group to a space. Groups cannot be attached to personal spaces.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def add_space_group_member(
     id: UUID,
     request: AddSpaceGroupMemberRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    """Add a user group to a space with the specified role.
-
-    All members of the group will gain access to the space at that role level.
-    Groups cannot be added to personal spaces.
-    """
+    """Attach a user group to a space. Groups cannot be attached to personal spaces."""
     service = container.space_service()
     current_user = container.user()
 
-    group_member = await service.add_group_member(
+    member = await service.add_group_member(
         space_id=id,
         group_id=request.id,
         role=request.role,
     )
 
-    # Get space for context (graceful degradation if space fetch fails)
     space = None
     try:
         space = await service.get_space(id)
@@ -1203,8 +1372,8 @@ async def add_space_group_member(
     extra = {
         "group": {
             "id": str(request.id),
-            "name": group_member.name,
-            "user_count": group_member.user_count,
+            "name": member.name,
+            "user_count": member.user_count,
         },
         "role": request.role,
     }
@@ -1212,25 +1381,26 @@ async def add_space_group_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_ADDED,
         entity_type=EntityType.SPACE,
         entity_id=id,
-        description=f"Added group '{group_member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
+        description=f"Added group '{member.name}' to space '{space.name if space else 'unknown'}' with role '{request.role}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else group_member,
+            target=space if space else member,
             space=space,
             extra=extra,
         ),
     )
 
-    return group_member
+    return member
 
 
 @router.patch(
     "/{id}/group-members/{group_id}/",
     response_model=SpaceGroupMember,
+    description="Change the role of a user group in a space.",
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
@@ -1238,7 +1408,7 @@ async def change_group_member_role(
     id: UUID,
     group_id: UUID,
     request: UpdateSpaceGroupMemberRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Change the role of a user group in a space."""
     service = container.space_service()
@@ -1278,7 +1448,7 @@ async def change_group_member_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.SPACE,
         entity_id=id,
@@ -1298,13 +1468,17 @@ async def change_group_member_role(
 @router.delete(
     "/{id}/group-members/{group_id}/",
     status_code=204,
+    description=(
+        "Remove a user group from a space. Members lose access granted via this "
+        "group, but may still have access through direct membership or other groups."
+    ),
     responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(forbid_org_space)],
 )
 async def remove_space_group_member(
     id: UUID,
     group_id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Remove a user group from a space.
 
@@ -1340,38 +1514,50 @@ async def remove_space_group_member(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.SPACE_MEMBER_REMOVED,
         entity_type=EntityType.SPACE,
         entity_id=id,
         description=f"Removed group '{group_snapshot['name'] or 'group'}' from space '{space.name if space else 'unknown'}'",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=space if space else type("FallbackTarget", (), {"id": id, "name": None})(),
+            target=space
+            if space
+            else type("FallbackTarget", (), {"id": id, "name": None})(),
             space=space,
             extra=extra,
         ),
     )
 
 
-@router.get("/type/personal/", response_model=SpacePublic)
+@router.get(
+    "/type/personal/",
+    response_model=SpacePublic,
+    description="Get the current user's personal space.",
+    responses=responses.get_responses([]),
+)
 async def get_personal_space(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_personal_space()
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)
 
-@router.get("/type/organization/", response_model=SpacePublic, dependencies=[Depends(require_permission(Permission.ADMIN))])
+
+@router.get(
+    "/type/organization/",
+    response_model=SpacePublic,
+    description="Get the organization (tenant) space. Requires admin permission.",
+    responses=responses.get_responses([403]),
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def get_organization_space(
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.space_init_service()
-    assembler = container.space_assembler()
 
     space = await service.get_or_create_tenant_space()
 
-    return assembler.from_space_to_model(space)
+    return await _space_response(container, space)

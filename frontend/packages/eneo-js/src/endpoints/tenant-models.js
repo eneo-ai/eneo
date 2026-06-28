@@ -13,7 +13,8 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     listCompletion: async (options) => {
-      const res = await client.fetch("/api/v1/admin/tenant-models/completion/", {
+      /** @type {any} */
+      const fetchOptions = {
         method: "get",
         params: {
           query: {
@@ -21,14 +22,15 @@ export function initTenantModels(client) {
             active_only: options?.activeOnly
           }
         }
-      });
+      };
+      const res = await client.fetch("/api/v1/admin/tenant-models/completion/", fetchOptions);
 
       return res;
     },
 
     /**
      * Create a new Completion Model.
-     * @param {Object} model Model data (passed through to API)
+     * @param {any} model Model data (passed through to API)
      * @throws {EneoError}
      * */
     createCompletion: async (model) => {
@@ -49,9 +51,9 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     updateCompletion: async ({ id }, update) => {
-      const res = await client.fetch("/api/v1/admin/tenant-models/completion/{id}/", {
+      const res = await client.fetch("/api/v1/admin/tenant-models/completion/{model_id}/", {
         method: "put",
-        params: { path: { id } },
+        params: { path: { model_id: id } },
         requestBody: {
           "application/json": update
         }
@@ -66,9 +68,9 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     deleteCompletion: async ({ id }) => {
-      await client.fetch("/api/v1/admin/tenant-models/completion/{id}/", {
+      await client.fetch("/api/v1/admin/tenant-models/completion/{model_id}/", {
         method: "delete",
-        params: { path: { id } }
+        params: { path: { model_id: id } }
       });
     },
 
@@ -80,7 +82,8 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     listEmbedding: async (options) => {
-      const res = await client.fetch("/api/v1/admin/tenant-models/embedding/", {
+      /** @type {any} */
+      const fetchOptions = {
         method: "get",
         params: {
           query: {
@@ -88,14 +91,15 @@ export function initTenantModels(client) {
             active_only: options?.activeOnly
           }
         }
-      });
+      };
+      const res = await client.fetch("/api/v1/admin/tenant-models/embedding/", fetchOptions);
 
       return res;
     },
 
     /**
      * Create a new Embedding Model.
-     * @param {Object} model
+     * @param {any} model
      * @throws {EneoError}
      * */
     createEmbedding: async (model) => {
@@ -116,9 +120,9 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     updateEmbedding: async ({ id }, update) => {
-      const res = await client.fetch("/api/v1/admin/tenant-models/embedding/{id}/", {
+      const res = await client.fetch("/api/v1/admin/tenant-models/embedding/{model_id}/", {
         method: "put",
-        params: { path: { id } },
+        params: { path: { model_id: id } },
         requestBody: {
           "application/json": update
         }
@@ -133,9 +137,9 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     deleteEmbedding: async ({ id }) => {
-      await client.fetch("/api/v1/admin/tenant-models/embedding/{id}/", {
+      await client.fetch("/api/v1/admin/tenant-models/embedding/{model_id}/", {
         method: "delete",
-        params: { path: { id } }
+        params: { path: { model_id: id } }
       });
     },
 
@@ -147,7 +151,8 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     listTranscription: async (options) => {
-      const res = await client.fetch("/api/v1/admin/tenant-models/transcription/", {
+      /** @type {any} */
+      const fetchOptions = {
         method: "get",
         params: {
           query: {
@@ -155,14 +160,15 @@ export function initTenantModels(client) {
             active_only: options?.activeOnly
           }
         }
-      });
+      };
+      const res = await client.fetch("/api/v1/admin/tenant-models/transcription/", fetchOptions);
 
       return res;
     },
 
     /**
      * Create a new Transcription Model.
-     * @param {Object} model
+     * @param {any} model
      * @throws {EneoError}
      * */
     createTranscription: async (model) => {
@@ -183,9 +189,9 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     updateTranscription: async ({ id }, update) => {
-      const res = await client.fetch("/api/v1/admin/tenant-models/transcription/{id}/", {
+      const res = await client.fetch("/api/v1/admin/tenant-models/transcription/{model_id}/", {
         method: "put",
-        params: { path: { id } },
+        params: { path: { model_id: id } },
         requestBody: {
           "application/json": update
         }
@@ -200,9 +206,9 @@ export function initTenantModels(client) {
      * @throws {EneoError}
      * */
     deleteTranscription: async ({ id }) => {
-      await client.fetch("/api/v1/admin/tenant-models/transcription/{id}/", {
+      await client.fetch("/api/v1/admin/tenant-models/transcription/{model_id}/", {
         method: "delete",
-        params: { path: { id } }
+        params: { path: { model_id: id } }
       });
     }
   };

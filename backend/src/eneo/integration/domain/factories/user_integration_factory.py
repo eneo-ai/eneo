@@ -1,6 +1,9 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.domain.factories.tenant_integration_factory import (
+    TenantIntegrationFactory,
+)
 
 if TYPE_CHECKING:
     from eneo.database.tables.integration_table import (
@@ -12,7 +15,9 @@ class UserIntegrationFactory:
     @staticmethod
     def create_entity(record: "UserIntegrationDBModel") -> UserIntegration:
         return UserIntegration(
-            tenant_integration=record.tenant_integration,
+            tenant_integration=TenantIntegrationFactory.create_entity(
+                record.tenant_integration
+            ),
             user_id=record.user_id,  # Can be None for tenant_app integrations
             id=record.id,
             authenticated=record.authenticated,
@@ -24,8 +29,6 @@ class UserIntegrationFactory:
 
     @staticmethod
     def create_entities(
-        records: list["UserIntegrationDBModel"],
+        records: Sequence["UserIntegrationDBModel"],
     ) -> list[UserIntegration]:
-        return [
-            UserIntegrationFactory.create_entity(record) for record in records
-        ]
+        return [UserIntegrationFactory.create_entity(record) for record in records]

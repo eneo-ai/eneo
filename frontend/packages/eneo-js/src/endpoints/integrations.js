@@ -93,11 +93,11 @@ export function initIntegrations(client) {
        * Preview to knowledge items that can be imported through this integration
        * @param {Object} args
        * @param {{id: string}} args.integration UserIntegration
-       * @param {import('../types/resources').IntegrationKnowledgePreview} args.preview The preview item received from calling the preview
+       * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: string}} args.preview The preview item received from calling the preview
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
        *
-       * @returns {Promise<Job>} The background job processing this import
+       * @returns {Promise<any>} The background job processing this import
        * @throws {EneoError}
        * */
       import: async ({ integration, preview, space, embedding_model }) => {
@@ -266,20 +266,12 @@ export function initIntegrations(client) {
       },
 
       /**
-       * Rename an integration knowledge item
-       * @param {Object} args
-       * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
-       * @param {{id: string}} args.space Space where the knowledge belongs
-       * @param {string} args.name New name for the knowledge
-       * @throws {EneoError}
-       * */
-      /**
        * Trigger a full resync for a SharePoint integration knowledge
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to sync
        * @param {{id: string}} args.space Space where the knowledge belongs
        *
-       * @returns {Promise<Job>} The background job processing this sync
+       * @returns {Promise<any>} The background job processing this sync
        * @throws {EneoError}
        * */
       triggerFullSync: async ({ knowledge, space }) => {
@@ -297,6 +289,14 @@ export function initIntegrations(client) {
         return job;
       },
 
+      /**
+       * Rename an integration knowledge item
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       * @param {string} args.name New name for the knowledge
+       * @throws {EneoError}
+       * */
       rename: async ({ knowledge, space, name }) => {
         const { id: integration_knowledge_id } = knowledge;
         const { id } = space;
@@ -363,35 +363,37 @@ export function initIntegrations(client) {
       },
 
       /**
-       * OAuth flow: Get an url where the user can authenticate for this specific integration
+       * OAuth flow: Get an url where the user can authenticate for this specific integration.
+       * The backend generates a single-use CSRF `state` bound to the user + integration;
+       * the caller must echo it back via {@link registerAuthCode}.
        *
-       * @param {{integration: {tenant_integration_id: string}, state?: string}} args
+       * @param {{integration: {tenant_integration_id: string}}} args
+       * @returns {Promise<{url: string, state: string}>}
        * @throws {EneoError}
        * */
-      getAuthUrl: async ({ integration, state }) => {
+      getAuthUrl: async ({ integration }) => {
         const res = await client.fetch("/api/v1/integrations/auth/{tenant_integration_id}/url/", {
           method: "get",
           params: {
-            path: integration,
-            query: { state }
+            path: integration
           }
         });
 
-        return res.auth_url;
+        return { url: res.auth_url, state: res.state };
       },
 
       /**
        * OAuth flow: Pass the callback code / auth token to the backend
        *
-       * @param {{integration: {tenant_integration_id: string}, code: string}} args
+       * @param {{integration: {tenant_integration_id: string}, code: string, state: string}} args
        * @throws {EneoError}
        * */
-      registerAuthCode: async ({ integration, code }) => {
+      registerAuthCode: async ({ integration, code, state }) => {
         const { tenant_integration_id } = integration;
         const res = await client.fetch("/api/v1/integrations/auth/callback/token/", {
           method: "post",
           requestBody: {
-            "application/json": { auth_code: code, tenant_integration_id }
+            "application/json": { auth_code: code, tenant_integration_id, state }
           }
         });
 
@@ -430,12 +432,15 @@ export function initIntegrations(client) {
          * */
         recreateSubscription: async (subscription) => {
           const { id } = subscription;
-          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/{id}/recreate", {
-            method: "post",
-            params: {
-              path: { id }
+          const res = await client.fetch(
+            "/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate",
+            {
+              method: "post",
+              params: {
+                path: { subscription_id: id }
+              }
             }
-          });
+          );
           return res;
         }
       }

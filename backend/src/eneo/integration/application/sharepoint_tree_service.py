@@ -1,6 +1,7 @@
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -26,7 +27,8 @@ class SharePointTreeService:
         user_integration_repo: "UserIntegrationRepository",
         sharepoint_auth_router: "SharePointAuthRouter",
         space_repo: "SpaceRepository",
-    ):
+    ) -> None:
+        super().__init__()
         self.user_integration_repo = user_integration_repo
         self.sharepoint_auth_router = sharepoint_auth_router
         self.space_repo = space_repo
@@ -39,7 +41,7 @@ class SharePointTreeService:
         drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: str = "",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Get folder tree from SharePoint site or OneDrive using hybrid authentication.
 
         Args:
@@ -54,11 +56,12 @@ class SharePointTreeService:
             Dictionary with folder tree structure
 
         Raises:
-            ValueError: If integration not authenticated, space not found,
-                        or neither site_id nor drive_id provided
+            BadRequestException: integration not authenticated, token acquisition
+                failed, or neither site_id nor drive_id provided.
+            NotFoundException: user integration or space not found.
         """
         if not site_id and not drive_id:
-            raise ValueError("Either site_id or drive_id must be provided")
+            raise BadRequestException("Either site_id or drive_id must be provided")
         from eneo.integration.infrastructure.preview_service.sharepoint_tree_service import (
             SharePointTreeService as InfraSharePointTreeService,
         )
@@ -94,14 +97,16 @@ class SharePointTreeService:
                 extra={"user_integration_id": str(user_integration_id)},
                 exc_info=True,
             )
-            raise ValueError(f"User integration {user_integration_id} not found") from e
+            raise NotFoundException(
+                f"User integration {user_integration_id} not found"
+            ) from e
 
         if not user_integration.authenticated:
             logger.error(
                 "User integration not authenticated",
                 extra={"user_integration_id": str(user_integration_id)},
             )
-            raise ValueError(
+            raise BadRequestException(
                 f"User integration {user_integration_id} is not authenticated"
             )
 
@@ -121,11 +126,11 @@ class SharePointTreeService:
                 extra={"space_id": str(space_id)},
                 exc_info=True,
             )
-            raise ValueError(f"Space {space_id} not found") from e
+            raise NotFoundException(f"Space {space_id} not found") from e
 
         if not space:
             logger.error("Space is None after fetch", extra={"space_id": str(space_id)})
-            raise ValueError(f"Space {space_id} not found")
+            raise NotFoundException(f"Space {space_id} not found")
 
         space_type = (
             "personal"
@@ -145,6 +150,7 @@ class SharePointTreeService:
             token = await self.sharepoint_auth_router.get_token_for_integration(
                 user_integration=user_integration, space=space
             )
+            assert token is not None
             logger.info(
                 "Token acquired successfully",
                 extra={
@@ -163,7 +169,7 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise ValueError(
+            raise BadRequestException(
                 f"Failed to acquire SharePoint token for integration {user_integration_id} "
                 f"in {space_type} space: {str(e)}"
             ) from e
@@ -220,4 +226,6 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise ValueError(f"Failed to fetch SharePoint folder tree: {str(e)}") from e
+            raise BadRequestException(
+                f"Failed to fetch SharePoint folder tree: {str(e)}"
+            ) from e

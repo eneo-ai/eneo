@@ -9,7 +9,13 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
 )
 from eneo.files.file_models import FilePublic, FileRestrictions
-from eneo.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, ResourcePermissionsMixin
+from eneo.main.models import (
+    NOT_PROVIDED,
+    InDB,
+    ModelId,
+    NotProvided,
+    ResourcePermissionsMixin,
+)
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
 from eneo.transcription_models.presentation import TranscriptionModelPublic
 

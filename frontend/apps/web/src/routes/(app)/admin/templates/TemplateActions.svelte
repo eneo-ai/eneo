@@ -7,11 +7,19 @@
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
   import { Button, Dropdown } from "@eneo/ui";
-  import { MoreVertical, Edit, Trash2, RotateCcw, ArrowUpToLine, ArrowDownToLine } from "lucide-svelte";
+  import {
+    MoreVertical,
+    Edit,
+    Trash2,
+    RotateCcw,
+    ArrowUpToLine,
+    ArrowDownToLine
+  } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { writable } from "svelte/store";
   import { goto, invalidate } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
   import TemplateDeleteDialog from "$lib/features/templates/components/admin/TemplateDeleteDialog.svelte";
   import TemplateRollbackDialog from "$lib/features/templates/components/admin/TemplateRollbackDialog.svelte";
@@ -27,7 +35,7 @@
   let isRollbackOpen = writable(false);
 
   function handleEdit() {
-    goto(`/admin/templates/edit/${type}/${template.id}`);
+    goto(resolve(`/admin/templates/edit/${type}/${template.id}`));
   }
 
   async function toggleDefault() {
@@ -44,18 +52,14 @@
       await invalidate("/admin/templates");
     } catch (e) {
       console.error("Error toggling default status:", e);
-      toast.error(m.error_changing_default_status?.() || "Error changing default status");
+      toastError(e, m.error_changing_default_status());
     }
   }
 </script>
 
 <Dropdown.Root>
   <Dropdown.Trigger asFragment let:trigger>
-    <Button
-      is={trigger}
-      padding="icon"
-      aria-label={m.actions()}
-    >
+    <Button is={trigger} padding="icon" aria-label={m.actions()}>
       <MoreVertical size={16} />
     </Button>
   </Dropdown.Trigger>
@@ -83,7 +87,12 @@
       </Button>
     {/if}
 
-    <Button is={item} padding="icon-leading" onclick={() => isDeleteOpen.set(true)} variant="destructive">
+    <Button
+      is={item}
+      padding="icon-leading"
+      onclick={() => isDeleteOpen.set(true)}
+      variant="destructive"
+    >
       <Trash2 size={16} />
       {m.delete()}
     </Button>

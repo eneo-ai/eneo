@@ -1,11 +1,15 @@
 from typing import Optional
 
+from eneo.main.datetime_utils import datetime_or_utc_min
 from eneo.transcription_models.domain.transcription_model import TranscriptionModel
-from eneo.transcription_models.domain.transcription_model_repo import TranscriptionModelRepository
+from eneo.transcription_models.domain.transcription_model_repo import (
+    TranscriptionModelRepository,
+)
 
 
 class TranscriptionModelService:
-    def __init__(self, transcription_model_repo: TranscriptionModelRepository):
+    def __init__(self, transcription_model_repo: TranscriptionModelRepository) -> None:
+        super().__init__()
         self.transcription_model_repo = transcription_model_repo
 
     async def get_default_model(self) -> Optional[TranscriptionModel]:
@@ -18,9 +22,13 @@ class TranscriptionModelService:
                 return model
 
         # Otherwise get the latest model
-        sorted_models = sorted(available_models, key=lambda model: model.created_at, reverse=True)
+        sorted_models: list[TranscriptionModel] = sorted(
+            available_models,
+            key=lambda model: datetime_or_utc_min(model.created_at),
+            reverse=True,
+        )
 
         if not sorted_models:
             return None
 
-        return sorted_models[0]  # type: ignore
+        return sorted_models[0]

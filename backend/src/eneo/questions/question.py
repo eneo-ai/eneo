@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -53,6 +53,23 @@ class WebSearchResultPublic(BaseModel):
     url: str
 
 
+class McpToolReferencePublic(InDB):
+    """One MCP resource block captured from a tool call.
+
+    Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+    raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+    (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+    gracefully when meta is empty.
+    """
+
+    uri: str
+    mime_type: Optional[str] = None
+    content: Optional[str] = None
+    meta: dict[str, Any] = {}
+    tool_call_id: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
+
+
 # Models
 class QuestionBase(BaseModel):
     question: str
@@ -64,9 +81,23 @@ class ToolCallInfo(BaseModel):
 
     server_name: str
     tool_name: str
-    arguments: Optional[dict] = None
+    title: Optional[str] = None
+    arguments: Optional[dict[str, object]] = None
     tool_call_id: Optional[str] = None  # For tool approval flow
-    approved: Optional[bool] = None  # True=approved, False=denied, None=auto-approved or pending
+    approved: Optional[bool] = (
+        None  # True=approved, False=denied, None=auto-approved or pending
+    )
+    # Additive execution status for newer clients. Keep `approved` for compatibility.
+    result_status: Optional[str] = None
+    # Text extraction of the tool result. Required to replay tool use to the LLM
+    # on later turns. Absent on rows persisted before this field was introduced;
+    # such rows fall back to text-only replay (the model won't see the tool use).
+    result: Optional[str] = None
+    # The prefixed tool identifier the LLM sees when calling (e.g.
+    # `server__tool`). Needed for replay so the tool_use name matches the
+    # currently-registered tools. `tool_name` above is the unprefixed/display
+    # form used by the UI.
+    mcp_tool_name: Optional[str] = None
 
 
 class QuestionAdd(QuestionBase):
@@ -79,6 +110,10 @@ class QuestionAdd(QuestionBase):
     logging_details: Optional[LoggingDetails] = None
     assistant_id: Optional[UUID] = None
     tool_calls: Optional[list[ToolCallInfo]] = None
+    # Model reasoning/thinking text captured during streaming. Persisted so the
+    # trace can be re-shown when a conversation is reloaded. None for turns
+    # produced before this field existed or by models without reasoning.
+    reasoning: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_session_id_and_service_id(self) -> "QuestionAdd":
@@ -89,7 +124,7 @@ class QuestionAdd(QuestionBase):
 
 
 class Question(QuestionAdd, InDB):
-    logging_details: Optional[LoggingDetailsInDB] = None
+    logging_details: Optional[LoggingDetailsInDB] = None  # pyright: ignore[reportIncompatibleVariableOverride]  # Pydantic narrows type from LoggingDetails to LoggingDetailsInDB
     info_blobs: list[InfoBlobInDB] = []
     session_id: Optional[UUID] = None
     completion_model: Optional[CompletionModel] = None
@@ -100,6 +135,7 @@ class Question(QuestionAdd, InDB):
     )
     questions_files: list[QuestionsFiles] = []
     web_search_results: list[WebSearchResult] = []
+    mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
     @model_validator(mode="after")
@@ -118,18 +154,30 @@ class Question(QuestionAdd, InDB):
 
 
 class Message(QuestionBase, InDB):
-    id: Optional[UUID] = None
+    id: Optional[UUID] = None  # pyright: ignore[reportIncompatibleVariableOverride]  # Pydantic allows None override of required UUID in InDB
     completion_model: Optional[CompletionModel] = None
     references: list[InfoBlobPublicNoText]
     files: list[FilePublic]
     tools: UseTools
     generated_files: list[FilePublic]
     web_search_references: list[WebSearchResultPublic]
+    mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
+    reasoning: Optional[str] = None
+    # Default 0 keeps deserialization safe for rows persisted before token
+    # measurement was introduced. The DB columns are NOT NULL int, so every
+    # persisted row reads back as an integer. Clients that sum these values
+    # across history should treat 0 as "zero OR unmeasured" — historical
+    # conversations from before measurement was added will underreport actual
+    # context usage. Fix requires a backfill migration, out of scope here.
+    num_tokens_question: int = 0
+    num_tokens_answer: int = 0
 
     @field_validator("tool_calls", mode="before")
     @classmethod
-    def convert_none_to_empty_list(cls, v):
+    def convert_none_to_empty_list(
+        cls, v: list[ToolCallInfo] | None
+    ) -> list[ToolCallInfo]:
         return v if v is not None else []
 
 

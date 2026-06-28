@@ -15,6 +15,24 @@ class TestOauthTokenFactory(unittest.TestCase):
         # Create a mock user integration to use in tests
         self.user_integration_mock = MagicMock()
         self.user_integration_mock.id = uuid4()
+        self.user_integration_mock.user_id = uuid4()
+        self.user_integration_mock.authenticated = True
+        self.user_integration_mock.auth_type = "user_oauth"
+        self.user_integration_mock.tenant_app_id = None
+        self.user_integration_mock.created_at = None
+        self.user_integration_mock.updated_at = None
+        self.user_integration_mock.tenant_integration.id = uuid4()
+        self.user_integration_mock.tenant_integration.tenant_id = uuid4()
+        self.user_integration_mock.tenant_integration.integration.id = uuid4()
+        self.user_integration_mock.tenant_integration.integration.name = (
+            "Test Integration"
+        )
+        self.user_integration_mock.tenant_integration.integration.description = (
+            "Test Description"
+        )
+        self.user_integration_mock.tenant_integration.integration.integration_type = (
+            IntegrationType.Confluence.value
+        )
 
         # Create base token data to use for both types
         self.token_id = uuid4()
@@ -43,7 +61,7 @@ class TestOauthTokenFactory(unittest.TestCase):
         self.assertEqual(token.access_token, self.access_token)
         self.assertEqual(token.refresh_token, self.refresh_token)
         self.assertEqual(token.token_type, IntegrationType.Confluence)
-        self.assertEqual(token.user_integration, self.user_integration_mock)
+        self.assertEqual(token.user_integration.id, self.user_integration_mock.id)
         self.assertEqual(token.resources, confluence_resources)
 
         # Test specific properties of ConfluenceToken
@@ -56,10 +74,12 @@ class TestOauthTokenFactory(unittest.TestCase):
 
     def test_create_sharepoint_token(self):
         # Arrange
-        sharepoint_resources = {
-            "id": "sites,tenant123,site456",
-            "webUrl": "https://tenant.sharepoint.com/sites/site456",
-        }
+        sharepoint_resources = [
+            {
+                "id": "sites,tenant123,site456",
+                "webUrl": "https://tenant.sharepoint.com/sites/site456",
+            }
+        ]
         db_record = MagicMock()
         db_record.id = self.token_id
         db_record.access_token = self.access_token
@@ -77,7 +97,7 @@ class TestOauthTokenFactory(unittest.TestCase):
         self.assertEqual(token.access_token, self.access_token)
         self.assertEqual(token.refresh_token, self.refresh_token)
         self.assertEqual(token.token_type, IntegrationType.Sharepoint)
-        self.assertEqual(token.user_integration, self.user_integration_mock)
+        self.assertEqual(token.user_integration.id, self.user_integration_mock.id)
         self.assertEqual(token.resources, sharepoint_resources)
 
         # Test specific properties of SharePointToken

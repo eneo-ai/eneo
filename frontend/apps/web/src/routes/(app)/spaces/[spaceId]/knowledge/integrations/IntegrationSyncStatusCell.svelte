@@ -11,7 +11,9 @@
   let { knowledge, onShowSyncHistory }: Props = $props();
 
   let syncedAt = $derived(knowledge.metadata?.last_synced_at ?? null);
-  let subscriptionExpiresAt = $derived(knowledge.metadata?.sharepoint_subscription_expires_at ?? null);
+  let subscriptionExpiresAt = $derived(
+    knowledge.metadata?.sharepoint_subscription_expires_at ?? null
+  );
   let isSharePoint = $derived(knowledge.integration_type === "sharepoint");
 
   // Compute subscription status
@@ -88,17 +90,18 @@
   <button
     onclick={onShowSyncHistory}
     disabled={!onShowSyncHistory}
-    class="flex min-w-0 items-center gap-1 text-xs text-secondary transition-colors hover:text-foreground disabled:cursor-default disabled:hover:text-secondary"
+    class="text-secondary hover:text-foreground disabled:hover:text-secondary flex min-w-0 items-center gap-1 text-xs transition-colors disabled:cursor-default"
   >
     {#if syncedAt}
       <span class="truncate">
-        {m.integration_last_synced()} {getTimeAgo(syncedAt)}
+        {m.integration_last_synced()}
+        {getTimeAgo(syncedAt)}
       </span>
       {#if onShowSyncHistory}
         <IconHistory size="sm" class="flex-shrink-0" />
       {/if}
     {:else}
-      <span class="truncate text-secondary opacity-70">
+      <span class="text-secondary truncate opacity-70">
         {m.integration_sync_summary_none()}
       </span>
     {/if}

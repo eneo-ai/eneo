@@ -48,6 +48,7 @@ class FileInfo(InDB, FileBase):
 class FileCreate(FileBaseWithContent):
     user_id: UUID
     tenant_id: UUID
+    parent_file_id: Optional[UUID] = None
 
 
 class File(InDB, FileCreate):

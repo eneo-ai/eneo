@@ -3,13 +3,14 @@
 import logging
 from uuid import UUID
 
-from eneo.audit.domain.action_metadata import get_action_metadata
+from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.category_mappings import (
-    CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+from eneo.audit.domain.category_types import CategoryType
 from eneo.audit.domain.repositories.audit_config_repository import (
+    ActionOverrides,
     AuditConfigRepository,
 )
 from eneo.audit.schemas.audit_config_schemas import (
@@ -41,6 +42,7 @@ class AuditConfigService:
     """Service for managing audit category configuration with Redis caching."""
 
     def __init__(self, repository: AuditConfigRepository):
+        super().__init__()
         self.repository = repository
         self.redis = get_redis()
         self.cache_ttl = AUDIT_CONFIG_CACHE_TTL
@@ -79,7 +81,9 @@ class AuditConfigService:
 
         # Cache miss or Redis unavailable - query database (slow path, ~5-10ms)
         try:
-            config = await self.repository.find_by_tenant_and_category(tenant_id, category)
+            config = await self.repository.find_by_tenant_and_category(
+                tenant_id, category
+            )
 
             if config is None:
                 # No config found - default to enabled for backward compatibility
@@ -107,12 +111,14 @@ class AuditConfigService:
 
     async def get_config(self, tenant_id: UUID) -> AuditConfigResponse:
         """
-        Get all audit category configurations for a tenant with metadata.
+        Get all audit category configurations for a tenant.
 
         Enriches configuration with:
-        - Category descriptions from CATEGORY_DESCRIPTIONS
         - Action counts from CATEGORY_MAPPINGS
         - Example actions (first 3) for each category
+
+        Category display text is not included; the frontend translates the
+        ``category`` key.
 
         Args:
             tenant_id: Tenant identifier
@@ -122,37 +128,25 @@ class AuditConfigService:
         """
         # Fetch current config from database
         configs = await self.repository.find_by_tenant(tenant_id)
-        config_dict = {category: enabled for category, enabled in configs}
+        config_dict: dict[str, bool] = {
+            category: enabled for category, enabled in configs
+        }
 
-        # All 7 categories in order
-        all_categories = [
-            "admin_actions",
-            "user_actions",
-            "security_events",
-            "file_operations",
-            "integration_events",
-            "system_actions",
-            "audit_access",
-        ]
-
-        # Build enriched category configs
-        category_configs = []
-        for category in all_categories:
+        # Build enriched category configs (CategoryType defines order)
+        category_configs: list[CategoryConfig] = []
+        for category in CategoryType:
             # Get enabled state (default to True if not found)
             enabled = config_dict.get(category, True)
 
             # Get actions for this category (keys are already string values)
             actions_in_category = [
-                action
-                for action, cat in CATEGORY_MAPPINGS.items()
-                if cat == category
+                action for action, cat in CATEGORY_MAPPINGS.items() if cat == category
             ]
 
             category_configs.append(
                 CategoryConfig(
                     category=category,
                     enabled=enabled,
-                    description=CATEGORY_DESCRIPTIONS[category],
                     action_count=len(actions_in_category),
                     example_actions=actions_in_category[:3],  # First 3 examples
                 )
@@ -186,12 +180,15 @@ class AuditConfigService:
                 await self.redis.delete(cache_key)
                 logger.info(f"Invalidated category cache for {cache_key}")
             except Exception as e:
-                logger.warning(f"Failed to invalidate category cache for {cache_key}: {e}")
+                logger.warning(
+                    f"Failed to invalidate category cache for {cache_key}: {e}"
+                )
 
             # Also invalidate all action caches for this category
             # This prevents stale action-level cache from returning wrong values
             actions_in_category = [
-                action for action, cat in CATEGORY_MAPPINGS.items()
+                action
+                for action, cat in CATEGORY_MAPPINGS.items()
                 if cat == update.category
             ]
             for action in actions_in_category:
@@ -199,7 +196,9 @@ class AuditConfigService:
                 try:
                     await self.redis.delete(action_cache_key)
                 except Exception as e:
-                    logger.warning(f"Failed to invalidate action cache {action_cache_key}: {e}")
+                    logger.warning(
+                        f"Failed to invalidate action cache {action_cache_key}: {e}"
+                    )
 
             if actions_in_category:
                 logger.info(
@@ -247,14 +246,16 @@ class AuditConfigService:
 
         try:
             # Fetch category config (includes action_overrides JSONB)
-            config = await self.repository.find_by_tenant_and_category(tenant_id, category)
+            config = await self.repository.find_by_tenant_and_category(
+                tenant_id, category
+            )
 
             if config is None:
                 # No config - default to True (backward compatible)
                 enabled = True
             else:
                 category_enabled = config[1]  # enabled boolean
-                action_overrides = config[2] if len(config) > 2 else {}  # action_overrides JSONB
+                action_overrides = config[2]  # action_overrides JSONB
 
                 if action in action_overrides:
                     # Action has explicit override - takes precedence over category state
@@ -299,13 +300,13 @@ class AuditConfigService:
         all_configs = await self.repository.find_all_by_tenant(tenant_id)
 
         # Build local lookup dict: {category: (enabled, action_overrides)}
-        config_dict = {
+        config_dict: dict[str, tuple[bool, ActionOverrides]] = {
             category: (enabled, overrides)
             for category, enabled, overrides in all_configs
         }
 
         # Build list of all actions with their enabled status
-        action_configs = []
+        action_configs: list[ActionConfig] = []
 
         for action_value, category in CATEGORY_MAPPINGS.items():
             # Determine if action is enabled using local dict (avoids 65 async calls)
@@ -322,16 +323,11 @@ class AuditConfigService:
                     # No override, use category enabled state
                     enabled = category_enabled
 
-            # Get Swedish metadata
-            metadata = get_action_metadata(action_value)
-
             action_configs.append(
                 ActionConfig(
-                    action=action_value,
+                    action=ActionType(action_value),
                     enabled=enabled,
-                    category=category,
-                    name_sv=metadata["name_sv"],
-                    description_sv=metadata["description_sv"],
+                    category=CategoryType(category),
                 )
             )
 
@@ -357,7 +353,7 @@ class AuditConfigService:
             Updated ActionConfigResponse
         """
         # Group updates by category (since we update JSONB per category)
-        updates_by_category: dict[str, dict[str, bool]] = {}
+        updates_by_category: dict[str, ActionOverrides] = {}
 
         for update in updates:
             category = get_category_for_action(update.action)
@@ -368,16 +364,18 @@ class AuditConfigService:
         # Update each category's action_overrides
         for category, action_overrides in updates_by_category.items():
             # Fetch current config
-            config = await self.repository.find_by_tenant_and_category(tenant_id, category)
+            config = await self.repository.find_by_tenant_and_category(
+                tenant_id, category
+            )
 
             if config is None:
                 # If no category config exists, create it with default enabled=True
                 category_enabled = True
-                current_overrides = {}
+                current_overrides: ActionOverrides = {}
             else:
                 # Preserve existing category enabled state
                 category_enabled = config[1]
-                current_overrides = config[2] if len(config) > 2 else {}
+                current_overrides = config[2]
 
             # Merge new overrides with existing ones
             updated_overrides = {**current_overrides, **action_overrides}

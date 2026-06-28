@@ -17,7 +17,7 @@
 <div class="flex w-full items-center justify-start {customClass} gap-2">
   <IntegrationVendorIcon size="sm" type={knowledge.integration_type}></IntegrationVendorIcon>
   <div class="min-w-0 flex-1">
-    <span class="truncate overflow-ellipsis block">
+    <span class="block truncate overflow-ellipsis">
       {knowledge.name}
       {#if showOriginalName}
         <span class="text-secondary">({knowledge.original_name})</span>

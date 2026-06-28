@@ -14,7 +14,11 @@
 </script>
 
 <div class="flex w-full items-center justify-start">
-  <Button href={localizeHref(`/spaces/${space.id}/overview`)} padding="icon-leading" class="'-ml-1' max-w-full">
+  <Button
+    href={localizeHref(`/spaces/${space.id}/overview`)}
+    padding="icon-leading"
+    class="'-ml-1' max-w-full"
+  >
     <SpaceChip {space}></SpaceChip>
 
     <span class="text-primary truncate overflow-ellipsis">

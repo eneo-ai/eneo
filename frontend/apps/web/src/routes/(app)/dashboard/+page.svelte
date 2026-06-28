@@ -12,7 +12,6 @@
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import SelectTheme from "$lib/components/SelectTheme.svelte";
 
   export let data;
   const { user } = getAppContext();
@@ -20,9 +19,9 @@
   // Consolidated filtering - spaces with any content (assistants, default_assistant for personal spaces, OR apps)
   const spacesWithContent = data.spaces.filter(
     (space) =>
-      space.applications.assistants.count > 0 ||
+      (space.applications?.assistants.count ?? 0) > 0 ||
       (space.personal && space.default_assistant != null) ||
-      space.applications.apps.count > 0
+      (space.applications?.apps.count ?? 0) > 0
   );
 
   const {
@@ -72,11 +71,12 @@
           {m.logged_in_as()}<br /><span class="font-mono text-sm">{user.email}</span>
         </div>
         <div class="border-default my-1 border-b"></div>
-        <div class="p-2">
-          <SelectTheme></SelectTheme>
-        </div>
-        <div class="border-default my-1 border-b"></div>
-        <Button is={item} variant="destructive" href={localizeHref("/logout")} padding="icon-leading">
+        <Button
+          is={item}
+          variant="destructive"
+          href={localizeHref("/logout")}
+          padding="icon-leading"
+        >
           <IconLogout />
           {m.logout()}</Button
         >
@@ -104,12 +104,7 @@
 
         <!-- Level 1: Space Content (contains Level 2 accordion) -->
         {#if $isSelected(space.id)}
-          <div
-            class="pl-4"
-            {...$content(space.id)}
-            use:content
-            transition:slide
-          >
+          <div class="pl-4" {...$content(space.id)} use:content transition:slide>
             <SpaceAccordionContent {space} />
           </div>
         {/if}

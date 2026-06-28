@@ -17,6 +17,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { Button } from "@eneo/ui";
+  import { m } from "$lib/paraglide/messages";
 
   export let page: number;
   export let totalPages: number;
@@ -46,16 +47,12 @@
         <span>/</span>
         <span>{totalPages}</span>
       </div>
-      <Button
-        variant="outlined"
-        disabled={!hasNext}
-        on:click={() => dispatch("change", page + 1)}
-      >
+      <Button variant="outlined" disabled={!hasNext} on:click={() => dispatch("change", page + 1)}>
         →
       </Button>
     </div>
     <span class="text-secondary text-sm">
-      {rangeStart}–{rangeEnd} av {totalCount}
+      {m.pagination_showing_range({ start: rangeStart, end: rangeEnd, total: totalCount })}
     </span>
   </div>
 {/if}

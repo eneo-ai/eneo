@@ -88,7 +88,9 @@ class TestContainerSessionScope:
         async with sessionmanager.session() as verify_session:
             async with verify_session.begin():
                 result = await verify_session.execute(text("SELECT 2 as verify_value"))
-                assert result.scalar() == 2, "Subsequent session should work after commit"
+                assert result.scalar() == 2, (
+                    "Subsequent session should work after commit"
+                )
 
     async def test_session_scope_rolls_back_on_exception(self, test_settings):
         """session_scope should rollback transaction on exception.
@@ -111,12 +113,16 @@ class TestContainerSessionScope:
                 rollback_triggered = True
                 raise ValueError("Force rollback")
 
-        assert rollback_triggered, "Exception should have been raised inside session_scope"
+        assert rollback_triggered, (
+            "Exception should have been raised inside session_scope"
+        )
 
         # Verify session was properly cleaned up - we should be able to use a new session
         async with sessionmanager.session() as verify_session:
             async with verify_session.begin():
-                result = await verify_session.execute(text("SELECT 'rollback_verified'"))
+                result = await verify_session.execute(
+                    text("SELECT 'rollback_verified'")
+                )
                 assert result.scalar() == "rollback_verified", (
                     "New session should work after rollback"
                 )
@@ -307,10 +313,7 @@ class TestSessionScopePoolExhaustion:
                 return (task_id, str(e))
 
         # Test OLD pattern - should have timeouts
-        old_tasks = [
-            asyncio.create_task(old_pattern_task(i))
-            for i in range(5)
-        ]
+        old_tasks = [asyncio.create_task(old_pattern_task(i)) for i in range(5)]
         await asyncio.gather(*old_tasks, return_exceptions=True)
 
         assert len(old_pattern_errors) > 0, (
@@ -327,10 +330,7 @@ class TestSessionScopePoolExhaustion:
         )
 
         # Test NEW pattern - should all succeed
-        new_tasks = [
-            asyncio.create_task(new_pattern_task(i))
-            for i in range(5)
-        ]
+        new_tasks = [asyncio.create_task(new_pattern_task(i)) for i in range(5)]
         await asyncio.gather(*new_tasks)
 
         await tiny_engine.dispose()
@@ -447,9 +447,7 @@ class TestWorkerBootstrapSession:
                 # Phase 3: DB operations via session_scope pattern
                 for batch in range(3):
                     async with tiny_engine.begin() as conn:
-                        await conn.execute(
-                            text(f"SELECT 'batch_{worker_id}_{batch}'")
-                        )
+                        await conn.execute(text(f"SELECT 'batch_{worker_id}_{batch}'"))
                     # Connection released between batches!
                     await asyncio.sleep(0.05)  # More "crawling"
 
@@ -461,10 +459,7 @@ class TestWorkerBootstrapSession:
                 worker_errors.append((worker_id, str(e)))
 
         # Run all workers concurrently
-        workers = [
-            asyncio.create_task(simulate_worker(i))
-            for i in range(num_workers)
-        ]
+        workers = [asyncio.create_task(simulate_worker(i)) for i in range(num_workers)]
         await asyncio.gather(*workers, return_exceptions=True)
 
         await tiny_engine.dispose()
@@ -534,8 +529,7 @@ class TestSessionScopeStress:
         # Allow some failures under extreme stress but most should succeed
         success_rate = len(task_results) / num_tasks
         assert success_rate >= 0.9, (
-            f"Success rate {success_rate:.0%} too low. "
-            f"Errors: {task_errors[:5]}..."
+            f"Success rate {success_rate:.0%} too low. Errors: {task_errors[:5]}..."
         )
 
     async def test_stress_rapid_session_scope_cycles(self, test_settings):
@@ -565,10 +559,7 @@ class TestSessionScopeStress:
                     errors.append((cycler_id, i, str(e)))
 
         # Run 5 cyclers, each doing 50 cycles
-        cyclers = [
-            asyncio.create_task(rapid_cycler(i, 50))
-            for i in range(5)
-        ]
+        cyclers = [asyncio.create_task(rapid_cycler(i, 50)) for i in range(5)]
         await asyncio.gather(*cyclers)
 
         await tiny_engine.dispose()
@@ -650,8 +641,7 @@ class TestPoolExhaustionRegression:
 
         # Run all tasks concurrently
         tasks = [
-            asyncio.create_task(simulated_crawl_task_fixed(i))
-            for i in range(num_tasks)
+            asyncio.create_task(simulated_crawl_task_fixed(i)) for i in range(num_tasks)
         ]
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -659,7 +649,6 @@ class TestPoolExhaustionRegression:
 
         # With fixed pattern, all should complete
         assert len(completed) == num_tasks, (
-            f"Expected {num_tasks} completions, got {len(completed)}. "
-            f"Failed: {failed}"
+            f"Expected {num_tasks} completions, got {len(completed)}. Failed: {failed}"
         )
         assert len(failed) == 0, f"Tasks failed: {failed}"

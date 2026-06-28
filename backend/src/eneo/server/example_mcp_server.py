@@ -3,6 +3,7 @@
 # pyright: reportUnknownMemberType=false
 # pyright: reportUntypedFunctionDecorator=false
 """Example MCP server using FastMCP - requires 'pip install fastmcp' for local testing."""
+
 from fastmcp import FastMCP
 
 # Create a basic server instance
@@ -14,10 +15,12 @@ mcp = FastMCP(
     """,
 )
 
+
 @mcp.tool
 def add_two_numbers(a: int, b: int) -> int:
     """Add two numbers."""
     return a + b
+
 
 # Run the server when executed
 if __name__ == "__main__":

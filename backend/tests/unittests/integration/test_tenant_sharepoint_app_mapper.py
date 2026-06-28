@@ -23,7 +23,9 @@ def mock_encryption_service():
     # Mock encrypt to add prefix
     service.encrypt.side_effect = lambda value: f"enc:fernet:v1:{value}:encrypted"
     # Mock decrypt to remove prefix
-    service.decrypt.side_effect = lambda value: value.replace("enc:fernet:v1:", "").replace(":encrypted", "")
+    service.decrypt.side_effect = lambda value: value.replace(
+        "enc:fernet:v1:", ""
+    ).replace(":encrypted", "")
     return service
 
 
@@ -73,7 +75,9 @@ def sample_db_model(sample_entity):
     return db_model
 
 
-def test_to_db_dict_encrypts_client_secret(mapper, mock_encryption_service, sample_entity):
+def test_to_db_dict_encrypts_client_secret(
+    mapper, mock_encryption_service, sample_entity
+):
     """to_db_dict() encrypts client_secret before database storage."""
     db_dict = mapper.to_db_dict(sample_entity)
 
@@ -81,7 +85,10 @@ def test_to_db_dict_encrypts_client_secret(mapper, mock_encryption_service, samp
     mock_encryption_service.encrypt.assert_called_once_with("azure-client-secret-456")
 
     # Verify encrypted value is in db_dict
-    assert db_dict["client_secret_encrypted"] == "enc:fernet:v1:azure-client-secret-456:encrypted"
+    assert (
+        db_dict["client_secret_encrypted"]
+        == "enc:fernet:v1:azure-client-secret-456:encrypted"
+    )
 
     # Verify plaintext secret is NOT in db_dict
     assert "client_secret" not in db_dict
@@ -145,7 +152,9 @@ def test_to_db_dict_excludes_timestamps_when_none(mapper, sample_entity):
     assert "updated_at" not in db_dict
 
 
-def test_to_entity_decrypts_client_secret(mapper, mock_encryption_service, sample_db_model):
+def test_to_entity_decrypts_client_secret(
+    mapper, mock_encryption_service, sample_db_model
+):
     """to_entity() decrypts client_secret after database retrieval."""
     entity = mapper.to_entity(sample_db_model)
 
@@ -181,7 +190,9 @@ def test_to_entity_includes_all_fields(mapper, sample_db_model):
     assert entity.updated_at == sample_db_model.updated_at
 
 
-def test_encryption_decryption_roundtrip(mapper, mock_encryption_service, sample_entity):
+def test_encryption_decryption_roundtrip(
+    mapper, mock_encryption_service, sample_entity
+):
     """Entity → DB Dict → Entity preserves data integrity."""
     # Convert entity to DB dict (encrypts)
     db_dict = mapper.to_db_dict(sample_entity)
@@ -196,7 +207,9 @@ def test_encryption_decryption_roundtrip(mapper, mock_encryption_service, sample
     db_model.is_active = db_dict["is_active"]
     db_model.certificate_path = db_dict["certificate_path"]
     db_model.auth_method = db_dict["auth_method"]
-    db_model.service_account_refresh_token_encrypted = db_dict["service_account_refresh_token_encrypted"]
+    db_model.service_account_refresh_token_encrypted = db_dict[
+        "service_account_refresh_token_encrypted"
+    ]
     db_model.service_account_email = db_dict["service_account_email"]
     db_model.created_by = db_dict["created_by"]
     db_model.created_at = db_dict.get("created_at")
@@ -209,7 +222,9 @@ def test_encryption_decryption_roundtrip(mapper, mock_encryption_service, sample
     assert restored_entity.id == sample_entity.id
     assert restored_entity.tenant_id == sample_entity.tenant_id
     assert restored_entity.client_id == sample_entity.client_id
-    assert restored_entity.client_secret == sample_entity.client_secret  # Critical: secret restored
+    assert (
+        restored_entity.client_secret == sample_entity.client_secret
+    )  # Critical: secret restored
     assert restored_entity.tenant_domain == sample_entity.tenant_domain
     assert restored_entity.is_active == sample_entity.is_active
 
@@ -320,7 +335,9 @@ def test_to_entities_empty_list(mapper):
     assert entities == []
 
 
-def test_encryption_service_called_with_correct_value(mapper, mock_encryption_service, sample_entity):
+def test_encryption_service_called_with_correct_value(
+    mapper, mock_encryption_service, sample_entity
+):
     """Encryption service is called with the exact plaintext secret."""
     mapper.to_db_dict(sample_entity)
 
@@ -328,7 +345,9 @@ def test_encryption_service_called_with_correct_value(mapper, mock_encryption_se
     mock_encryption_service.encrypt.assert_called_once_with("azure-client-secret-456")
 
 
-def test_decryption_service_called_with_correct_value(mapper, mock_encryption_service, sample_db_model):
+def test_decryption_service_called_with_correct_value(
+    mapper, mock_encryption_service, sample_db_model
+):
     """Decryption service is called with the exact encrypted value."""
     mapper.to_entity(sample_db_model)
 

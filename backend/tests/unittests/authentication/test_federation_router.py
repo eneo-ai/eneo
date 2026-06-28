@@ -21,7 +21,7 @@ from eneo.users.user import UserInDB
 class DummySettings(SimpleNamespace):
     def __init__(self, **overrides):
         defaults = {
-            "jwt_secret": "unit-test-secret",
+            "jwt_secret": "unit-test-secret-padded-to-the-hs256-minimum",
             "oidc_state_ttl_seconds": 600,
             "oidc_redirect_grace_period_seconds": 900,
             "strict_oidc_redirect_validation": True,
@@ -204,7 +204,9 @@ async def test_initiate_auth_blocks_inactive_tenant(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc:
-        await federation_router.initiate_auth(tenant="suspended", state=None, container=container)
+        await federation_router.initiate_auth(
+            tenant="suspended", state=None, container=container
+        )
 
     assert exc.value.status_code == 403
 
@@ -230,9 +232,7 @@ async def test_initiate_auth_uses_additional_redirect_uri_from_query_param(monke
             "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
             "canonical_public_origin": "https://canonical.example.com",
             "redirect_path": "/auth/callback",
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ],
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"],
             "allowed_domains": ["example.com"],
         },
         created_at=datetime.now(timezone.utc),
@@ -273,9 +273,7 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         modules=[],
         api_credentials={},
         federation_config={
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ]
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"]
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -293,7 +291,9 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         federation_router,
         "aiohttp_client",
         lambda: FakeAioHttpClient(
-            FakeResponse({"authorization_endpoint": "https://idp.example.com/authorize"})
+            FakeResponse(
+                {"authorization_endpoint": "https://idp.example.com/authorize"}
+            )
         ),
     )
 
@@ -337,9 +337,7 @@ async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
             "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
             "canonical_public_origin": "https://canonical.example.com",
             "redirect_path": "/auth/callback",
-            "additional_redirect_uris": [
-                "https://external.example.com/auth/callback"
-            ],
+            "additional_redirect_uris": ["https://external.example.com/auth/callback"],
             "allowed_domains": ["example.com"],
         },
         created_at=datetime.now(timezone.utc),
@@ -440,7 +438,9 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         "config_version": old_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -456,7 +456,9 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     )
 
     # Simulate canonical origin update during login
-    tenant.federation_config["canonical_public_origin"] = "https://new.tenant.example.com"
+    tenant.federation_config["canonical_public_origin"] = (
+        "https://new.tenant.example.com"
+    )
     tenant.updated_at = datetime.now(timezone.utc)
 
     fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
@@ -554,7 +556,9 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -656,7 +660,9 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
         "config_version": datetime.now(timezone.utc).isoformat(),
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     # Store state in Redis cache with correct key format (uses nonce, not full JWT)
     cache_payload = {
@@ -688,28 +694,21 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
 
     assert exc.value.status_code == 401
     # Accept either "invalid" or "failed to validate" in error message
-    assert ("invalid" in exc.value.detail.lower() or "failed to validate" in exc.value.detail.lower())
+    assert (
+        "invalid" in exc.value.detail.lower()
+        or "failed to validate" in exc.value.detail.lower()
+    )
 
 
 # --- JIT Provisioning Tests ---
-
-from eneo.predefined_roles.predefined_role import PredefinedRoleInDB
-
-
-class PredefinedRolesRepoStub:
-    def __init__(self, user_role: PredefinedRoleInDB | None):
-        self._user_role = user_role
-
-    async def get_predefined_role_by_name(self, name):
-        if self._user_role and self._user_role.name == name.value:
-            return self._user_role
-        return None
 
 
 class UserRepoStubForJIT:
     """User repo stub that can simulate a user not existing initially, then being created."""
 
-    def __init__(self, existing_user: UserInDB | None = None, tenant: TenantInDB | None = None):
+    def __init__(
+        self, existing_user: UserInDB | None = None, tenant: TenantInDB | None = None
+    ):
         self._user = existing_user
         self._tenant = tenant
         self._created_user = None
@@ -758,7 +757,6 @@ class MockContainerForJIT:
         auth_service,
         redis_client,
         encryption_service,
-        predefined_roles_repo=None,
         audit_service=None,
         allowed_origin_repo=None,
     ):
@@ -767,7 +765,6 @@ class MockContainerForJIT:
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
-        self._predefined_roles_repo = predefined_roles_repo
         self._audit_service = audit_service
         self._allowed_origin_repo = allowed_origin_repo
 
@@ -786,9 +783,6 @@ class MockContainerForJIT:
     def user_repo(self):
         return self._user_repo
 
-    def predefined_roles_repo(self):
-        return self._predefined_roles_repo
-
     def audit_service(self):
         return self._audit_service
 
@@ -805,9 +799,9 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
     redis_client = FakeRedis()
     tenant_id = uuid4()
     slug = "tenant-jit"
-    role_id = uuid4()
+    default_role_id = uuid4()
 
-    # Tenant with provisioning enabled
+    # Tenant with provisioning enabled and default role set
     tenant = TenantInDB(
         id=tenant_id,
         name="Tenant JIT",
@@ -816,6 +810,7 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         quota_limit=1024**3,
         state=TenantState.ACTIVE,
         provisioning=True,  # JIT provisioning enabled
+        default_role_id=default_role_id,
         modules=[],
         api_credentials={},
         federation_config={
@@ -834,15 +829,6 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         updated_at=datetime.now(timezone.utc),
     )
 
-    # User role
-    user_role = PredefinedRoleInDB(
-        id=role_id,
-        name="User",
-        permissions=[],
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-
     # User repo that returns None (user doesn't exist)
     user_repo = UserRepoStubForJIT(existing_user=None, tenant=tenant)
     audit_service = AuditServiceStub()
@@ -853,7 +839,6 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
-        predefined_roles_repo=PredefinedRolesRepoStub(user_role),
         audit_service=audit_service,
     )
 
@@ -871,7 +856,9 @@ async def test_jit_provisioning_creates_user_when_enabled(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -963,7 +950,6 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
         auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
-        predefined_roles_repo=None,
         audit_service=None,
     )
 
@@ -981,7 +967,9 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),
@@ -1095,7 +1083,9 @@ async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
         "config_version": config_version,
     }
 
-    signed_state = jwt.encode(state_payload, dummy_settings.jwt_secret, algorithm="HS256")
+    signed_state = jwt.encode(
+        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    )
 
     cache_payload = {
         "tenant_id": str(tenant_id),

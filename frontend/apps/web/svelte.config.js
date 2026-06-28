@@ -1,17 +1,5 @@
-import adapter_vercel from "@sveltejs/adapter-vercel";
-import adapter_cloudflare from "@sveltejs/adapter-cloudflare";
 import adapter_node from "@sveltejs/adapter-node";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-
-function getAdapter() {
-  if (process.env.ADAPTER === "vercel") {
-    return adapter_vercel();
-  }
-  if (process.env.ADAPTER === "cloudflare") {
-    return adapter_cloudflare();
-  }
-  return adapter_node();
-}
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -19,9 +7,13 @@ const config = {
   // for more information about preprocessors
   preprocess: vitePreprocess(),
   kit: {
+    // SvelteKit's generated/build dir, shared by `dev`, `build` and `preview`.
+    // The E2E run (vite build + preview) overrides this to a separate dir so it
+    // can't clobber a live `vite dev`'s `.svelte-kit` — letting tests and dev
+    // coexist. See playwright.config.ts (SVELTE_KIT_OUT_DIR).
+    outDir: process.env.SVELTE_KIT_OUT_DIR ?? ".svelte-kit",
     // Default build will generate a node version of the frontend
-    // Set the ADAPTER environment variable to `vercel` for vercel build
-    adapter: getAdapter(),
+    adapter: adapter_node(),
     csp: {
       directives: {
         "script-src": ["self"],

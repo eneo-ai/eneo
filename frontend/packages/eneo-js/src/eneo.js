@@ -26,12 +26,16 @@ import { initIntegrations } from "./endpoints/integrations";
 import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
 import { initMCPServers } from "./endpoints/mcp-servers";
+import { initPromptLibrary } from "./endpoints/prompt-library";
+import { initGovernancePolicy } from "./endpoints/governance-policy";
 import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
 import { initAudit } from "./endpoints/audit";
 import { initIcons } from "./endpoints/icons";
 import { initModelProviders } from "./endpoints/model-providers";
 import { initTenantModels } from "./endpoints/tenant-models";
+import { initApiKeys } from "./endpoints/api-keys";
+import { initHelpAssistants } from "./endpoints/helpAssistants";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -72,12 +76,16 @@ export function createEneo(args) {
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
     mcpServers: initMCPServers(client),
+    promptLibrary: initPromptLibrary(client),
+    governancePolicy: initGovernancePolicy(client),
     settings: initSettings(client),
     credentials: initCredentials(client),
     audit: initAudit(client),
     icons: initIcons(client),
     modelProviders: initModelProviders(client),
     tenantModels: initTenantModels(client),
+    apiKeys: initApiKeys(client),
+    helpAssistants: initHelpAssistants(client),
     client
   };
 }

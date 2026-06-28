@@ -10,10 +10,10 @@ Tests cover:
 - refresh_tools uses stored encrypted credentials
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
 from pydantic import ValidationError
 
 from eneo.mcp_servers.presentation.models import (
@@ -22,7 +22,6 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerUpdate,
 )
 from eneo.settings.encryption_service import EncryptionService
-
 
 # =============================================================================
 # Helpers
@@ -150,7 +149,7 @@ class TestMCPServerPublicHasCredentials:
             icon_url=None,
             documentation_url=None,
         )
-        assert "http_auth_config_schema" not in dto.model_fields
+        assert "http_auth_config_schema" not in type(dto).model_fields
 
 
 # =============================================================================
@@ -477,7 +476,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Connection refused"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Connection refused"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -518,7 +520,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Unauthorized"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Unauthorized"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -538,7 +543,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="should not be called"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -560,7 +568,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="Invalid token"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="Invalid token"),
+            )
         )
 
         result = await service.update_mcp_server(
@@ -623,7 +634,10 @@ class TestUpdateConnectionValidation:
         service, mock_repo, existing, _ = _setup
 
         service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=False, error_message="should not be called"))
+            return_value=(
+                [],
+                ConnectionResult(success=False, error_message="should not be called"),
+            )
         )
 
         await service.update_mcp_server(

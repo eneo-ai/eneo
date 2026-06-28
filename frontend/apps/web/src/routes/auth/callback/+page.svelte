@@ -3,6 +3,7 @@
   import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   const { data } = $props();
 
@@ -16,7 +17,7 @@
       });
 
       // Redirect to login with error message
-      const params = new URLSearchParams();
+      const params = new SvelteURLSearchParams();
       params.set("message", data.error);
 
       if (data.detailCode) {
@@ -38,7 +39,11 @@
         }
       }
 
-      setTimeout(() => goto(`/login?${params.toString()}`, { replaceState: true }), 1200);
+      setTimeout(
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string
+        () => goto(`/login?${params.toString()}`, { replaceState: true }),
+        1200
+      );
     }
   });
 </script>

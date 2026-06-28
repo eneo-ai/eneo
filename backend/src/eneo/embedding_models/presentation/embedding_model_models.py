@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -24,6 +25,8 @@ class EmbeddingModelPublic(BaseResponse):
     description: Optional[str] = None
     org: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
     can_access: bool = False
     is_locked: bool = True
     lock_reason: Optional[str] = None
@@ -36,6 +39,7 @@ class EmbeddingModelPublic(BaseResponse):
     # Provider info for grouped display in UI
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
+    deprecation_date: Optional[str] = None
 
     @classmethod
     def from_domain(cls, model: EmbeddingModel):
@@ -53,7 +57,7 @@ class EmbeddingModelPublic(BaseResponse):
             name=model.name,
             nickname=model.nickname,
             family=model.family,
-            is_deprecated=model.is_deprecated,
+            is_deprecated=model.is_effectively_deprecated,
             open_source=model.open_source,
             max_input=model.max_input,
             hf_link=model.hf_link,
@@ -62,6 +66,8 @@ class EmbeddingModelPublic(BaseResponse):
             description=model.description,
             org=model.org,
             litellm_model_name=model.litellm_model_name,
+            input_cost_per_token=getattr(model, "input_cost_per_token", None),
+            output_cost_per_token=getattr(model, "output_cost_per_token", None),
             dimensions=model.dimensions,
             can_access=model.can_access,
             is_locked=model.is_locked,
@@ -73,6 +79,7 @@ class EmbeddingModelPublic(BaseResponse):
             provider_id=model.provider_id,
             provider_name=model.provider_name,
             provider_type=model.provider_type,
+            deprecation_date=model.litellm_deprecation_date,
         )
 
 

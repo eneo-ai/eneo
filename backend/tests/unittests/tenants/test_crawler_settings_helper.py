@@ -37,9 +37,7 @@ class TestCrawlerSettingSpecs:
         for name, spec in CRAWLER_SETTING_SPECS.items():
             has_default = "default" in spec
             has_env_attr = "env_attr" in spec
-            assert has_default or has_env_attr, (
-                f"{name} needs 'default' or 'env_attr'"
-            )
+            assert has_default or has_env_attr, f"{name} needs 'default' or 'env_attr'"
 
     def test_expected_settings_count(self):
         """Verify we have all 18 crawler settings."""

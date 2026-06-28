@@ -1,6 +1,7 @@
 """
 Test to validate that settings can be properly mocked and overridden for integration tests.
 """
+
 import logging
 
 import pytest
@@ -139,10 +140,15 @@ def test_settings_database_url_construction():
     settings = get_settings()
 
     # Test async database URL
-    assert settings.database_url == "postgresql+asyncpg://myuser:mypassword@myhost:5433/mydb"
+    assert (
+        settings.database_url
+        == "postgresql+asyncpg://myuser:mypassword@myhost:5433/mydb"
+    )
 
     # Test sync database URL
-    assert settings.sync_database_url == "postgresql://myuser:mypassword@myhost:5433/mydb"
+    assert (
+        settings.sync_database_url == "postgresql://myuser:mypassword@myhost:5433/mydb"
+    )
 
 
 def _set_minimal_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,7 +181,9 @@ def _set_minimal_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(key, value)
 
 
-def test_federation_enabled_env_takes_precedence(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+def test_federation_enabled_env_takes_precedence(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
     _set_minimal_settings_env(monkeypatch)
     monkeypatch.setenv("FEDERATION_ENABLED", "false")
     monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
@@ -188,7 +196,9 @@ def test_federation_enabled_env_takes_precedence(monkeypatch: pytest.MonkeyPatch
     assert "Using FEDERATION_ENABLED" in caplog.text
 
 
-def test_deprecated_federation_flag_falls_back_when_primary_missing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+def test_deprecated_federation_flag_falls_back_when_primary_missing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
     _set_minimal_settings_env(monkeypatch)
     monkeypatch.delenv("FEDERATION_ENABLED", raising=False)
     monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
@@ -200,7 +210,9 @@ def test_deprecated_federation_flag_falls_back_when_primary_missing(monkeypatch:
     assert "deprecated" in caplog.text
 
 
-def test_matching_federation_flags_do_not_override_primary(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+def test_matching_federation_flags_do_not_override_primary(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
     _set_minimal_settings_env(monkeypatch)
     monkeypatch.setenv("FEDERATION_ENABLED", "true")
     monkeypatch.setenv("FEDERATION_PER_TENANT_ENABLED", "true")
@@ -213,7 +225,9 @@ def test_matching_federation_flags_do_not_override_primary(monkeypatch: pytest.M
     assert "deprecated" in caplog.text
 
 
-def test_primary_federation_flag_works_without_deprecated_alias(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+def test_primary_federation_flag_works_without_deprecated_alias(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
     _set_minimal_settings_env(monkeypatch)
     monkeypatch.setenv("FEDERATION_ENABLED", "true")
     monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)

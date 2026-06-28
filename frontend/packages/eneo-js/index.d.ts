@@ -6,5 +6,6 @@ export { createClient, EneoError } from "./src/client/client";
 export { JSONRequestBody } from "./src/types/fetch";
 export * from "./src/types/resources";
 export * from "./src/socket/types";
+export type { components } from "./src/types/schema";
 export type Eneo = ReturnType<typeof createEneo>;
 export type EneoSocket = ReturnType<typeof createEneoSocket>;

@@ -1,7 +1,12 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
+# Audit logging - module level imports for consistency
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.info_blobs import info_blob_protocol
 from eneo.info_blobs.info_blob import InfoBlobPublicNoText
 from eneo.main.container.container import Container
@@ -10,11 +15,6 @@ from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
 from eneo.spaces.api.space_models import TransferRequest
-
-# Audit logging - module level imports for consistency
-from eneo.audit.application.audit_metadata import AuditMetadata
-from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.entity_types import EntityType
 from eneo.websites.presentation.website_models import (
     BulkCrawlRequest,
     BulkCrawlResponse,
@@ -27,26 +27,44 @@ from eneo.websites.presentation.website_models import (
 
 router = APIRouter()
 
+ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 
-@router.get("/", response_model=PaginatedResponse[WebsitePublic], deprecated=True)
+
+@router.get(
+    "/",
+    response_model=PaginatedResponse[WebsitePublic],
+    responses=responses.get_responses([410]),
+    description="Deprecated: list websites. Always returns 410 Gone.",
+    deprecated=True,
+)
 async def get_websites(
-    for_tenant: bool = Query(default=False, description="Filter websites by tenant scope"),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    for_tenant: Annotated[
+        bool,
+        Query(description="Filter websites by tenant scope"),
+    ] = False,
 ):
-    return HTTPException(status_code=410, detail="This endpoint is deprecated")
+    raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
-@router.post("/", response_model=WebsitePublic, deprecated=True)
+@router.post(
+    "/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([410]),
+    description="Deprecated: create a website. Always returns 410 Gone.",
+    deprecated=True,
+)
 async def create_website(
     crawl: WebsiteCreateRequestDeprecated,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
-    return HTTPException(status_code=410, detail="This endpoint is deprecated")
+    raise HTTPException(status_code=410, detail="This endpoint is deprecated")
 
 
 @router.get(
     "/check-url/",
     response_model=WebsiteExistsResponse | None,
+    responses=responses.get_responses([]),
     summary="Check if URL exists on Organization space",
     description="""
     Check if a website URL already exists on the user's Organization space.
@@ -65,8 +83,8 @@ async def create_website(
     """,
 )
 async def check_existing_website_url(
-    url: str = Query(description="The website URL to check"),
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
+    url: Annotated[str, Query(description="The website URL to check")],
 ) -> WebsiteExistsResponse | None:
     """Check if URL exists on the Organization space."""
     service = container.website_crud_service()
@@ -75,7 +93,7 @@ async def check_existing_website_url(
     if result is None:
         return None
 
-    return WebsiteExistsResponse(**result)
+    return WebsiteExistsResponse.model_validate(result)
 
 
 @router.post(
@@ -123,10 +141,11 @@ async def check_existing_website_url(
 )
 async def bulk_run_crawl(
     request: BulkCrawlRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: ContainerDep,
 ):
     """Trigger crawls for multiple websites in a single request."""
     import logging
+
     logger = logging.getLogger(__name__)
 
     logger.info(f"Bulk crawl request received: {len(request.website_ids)} websites")
@@ -137,7 +156,9 @@ async def bulk_run_crawl(
     try:
         successful_runs, errors = await service.bulk_crawl_websites(request.website_ids)
 
-        logger.info(f"Bulk crawl completed: {len(successful_runs)} queued, {len(errors)} failed")
+        logger.info(
+            f"Bulk crawl completed: {len(successful_runs)} queued, {len(errors)} failed"
+        )
         if errors:
             logger.warning(f"Bulk crawl errors: {errors}")
 
@@ -153,10 +174,14 @@ async def bulk_run_crawl(
         raise
 
 
-@router.get("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
+@router.get(
+    "/{id}/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([403, 404]),
+)
 async def get_website(
-    id: UUID = Path(description="Unique identifier of the website"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     website = await service.get_website(id)
@@ -164,11 +189,16 @@ async def get_website(
     return WebsitePublic.from_domain(website)
 
 
-@router.post("/{id}/", response_model=WebsitePublic, responses=responses.get_responses([404]))
+@router.post(
+    "/{id}/",
+    response_model=WebsitePublic,
+    responses=responses.get_responses([403, 404]),
+    description="Update a website's configuration by id.",
+)
 async def update_website(
-    id: UUID = Path(description="Unique identifier of the website to update"),
-    website_update: WebsiteUpdate = ...,
-    container: Container = Depends(get_container(with_user=True)),
+    website_update: WebsiteUpdate,
+    id: Annotated[UUID, Path(description="Unique identifier of the website to update")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     user = container.user()
@@ -189,7 +219,7 @@ async def update_website(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_UPDATED,
         entity_type=EntityType.WEBSITE,
         entity_id=id,
@@ -204,10 +234,16 @@ async def update_website(
     return WebsitePublic.from_domain(website)
 
 
-@router.delete("/{id}/", status_code=200, responses=responses.get_responses([404]))
+@router.delete(
+    "/{id}/",
+    status_code=200,
+    response_model=None,
+    responses=responses.get_responses([404]),
+    description="Delete a website by id.",
+)
 async def delete_website(
-    id: UUID = Path(description="Unique identifier of the website to delete"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website to delete")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     user = container.user()
@@ -222,7 +258,7 @@ async def delete_website(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_DELETED,
         entity_type=EntityType.WEBSITE,
         entity_id=id,
@@ -236,10 +272,11 @@ async def delete_website(
 
     return {"id": id, "deletion_info": {"success": True}}
 
+
 @router.post(
     "/{id}/run/",
     response_model=CrawlRunPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 429]),
     summary="Trigger a crawl",
     description="""
     Manually trigger a crawl for a specific website. This can be used to:
@@ -259,8 +296,8 @@ async def delete_website(
     """,
 )
 async def run_crawl(
-    id: UUID = Path(description="Unique identifier of the website to crawl"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
+    container: ContainerDep,
 ):
     # MIT License
 
@@ -270,10 +307,15 @@ async def run_crawl(
     return CrawlRunPublic.from_domain(crawl_run)
 
 
-@router.get("/{id}/runs/", response_model=PaginatedResponse[CrawlRunPublic])
+@router.get(
+    "/{id}/runs/",
+    response_model=PaginatedResponse[CrawlRunPublic],
+    responses=responses.get_responses([403, 404]),
+    description="List crawl runs for a website by id.",
+)
 async def get_crawl_runs(
-    id: UUID = Path(description="Unique identifier of the website"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
 ):
     service = container.website_crud_service()
     crawl_runs = await service.get_crawl_runs(id)
@@ -283,15 +325,24 @@ async def get_crawl_runs(
     )
 
 
-@router.post("/{id}/transfer/", status_code=204)
+@router.post(
+    "/{id}/transfer/",
+    status_code=204,
+    responses=responses.get_responses([403, 404]),
+    description="Transfer a website to another space by id.",
+)
 async def transfer_website_to_space(
-    id: UUID = Path(description="Unique identifier of the website to transfer"),
-    transfer_req: TransferRequest = ...,
-    container: Container = Depends(get_container(with_user=True)),
+    transfer_req: TransferRequest,
+    id: Annotated[
+        UUID, Path(description="Unique identifier of the website to transfer")
+    ],
+    container: ContainerDep,
 ):
     # Transfer website (do this FIRST to avoid DI issues)
     service = container.resource_mover_service()
-    await service.link_website_to_space(website_id=id, space_id=transfer_req.target_space_id)
+    await service.link_website_to_space(
+        website_id=id, space_id=transfer_req.target_space_id
+    )
 
     # Get user and website info AFTER transfer for audit logging
     user = container.user()
@@ -302,7 +353,7 @@ async def transfer_website_to_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.WEBSITE_TRANSFERRED,
         entity_type=EntityType.WEBSITE,
         entity_id=id,
@@ -321,18 +372,19 @@ async def transfer_website_to_space(
 @router.get(
     "/{id}/info-blobs/",
     response_model=PaginatedResponse[InfoBlobPublicNoText],
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def get_info_blobs(
-    id: UUID = Path(description="Unique identifier of the website"),
-    container: Container = Depends(get_container(with_user=True)),
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
 ):
     service = container.info_blob_service()
 
     info_blobs_in_db = await service.get_by_website(id)
 
     info_blobs_public = [
-        info_blob_protocol.to_info_blob_public_no_text(blob) for blob in info_blobs_in_db
+        info_blob_protocol.to_info_blob_public_no_text(blob)
+        for blob in info_blobs_in_db
     ]
 
     return protocol.to_paginated_response(info_blobs_public)

@@ -1,11 +1,9 @@
 # MIT License
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from eneo.main.models import InDB, PaginatedResponse
-from eneo.predefined_roles.predefined_role import PredefinedRolePublic
 from eneo.roles.permissions import Permission
 
 
@@ -25,11 +23,12 @@ class RoleCreateRequest(RoleBase):
 
 class RoleCreate(RoleCreateRequest):
     tenant_id: UUID
+    predefined_source: str | None = None
 
 
 class RoleUpdateRequest(RoleBase):
-    name: Optional[str] = None
-    permissions: Optional[list[Permission]] = None
+    name: str | None = None  # type: ignore[assignment]  # intentional widening to Optional for partial update
+    permissions: list[Permission] | None = None  # type: ignore[assignment]  # intentional widening to Optional for partial update
 
 
 class RoleUpdate(RoleUpdateRequest):
@@ -38,12 +37,13 @@ class RoleUpdate(RoleUpdateRequest):
 
 class RoleInDB(RoleBase, InDB):
     tenant_id: UUID
+    predefined_source: str | None = None
 
 
 class RolePublic(RoleBase, InDB):
-    pass
+    predefined_source: str | None = None
 
 
 class RolesPaginatedResponse(BaseModel):
     roles: PaginatedResponse[RolePublic]
-    predefined_roles: PaginatedResponse[PredefinedRolePublic]
+    predefined_roles: PaginatedResponse[RolePublic]

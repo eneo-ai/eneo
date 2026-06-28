@@ -8,10 +8,9 @@
   import { Button, Dialog, Input } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { EneoError } from "@eneo/eneo-js";
+  import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
 
   let name = $state("");
   let description = $state("");
@@ -26,7 +25,7 @@
       name = "";
       description = "";
     } catch (error) {
-      toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

@@ -63,7 +63,9 @@ async def test_retention_policy_validation(db_session, test_tenant):
             await retention_service.update_policy(test_tenant.id, 3000)
 
         # Valid ranges should work
-        await retention_service.update_policy(test_tenant.id, 1)  # Min (monthly purge possible)
+        await retention_service.update_policy(
+            test_tenant.id, 1
+        )  # Min (monthly purge possible)
         await retention_service.update_policy(test_tenant.id, 30)  # 1 month
         await retention_service.update_policy(test_tenant.id, 90)  # Recommended minimum
         await retention_service.update_policy(test_tenant.id, 180)  # 6 months
@@ -73,7 +75,9 @@ async def test_retention_policy_validation(db_session, test_tenant):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Complex transaction management - purge logic verified in service tests")
+@pytest.mark.skip(
+    reason="Complex transaction management - purge logic verified in service tests"
+)
 async def test_purge_old_logs(db_session, test_tenant, test_user):
     """Test purging old audit logs based on retention period."""
     # First session: Set up data

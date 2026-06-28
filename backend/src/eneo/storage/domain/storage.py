@@ -27,7 +27,8 @@ class StorageSpaceInfo:
         size: int,
         members: list["SpaceMember"],
         user_id: Optional["UUID"],
-    ):
+    ) -> None:
+        super().__init__()
         self.space_id = space_id
         self.created_at = created_at
         self.updated_at = updated_at
@@ -45,7 +46,8 @@ class StorageInfo:
         shared_spaces: dict["UUID", StorageSpaceInfo],
         personal_spaces: dict["UUID", StorageSpaceInfo],
         quota_limit: int,
-    ):
+    ) -> None:
+        super().__init__()
         self._shared_spaces = shared_spaces
         self._personal_spaces = personal_spaces
         self._quota_limit = quota_limit

@@ -7,7 +7,9 @@
   import { writable } from "svelte/store";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
-  import { Button } from "@eneo/ui";
+  import { Button, Tooltip } from "@eneo/ui";
+  import { resolve } from "$app/paths";
+  import { IconInfo } from "@eneo/icons/info";
   import { IconLinkExternal } from "@eneo/icons/link-external";
   import { IconRefresh } from "@eneo/icons/refresh";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
@@ -15,9 +17,12 @@
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
+  import { untrack } from "svelte";
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- page data type inferred from layout chain
   let { data } = $props<{ data: any }>();
 
   const eneo = getEneo();
@@ -36,16 +41,21 @@
   });
 
   let selectedTab = writable<string>();
-  let showIntegrationsNotice = data.environment.integrationRequestFormUrl !== undefined;
+  let showIntegrationsNotice = $state(
+    untrack(() => data.environment.integrationRequestFormUrl !== undefined)
+  );
   let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
   let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
   let isPersonalSpace = $currentSpace.personal;
 
   // Check if user has admin permission
-  let isAdmin = data.user?.predefined_roles?.some((role: any) =>
-    role.permissions?.includes('admin')
-  ) ?? false;
+  let isAdmin = untrack(
+    () =>
+      data.user?.roles?.some((role: { permissions?: string[] }) =>
+        role.permissions?.includes("admin")
+      ) ?? false
+  );
 
   function handleSelectIntegration(integration: IntegrationKnowledge) {
     selectedIntegrationForSyncHistory = integration;
@@ -53,8 +63,8 @@
   }
 
   // Website selection state (shared with WebsiteTable)
-  let selectedWebsiteIds = writable<Set<string>>(new Set());
-  let isBulkRecrawling = false;
+  let selectedWebsiteIds = $state.raw(writable<Set<string>>(new Set()));
+  let isBulkRecrawling = $state(false);
 
   // Bulk recrawl handler
   async function bulkRecrawl() {
@@ -70,22 +80,24 @@
 
       // Only show alert if there were errors
       if (response.failed > 0) {
+        const errorMessages = response.errors
+          .map((e: { error?: string }) => e.error)
+          .filter(Boolean);
+        const detail = errorMessages.length > 0 ? `: ${errorMessages.join(", ")}` : "";
         toast.error(
-          `${response.queued} website${response.queued > 1 ? 's' : ''} queued, ${response.failed} failed. Check console for error details.`
+          `${response.queued} website${response.queued !== 1 ? "s" : ""} queued, ${response.failed} failed${detail}`
         );
-        console.error("Bulk recrawl errors:", response.errors);
       }
 
       // Clear selection and refresh
       $selectedWebsiteIds = new Set();
       refreshCurrentSpace();
     } catch (e) {
-      toast.error("Failed to trigger bulk recrawl: " + (e instanceof Error ? e.message : String(e)));
+      toastError(e);
       console.error(e);
     }
     isBulkRecrawling = false;
   }
-
 
   let userCanSeeCollections = $derived($currentSpace.hasPermission("read", "collection"));
   let userCanSeeWebsites = $derived($currentSpace.hasPermission("read", "website"));
@@ -107,6 +119,26 @@
   >
 </svelte:head>
 
+{#snippet noCreatePermission(resourceType: string)}
+  {@const message = m.knowledge_create_no_permission({ resourceType })}
+  <!-- Sits where the create button would be, so the header layout stays
+       consistent whether or not the user can create. A real <button> trigger
+       keeps it keyboard-focusable (tabbable), and aria-label exposes the reason
+       to screen readers rather than relying on hover alone. -->
+  <Tooltip text={message} placement="bottom" asFragment let:trigger>
+    {@const tip = trigger[0]}
+    <button
+      {...tip}
+      use:tip.action
+      type="button"
+      aria-label={message}
+      class="text-secondary hover:text-primary hover:bg-hover-default focus-visible:ring-accent-default flex cursor-help items-center rounded-md p-1.5 focus:outline-none focus-visible:ring-2"
+    >
+      <IconInfo />
+    </button>
+  </Tooltip>
+{/snippet}
+
 <Page.Root tabController={selectedTab}>
   <Page.Header>
     <Page.Title title={m.knowledge()}></Page.Title>
@@ -125,51 +157,45 @@
     <Page.Flex>
       {#if $selectedTab === "collections" && $currentSpace.hasPermission("create", "collection")}
         <CollectionEditor mode="create" collection={undefined}></CollectionEditor>
-      {:else if $selectedTab === "collections" && !$currentSpace.hasPermission("create", "collection")}
-        <p class="text-secondary max-w-72 text-right text-xs">
-          {m.knowledge_create_no_permission({ resourceType: m.collections().toLowerCase() })}
-        </p>
+      {:else if $selectedTab === "collections"}
+        {@render noCreatePermission(m.collections().toLowerCase())}
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
-          <Button
-            variant="primary"
-            on:click={bulkRecrawl}
-            disabled={isBulkRecrawling}
-          >
+          <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
             <IconRefresh size="sm" />
-            {isBulkRecrawling
-              ? m.syncing()
-              : m.sync_selected({ count: $selectedWebsiteIds.size })}
+            {isBulkRecrawling ? m.syncing() : m.sync_selected({ count: $selectedWebsiteIds.size })}
           </Button>
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
-      {:else if $selectedTab === "websites" && !$currentSpace.hasPermission("create", "website")}
-        <p class="text-secondary max-w-72 text-right text-xs">
-          {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
-        </p>
+      {:else if $selectedTab === "websites"}
+        {@render noCreatePermission(m.websites().toLowerCase())}
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
+        {:else if isPersonalSpace}
+          <Button
+            variant="primary"
+            onclick={() => (window.location.href = resolve("/account/integrations?tab=providers"))}
+          >
+            {m.configure_integrations()}
+          </Button>
+        {:else if isAdmin}
+          <Button
+            variant="primary"
+            onclick={() => (window.location.href = resolve("/admin/integrations?tab=providers"))}
+          >
+            {m.configure_integrations()}
+          </Button>
         {:else}
-          {#if isPersonalSpace}
-            <Button variant="primary" onclick={() => window.location.href = '/account/integrations?tab=providers'}>
-              {m.configure_integrations()}
-            </Button>
-          {:else if isAdmin}
-            <Button variant="primary" onclick={() => window.location.href = '/admin/integrations?tab=providers'}>
-              {m.configure_integrations()}
-            </Button>
-          {:else}
-            <p class="text-secondary max-w-72 text-right text-xs">
-              {isOrgSpace ? m.org_integrations_require_admin() : m.shared_integrations_require_admin()}
-            </p>
-          {/if}
+          <p class="text-secondary max-w-72 text-right text-xs">
+            {isOrgSpace
+              ? m.org_integrations_require_admin()
+              : m.shared_integrations_require_admin()}
+          </p>
         {/if}
-      {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}
-        <p class="text-secondary max-w-72 text-right text-xs">
-          {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
-        </p>
+      {:else if $selectedTab === "integrations"}
+        {@render noCreatePermission(m.integrations().toLowerCase())}
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -197,6 +223,7 @@
               </div>
               <p class="-mt-[0.1rem] max-w-[85ch] pl-6 leading-[1.3rem]">
                 {m.integrations_beta_notice()}
+                <!-- eslint-disable svelte/no-navigation-without-resolve -- external URL -->
                 <a
                   target="_blank"
                   rel="noreferrer"
@@ -204,6 +231,7 @@
                   href={data.environment.integrationRequestFormUrl}
                   >{m.request_integrations_feedback()}
                 </a>
+                <!-- eslint-enable svelte/no-navigation-without-resolve -->
                 <IconLinkExternal class="-mt-0.5 inline" size="sm"></IconLinkExternal>
               </p>
               <div class="flex-grow"></div>
@@ -217,7 +245,8 @@
             </div>
           </div>
         {/if}
-        <IntegrationsTable onSelectIntegrationForSyncHistory={handleSelectIntegration}></IntegrationsTable>
+        <IntegrationsTable onSelectIntegrationForSyncHistory={handleSelectIntegration}
+        ></IntegrationsTable>
         <SyncHistoryDialog
           knowledge={selectedIntegrationForSyncHistory}
           bind:open={showSyncHistoryDialog}

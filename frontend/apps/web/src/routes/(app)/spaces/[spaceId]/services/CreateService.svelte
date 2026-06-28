@@ -1,10 +1,11 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Button, Dialog, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const {
     state: { currentSpace },
@@ -30,10 +31,10 @@
       $showCreateDialog = false;
       newServiceName = "";
       if (openServiceAfterCreation) {
-        goto(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`);
+        goto(resolve(`/spaces/${$currentSpace.routeId}/services/${service.id}?tab=edit`));
       }
     } catch (e) {
-      toast.error(m.error_creating_new_service());
+      toastError(e, m.error_creating_new_service());
       console.error(e);
     }
     isProcessing = false;
@@ -64,10 +65,7 @@
       >
       <div class="flex-grow"></div>
       <Button is={close}>{m.cancel()}</Button>
-      <Button
-        variant="primary"
-        on:click={createService}
-        disabled={isProcessing}
+      <Button variant="primary" on:click={createService} disabled={isProcessing}
         >{isProcessing ? m.creating() : m.create_service()}</Button
       >
     </Dialog.Controls>

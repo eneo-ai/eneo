@@ -11,6 +11,9 @@
   } = getSpacesManager();
 </script>
 
-<Button unstyled href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}/results/${run.id}`)}>
+<Button
+  unstyled
+  href={localizeHref(`/spaces/${$currentSpace.routeId}/apps/${app.id}/results/${run.id}`)}
+>
   <AppResultInputList {run}></AppResultInputList>
 </Button>

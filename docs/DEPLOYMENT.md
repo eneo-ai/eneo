@@ -281,7 +281,7 @@ docker compose pull
 docker compose up -d
 
 # 5. Verify the new version is running
-docker compose exec backend python -c "import importlib.metadata; print(importlib.metadata.version('eneo'))"
+docker compose exec backend python -c "import eneo; print(eneo.__version__)"
 ```
 
 ### Before You Upgrade
@@ -319,7 +319,7 @@ docker compose up -d
 
 ### Upgrading Between Major Versions or After Long Gaps
 
-If upgrading from a very old image or across major versions (e.g., develop branch to main branch), you may encounter database migration issues.
+If upgrading from a very old image or across major versions (e.g., develop branch to release branch), you may encounter database migration issues.
 
 **Symptoms:**
 - "Unauthorized" errors in the frontend after upgrade
@@ -353,6 +353,22 @@ docker compose up -d
 ## ✨ Advanced Configuration & Features
 
 Enable optional features by setting variables in `env_backend.env`.
+
+### Observability & Logging
+
+Eneo writes structured logs as NDJSON to STDOUT and emits distributed traces using the OpenTelemetry SDK. There is no built-in log shipper or trace exporter; the choice of log collector and aggregation system is left to your infrastructure.
+
+Minimum production setup in `env_backend.env`:
+
+```bash
+JSON_LOGS=true
+OTEL_SERVICE_NAME=eneo
+OTEL_SERVICE_VERSION=<your-git-sha-or-release-tag>
+OTEL_DEPLOYMENT_ENVIRONMENT=production
+```
+
+For the full log schema, ID contract (`trace_id`, `error_id`, `correlation_id`), redaction policy, and a Kubernetes log-collection reference setup with Fluent Bit and Vector, see [OBSERVABILITY.md](./OBSERVABILITY.md).
+
 
 **Enable Crawler & Document Upload:**
 > To use the web crawler or upload documents, the worker service must be running and at least one embedding model must be enabled in the admin panel.
@@ -413,6 +429,15 @@ curl -X PUT https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federati
     "client_secret": "...",
     "allowed_domains": ["municipality.gov"]
   }'
+```
+
+To update the current federation later without resending the full payload, use `PATCH` instead of `PUT`:
+
+```bash
+curl -X PATCH https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation \
+  -H "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_domains": ["municipality.gov", "municipality.se"]}'
 ```
 
 **⚠️ Important Notes:**
@@ -505,4 +530,3 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
   ```bash
   UPLOAD_MAX_FILE_SIZE=10485760
   ```
-

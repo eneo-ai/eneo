@@ -13,11 +13,13 @@ class IntegrationRepository(ABC):
 
     @abstractmethod
     async def one_or_none(
-        self, id: "UUID | None" = None, **filters
+        self, id: "UUID | None" = None, **filters: object
     ) -> "Integration | None": ...
 
     @abstractmethod
-    async def one(self, id: "UUID | None" = None, **filters) -> "Integration": ...
+    async def one(
+        self, id: "UUID | None" = None, **filters: object
+    ) -> "Integration": ...
 
     @abstractmethod
     async def add(self, obj: "Integration") -> "Integration": ...

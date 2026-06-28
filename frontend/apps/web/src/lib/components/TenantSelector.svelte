@@ -149,7 +149,9 @@
       />
     </div>
 
-    <div class="border-default bg-primary flex max-h-96 flex-col gap-2 overflow-y-auto rounded-lg border p-3 shadow-md">
+    <div
+      class="border-default bg-primary flex max-h-96 flex-col gap-2 overflow-y-auto rounded-lg border p-3 shadow-md"
+    >
       {#if filteredTenants.length === 0}
         <div class="flex flex-col items-center gap-3 py-8 text-center">
           <div class="text-primary text-base font-medium">
@@ -160,9 +162,9 @@
           </div>
         </div>
       {:else}
-        {#each filteredTenants as tenant}
+        {#each filteredTenants as tenant (tenant.slug)}
           <button
-            class="border-default hover:border-accent-default focus-visible:border-accent-default hover:bg-secondary text-primary flex w-full items-center justify-between rounded-md border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-default focus-visible:ring-offset-2"
+            class="border-default hover:border-accent-default focus-visible:border-accent-default hover:bg-secondary text-primary focus-visible:ring-default flex w-full items-center justify-between rounded-md border px-4 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
             onclick={() => handleTenantClick(tenant.slug)}
           >
             <div class="flex flex-col gap-1">

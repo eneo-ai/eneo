@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -6,9 +6,9 @@ from eneo.main.models import GeneralError
 
 
 def streaming_response(
-    model: Optional[BaseModel] = None,
-    response_codes: list[int] = None,
-    models: list[BaseModel] = None,
+    model: type[BaseModel] | None = None,
+    response_codes: list[int] | None = None,
+    models: list[type[BaseModel]] | None = None,
 ) -> dict[int | str, Any]:
     """Define a streaming response with Server-Sent Events.
 
@@ -31,7 +31,9 @@ def streaming_response(
         # If only model is provided (backwards compatibility)
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
 
-    streaming: dict[int | str, Any] = {200: {"content": {"text/event-stream": {"schema": schema}}}}
+    streaming: dict[int | str, Any] = {
+        200: {"content": {"text/event-stream": {"schema": schema}}}
+    }
 
     if response_codes is not None:
         codes = get_responses(response_codes)

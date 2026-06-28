@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
+        Completion,
         CompletionModel,
         Context,
         ModelKwargs,
@@ -12,22 +13,41 @@ if TYPE_CHECKING:
 
 class CompletionModelAdapter(ABC):
     def __init__(self, model: "CompletionModel"):
+        super().__init__()
         self.model = model
 
-    def get_token_limit_of_model(self):
+    def get_token_limit_of_model(self) -> int:
         raise NotImplementedError()
 
+    def get_model_route(self) -> str:
+        """Provider-qualified model identifier used for calls and token counting.
+
+        Token counting must use the same identifier as the actual request,
+        otherwise the tokenizer may silently resolve a different model.
+        """
+        return self.model.name
+
+    def get_litellm_model_name(self) -> str:
+        """Backward-compatible alias for persisted/API code using the old name."""
+        return self.get_model_route()
+
     def get_logging_details(
-        self, context: "Context", model_kwargs: "ModelKwargs"
+        self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
     ) -> "LoggingDetails":
         raise NotImplementedError()
 
     async def get_response(
-        self, context: "Context", model_kwargs: "ModelKwargs", mcp_proxy=None, **kwargs
-    ):
+        self,
+        context: "Context",
+        model_kwargs: "ModelKwargs | dict[str, Any] | None",
+        mcp_proxy: Any | None = None,
+        **kwargs: Any,
+    ) -> "Completion":
         raise NotImplementedError()
 
-    def get_response_streaming(self, context: "Context", model_kwargs: "ModelKwargs"):
+    def get_response_streaming(
+        self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
+    ) -> Any:
         """
         Legacy streaming method for backward compatibility.
 
@@ -43,9 +63,9 @@ class CompletionModelAdapter(ABC):
     async def prepare_streaming(
         self,
         context: "Context",
-        model_kwargs: "ModelKwargs | None" = None,
-        mcp_proxy=None,
-        **kwargs,
+        model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
+        mcp_proxy: Any | None = None,
+        **kwargs: Any,
     ) -> Any:
         """
         Phase 1 (Pre-flight): Create streaming connection BEFORE EventSourceResponse.
@@ -72,11 +92,13 @@ class CompletionModelAdapter(ABC):
     async def iterate_stream(
         self,
         stream: Any,
-        context: "Context" = None,
-        model_kwargs: "ModelKwargs | None" = None,
+        context: Optional["Context"] = None,
+        model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
         require_tool_approval: bool = False,
-        approval_manager=None,
-    ):
+        approval_manager: Any | None = None,
+        approval_context: dict[str, Any] | None = None,
+        pending_approval_ids: set[str] | None = None,
+    ) -> "AsyncIterator[Completion]":
         """
         Phase 2 (Iteration): Iterate pre-created stream INSIDE EventSourceResponse.
 
@@ -103,4 +125,10 @@ class CompletionModelAdapter(ABC):
         Yields:
             Completion: Completion objects with text chunks or error events
         """
-        pass
+        # `if False: yield` keeps this abstract method an async *generator* so its
+        # return type matches the async-generator overrides in subclasses (without
+        # it, the base becomes a coroutine returning AsyncIterator — a pyright
+        # reportIncompatibleMethodOverride). vulture flags the dead branch; the
+        # file is excluded from vulture rather than dropping the typing shim.
+        if False:  # pragma: no cover
+            yield None  # type: ignore[misc]

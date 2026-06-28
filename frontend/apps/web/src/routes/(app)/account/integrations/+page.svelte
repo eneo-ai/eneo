@@ -10,8 +10,8 @@
   import UserConnectedSplitButton from "$lib/features/integrations/components/UserConnectedSplitButton.svelte";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
-  import { toast } from "$lib/components/toast";
-  import { localizeHref } from "$lib/paraglide/runtime";
+  import { toastError } from "$lib/core/errors";
+  import { resolve } from "$app/paths";
 
   const { data }: PageProps = $props();
 
@@ -19,14 +19,16 @@
 
   let integrations = $derived.by(() => {
     // Filter out integrations that are not yet ready (e.g., Confluence)
-    let integrations = $state(data.myIntegrations.filter(i => i.integration_type === "sharepoint"));
+    let integrations = $state(
+      data.myIntegrations.filter((i) => i.integration_type === "sharepoint")
+    );
     return integrations;
   });
 
   const auth = new IntegrationAuthService({
     onConnected(result) {
       if (!result.success) {
-        toast.error(result.error instanceof Error ? result.error.message : String(result.error));
+        toastError(result.error);
         return;
       }
 
@@ -51,7 +53,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Account – {m.my_integrations()}</title>
+  <title>Eneo.ai – {m.account()} – {m.my_integrations()}</title>
 </svelte:head>
 
 <Page.Root>
@@ -68,12 +70,12 @@
         >
           {#if integrations.length > 0}
             <IntegrationGrid>
-              {#each integrations as integration (`${integration.tenant_integration_id}-${integration.auth_type || 'user_oauth'}`)}
+              {#each integrations as integration (`${integration.tenant_integration_id}-${integration.auth_type || "user_oauth"}`)}
                 <IntegrationCard {integration}>
                   {#snippet action()}
                     {#if integration.tenant_app_configured === false}
                       <div class="flex flex-col gap-1">
-                        <Button disabled variant="secondary">{m.not_available()}</Button>
+                        <Button disabled variant="outlined">{m.not_available()}</Button>
                         <p class="text-secondary text-xs">
                           {m.contact_admin_to_configure()}
                         </p>
@@ -102,7 +104,9 @@
                 {m.no_integrations_enabled()}
                 {#if user.hasPermission("admin")}
                   <br />{m.enable_integrations_admin()}
-                  <a href={localizeHref("/admin/integrations?tab=providers")} class="underline">{m.integrations_admin_menu()}</a>.
+                  <a href={resolve("/admin/integrations?tab=providers")} class="underline"
+                    >{m.integrations_admin_menu()}</a
+                  >.
                 {/if}
               </div>
             </div>

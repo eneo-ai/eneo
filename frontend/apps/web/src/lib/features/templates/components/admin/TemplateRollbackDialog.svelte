@@ -45,12 +45,13 @@
 
       await invalidate("admin:templates:load");
       openController.set(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error rolling back template:", error);
-      if (error.status === 400) {
+      const err = error as { status?: number; message?: string };
+      if (err.status === 400) {
         errorMessage = "No snapshot available to rollback to";
       } else {
-        errorMessage = error.message || "Failed to rollback template";
+        errorMessage = err.message || "Failed to rollback template";
       }
     } finally {
       isLoading = false;
@@ -67,12 +68,12 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4">
-        <div class="rounded-lg border border-accent-default bg-accent-default/10 px-4 py-3">
+        <div class="border-accent-default bg-accent-default/10 rounded-lg border px-4 py-3">
           <div class="flex items-start gap-3">
             <RotateCcw class="text-accent-default mt-0.5 shrink-0" size={20} />
             <div class="flex flex-col gap-2">
-              <div class="font-medium text-default">{template.name}</div>
-              <div class="text-sm text-dimmer">
+              <div class="text-default font-medium">{template.name}</div>
+              <div class="text-dimmer text-sm">
                 {m.rollback_template_description()}
               </div>
             </div>
@@ -80,7 +81,7 @@
         </div>
 
         {#if errorMessage}
-          <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default">
+          <div class="bg-negative-default/10 text-negative-default rounded-lg px-3 py-2 text-sm">
             {errorMessage}
           </div>
         {/if}

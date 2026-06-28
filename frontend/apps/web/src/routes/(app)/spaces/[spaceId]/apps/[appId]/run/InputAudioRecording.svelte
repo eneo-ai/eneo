@@ -16,7 +16,7 @@
   import { toast } from "$lib/components/toast";
   import { fade } from "svelte/transition";
 
-  export let description = m.record_audio_device();
+  export let description: string | undefined = m.record_audio_device();
 
   const {
     queueValidUploadsDetailed,
@@ -37,8 +37,7 @@
   $: recordingQueued = audioFile
     ? $attachments.some((attachment) => attachment.file === audioFile)
     : false;
-  $: shouldWarnOnNavigate =
-    isRecording || (!!audioFile && !recordingQueued) || $isUploading;
+  $: shouldWarnOnNavigate = isRecording || (!!audioFile && !recordingQueued) || $isUploading;
   $: if (!audioFile) {
     recordingWarning = null;
     validationErrors = [];
@@ -143,8 +142,7 @@
     {/if}
 
     <div class="secondary-actions">
-      <Button variant="outlined" on:click={saveAudioFile}
-        ><IconDownload />{m.save_as_file()}</Button
+      <Button variant="outlined" on:click={saveAudioFile}><IconDownload />{m.save_as_file()}</Button
       >
       {#if $attachments.length === 0}
         <Button

@@ -5,10 +5,18 @@ from fastapi import UploadFile
 from eneo.files.file_size_service import FileSizeService
 from eneo.icons.icon import Icon, IconCreate
 from eneo.icons.icon_repo import IconRepository
-from eneo.main.exceptions import BadRequestException, FileTooLargeException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    FileTooLargeException,
+    NotFoundException,
+)
 
 ICON_MAX_SIZE = 262144  # 256 KB
-ICON_ALLOWED_MIMETYPES = ("image/jpeg", "image/png", "image/webp")  # Tuple for deterministic order in tests
+ICON_ALLOWED_MIMETYPES = (
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+)  # Tuple for deterministic order in tests
 
 
 class IconService:
@@ -16,7 +24,8 @@ class IconService:
         self,
         icon_repo: IconRepository,
         file_size_service: FileSizeService,
-    ):
+    ) -> None:
+        super().__init__()
         self.icon_repo = icon_repo
         self.file_size_service = file_size_service
 
@@ -47,6 +56,10 @@ class IconService:
             )
 
         content = await upload_file.read()
+
+        assert (
+            upload_file.content_type is not None
+        )  # validated above by validate_mimetype
 
         icon_create = IconCreate(
             blob=content,

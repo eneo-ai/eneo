@@ -102,7 +102,7 @@
           end: inclusiveEnd,
           includeFollowups,
           limit: PAGE_SIZE,
-          cursor: reset ? undefined : nextCursor ?? undefined,
+          cursor: reset ? undefined : (nextCursor ?? undefined),
           query: searchQuery.trim() || undefined
         }
       })) as PaginatedQuestionsResponse;
@@ -127,6 +127,7 @@
         isLoading = false;
         isLoadingMore = false;
         if (reset) {
+          // eslint-disable-next-line svelte/infinite-reactive-loop -- guarded by fetchKey comparison in reactive block
           inFlightFetchKey = "";
         }
       }
@@ -156,27 +157,28 @@
     };
   });
 
-$: fetchKey = [
-  assistantId,
-  timeframe.start.toString(),
-  timeframe.end.toString(),
-  includeFollowups ? "1" : "0",
-  searchQuery.trim(),
-  refreshToken
-].join("|");
+  $: fetchKey = [
+    assistantId,
+    timeframe.start.toString(),
+    timeframe.end.toString(),
+    includeFollowups ? "1" : "0",
+    searchQuery.trim(),
+    refreshToken
+  ].join("|");
 
-$: if (active) {
+  $: if (active) {
     const fetchKeyLocal = fetchKey;
     if (fetchKeyLocal === lastFetchKey || fetchKeyLocal === inFlightFetchKey) {
       // no-op
     } else {
       inFlightFetchKey = fetchKeyLocal;
       lastFetchKey = fetchKeyLocal;
+      // eslint-disable-next-line svelte/infinite-reactive-loop -- guarded by fetchKey dedup check above
       void fetchQuestions({ reset: true });
     }
   }
 
-$: table.update(questions ?? []);
+  $: table.update(questions ?? []);
 </script>
 
 <Table.Root
@@ -200,7 +202,7 @@ $: table.update(questions ?? []);
       {m.loaded_questions_count({ loaded: questions.length, total: totalCount })}
     </p>
   {:else if totalCount > 0}
-    <div class="mx-auto my-2 h-px w-16 border-t border-dimmer"></div>
+    <div class="border-dimmer mx-auto my-2 h-px w-16 border-t"></div>
     <p class="text-muted text-xs tabular-nums" role="status" aria-live="polite">
       {m.loaded_all_questions({ total: totalCount })}
     </p>

@@ -17,6 +17,8 @@
 */**/.env
 
 # docker
+# devcontainer Feature lockfile (auto-generated locally; not tracked by the team)
+.devcontainer/devcontainer-lock.json
 
 # venv
 .venv/
@@ -24,6 +26,16 @@
 # audit log exports (auto-created on startup)
 exports/
 backend/exports/
+
+# test results
+backend/test-results/
+
+# Local review notes and ad-hoc UI screenshots (not part of the codebase)
+REVIEW_*.md
+REVIEW_PLAN.md
+REVIEW_REPORT.md
+chat-*.png
+notes/
 
 # claude
 .claude/*.local.json
@@ -43,3 +55,43 @@ specs/
 .serena/
 .speckit/
 .playwright-mcp/
+
+# OpenAI Codex configuration
+.codex
+AGENTS.md
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+.gsd-id
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+.codex/
+.env.*
+!.env.example
+!.env.template
+node_modules/
+.next/
+.svelte-kit/
+dist/
+build/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+venv/
+target/
+vendor/
+*.log
+coverage/
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+htmlcov/
+.cache/
+tmp/
+backend/celerybeat-schedule

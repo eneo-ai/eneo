@@ -10,11 +10,13 @@ if TYPE_CHECKING:
 class OauthTokenRepository(ABC):
     @abstractmethod
     async def one_or_none(
-        self, id: "UUID | None" = None, **filters
+        self, id: "UUID | None" = None, **filters: object
     ) -> "OauthToken | None": ...
 
     @abstractmethod
-    async def one(self, id: "UUID | None" = None, **filters) -> "OauthToken": ...
+    async def one(
+        self, id: "UUID | None" = None, **filters: object
+    ) -> "OauthToken": ...
 
     @abstractmethod
     async def add(self, obj: "OauthToken") -> "OauthToken": ...

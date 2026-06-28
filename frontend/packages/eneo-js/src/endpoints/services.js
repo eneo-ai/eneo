@@ -104,15 +104,14 @@ export function initServices(client) {
     /**
      * Delete the specified service.
      * @param {{id: string} | Service} service - Either provide the service to delete or a specified id.
-     * @returns {Promise<Service>} The deleted service
+     * @returns {Promise<void>} Resolves on successful deletion (204 No Content)
      * */
     delete: async (service) => {
       const { id } = service;
-      const res = await client.fetch("/api/v1/services/{id}/", {
+      await client.fetch("/api/v1/services/{id}/", {
         method: "delete",
         params: { path: { id } }
       });
-      return res;
     },
 
     /**

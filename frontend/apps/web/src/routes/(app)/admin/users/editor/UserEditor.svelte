@@ -15,17 +15,17 @@
   import { getAdminUserCtx } from "../ctx";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const eneo = getEneo();
 
-  const { defaultRoles, customRoles, userGroups } = getAdminUserCtx();
+  const { roles: allRoles, userGroups } = getAdminUserCtx();
 
   const createEmptyUser = () => {
     return {
       id: "",
       email: "",
       username: "",
-      predefined_roles: [],
       roles: [],
       user_groups: []
     };
@@ -33,16 +33,15 @@
 
   type Props = {
     mode?: "update" | "create";
-    hideTrigger?: boolean;  // Hide built-in trigger when controlled externally
+    hideTrigger?: boolean; // Hide built-in trigger when controlled externally
     user?: {
       id: string;
       username?: string | null | undefined;
       email: string;
-      predefined_roles: Role[];
       roles: Role[];
       user_groups: UserGroup[];
     };
-    showDialog: Dialog.OpenState;  // For parent component control (used in UserActions dropdown)
+    showDialog?: Dialog.OpenState; // For parent component control (used in UserActions dropdown)
   };
 
   let {
@@ -54,35 +53,16 @@
 
   let userPassword = $state("");
   let username = $state(user.username ?? "");
-  let userRoles = $state(user.predefined_roles.concat(user.roles));
-  let defaultRolesIds = $derived(defaultRoles.flatMap((role) => role.id));
+  let userRoles = $state([...user.roles]);
 
   let editableUser = $state(makeEditable(user));
 
   // Reinitialize state when user prop changes (e.g., when selecting different row in table)
   $effect(() => {
     username = user.username ?? "";
-    userRoles = user.predefined_roles.concat(user.roles);
+    userRoles = [...user.roles];
     editableUser = makeEditable(user);
   });
-
-  function getRolesUpdate() {
-    const updatedRoles = userRoles.reduce(
-      (prev, curr) => {
-        if (defaultRolesIds.includes(curr.id)) {
-          prev.predefined_roles.push(curr);
-        } else {
-          prev.roles.push(curr);
-        }
-        return prev;
-      },
-      {
-        roles: [] as Role[],
-        predefined_roles: [] as Role[]
-      }
-    );
-    return updatedRoles;
-  }
 
   async function updateUser() {
     if (!user.username) {
@@ -93,20 +73,20 @@
       ...editableUser.getEdits(),
       password: userPassword === "" ? undefined : userPassword,
       username: username === user.username || username === "" ? undefined : username,
-      ...getRolesUpdate()
+      roles: userRoles
     };
     try {
       await eneo.users.update({
         user: { username: user.username },
         update
       });
-      invalidate("admin:users:load");
+      await invalidate("admin:users");
       // Invalidate does not update the user and userPassword values in this component, so we need to update
       user = editableUser;
       userPassword = "";
-      showDialog.set(false);
+      showDialog?.set(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 
@@ -117,17 +97,17 @@
     const newUser = {
       ...editableUser,
       password: userPassword,
-      ...getRolesUpdate(),
+      roles: userRoles,
       username
     };
     try {
       await eneo.users.create(newUser);
       editableUser.updateWithValue(createEmptyUser());
       userPassword = "";
-      invalidate("admin:users:load");
-      showDialog.set(false);
+      await invalidate("admin:users");
+      showDialog?.set(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toastError(e);
     }
   }
 </script>
@@ -192,7 +172,7 @@
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
 
-      <SelectRole {customRoles} {defaultRoles} bind:value={userRoles}></SelectRole>
+      <SelectRole roles={allRoles} bind:value={userRoles}></SelectRole>
 
       {#if mode === "update"}
         <SelectUserGroups bind:selectedGroups={editableUser.user_groups} {userGroups} {user}

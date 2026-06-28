@@ -10,7 +10,7 @@ function sortModel(a: Model, b: Model) {
 }
 
 /** Will sort an array of `CompletionModel`or `EmbeddingModel`. ATTENTION: sorts in place! */
-export function sortModels(models: Model[]) {
+export function sortModels<T extends Model>(models: T[]): T[] {
   models.sort(sortModel);
   return models;
 }

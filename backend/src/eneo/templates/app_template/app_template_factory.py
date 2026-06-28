@@ -1,8 +1,7 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
-from eneo.templates.app_template.app_template import AppTemplate
 from eneo.templates.app_template.api.app_template_models import AppTemplateWizard
-
+from eneo.templates.app_template.app_template import AppTemplate
 
 if TYPE_CHECKING:
     from eneo.database.tables.app_template_table import AppTemplates
@@ -38,6 +37,6 @@ class AppTemplateFactory:
 
     @staticmethod
     def create_app_template_list(
-        items: list["AppTemplates"],
+        items: "Sequence[AppTemplates]",
     ) -> list[AppTemplate]:
         return [AppTemplateFactory.create_app_template(item=item) for item in items]

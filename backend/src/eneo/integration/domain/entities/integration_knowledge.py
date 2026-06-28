@@ -1,13 +1,15 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Dict
+from typing import TYPE_CHECKING, Dict, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
 
 if TYPE_CHECKING:
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
+    from eneo.integration.domain.entities.sharepoint_subscription import (
+        SharePointSubscription,
+    )
     from eneo.integration.domain.entities.user_integration import UserIntegration
-    from eneo.integration.domain.entities.sharepoint_subscription import SharePointSubscription
 
 
 _DEFAULT_SIZE = 0

@@ -1,0 +1,347 @@
+{
+  "src/lib/assets/EneoWordMark.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/assets/EneoWordMark.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/layout/Page/Header.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/toast/Toaster.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/ui/badge/badge.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/components/ui/button/button.svelte": {
+    "eneo/no-raw-color": {
+      "count": 9
+    }
+  },
+  "src/lib/components/ui/calendar/calendar-month-select.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/calendar/calendar-year-select.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/checkbox/checkbox.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/components/ui/dropdown-menu/dropdown-menu-item.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/components/ui/field/field-label.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/input-group/input-group-input.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/input-group/input-group-textarea.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/components/ui/input-group/input-group.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/components/ui/input/input.svelte": {
+    "eneo/no-raw-color": {
+      "count": 8
+    }
+  },
+  "src/lib/components/ui/select/select-trigger.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/components/ui/switch/switch.svelte": {
+    "eneo/no-raw-color": {
+      "count": 5
+    }
+  },
+  "src/lib/components/ui/tabs/tabs-trigger.svelte": {
+    "eneo/no-raw-color": {
+      "count": 7
+    }
+  },
+  "src/lib/components/ui/textarea/textarea.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/features/ai-models/components/ModelStatusIcons.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/features/api-keys/ApiKeySecretDialog.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/features/api-keys/CreateApiKeyDialog.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/lib/features/api-keys/ExpiringKeysBanner.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/features/api-keys/apiKeyTableUtils.ts": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/features/apps/components/AppIcon.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/lib/features/chat/components/conversation/ThinkingIndicator.svelte": {
+    "eneo/no-raw-color": {
+      "count": 7
+    }
+  },
+  "src/lib/features/insights/components/InsightsConversationTable.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/lib/features/spaces/components/SpaceSelector.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/lib/features/templates/components/LucideIconPicker.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/+layout.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/account/api-keys/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/account/api-keys/ApiKeyTable.svelte": {
+    "eneo/no-raw-color": {
+      "count": 8
+    }
+  },
+  "src/routes/(app)/admin/api-keys/AdminApiKeyTable.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/audit-logs/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 200
+    }
+  },
+  "src/routes/(app)/admin/audit-logs/AccessJustificationForm.svelte": {
+    "eneo/no-raw-color": {
+      "count": 19
+    }
+  },
+  "src/routes/(app)/admin/audit-logs/AuditConfigTab.svelte": {
+    "eneo/no-raw-color": {
+      "count": 11
+    }
+  },
+  "src/routes/(app)/admin/insights/InteractiveGraph.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/insights/assistant/[assistantId]/QuestionTable.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/insights/prepareData.ts": {
+    "eneo/no-raw-color": {
+      "count": 16
+    }
+  },
+  "src/routes/(app)/admin/legacy/user-groups/UserGroupMembersEditor.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/mcp-servers/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 8
+    }
+  },
+  "src/routes/(app)/admin/mcp-servers/MCPServerPrimaryCell.svelte": {
+    "eneo/no-raw-color": {
+      "count": 14
+    }
+  },
+  "src/routes/(app)/admin/mcp-servers/MCPToolsPanel.svelte": {
+    "eneo/no-raw-color": {
+      "count": 19
+    }
+  },
+  "src/routes/(app)/admin/models/ModelNameCell.svelte": {
+    "eneo/no-raw-color": {
+      "count": 6
+    }
+  },
+  "src/routes/(app)/admin/models/components/PageEmptyState.svelte": {
+    "eneo/no-raw-color": {
+      "count": 7
+    }
+  },
+  "src/routes/(app)/admin/models/components/ProviderEmptyState.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/models/components/ProviderGlyph.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/routes/(app)/admin/usage/tokens/TokenOverviewTable.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/admin/usage/users/UsageBadge.svelte": {
+    "eneo/no-raw-color": {
+      "count": 18
+    }
+  },
+  "src/routes/(app)/admin/usage/users/UserTokenSummary.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/usage/users/[userId]/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/admin/users/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/dashboard/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(app)/dashboard/[assistantId]/[[sessionId]]/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/dashboard/app/[appId]/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 5
+    }
+  },
+  "src/routes/(app)/dashboard/app/[appId]/results/[resultId]/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/results/[resultId]/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/AudioRecorder.svelte": {
+    "eneo/no-raw-color": {
+      "count": 18
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputAudioRecording.svelte": {
+    "eneo/no-raw-color": {
+      "count": 10
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/apps/[appId]/run/InputUpload.svelte": {
+    "eneo/no-raw-color": {
+      "count": 16
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/assistants/AssistantTile.svelte": {
+    "eneo/no-raw-color": {
+      "count": 3
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/knowledge/integrations/IntegrationSyncStatusCell.svelte": {
+    "eneo/no-raw-color": {
+      "count": 4
+    }
+  },
+  "src/routes/(app)/spaces/[spaceId]/settings/SelectMCPServers.svelte": {
+    "eneo/no-raw-color": {
+      "count": 6
+    }
+  },
+  "src/routes/(public)/login/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 28
+    }
+  },
+  "src/routes/(public)/login/failed/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/(public)/logout/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 2
+    }
+  },
+  "src/routes/integrations/callback/token/+page.svelte": {
+    "eneo/no-raw-color": {
+      "count": 12
+    }
+  }
+}

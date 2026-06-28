@@ -3,13 +3,18 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
-  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
+  import {
+    filterSupportedModelKwargs,
+    hasModelSpecificSettings
+  } from "$lib/features/ai-models/ModelKwargCapabilities";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import HelpTooltip from "../../../models/components/HelpTooltip.svelte";
@@ -24,7 +29,7 @@
 
   let { data } = $props();
 
-  const eneo = data.eneo;
+  const eneo = $derived(data.eneo);
 
   // Template state
   let name = $state("");
@@ -32,13 +37,15 @@
   let category = $state("");
   let iconName = $state<string | null>(null);
   let promptText = $state("");
-  let completionModel = $state(data.completionModels?.[0] || null);
+  let completionModel = $state(untrack(() => data.completionModels?.[0] || null));
   let completionModelKwargs = $state({});
   let isSaving = $state(false);
 
   // Input field configuration
   let inputDescription = $state("");
-  let inputType = $state<"text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload">("text-field");
+  let inputType = $state<
+    "text-upload" | "text-field" | "audio-upload" | "audio-recorder" | "image-upload"
+  >("text-field");
 
   const inputTypes = {
     "text-upload": { icon: IconFileText, label: m.upload_text_document() },
@@ -94,32 +101,34 @@
       // Transform wizard configuration to backend format
       // NOTE: App templates MUST have collections: null (backend validator enforces this)
       const wizard = {
-        attachments: wizardAttachmentsEnabled ? {
-          required: wizardAttachmentsRequired,
-          title: wizardAttachmentsTitle || undefined,
-          description: wizardAttachmentsDescription || undefined
-        } : null,
-        collections: null  // MUST be null for app templates (backend validator)
+        attachments: wizardAttachmentsEnabled
+          ? {
+              required: wizardAttachmentsRequired,
+              title: wizardAttachmentsTitle || undefined,
+              description: wizardAttachmentsDescription || undefined
+            }
+          : null,
+        collections: null // MUST be null for app templates (backend validator)
       };
 
       const templateData = {
         name,
         description,
         category,
-        prompt: promptText,  // Backend expects string, not object
+        prompt: promptText, // Backend expects string, not object
         completion_model_id: completionModel?.id,
-        completion_model_kwargs: completionModelKwargs,
-        input_type: inputType,  // Single string, not array
+        completion_model_kwargs: filterSupportedModelKwargs(completionModelKwargs, completionModel),
+        input_type: inputType, // Single string, not array
         input_description: inputDescription || undefined,
-        wizard,  // Always send wizard object, never undefined
-        icon_name: iconName || undefined  // Include icon if selected
+        wizard, // Always send wizard object, never undefined
+        icon_name: iconName || undefined // Include icon if selected
       };
 
       await eneo.templates.admin.createApp(templateData);
-      goto("/admin/templates?success=template_created");
+      goto(resolve("/admin/templates?success=template_created"));
     } catch (error) {
       console.error("Failed to create template:", error);
-      toast.error(m.failed_to_create_template());
+      toastError(error, m.failed_to_create_template());
     } finally {
       isSaving = false;
     }
@@ -134,17 +143,12 @@
   <Page.Header>
     <Page.Title
       title={m.create_app_template()}
-      parent={{ href: "/admin/templates", label: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.templates() }}
     />
 
     <Page.Flex>
       <Button variant="outlined" href={localizeHref("/admin/templates")}>{m.cancel()}</Button>
-      <Button
-        variant="positive"
-        class="w-32"
-        onclick={handleCreateTemplate}
-        disabled={isSaving}
-      >
+      <Button variant="positive" class="w-32" onclick={handleCreateTemplate} disabled={isSaving}>
         {isSaving ? m.loading() : m.create_template()}
       </Button>
     </Page.Flex>
@@ -309,15 +313,15 @@
           <SelectBehaviourV2
             bind:kwArgs={completionModelKwargs}
             selectedModel={completionModel}
-            isDisabled={!supportsTemperature(completionModel?.name)}
+            isDisabled={!completionModel}
             {aria}
           />
         </Settings.Row>
 
-        {#if completionModel?.reasoning || completionModel?.litellm_model_name}
+        {#if hasModelSpecificSettings(completionModel)}
           <Settings.Row
-            title="Model settings"
-            description="Configure model-specific parameters for advanced control over the response."
+            title={m.model_settings()}
+            description={m.model_settings_description()}
             hasChanges={false}
           >
             <SelectModelSpecificSettings
@@ -344,10 +348,14 @@
             />
 
             {#if wizardAttachmentsEnabled}
-              <div class="flex flex-col gap-4 rounded-lg border border-default bg-hover-default p-4">
+              <div
+                class="border-default bg-hover-default flex flex-col gap-4 rounded-lg border p-4"
+              >
                 <label class="flex items-center gap-2">
                   <input type="checkbox" bind:checked={wizardAttachmentsRequired} />
-                  <span class="text-sm text-default">{m.wizard_attachments_required_description()}</span>
+                  <span class="text-default text-sm"
+                    >{m.wizard_attachments_required_description()}</span
+                  >
                 </label>
 
                 <Input.Text
@@ -357,7 +365,10 @@
                 />
 
                 <div class="flex flex-col gap-1">
-                  <label for="wizard-attachments-description" class="text-sm font-medium text-default">{m.description()}</label>
+                  <label
+                    for="wizard-attachments-description"
+                    class="text-default text-sm font-medium">{m.description()}</label
+                  >
                   <textarea
                     id="wizard-attachments-description"
                     bind:value={wizardAttachmentsDescription}

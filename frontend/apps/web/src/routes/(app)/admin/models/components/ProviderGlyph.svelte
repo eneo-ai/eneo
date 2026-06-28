@@ -2,14 +2,13 @@
 
 <script lang="ts">
   /**
-   * ProviderGlyph - Provider logos with chip styling
-   * Logos are auto-discovered from provider-logos/* via Vite glob import.
-   * To add a new provider: drop a {provider_type}.{svg,png,jpg,webp} in the folder. No code change needed.
+   * ProviderGlyph — provider logos with chip styling.
+   *
+   * Logos are auto-discovered from `$lib/assets/provider-logos/*` via a Vite
+   * glob import. To add a new provider: drop a
+   * `{provider_type}.{svg,png,jpg,webp}` in the folder. No code change needed.
    */
-
-  // Accept both prop names (some callers use `type`, some use `providerType`)
   export let providerType: string = "";
-  export let type: string = "";
   export let size: "sm" | "md" | "lg" = "md";
 
   const sizes = {
@@ -19,10 +18,11 @@
   };
 
   // Glob import all image assets at build time — no hardcoded mapping needed
-  const logoModules = import.meta.glob(
-    "$lib/assets/provider-logos/*.{svg,png,jpg,jpeg,webp}",
-    { eager: true, query: "?url", import: "default" }
-  );
+  const logoModules = import.meta.glob("$lib/assets/provider-logos/*.{svg,png,jpg,jpeg,webp}", {
+    eager: true,
+    query: "?url",
+    import: "default"
+  });
 
   const logos: Record<string, string> = {};
   for (const [path, url] of Object.entries(logoModules)) {
@@ -37,7 +37,7 @@
     return t;
   }
 
-  $: resolvedType = normalize(providerType || type);
+  $: resolvedType = normalize(providerType);
   $: logoUrl = logos[resolvedType];
   $: sizeConfig = sizes[size];
 </script>
@@ -47,8 +47,8 @@
     {sizeConfig.chip}
     {sizeConfig.radius}
     bg-surface-dimmer dark:bg-surface-dimmest
-    border border-dimmer
-    flex items-center justify-center
+    border-dimmer flex
+    items-center justify-center border
     shadow-[inset_0_1px_2px_oklch(0%_0_0/0.05)]
     transition-all duration-150 ease-out
     hover:translate-y-[-1px]
@@ -61,7 +61,10 @@
       src={logoUrl}
       alt={resolvedType}
       class="{sizeConfig.img} object-contain dark:brightness-90 dark:contrast-125"
-      class:dark-invert={resolvedType === "openai" || resolvedType === "anthropic" || resolvedType === "ollama" || resolvedType === "replicate"}
+      class:dark-invert={resolvedType === "openai" ||
+        resolvedType === "anthropic" ||
+        resolvedType === "ollama" ||
+        resolvedType === "replicate"}
     />
   {:else}
     <!-- Fallback: generic grid icon for unknown providers -->

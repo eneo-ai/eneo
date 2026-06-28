@@ -10,4 +10,4 @@ export { default as ButtonCell } from "./ButtonCell.svelte";
 export { default as FormattedCell } from "./FormattedCell.svelte";
 export { default as Group } from "./Group.svelte";
 
-export { createWithResource, createWithStore } from "./create.js";
+export { createWithResource, createWithStore, renderComponent } from "./create.js";
