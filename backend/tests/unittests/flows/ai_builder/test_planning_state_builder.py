@@ -1,10 +1,10 @@
 """Unit tests for `planning_state_builder.carry_forward_persisted_planner_state`.
 
 The helper is the single place the save path merges planner-owned
-fields (architecture_commit and monotonic phase) from the previously
-persisted state onto a freshly rebuilt one. Integration tests pin the
-savepoint wiring; these unit tests pin the merge semantics in isolation
-so regressions show up at the merge layer, not two containers deep.
+architecture_commit from the previously persisted state onto a freshly
+rebuilt one. Integration tests pin the savepoint wiring; these unit tests
+pin the merge semantics in isolation so regressions show up at the merge
+layer, not two containers deep.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from intric.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
-    EvidenceRef,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -52,15 +51,12 @@ from intric.flows.ai_builder.question_catalog import legal_slot_values
 
 def _state(
     *,
-    phase: str = "discovering",
     architecture_commit: ArchitectureCommit | None = None,
 ) -> PlanningState:
     return PlanningState(
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
-        phase=phase,  # type: ignore[arg-type]
-        evidence=EvidenceRef(),
         architecture_commit=architecture_commit,
     )
 
@@ -132,12 +128,11 @@ def test_model_value_acceptance_policies_reference_legal_slot_values() -> None:
 
 class TestPersistedNone:
     def test_is_noop_when_persisted_is_none(self) -> None:
-        rebuilt = _state(phase="awaiting_input")
+        rebuilt = _state()
 
         carry_forward_persisted_planner_state(rebuilt, None)
 
         assert rebuilt.architecture_commit is None
-        assert rebuilt.phase == "awaiting_input"
 
 
 class TestArchitectureCommitPreservation:
@@ -167,47 +162,6 @@ class TestArchitectureCommitPreservation:
         carry_forward_persisted_planner_state(rebuilt, persisted)
 
         assert rebuilt.architecture_commit is None
-
-
-class TestPhaseMonotonicity:
-    def test_preserves_advanced_phase_when_rebuild_regressed(self) -> None:
-        rebuilt = _state(phase="discovering")
-        persisted = _state(phase="plan_proposed")
-
-        carry_forward_persisted_planner_state(rebuilt, persisted)
-
-        assert rebuilt.phase == "plan_proposed"
-
-    def test_keeps_rebuilt_phase_when_already_equal_or_ahead(self) -> None:
-        rebuilt = _state(phase="plan_proposed")
-        persisted = _state(phase="discovering")
-
-        carry_forward_persisted_planner_state(rebuilt, persisted)
-
-        assert rebuilt.phase == "plan_proposed"
-
-    def test_preserves_ready_to_commit_over_discovering(self) -> None:
-        rebuilt = _state(phase="discovering")
-        persisted = _state(phase="ready_to_commit")
-
-        carry_forward_persisted_planner_state(rebuilt, persisted)
-
-        assert rebuilt.phase == "ready_to_commit"
-
-    def test_raises_on_unknown_phase(self) -> None:
-        # The tuple-based PHASE_ORDER lookup fails loud on unknown
-        # phases. If a new PlanningPhase Literal is added without
-        # updating the order, .index() raises — preservation never
-        # silently degrades.
-        rebuilt = _state()
-        rebuilt.phase = "discovering"  # valid
-        persisted = _state(phase="plan_proposed")
-        # Bypass Literal enforcement on persisted to simulate a phase
-        # that exists at runtime but was forgotten in _PHASE_ORDER.
-        object.__setattr__(persisted, "phase", "brand_new_phase")
-
-        with pytest.raises(ValueError):
-            carry_forward_persisted_planner_state(rebuilt, persisted)
 
 
 class TestReturnValue:
@@ -1197,7 +1151,7 @@ class TestModelSlotMerge:
     def test_medium_model_output_replaces_heuristic_and_fills_missing_slot(
         self,
     ) -> None:
-        state = _state(phase="awaiting_input")
+        state = _state()
         state.resolved_slots = {
             "terminal_output": _slot(
                 name="terminal_output",
@@ -1220,10 +1174,9 @@ class TestModelSlotMerge:
 
         assert state.resolved_slots["terminal_output"].value == "pdf_document"
         assert state.resolved_slots["primary_runtime_input"].value == "text"
-        assert state.phase == "discovering"
 
     def test_model_output_accepts_json_primary_runtime_input(self) -> None:
-        state = _state(phase="awaiting_input")
+        state = _state()
 
         merge_llm_resolved_slots(
             state,

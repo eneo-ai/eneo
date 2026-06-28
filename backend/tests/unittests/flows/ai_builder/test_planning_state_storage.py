@@ -27,7 +27,6 @@ from intric.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
-    EvidenceRef,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -36,13 +35,11 @@ from intric.flows.ai_builder.planning_state import (
 _VALID_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
-def _discovering_state() -> PlanningState:
+def _state_with_resolved_slot() -> PlanningState:
     return PlanningState(
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
-        phase="discovering",
-        evidence=EvidenceRef(conversation_message_ids=["msg-1"]),
         resolved_slots={
             "primary_runtime_input": ResolvedSlot(
                 name="primary_runtime_input",
@@ -60,8 +57,6 @@ def _ready_state() -> PlanningState:
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
-        phase="ready_to_commit",
-        evidence=EvidenceRef(conversation_message_ids=["msg-1", "msg-2"]),
         architecture_commit=ArchitectureCommit(
             tuples_chain=[
                 StepTriple(
@@ -79,14 +74,14 @@ def _ready_state() -> PlanningState:
 
 class TestPlanningStateForStorage:
     def test_returns_jsonb_column(self) -> None:
-        state = _discovering_state()
+        state = _state_with_resolved_slot()
         values = _planning_state_for_storage(state)
         assert set(values.keys()) == {"planning_state_jsonb"}
 
     def test_jsonb_payload_is_full_validated_snapshot(self) -> None:
         """The jsonb payload must be the full Pydantic dump — partial
         updates are forbidden so the column never drifts."""
-        state = _discovering_state()
+        state = _state_with_resolved_slot()
         values = _planning_state_for_storage(state)
         payload = values["planning_state_jsonb"]
         assert isinstance(payload, dict)
@@ -98,7 +93,7 @@ class TestPlanningStateForStorage:
         stamped invariants. The storage helper calls
         `validated_snapshot()` so that drift fails here rather than
         landing in JSONB."""
-        state = _discovering_state()
+        state = _state_with_resolved_slot()
         # Bypass the field validator by mutating the underlying list.
         state.signals.append("not a signal")  # type: ignore[arg-type]
         with pytest.raises(Exception):

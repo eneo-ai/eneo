@@ -23,8 +23,6 @@ from intric.flows.ai_builder.planning_state import (
     PLANNER_CONTRACT_VERSION,
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
-    EvidenceRef,
-    PlanningPhase,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -61,21 +59,11 @@ class TestEmptyConstruction:
         assert state.planner_contract_version == PLANNER_CONTRACT_VERSION
         assert state.builder_schema_version == BUILDER_SCHEMA_VERSION
 
-    def test_empty_starts_in_awaiting_input(self) -> None:
-        state = PlanningState.empty()
-        assert state.phase == "awaiting_input"
-
     def test_empty_has_no_signals_slots_or_commit(self) -> None:
         state = PlanningState.empty()
         assert state.signals == []
         assert state.resolved_slots == {}
         assert state.architecture_commit is None
-
-    def test_empty_evidence_has_empty_lists_and_hash(self) -> None:
-        state = PlanningState.empty()
-        assert state.evidence.conversation_message_ids == []
-        assert state.evidence.attachment_digest_hashes == []
-        assert state.evidence.raw_prompt_hash == ""
 
 
 class TestRoundTrip:
@@ -85,12 +73,6 @@ class TestRoundTrip:
             fcm_version=FCM_VERSION,
             planner_contract_version=PLANNER_CONTRACT_VERSION,
             builder_schema_version=BUILDER_SCHEMA_VERSION,
-            phase="discovering",
-            evidence=EvidenceRef(
-                conversation_message_ids=["msg_1", "msg_2"],
-                attachment_digest_hashes=["f" * 64],
-                raw_prompt_hash="b" * 64,
-            ),
             signals=[
                 PlanningSignal(
                     question_id="document_kind",
@@ -148,42 +130,11 @@ class TestRoundTrip:
         assert restored == original
 
 
-class TestPhaseValidation:
-    @pytest.mark.parametrize(
-        "phase",
-        ["awaiting_input", "discovering", "ready_to_commit", "plan_proposed"],
-    )
-    def test_valid_phase_accepted(self, phase: PlanningPhase) -> None:
-        state = PlanningState(
-            fcm_version=FCM_VERSION,
-            planner_contract_version=PLANNER_CONTRACT_VERSION,
-            builder_schema_version=BUILDER_SCHEMA_VERSION,
-            phase=phase,
-            evidence=EvidenceRef(),
-        )
-        assert state.phase == phase
-
-    def test_unknown_phase_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            PlanningState(
-                fcm_version=FCM_VERSION,
-                planner_contract_version=PLANNER_CONTRACT_VERSION,
-                builder_schema_version=BUILDER_SCHEMA_VERSION,
-                phase="not_a_real_phase",  # type: ignore[arg-type]
-                evidence=EvidenceRef(),
-            )
-
-
 class TestAssignmentRevalidation:
     """`validate_assignment=True` re-runs validators when an attribute
     is directly reassigned, closing the most obvious drift hole for a
     mutable Pydantic model.
     """
-
-    def test_invalid_phase_assignment_raises(self) -> None:
-        state = PlanningState.empty()
-        with pytest.raises(ValidationError):
-            state.phase = "bogus"  # type: ignore[assignment]
 
     def test_invalid_signal_confidence_assignment_raises(self) -> None:
         signal = PlanningSignal(
@@ -330,12 +281,6 @@ class TestStrictExtraRejection:
             "fcm_version": FCM_VERSION,
             "planner_contract_version": PLANNER_CONTRACT_VERSION,
             "builder_schema_version": BUILDER_SCHEMA_VERSION,
-            "phase": "awaiting_input",
-            "evidence": {
-                "conversation_message_ids": [],
-                "attachment_digest_hashes": [],
-                "raw_prompt_hash": "",
-            },
             "signals": [],
             "resolved_slots": {},
             "architecture_commit": None,
@@ -346,7 +291,7 @@ class TestStrictExtraRejection:
 
     @pytest.mark.parametrize(
         "legacy_field",
-        ["open_questions", "draft_plan_id", "validation"],
+        ["open_questions", "draft_plan_id", "validation", "phase", "evidence"],
     )
     def test_deleted_planning_state_fields_are_rejected(
         self, legacy_field: str
@@ -356,10 +301,6 @@ class TestStrictExtraRejection:
 
         with pytest.raises(ValidationError):
             PlanningState.model_validate(payload)
-
-    def test_unknown_field_on_evidence_ref_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            EvidenceRef.model_validate({"mystery": 1})
 
 
 class TestVersionStampContract:
@@ -374,8 +315,6 @@ class TestVersionStampContract:
             fcm_version=FCM_VERSION - 100,
             planner_contract_version=PLANNER_CONTRACT_VERSION,
             builder_schema_version=BUILDER_SCHEMA_VERSION,
-            phase="awaiting_input",
-            evidence=EvidenceRef(),
         )
         restored = PlanningState.model_validate_json(state.model_dump_json())
         assert restored.fcm_version == FCM_VERSION - 100
@@ -385,8 +324,6 @@ class TestVersionStampContract:
             fcm_version=FCM_VERSION,
             planner_contract_version=PLANNER_CONTRACT_VERSION - 100,
             builder_schema_version=BUILDER_SCHEMA_VERSION,
-            phase="awaiting_input",
-            evidence=EvidenceRef(),
         )
         restored = PlanningState.model_validate_json(state.model_dump_json())
         assert restored.planner_contract_version == PLANNER_CONTRACT_VERSION - 100
@@ -395,12 +332,6 @@ class TestVersionStampContract:
         payload = {
             "fcm_version": FCM_VERSION,
             "planner_contract_version": PLANNER_CONTRACT_VERSION,
-            "phase": "awaiting_input",
-            "evidence": {
-                "conversation_message_ids": [],
-                "attachment_digest_hashes": [],
-                "raw_prompt_hash": "",
-            },
             "signals": [],
             "resolved_slots": {},
             "architecture_commit": None,
@@ -413,8 +344,6 @@ class TestVersionStampContract:
             fcm_version=FCM_VERSION,
             planner_contract_version=PLANNER_CONTRACT_VERSION,
             builder_schema_version=BUILDER_SCHEMA_VERSION - 100,
-            phase="awaiting_input",
-            evidence=EvidenceRef(),
         )
         restored = PlanningState.model_validate_json(state.model_dump_json())
         assert restored.builder_schema_version == BUILDER_SCHEMA_VERSION - 100

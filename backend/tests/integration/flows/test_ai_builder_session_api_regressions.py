@@ -51,7 +51,6 @@ from intric.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     ArchitectureCommit,
-    EvidenceRef,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -1394,8 +1393,6 @@ def _planning_state_fixture() -> PlanningState:
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
-        phase="discovering",
-        evidence=EvidenceRef(conversation_message_ids=["msg-1"]),
         resolved_slots={
             "primary_runtime_input": ResolvedSlot(
                 name="primary_runtime_input",
@@ -1774,9 +1771,8 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
     assert fetched.conversation[0].role == "assistant"
     assert fetched.conversation[0].content == "Hej"
     assert loaded is not None
-    assert loaded.evidence.conversation_message_ids == [
-        fetched.conversation[0].message_id
-    ]
+    assert loaded.resolved_slots == {}
+    assert "evidence" not in loaded.model_dump(mode="json")
 
 
 @pytest.mark.integration
@@ -1881,9 +1877,9 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
     assert tool_message.metadata is not None
     assert "requirements_summary" in tool_message.metadata
     assert loaded is not None
-    assert loaded.evidence.conversation_message_ids == [
-        message.message_id for message in fetched.conversation
-    ]
+    dumped_state = loaded.model_dump(mode="json")
+    assert "phase" not in dumped_state
+    assert "evidence" not in dumped_state
     assert version_row.scalar_one() == 1
 
 
@@ -2336,8 +2332,6 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
         tenant_id = user.tenant_id
 
     concurrent_state = _planning_state_fixture()
-    concurrent_state.phase = "awaiting_input"
-    concurrent_state.evidence = EvidenceRef(conversation_message_ids=["concurrent"])
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         advanced_version = await repo.save_planning_state(
@@ -2397,8 +2391,7 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
     assert fetched.conversation == []
     assert version == 1
     assert loaded_state is not None
-    assert loaded_state.phase == "awaiting_input"
-    assert loaded_state.evidence.conversation_message_ids == ["concurrent"]
+    assert loaded_state.resolved_slots["primary_runtime_input"].value == "documents"
 
 
 @pytest.mark.integration
@@ -2852,7 +2845,7 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
 
     assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
-    assert loaded_state.phase == "plan_proposed"
+    assert "phase" not in loaded_state.model_dump(mode="json")
     assert version == 1
 
 
@@ -2957,7 +2950,6 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
     assert loaded is not None
     assert loaded.architecture_commit is not None
     assert loaded.architecture_commit.architecture_hash == commit.architecture_hash
-    assert loaded.phase == "plan_proposed"
 
 
 @pytest.mark.integration
@@ -3113,11 +3105,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
     assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
     assert loaded_state.planner_contract_version == PLANNER_CONTRACT_VERSION
-    # evidence.conversation_message_ids is built from the compacted list
-    # that was persisted, so it must match the stored conversation.
-    assert loaded_state.evidence.conversation_message_ids == [
-        message.message_id for message in fetched.conversation
-    ]
+    assert "evidence" not in loaded_state.model_dump(mode="json")
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         stmt = select(BuilderSessions.planning_state_version).where(
@@ -3136,8 +3124,8 @@ async def test_store_plan_and_update_conversation_updates_latest_plan_pointer(
     db_container,
 ):
     """After the plan-proposal path persists a plan, the session's
-    `latest_plan_id` is the canonical plan identity and PlanningState only
-    records that proposal has been reached.
+    `latest_plan_id` is the canonical plan identity; PlanningState does
+    not duplicate plan lifecycle.
     """
     from intric.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
@@ -3193,7 +3181,7 @@ async def test_store_plan_and_update_conversation_updates_latest_plan_pointer(
 
     assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
-    assert loaded_state.phase == "plan_proposed"
+    assert "phase" not in loaded_state.model_dump(mode="json")
 
 
 @pytest.mark.integration
@@ -3206,8 +3194,8 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
 ):
     """Long sessions hit the compaction threshold: the persisted
     conversation is shorter than the caller's in-memory list. The saved
-    PlanningState must reflect the compacted, persisted list — not the
-    full pre-compaction one — so the next turn reads coherent state.
+    PlanningState must still be derived from the compacted, persisted
+    conversation that the next turn reads.
     """
     from intric.flows.ai_builder.ai_builder_conversation_compaction import (
         MAX_SESSION_MESSAGES,
@@ -3240,6 +3228,10 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
         ConversationMessage(role="user", content=f"filler {index}")
         for index in range(MAX_SESSION_MESSAGES + 5)
     ]
+    pre_compaction_conversation[-1] = ConversationMessage(
+        role="user",
+        content="Skapa ett flöde som tar emot text och returnerar JSON.",
+    )
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
@@ -3272,9 +3264,8 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
     assert len(fetched.conversation) <= MAX_SESSION_MESSAGES
     assert len(fetched.conversation) < len(pre_compaction_conversation) + 2
     assert loaded_state is not None
-    assert loaded_state.evidence.conversation_message_ids == [
-        message.message_id for message in fetched.conversation
-    ]
+    assert loaded_state.resolved_slots["primary_runtime_input"].value == "text"
+    assert loaded_state.resolved_slots["terminal_output"].value == "structured_json"
 
 
 async def _get_latest_plan_id(*, client, bearer_token: str, session_id: str) -> str:

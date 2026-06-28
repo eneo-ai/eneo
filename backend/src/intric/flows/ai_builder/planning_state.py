@@ -2,8 +2,9 @@
 
 PlanningState replaces the turn-by-turn reconstruction of discovery
 state and is the single source of truth for what the planner has
-learned, decided, and committed to. Business logic consumes the typed
-Pydantic model here — partial JSONB operators
+learned and committed to. It does not mirror session or plan lifecycle
+status; those stay on their own tables. Business logic consumes the
+typed Pydantic model here — partial JSONB operators
 (`jsonb_set`, `||`, path updates) are forbidden. Every mutation follows
 load → validate → mutate-in-python → serialize-full-snapshot, so the
 JSONB column never drifts out of Pydantic's typed world.
@@ -41,13 +42,6 @@ PLANNING_STATE_PAYLOAD_CAP_BYTES: int = 128 * 1024
 ARCHITECTURE_HASH_HEX_LENGTH: int = 64
 
 _ARCHITECTURE_HASH_RE = re.compile(rf"^[0-9a-f]{{{ARCHITECTURE_HASH_HEX_LENGTH}}}$")
-
-PlanningPhase = Literal[
-    "awaiting_input",
-    "discovering",
-    "ready_to_commit",
-    "plan_proposed",
-]
 
 SignalConfidence = Literal["high", "medium", "low"]
 
@@ -92,12 +86,6 @@ class _PlanningModel(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
-
-
-class EvidenceRef(_PlanningModel):
-    conversation_message_ids: list[str] = Field(default_factory=list[str])
-    attachment_digest_hashes: list[str] = Field(default_factory=list[str])
-    raw_prompt_hash: str = ""
 
 
 class PlanningSignal(_PlanningModel):
@@ -176,8 +164,6 @@ class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
     builder_schema_version: int
-    phase: PlanningPhase
-    evidence: EvidenceRef
     signals: list[PlanningSignal] = Field(default_factory=list[PlanningSignal])
     resolved_slots: dict[str, ResolvedSlot] = Field(
         default_factory=dict[str, ResolvedSlot]
@@ -191,8 +177,6 @@ class PlanningState(_PlanningModel):
             fcm_version=FCM_VERSION,
             planner_contract_version=PLANNER_CONTRACT_VERSION,
             builder_schema_version=BUILDER_SCHEMA_VERSION,
-            phase="awaiting_input",
-            evidence=EvidenceRef(),
         )
 
     def validated_snapshot(self) -> PlanningState:

@@ -1,9 +1,9 @@
-"""Derive `PlanningState` from a conversation and render the planner
-prompt block from it.
+"""Derive `PlanningState` from persisted conversation facts.
 
-This module owns the deterministic path from a raw conversation to a
-stamped `PlanningState` and from that state to the prompt block the
-planner LLM reads.
+This module owns the deterministic path from a compacted conversation
+to a stamped `PlanningState`. Planner prompt rendering lives elsewhere;
+this layer only resolves durable slots, result signals, and committed
+architecture state.
 """
 
 from __future__ import annotations
@@ -60,7 +60,6 @@ from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
-    EvidenceRef,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
@@ -152,22 +151,15 @@ def build_planning_state_from_conversation(
 ) -> PlanningState:
     """Derive a `PlanningState` from a conversation and optional `Flow`.
 
-    Phase shifts to `discovering` once any slot resolves; otherwise the
-    state stays at `awaiting_input`. Evidence captures the stable
-    conversation message ids so the snapshot survives conversation
-    compaction. Signals and architecture commit are populated by later
-    planner turns — this function seeds the deterministic slot surface only.
+    Signals and architecture commit are populated by later planner turns;
+    this function seeds the deterministic slot surface from the compacted
+    conversation that was actually persisted.
     """
     resolved_slots = _resolve_slots(conversation, flow=flow)
-    phase = "discovering" if resolved_slots else "awaiting_input"
     state = PlanningState(
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
-        phase=phase,
-        evidence=EvidenceRef(
-            conversation_message_ids=[message.message_id for message in conversation],
-        ),
         resolved_slots=resolved_slots,
     )
     _replay_slot_classification_metadata(state, conversation, flow=flow)
@@ -203,17 +195,6 @@ def _replay_slot_classification_metadata(
         apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
 
 
-# PlanningPhase advance order. Stored as a tuple (not a dict with a get-default)
-# so adding a new PlanningPhase Literal without updating this tuple raises
-# ValueError on .index() instead of silently ranking the unknown phase at 0 —
-# preservation must never silently degrade when the state machine grows.
-_PHASE_ORDER: tuple[str, ...] = (
-    "awaiting_input",
-    "discovering",
-    "ready_to_commit",
-    "plan_proposed",
-)
-
 _MODEL_PROTECTED_SOURCES: frozenset[SlotSource] = frozenset(
     {"structured_answer", "flow_default"}
 )
@@ -227,16 +208,12 @@ def carry_forward_persisted_planner_state(
     state onto a freshly rebuilt state — mutation-only, no return.
 
     `build_planning_state_from_conversation` reseeds only the
-    deterministic slot surface. Planner-owned `architecture_commit` and
-    phase transitions past `discovering` are written by explicit planner
-    actions on prior turns. Without preservation, every later `commit_turn`
-    or proposal save would erase them by overwrite. The caller still owns
-    explicit replacement: if the current turn sets any of these fields on
-    `rebuilt` before calling this helper, the persisted value is not copied
-    over it.
-
-    Phase is monotonic — if persisted advanced past what the rebuild
-    derived, the advanced phase is preserved.
+    deterministic slot surface. Planner-owned `architecture_commit` is
+    written by explicit planner actions on prior turns. Without
+    preservation, every later `commit_turn` or proposal save would erase it
+    by overwrite. The caller still owns explicit replacement: if the current
+    turn sets this field on `rebuilt` before calling this helper, the
+    persisted value is not copied over it.
     """
     if persisted is None:
         return
@@ -245,8 +222,6 @@ def carry_forward_persisted_planner_state(
         and persisted.architecture_commit is not None
     ):
         rebuilt.architecture_commit = persisted.architecture_commit
-    if _PHASE_ORDER.index(rebuilt.phase) < _PHASE_ORDER.index(persisted.phase):
-        rebuilt.phase = persisted.phase
 
 
 def merge_llm_resolved_slots(
@@ -305,9 +280,6 @@ def merge_llm_resolved_slots(
             ],
             confidence=classified_slot.confidence,
         )
-
-    if state.resolved_slots and state.phase == "awaiting_input":
-        state.phase = "discovering"
 
 
 def _merge_model_result_obligations(
@@ -438,9 +410,6 @@ def apply_policy_defaults_from_resolved_slots(
             )
 
     _apply_structured_analysis_default_from_post_processing_goal(state)
-
-    if state.resolved_slots and state.phase == "awaiting_input":
-        state.phase = "discovering"
 
 
 def _apply_structured_analysis_default_from_post_processing_goal(

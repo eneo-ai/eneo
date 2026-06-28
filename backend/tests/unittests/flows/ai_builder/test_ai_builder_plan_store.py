@@ -321,7 +321,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
     assert repo.save_planning_state.await_args is not None
     saved_state = repo.save_planning_state.await_args.kwargs["state"]
     assert isinstance(saved_state, PlanningState)
-    assert saved_state.phase == "plan_proposed"
+    assert "phase" not in saved_state.model_dump(mode="json")
     assert repo.save_planning_state.await_args.kwargs["base_version"] == 7
     repo.update_session_latest_plan.assert_awaited_once()
     assert repo.update_session_latest_plan.await_args.kwargs["plan_id"] == (

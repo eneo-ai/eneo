@@ -514,9 +514,9 @@ class AIBuilderRepository:
 
         Returning the compacted list lets callers derive side-effects
         (notably `PlanningState`) from the same view that will be read
-        back on the next turn. Without this, long sessions could save a
-        state whose `evidence.conversation_message_ids` referred to
-        messages that had been compacted away before persist.
+        back on the next turn. Without this, long sessions could save
+        slot state derived from messages that had been compacted away
+        before persist.
         """
         if not conversation:
             return []
@@ -1062,11 +1062,9 @@ class AIBuilderRepository:
         """Append new conversation messages and save `PlanningState` atomically.
 
         The `PlanningState` is built from the compacted conversation
-        that `append_session_messages` actually persisted, so
-        `evidence.conversation_message_ids` always matches what the next
-        turn will read back. Building it from the caller's pre-compaction
-        list would drift once a session crosses the compaction
-        threshold.
+        that `append_session_messages` actually persisted. Building it
+        from the caller's pre-compaction list would drift once a session
+        crosses the compaction threshold.
 
         When `architecture_commit` is provided, it is stamped on the
         rebuilt state inside the savepoint so the commit lands as one

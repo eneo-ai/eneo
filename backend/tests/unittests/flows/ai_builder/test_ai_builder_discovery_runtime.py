@@ -32,7 +32,6 @@ from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
-    EvidenceRef,
     PlanningState,
     ResolvedSlot,
 )
@@ -53,8 +52,6 @@ def _resolved_state() -> PlanningState:
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
-        phase="discovering",
-        evidence=EvidenceRef(),
         resolved_slots={
             "primary_runtime_input": _slot("primary_runtime_input", "text"),
             "terminal_output": _slot("terminal_output", "structured_text"),
@@ -313,7 +310,6 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     heuristic_state = PlanningState.empty()
-    heuristic_state.phase = "discovering"
     heuristic_state.resolved_slots = {
         "primary_runtime_input": _slot(
             "primary_runtime_input",

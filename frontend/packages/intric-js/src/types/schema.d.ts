@@ -22881,7 +22881,7 @@ export interface components {
      * SessionStatus
      * @enum {string}
      */
-    SessionStatus: "chatting" | "awaiting_approval" | "applying" | "applied" | "cancelled";
+    SessionStatus: "chatting" | "awaiting_approval" | "applied" | "cancelled";
     /** SessionTelemetrySummary */
     SessionTelemetrySummary: {
       /**
