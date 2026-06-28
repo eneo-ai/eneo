@@ -1,17 +1,15 @@
 """Unit tests for `planning_state_builder.carry_forward_persisted_planner_state`.
 
 The helper is the single place the save path merges planner-owned
-fields (architecture_commit, draft_plan_id, monotonic phase) from the
-previously persisted state onto a freshly rebuilt one. Integration
-tests pin the savepoint wiring; these unit tests pin the merge
-semantics in isolation so regressions show up at the merge layer, not
-two containers deep.
+fields (architecture_commit and monotonic phase) from the previously
+persisted state onto a freshly rebuilt one. Integration tests pin the
+savepoint wiring; these unit tests pin the merge semantics in isolation
+so regressions show up at the merge layer, not two containers deep.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import pytest
 
@@ -56,7 +54,6 @@ def _state(
     *,
     phase: str = "discovering",
     architecture_commit: ArchitectureCommit | None = None,
-    draft_plan_id=None,
 ) -> PlanningState:
     return PlanningState(
         fcm_version=FCM_VERSION,
@@ -65,7 +62,6 @@ def _state(
         phase=phase,  # type: ignore[arg-type]
         evidence=EvidenceRef(),
         architecture_commit=architecture_commit,
-        draft_plan_id=draft_plan_id,
     )
 
 
@@ -141,7 +137,6 @@ class TestPersistedNone:
         carry_forward_persisted_planner_state(rebuilt, None)
 
         assert rebuilt.architecture_commit is None
-        assert rebuilt.draft_plan_id is None
         assert rebuilt.phase == "awaiting_input"
 
 
@@ -172,27 +167,6 @@ class TestArchitectureCommitPreservation:
         carry_forward_persisted_planner_state(rebuilt, persisted)
 
         assert rebuilt.architecture_commit is None
-
-
-class TestDraftPlanIdPreservation:
-    def test_carries_forward_when_rebuilt_has_none(self) -> None:
-        plan_id = uuid4()
-        rebuilt = _state()
-        persisted = _state(draft_plan_id=plan_id)
-
-        carry_forward_persisted_planner_state(rebuilt, persisted)
-
-        assert rebuilt.draft_plan_id == plan_id
-
-    def test_does_not_overwrite_explicit_set_on_rebuilt(self) -> None:
-        explicit = uuid4()
-        old = uuid4()
-        rebuilt = _state(draft_plan_id=explicit)
-        persisted = _state(draft_plan_id=old)
-
-        carry_forward_persisted_planner_state(rebuilt, persisted)
-
-        assert rebuilt.draft_plan_id == explicit
 
 
 class TestPhaseMonotonicity:

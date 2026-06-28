@@ -2843,7 +2843,6 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
 
     assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
-    assert loaded_state.draft_plan_id == stored_plan.plan.id
     assert loaded_state.phase == "plan_proposed"
     assert version == 1
 
@@ -2919,7 +2918,7 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
                 )
             ],
         )
-        await store_plan_and_update_conversation(
+        stored_plan = await store_plan_and_update_conversation(
             repo=repo,
             turn=replace(
                 turn,
@@ -2938,14 +2937,17 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
         loaded = await repo.load_planning_state(
             session_id=session.id, tenant_id=user.tenant_id
         )
 
+    assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded is not None
     assert loaded.architecture_commit is not None
     assert loaded.architecture_commit.architecture_hash == commit.architecture_hash
-    assert loaded.draft_plan_id is not None
     assert loaded.phase == "plan_proposed"
 
 
@@ -3118,16 +3120,15 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
+async def test_store_plan_and_update_conversation_updates_latest_plan_pointer(
     client,
     bearer_token,
     completion_model_factory,
     db_container,
 ):
-    """After the plan-proposal path persists a plan, the saved PlanningState
-    must stamp `draft_plan_id` to the new plan's id and transition `phase`
-    to `plan_proposed` so the next turn's reader sees the state is coherent
-    with the just-written plan row.
+    """After the plan-proposal path persists a plan, the session's
+    `latest_plan_id` is the canonical plan identity and PlanningState only
+    records that proposal has been reached.
     """
     from intric.flows.ai_builder.ai_builder_plan_store import (
         store_plan_and_update_conversation,
@@ -3176,12 +3177,13 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
         loaded_state = await repo.load_planning_state(
             session_id=session_id, tenant_id=tenant_id
         )
 
+    assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
-    assert loaded_state.draft_plan_id == stored_plan.plan.id
     assert loaded_state.phase == "plan_proposed"
 
 

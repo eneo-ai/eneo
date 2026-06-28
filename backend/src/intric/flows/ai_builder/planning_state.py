@@ -28,8 +28,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Literal, Optional
-from uuid import UUID
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -71,8 +70,6 @@ SlotSource = Literal[
 ]
 
 SlotConfidence = Literal["high", "medium", "low"]
-
-InvariantResult = Literal["pass", "fail", "warning"]
 
 StepOutputType = Literal["text", "json", "pdf", "docx"]
 StepOutputMode = Literal[
@@ -175,19 +172,6 @@ class ArchitectureCommit(ArchitectureCommitDraft):
         return value
 
 
-class OpenQuestion(_PlanningModel):
-    question_id: str
-    slot_name: str
-    priority: int
-    reason: str
-
-
-class InvariantEvaluation(_PlanningModel):
-    invariant_id: str
-    result: InvariantResult
-    detail: str = ""
-
-
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
@@ -198,12 +182,7 @@ class PlanningState(_PlanningModel):
     resolved_slots: dict[str, ResolvedSlot] = Field(
         default_factory=dict[str, ResolvedSlot]
     )
-    architecture_commit: Optional[ArchitectureCommit] = None
-    open_questions: list[OpenQuestion] = Field(default_factory=list[OpenQuestion])
-    draft_plan_id: Optional[UUID] = None
-    validation: list[InvariantEvaluation] = Field(
-        default_factory=list[InvariantEvaluation]
-    )
+    architecture_commit: ArchitectureCommit | None = None
 
     @classmethod
     def empty(cls) -> PlanningState:

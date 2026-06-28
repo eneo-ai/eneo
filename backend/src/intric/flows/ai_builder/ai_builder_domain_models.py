@@ -138,7 +138,6 @@ class BuilderSession(BaseModel):
     conversation: list[ConversationMessage] = Field(
         default_factory=_default_conversation
     )
-    requirements_version: str | None = None
     # Monotonic counter bumped by `save_planning_state`. Exposed on the
     # domain model so the active turn can carry `base_planning_state_version`
     # through proposal submission and reject stale deltas without a second

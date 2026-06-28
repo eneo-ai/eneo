@@ -155,9 +155,8 @@ def build_planning_state_from_conversation(
     Phase shifts to `discovering` once any slot resolves; otherwise the
     state stays at `awaiting_input`. Evidence captures the stable
     conversation message ids so the snapshot survives conversation
-    compaction. Signals, architecture commit, and open questions are
-    populated by later planner turns — this function seeds the
-    deterministic slot surface only.
+    compaction. Signals and architecture commit are populated by later
+    planner turns — this function seeds the deterministic slot surface only.
     """
     resolved_slots = _resolve_slots(conversation, flow=flow)
     phase = "discovering" if resolved_slots else "awaiting_input"
@@ -228,14 +227,13 @@ def carry_forward_persisted_planner_state(
     state onto a freshly rebuilt state — mutation-only, no return.
 
     `build_planning_state_from_conversation` reseeds only the
-    deterministic slot surface. Planner-owned fields
-    (`architecture_commit`, `draft_plan_id`) and phase transitions past
-    `discovering` are written by explicit planner actions on prior
-    turns. Without preservation, every later `commit_turn` or proposal
-    save would erase them by overwrite. The caller still owns explicit
-    replacement: if the current turn sets any of these fields on
-    `rebuilt` before calling this helper, the persisted value is not
-    copied over it.
+    deterministic slot surface. Planner-owned `architecture_commit` and
+    phase transitions past `discovering` are written by explicit planner
+    actions on prior turns. Without preservation, every later `commit_turn`
+    or proposal save would erase them by overwrite. The caller still owns
+    explicit replacement: if the current turn sets any of these fields on
+    `rebuilt` before calling this helper, the persisted value is not copied
+    over it.
 
     Phase is monotonic — if persisted advanced past what the rebuild
     derived, the advanced phase is preserved.
@@ -247,8 +245,6 @@ def carry_forward_persisted_planner_state(
         and persisted.architecture_commit is not None
     ):
         rebuilt.architecture_commit = persisted.architecture_commit
-    if rebuilt.draft_plan_id is None and persisted.draft_plan_id is not None:
-        rebuilt.draft_plan_id = persisted.draft_plan_id
     if _PHASE_ORDER.index(rebuilt.phase) < _PHASE_ORDER.index(persisted.phase):
         rebuilt.phase = persisted.phase
 

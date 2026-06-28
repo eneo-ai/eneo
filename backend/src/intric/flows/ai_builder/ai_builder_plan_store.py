@@ -121,7 +121,6 @@ async def store_plan_and_update_conversation(
             start_index=new_messages_start,
         )
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
-        planning_state.draft_plan_id = plan.id
         planning_state.phase = "plan_proposed"
         carry_forward_persisted_planner_state(planning_state, prior_state)
         new_version = await repo.save_planning_state(

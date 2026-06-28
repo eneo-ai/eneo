@@ -12,7 +12,6 @@ validation boundaries the rest of the builder depends on.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -25,8 +24,6 @@ from intric.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
     ArchitectureCommit,
     EvidenceRef,
-    InvariantEvaluation,
-    OpenQuestion,
     PlanningPhase,
     PlanningSignal,
     PlanningState,
@@ -68,14 +65,11 @@ class TestEmptyConstruction:
         state = PlanningState.empty()
         assert state.phase == "awaiting_input"
 
-    def test_empty_has_no_signals_slots_or_questions(self) -> None:
+    def test_empty_has_no_signals_slots_or_commit(self) -> None:
         state = PlanningState.empty()
         assert state.signals == []
         assert state.resolved_slots == {}
-        assert state.open_questions == []
-        assert state.validation == []
         assert state.architecture_commit is None
-        assert state.draft_plan_id is None
 
     def test_empty_evidence_has_empty_lists_and_hash(self) -> None:
         state = PlanningState.empty()
@@ -134,22 +128,6 @@ class TestRoundTrip:
                 committed_at=datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc),
                 architecture_hash=_VALID_ARCH_HASH,
             ),
-            open_questions=[
-                OpenQuestion(
-                    question_id="output_reader",
-                    slot_name="output_reader",
-                    priority=1,
-                    reason="Reader unspecified",
-                ),
-            ],
-            draft_plan_id=uuid4(),
-            validation=[
-                InvariantEvaluation(
-                    invariant_id="form_fields.reference_resolves",
-                    result="pass",
-                    detail="",
-                ),
-            ],
         )
 
     def test_model_dump_json_survives_round_trip(self) -> None:
@@ -206,11 +184,6 @@ class TestAssignmentRevalidation:
         state = PlanningState.empty()
         with pytest.raises(ValidationError):
             state.phase = "bogus"  # type: ignore[assignment]
-
-    def test_invalid_draft_plan_id_assignment_raises(self) -> None:
-        state = PlanningState.empty()
-        with pytest.raises(ValidationError):
-            state.draft_plan_id = "not-a-uuid"  # type: ignore[assignment]
 
     def test_invalid_signal_confidence_assignment_raises(self) -> None:
         signal = PlanningSignal(
@@ -366,11 +339,21 @@ class TestStrictExtraRejection:
             "signals": [],
             "resolved_slots": {},
             "architecture_commit": None,
-            "open_questions": [],
-            "draft_plan_id": None,
-            "validation": [],
             "unexpected_field": "drift",
         }
+        with pytest.raises(ValidationError):
+            PlanningState.model_validate(payload)
+
+    @pytest.mark.parametrize(
+        "legacy_field",
+        ["open_questions", "draft_plan_id", "validation"],
+    )
+    def test_deleted_planning_state_fields_are_rejected(
+        self, legacy_field: str
+    ) -> None:
+        payload = PlanningState.empty().model_dump(mode="json")
+        payload[legacy_field] = None
+
         with pytest.raises(ValidationError):
             PlanningState.model_validate(payload)
 
@@ -421,9 +404,6 @@ class TestVersionStampContract:
             "signals": [],
             "resolved_slots": {},
             "architecture_commit": None,
-            "open_questions": [],
-            "draft_plan_id": None,
-            "validation": [],
         }
         with pytest.raises(ValidationError):
             PlanningState.model_validate(payload)
