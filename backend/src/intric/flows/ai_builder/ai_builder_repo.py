@@ -158,7 +158,6 @@ class AIBuilderRepository:
                         [
                             SessionStatus.CHATTING.value,
                             SessionStatus.AWAITING_APPROVAL.value,
-                            SessionStatus.APPLYING.value,
                         ]
                     ),
                     BuilderSessions.flow_id.is_(None)
@@ -256,7 +255,6 @@ class AIBuilderRepository:
                     [
                         SessionStatus.CHATTING.value,
                         SessionStatus.AWAITING_APPROVAL.value,
-                        SessionStatus.APPLYING.value,
                     ]
                 ),
                 BuilderSessions.flow_id.is_(None)
@@ -284,7 +282,6 @@ class AIBuilderRepository:
                         [
                             SessionStatus.CHATTING.value,
                             SessionStatus.AWAITING_APPROVAL.value,
-                            SessionStatus.APPLYING.value,
                         ]
                     ),
                     BuilderSessions.flow_id.is_(None)

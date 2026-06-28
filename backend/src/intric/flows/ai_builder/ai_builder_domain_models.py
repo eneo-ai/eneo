@@ -32,7 +32,6 @@ from intric.flows.flow_resource_bindings import (
 class SessionStatus(str, enum.Enum):
     CHATTING = "chatting"
     AWAITING_APPROVAL = "awaiting_approval"
-    APPLYING = "applying"
     APPLIED = "applied"
     CANCELLED = "cancelled"
 

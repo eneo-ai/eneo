@@ -14,10 +14,6 @@ _ALLOWED_TRANSITIONS: dict[SessionStatus, set[SessionStatus]] = {
     },
     SessionStatus.AWAITING_APPROVAL: {
         SessionStatus.CHATTING,
-        SessionStatus.APPLYING,
-        SessionStatus.CANCELLED,
-    },
-    SessionStatus.APPLYING: {
         SessionStatus.APPLIED,
         SessionStatus.CANCELLED,
     },

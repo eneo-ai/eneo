@@ -23,7 +23,6 @@ depends_on = None
 BUILDER_SESSION_STATUS_VALUES = (
     "chatting",
     "awaiting_approval",
-    "applying",
     "applied",
     "cancelled",
 )

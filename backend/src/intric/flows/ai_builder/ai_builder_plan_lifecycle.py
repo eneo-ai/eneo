@@ -278,11 +278,6 @@ class AIBuilderPlanLifecycle:
             default_transcription_model_id=default_transcription_model_id,
         )
 
-        await self.repo.update_session_status_without_send_lease(
-            session_id=session.id,
-            tenant_id=self.user.tenant_id,
-            status=SessionStatus.APPLYING,
-        )
         if command.origin.kind != "ai_builder":
             raise RuntimeError("AI Builder apply constructed a non-AI Builder command.")
         origin_policy = AIBuilderAuthoringPolicy(command.origin)

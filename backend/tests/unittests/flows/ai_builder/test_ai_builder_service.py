@@ -1214,27 +1214,6 @@ class TestSendMessage:
             )
 
     @pytest.mark.anyio
-    async def test_rejects_applying_session(self):
-        user = _make_user()
-        repo = AsyncMock()
-        session = _make_session(
-            status=SessionStatus.APPLYING,
-            tenant_id=user.tenant_id,
-        )
-        repo.get_session.return_value = session
-        service = _make_service(user=user, repo=repo)
-
-        with pytest.raises(BadRequestException, match="Cannot send messages"):
-            await _collect_events(
-                service.send_message(
-                    session_id=session.id,
-                    message="Hello",
-                    litellm_model="openai/gpt-4",
-                    litellm_kwargs={"api_key": "sk-test"},
-                )
-            )
-
-    @pytest.mark.anyio
     async def test_awaiting_approval_transitions_to_chatting(self):
         user = _make_user()
         repo = AsyncMock()

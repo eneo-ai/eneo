@@ -2052,7 +2052,6 @@ class ModuleRegistry(BasePublic):
 BUILDER_SESSION_STATUS_VALUES = (
     "chatting",
     "awaiting_approval",
-    "applying",
     "applied",
     "cancelled",
 )

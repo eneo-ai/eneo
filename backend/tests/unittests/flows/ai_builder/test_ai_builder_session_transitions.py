@@ -11,13 +11,12 @@ from intric.main.exceptions import BadRequestException
 
 @pytest.mark.parametrize(
     ("current", "next_status"),
-    [
-        (SessionStatus.CHATTING, SessionStatus.AWAITING_APPROVAL),
-        (SessionStatus.AWAITING_APPROVAL, SessionStatus.CHATTING),
-        (SessionStatus.AWAITING_APPROVAL, SessionStatus.APPLYING),
-        (SessionStatus.APPLYING, SessionStatus.APPLIED),
-        (SessionStatus.CANCELLED, SessionStatus.CANCELLED),
-    ],
+        [
+            (SessionStatus.CHATTING, SessionStatus.AWAITING_APPROVAL),
+            (SessionStatus.AWAITING_APPROVAL, SessionStatus.CHATTING),
+            (SessionStatus.AWAITING_APPROVAL, SessionStatus.APPLIED),
+            (SessionStatus.CANCELLED, SessionStatus.CANCELLED),
+        ],
 )
 def test_valid_transitions_are_allowed(
     current: SessionStatus, next_status: SessionStatus

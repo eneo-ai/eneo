@@ -834,7 +834,7 @@ class TestAIBuilderPlanLifecycle:
             await lifecycle.apply_plan(plan_id=plan.id)
 
     @pytest.mark.anyio
-    async def test_apply_plan_create_failure_marks_applying_without_flow_listing(
+    async def test_apply_plan_create_failure_does_not_list_flows(
         self,
     ):
         user = _make_user()
@@ -867,11 +867,6 @@ class TestAIBuilderPlanLifecycle:
         with pytest.raises(RuntimeError, match="apply failed"):
             await lifecycle.apply_plan(plan_id=plan.id)
 
-        repo.update_session_status_without_send_lease.assert_any_await(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
-            status=SessionStatus.APPLYING,
-        )
         flow_service.list_flows.assert_not_awaited()
 
     @pytest.mark.anyio
@@ -929,12 +924,6 @@ class TestAIBuilderPlanLifecycle:
         )
         assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is None
         assert mock_log_apply_failed.call_args.kwargs["materializer_progress"] is None
-        repo.update_session_status_without_send_lease.assert_any_await(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
-            status=SessionStatus.APPLYING,
-        )
-
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     async def test_apply_plan_logs_compile_bad_request_code(
@@ -1081,12 +1070,6 @@ class TestAIBuilderPlanLifecycle:
             flow_created=False,
             flow_updated=False,
         )
-        repo.update_session_status_without_send_lease.assert_any_await(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
-            status=SessionStatus.APPLYING,
-        )
-
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.log_apply_failed")
     async def test_apply_plan_logs_execute_bad_request_code(

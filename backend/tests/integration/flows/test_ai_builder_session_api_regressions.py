@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from intric.assistants.assistant_update import AssistantUpdateCommand
 from intric.database.tables.ai_models_table import TranscriptionModels
-from intric.database.tables.flow_tables import BuilderSessions, Flows
+from intric.database.tables.flow_tables import BuilderPlans, BuilderSessions, Flows
 from intric.database.tables.model_providers_table import ModelProviders
 from intric.database.tables.spaces_table import (
     Spaces,
@@ -547,7 +547,7 @@ async def _create_proposed_ai_builder_plan(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_apply_plan_request_transaction_rolls_back_applying_status_on_failure(
+async def test_apply_plan_request_transaction_rolls_back_to_approved_plan_on_failure(
     client,
     bearer_token,
     completion_model_factory,
@@ -591,7 +591,7 @@ async def test_apply_plan_request_transaction_rolls_back_applying_status_on_fail
 
     assert apply_response.status_code == 400, apply_response.text
     async with db_container() as container:
-        persisted_status = (
+        persisted_session_status = (
             await container.session().execute(
                 select(BuilderSessions.status).where(
                     BuilderSessions.id == session_id,
@@ -599,8 +599,17 @@ async def test_apply_plan_request_transaction_rolls_back_applying_status_on_fail
                 )
             )
         ).scalar_one()
+        persisted_plan_status = (
+            await container.session().execute(
+                select(BuilderPlans.status).where(
+                    BuilderPlans.id == plan_id,
+                    BuilderPlans.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
 
-    assert persisted_status == SessionStatus.AWAITING_APPROVAL.value
+    assert persisted_session_status == SessionStatus.AWAITING_APPROVAL.value
+    assert persisted_plan_status == PlanStatus.APPROVED.value
 
 
 @pytest.mark.integration
