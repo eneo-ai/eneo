@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { Dialog } from "@intric/ui";
+  import { Dialog } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { onMount } from "svelte";
   import { writable, type Writable } from "svelte/store";
-  import { IconHistory } from "@intric/icons/history";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconXMark } from "@intric/icons/x-mark";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { getIntric } from "$lib/core/Intric";
+  import { IconHistory } from "@eneo/icons/history";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconXMark } from "@eneo/icons/x-mark";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { getEneo } from "$lib/core/Eneo";
   import dayjs from "dayjs";
 
-  // Get intric during component initialization
-  const intric = getIntric();
+  // Get eneo during component initialization
+  const eneo = getEneo();
 
   interface SkippedDetail {
     file: string;
@@ -83,7 +83,7 @@
     error = null;
     try {
       const skip = (page - 1) * pageSize;
-      const response = await intric.integrations.knowledge.getSyncLogs({
+      const response = await eneo.integrations.knowledge.getSyncLogs({
         knowledge: localKnowledge,
         skip,
         limit: pageSize

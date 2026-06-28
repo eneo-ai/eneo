@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import type { Permission, Role } from "@intric/intric-js";
-  import { Label, Table } from "@intric/ui";
+  import type { Permission, Role } from "@eneo/eneo-js";
+  import { Label, Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import RoleActions from "./RoleActions.svelte";
   import RoleName from "./RoleName.svelte";

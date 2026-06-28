@@ -3,17 +3,17 @@ from uuid import uuid4
 
 import pytest
 
-from intric.templates.app_template.api.admin_router import (
+from eneo.templates.app_template.api.admin_router import (
     create_template as create_app_template,
 )
-from intric.templates.app_template.api.app_template_models import (
+from eneo.templates.app_template.api.app_template_models import (
     AppTemplateAdminCreate,
     AppTemplateWizard,
 )
-from intric.templates.assistant_template.api.admin_router import (
+from eneo.templates.assistant_template.api.admin_router import (
     create_template as create_assistant_template,
 )
-from intric.templates.assistant_template.api.assistant_template_models import (
+from eneo.templates.assistant_template.api.assistant_template_models import (
     AssistantTemplateAdminCreate,
     AssistantTemplateWizard,
 )

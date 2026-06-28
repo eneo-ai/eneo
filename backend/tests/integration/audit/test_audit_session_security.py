@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import redis.exceptions
 
-from intric.audit.infrastructure.audit_session_service import AuditSessionService
+from eneo.audit.infrastructure.audit_session_service import AuditSessionService
 
 pytestmark = pytest.mark.integration
 
@@ -15,7 +15,7 @@ async def test_environment_aware_cookies_in_development(
     client, auth_headers, monkeypatch
 ):
     """Test that cookies use relaxed settings in development/testing mode."""
-    from intric.main.config import get_settings
+    from eneo.main.config import get_settings
 
     # Enable testing mode for this test to verify dev-mode cookie settings
     settings = get_settings()
@@ -62,7 +62,7 @@ async def test_environment_aware_cookies_in_development(
 async def test_redis_error_handling_on_session_creation(client, auth_headers):
     """Test that Redis errors return 503 with helpful message."""
     with patch(
-        "intric.audit.infrastructure.audit_session_service.get_redis"
+        "eneo.audit.infrastructure.audit_session_service.get_redis"
     ) as mock_redis:
         # Simulate Redis connection failure
         mock_redis_instance = AsyncMock()
@@ -102,7 +102,7 @@ async def test_redis_error_handling_on_session_validation(client, auth_headers):
 
     # Now simulate Redis failure on validation
     with patch(
-        "intric.audit.infrastructure.audit_session_service.get_redis"
+        "eneo.audit.infrastructure.audit_session_service.get_redis"
     ) as mock_redis:
         mock_redis_instance = AsyncMock()
         mock_redis_instance.get.side_effect = redis.exceptions.TimeoutError(

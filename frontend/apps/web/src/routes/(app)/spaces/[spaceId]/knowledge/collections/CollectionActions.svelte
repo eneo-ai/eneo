@@ -1,13 +1,13 @@
 <script lang="ts">
-  import type { GroupSparse } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconMove } from "@intric/icons/move";
-  import { Button, Dialog, Dropdown, Select } from "@intric/ui";
+  import type { GroupSparse } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconMove } from "@eneo/icons/move";
+  import { Button, Dialog, Dropdown, Select } from "@eneo/ui";
   import CollectionEditor from "./CollectionEditor.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
@@ -16,7 +16,7 @@
     refreshCurrentSpace,
     state: { accessibleSpaces, currentSpace }
   } = getSpacesManager();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   export let collection: GroupSparse;
   $: isOrgSpace = $currentSpace.organization === true;
@@ -24,7 +24,7 @@
   async function deleteResource() {
     isProcessing = true;
     try {
-      await intric.groups.delete({ id: collection.id });
+      await eneo.groups.delete({ id: collection.id });
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
@@ -37,7 +37,7 @@
     if (!moveDestination) return;
     isProcessing = true;
     try {
-      await intric.groups.transfer({ group: collection, targetSpace: moveDestination });
+      await eneo.groups.transfer({ group: collection, targetSpace: moveDestination });
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {

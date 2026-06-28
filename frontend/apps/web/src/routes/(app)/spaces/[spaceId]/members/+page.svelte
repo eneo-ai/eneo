@@ -14,7 +14,7 @@
   import GroupMemberRole from "./GroupMemberRole.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import { IconPeople } from "@intric/icons/people";
+  import { IconPeople } from "@eneo/icons/people";
 
   const { user } = getAppContext();
 

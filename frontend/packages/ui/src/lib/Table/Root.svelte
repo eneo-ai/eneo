@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts" generics="T extends unknown">
-  import { IconList } from "@intric/icons/list";
-  import { IconSquares } from "@intric/icons/squares";
+  import { IconList } from "@eneo/icons/list";
+  import { IconSquares } from "@eneo/icons/squares";
   import { writable } from "svelte/store";
   import type { ComponentType, SvelteComponent } from "svelte";
   import { Button, Input } from "$lib/index.js";

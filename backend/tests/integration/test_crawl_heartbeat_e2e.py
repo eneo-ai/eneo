@@ -19,7 +19,7 @@ heartbeat functionality.
 import pytest
 from httpx import AsyncClient
 
-from intric.tenants.crawler_settings_helper import (
+from eneo.tenants.crawler_settings_helper import (
     get_crawler_setting,
 )
 

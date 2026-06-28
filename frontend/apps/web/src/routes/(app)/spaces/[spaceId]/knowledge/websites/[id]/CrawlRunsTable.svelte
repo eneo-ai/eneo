@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { CrawlRun } from "@intric/intric-js";
-  import { Table } from "@intric/ui";
+  import type { CrawlRun } from "@eneo/eneo-js";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";

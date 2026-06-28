@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Role, User, Group } from "@intric/intric-js";
-  import { Table, Label } from "@intric/ui";
+  import type { Role, User, Group } from "@eneo/eneo-js";
+  import { Table, Label } from "@eneo/ui";
   import UserActions from "./UserActions.svelte";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";

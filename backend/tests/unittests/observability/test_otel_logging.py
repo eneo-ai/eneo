@@ -14,9 +14,9 @@ import logging
 
 import pytest
 
-from intric.main.logging import OTELJSONFormatter, _SEVERITY_NUMBER
-from intric.main.observability import redact_url_query
-from intric.main.request_context import clear_request_context, set_request_context
+from eneo.main.logging import OTELJSONFormatter, _SEVERITY_NUMBER
+from eneo.main.observability import redact_url_query
+from eneo.main.request_context import clear_request_context, set_request_context
 
 
 @pytest.fixture(autouse=True)

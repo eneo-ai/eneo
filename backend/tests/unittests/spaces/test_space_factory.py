@@ -6,13 +6,13 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from intric.spaces import space_factory
-from intric.spaces.space_factory import SpaceFactory, _build_or_skip
+from eneo.spaces import space_factory
+from eneo.spaces.space_factory import SpaceFactory, _build_or_skip
 
 
 @pytest.fixture
 def patched_logger(monkeypatch):
-    """Project's `SimpleLogger` (intric.main.logging) bypasses the root
+    """Project's `SimpleLogger` (eneo.main.logging) bypasses the root
     `logging.Logger.manager.loggerDict`, so pytest's `caplog` can't intercept
     its records via propagation. Swap in a stdlib logger for log assertions."""
     test_logger = logging.getLogger("test_space_factory_build_or_skip")

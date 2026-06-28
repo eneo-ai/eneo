@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import SpaceChip from "$lib/features/spaces/components/SpaceChip.svelte";
-  import type { StorageSpaceList } from "@intric/intric-js";
+  import type { StorageSpaceList } from "@eneo/eneo-js";
 
   export let space: StorageSpaceList;
 </script>

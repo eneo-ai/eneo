@@ -1,18 +1,18 @@
 from uuid import uuid4
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
-from intric.ai_models.embedding_models.embedding_model import (
+from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
-from intric.assistants.assistant import Assistant
-from intric.authentication.auth_models import ApiKey
-from intric.collections.domain.collection import Collection
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB
-from intric.tenants.tenant import TenantInDB
-from intric.users.user import UserInDB
+from eneo.assistants.assistant import Assistant
+from eneo.authentication.auth_models import ApiKey
+from eneo.collections.domain.collection import Collection
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
+from eneo.tenants.tenant import TenantInDB
+from eneo.users.user import UserInDB
 
 TEST_UUID = uuid4()
 

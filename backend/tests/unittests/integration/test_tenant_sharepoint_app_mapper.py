@@ -10,8 +10,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
-from intric.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
+from eneo.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+from eneo.integration.infrastructure.mappers.tenant_sharepoint_app_mapper import (
     TenantSharePointAppMapper,
 )
 

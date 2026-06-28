@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { Table } from "@intric/ui";
+  import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import CollectionActions from "./CollectionActions.svelte";
   import CollectionFileLabels from "./CollectionFileLabels.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
-  import type { GroupSparse } from "@intric/intric-js";
-  import { IconCollections } from "@intric/icons/collections";
+  import type { GroupSparse } from "@eneo/eneo-js";
+  import { IconCollections } from "@eneo/icons/collections";
   import { m } from "$lib/paraglide/messages";
 
   const {

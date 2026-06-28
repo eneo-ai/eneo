@@ -1,4 +1,4 @@
-import type { Permission, Role } from "@intric/intric-js";
+import type { Permission, Role } from "@eneo/eneo-js";
 
 export function hasPermission(entity: { roles?: Role[]; predefined_roles?: Role[] }) {
   try {

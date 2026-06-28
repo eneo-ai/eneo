@@ -4,7 +4,7 @@
   import { initLanguageStore } from "$lib/core/language";
   import { setContext } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import { MESSAGES_CONTEXT_KEY } from "@intric/ui";
+  import { MESSAGES_CONTEXT_KEY } from "@eneo/ui";
   import { Toaster } from "$lib/components/ui/sonner/index.js";
 
   initThemeStore();

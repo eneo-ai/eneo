@@ -16,7 +16,7 @@
  * Add a new provider on the backend and it will appear here automatically;
  * only display-name overrides need a code change.
  */
-import type { Intric } from "@intric/intric-js";
+import type { Eneo } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 export interface ModelProviderFieldDef {
@@ -43,14 +43,14 @@ let capabilitiesCache: ModelProviderCapabilities | null = null;
 let capabilitiesPromise: Promise<ModelProviderCapabilities> | null = null;
 
 export async function getModelProviderCapabilities(
-  intric: Intric
+  eneo: Eneo
 ): Promise<ModelProviderCapabilities> {
   if (capabilitiesCache) {
     return capabilitiesCache;
   }
 
   if (!capabilitiesPromise) {
-    capabilitiesPromise = intric.modelProviders
+    capabilitiesPromise = eneo.modelProviders
       .getCapabilities()
       .then((capabilities) => {
         capabilitiesCache = capabilities as ModelProviderCapabilities;

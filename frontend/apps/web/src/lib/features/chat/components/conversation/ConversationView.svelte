@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
   import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import { Markdown } from "@intric/ui";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
+  import { Markdown } from "@eneo/ui";
   import Message from "./Message.svelte";
   import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { Snippet } from "svelte";
   import { m } from "$lib/paraglide/messages";
@@ -38,7 +38,7 @@
     })
   );
   initAttachmentManager({
-    intric: getIntric(),
+    eneo: getEneo(),
     options: { rules: attachmentRules, inlineErrors: true }
   });
 

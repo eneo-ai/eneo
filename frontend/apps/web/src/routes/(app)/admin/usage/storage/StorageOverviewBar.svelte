@@ -8,7 +8,7 @@
   import { Settings } from "$lib/components/layout";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatPercent } from "$lib/core/formatting/formatPercent";
-  import type { StorageUsageSummary } from "@intric/intric-js";
+  import type { StorageUsageSummary } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from intric.mcp_servers.application.mcp_server_settings_service import (
+from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
 

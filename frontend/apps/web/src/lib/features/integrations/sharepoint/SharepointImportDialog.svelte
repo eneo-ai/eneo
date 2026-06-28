@@ -1,15 +1,15 @@
 <script lang="ts">
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconSearch } from "@intric/icons/search";
-  import { IconUploadCloud } from "@intric/icons/upload-cloud";
-  import { IconWeb } from "@intric/icons/web";
-  import { type IntegrationKnowledgePreview } from "@intric/intric-js";
-  import { Button, Dialog } from "@intric/ui";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconSearch } from "@eneo/icons/search";
+  import { IconUploadCloud } from "@eneo/icons/upload-cloud";
+  import { IconWeb } from "@eneo/icons/web";
+  import { type IntegrationKnowledgePreview } from "@eneo/eneo-js";
+  import { Button, Dialog } from "@eneo/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
@@ -52,7 +52,7 @@
 
   let { goBack, openController, integration }: IntegrationImportDialogProps = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -142,7 +142,7 @@
       return;
     }
 
-    const preview = (await intric.integrations.knowledge.preview({
+    const preview = (await eneo.integrations.knowledge.preview({
       id
     })) as CategorizedIntegrationKnowledgePreview[];
 
@@ -307,7 +307,7 @@
         };
       });
 
-      const response = await intric.integrations.knowledge.importBatch({
+      const response = await eneo.integrations.knowledge.importBatch({
         integration: { id },
         items: batchItems,
         wrapper_name: requiresWrapperName ? wrapperName.trim() : undefined,

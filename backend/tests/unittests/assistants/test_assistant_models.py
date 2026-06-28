@@ -10,8 +10,8 @@ ModelKwargs.
 import pytest
 from pydantic import ValidationError
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.api.assistant_models import AssistantBase
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import AssistantBase
 
 
 def test_assistant_base_coerces_db_null_to_default_kwargs():

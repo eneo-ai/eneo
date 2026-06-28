@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 
-from intric.worker.redis.client import parse_arq_health_string
+from eneo.worker.redis.client import parse_arq_health_string
 
 
 class TestParseArqHealthString:
@@ -100,7 +100,7 @@ class TestParseArqHealthString:
         # Mock datetime.now() to return January 2, 2026
         mock_now = datetime(2026, 1, 2, 10, 0, 0)
 
-        with patch("intric.worker.redis.client.datetime") as mock_datetime:
+        with patch("eneo.worker.redis.client.datetime") as mock_datetime:
             mock_datetime.now.return_value = mock_now
             mock_datetime.strptime = datetime.strptime
             mock_datetime.fromisoformat = datetime.fromisoformat
@@ -128,7 +128,7 @@ class TestParseArqHealthString:
         # Mock datetime.now() to return January 15, 2026
         mock_now = datetime(2026, 1, 15, 10, 0, 0)
 
-        with patch("intric.worker.redis.client.datetime") as mock_datetime:
+        with patch("eneo.worker.redis.client.datetime") as mock_datetime:
             mock_datetime.now.return_value = mock_now
             mock_datetime.strptime = datetime.strptime
             mock_datetime.fromisoformat = datetime.fromisoformat

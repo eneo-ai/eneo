@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ConversationMessage } from "@intric/intric-js";
+  import type { ConversationMessage } from "@eneo/eneo-js";
   import TypingIndicator from "./TypingIndicator.svelte";
   import ThinkingIndicator from "./ThinkingIndicator.svelte";
   import MessageQuestion from "./MessageQuestion.svelte";

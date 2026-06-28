@@ -4,7 +4,7 @@
  *
  * @example
  * const loadUsers = createAsyncState(async () => {
- *   return await intric.users.list();
+ *   return await eneo.users.list();
  * });
  *
  * // True while is loading

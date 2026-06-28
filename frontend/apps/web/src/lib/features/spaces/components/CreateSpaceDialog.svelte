@@ -5,7 +5,7 @@
 -->
 
 <script lang="ts">
-  import { Button, Dialog, Input } from "@intric/ui";
+  import { Button, Dialog, Input } from "@eneo/ui";
   import { getSpacesManager } from "../SpacesManager";
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages";

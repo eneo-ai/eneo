@@ -4,14 +4,14 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from intric.scim.app import scim_app
-from intric.scim.auth import require_scim_auth
-from intric.scim.deps import get_scim_group_service
-from intric.scim.domain.errors import ScimGroupConflictError, ScimGroupNotFoundError
-from intric.scim.schemas.group import ScimGroup
-from intric.scim.schemas.user import ScimMeta
-from intric.scim.services.group_service import ScimGroupService
-from intric.server.main import app
+from eneo.scim.app import scim_app
+from eneo.scim.auth import require_scim_auth
+from eneo.scim.deps import get_scim_group_service
+from eneo.scim.domain.errors import ScimGroupConflictError, ScimGroupNotFoundError
+from eneo.scim.schemas.group import ScimGroup
+from eneo.scim.schemas.user import ScimMeta
+from eneo.scim.services.group_service import ScimGroupService
+from eneo.server.main import app
 
 TEST_TOKEN = "test-scim-token"
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}

@@ -4,9 +4,9 @@ import jwt
 import pytest
 from pydantic import ValidationError
 
-from intric.authentication.auth_service import AuthService
-from intric.main.config import get_settings
-from intric.main.exceptions import AuthenticationException
+from eneo.authentication.auth_service import AuthService
+from eneo.main.config import get_settings
+from eneo.main.exceptions import AuthenticationException
 from tests.fixtures import TEST_USER
 
 JWT_ALGORITHM = get_settings().jwt_algorithm

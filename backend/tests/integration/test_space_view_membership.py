@@ -25,10 +25,10 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.main.models import ModelId
-from intric.roles.role import RoleCreate
-from intric.spaces.api.space_models import SpaceRoleValue
-from intric.users.user import UserAdd, UserState
+from eneo.main.models import ModelId
+from eneo.roles.role import RoleCreate
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.users.user import UserAdd, UserState
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 

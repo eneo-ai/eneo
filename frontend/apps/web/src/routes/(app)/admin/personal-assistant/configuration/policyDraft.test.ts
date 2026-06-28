@@ -10,7 +10,7 @@ describe("PolicyDraft", () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();
     draft.sync({
-      intric: { governancePolicy: { update } } as never,
+      eneo: { governancePolicy: { update } } as never,
       policy: {
         models_restriction: { enabled: false, models: [], provider_ids: [] },
         mcp_restriction: {

@@ -3,7 +3,7 @@
 export const ssr = false;
 
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   try {
     // Read filter parameters from URL (aligned with backend API)
@@ -22,7 +22,7 @@ export const load = async (event) => {
     // Fetch audit logs and retention policy in parallel
     // Session cookie (if present) is automatically sent with request
     const [response, retentionPolicy] = await Promise.all([
-      intric.audit.list({
+      eneo.audit.list({
         page,
         page_size,
         from_date,
@@ -33,7 +33,7 @@ export const load = async (event) => {
         actor_id,
         search
       }),
-      intric.audit.getRetentionPolicy()
+      eneo.audit.getRetentionPolicy()
     ]);
 
     return {
@@ -59,7 +59,7 @@ export const load = async (event) => {
     // Fetch retention policy separately (doesn't require session)
     let retentionPolicy = null;
     try {
-      retentionPolicy = await intric.audit.getRetentionPolicy();
+      retentionPolicy = await eneo.audit.getRetentionPolicy();
     } catch (err) {
       console.error("Failed to fetch retention policy:", err);
     }

@@ -15,7 +15,7 @@ import pytest
 from uuid import uuid4
 from httpx import AsyncClient
 
-from intric.tenants.crawler_settings_helper import (
+from eneo.tenants.crawler_settings_helper import (
     get_crawler_setting,
     get_all_crawler_settings,
     CRAWLER_SETTING_SPECS,

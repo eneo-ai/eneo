@@ -1,12 +1,12 @@
 /*
  * Copyright (c) 2026 Sundsvalls Kommun
  *
- * Build a `model_id -> rate` lookup map from the result of `intric.models.list()`.
+ * Build a `model_id -> rate` lookup map from the result of `eneo.models.list()`.
  * Used by token-stats tables to apply the *current* ratecard to *historical*
  * token counts. Transcription models intentionally absent — they're priced per
  * minute of audio, not per token, and the token-stats endpoint deals in tokens.
  */
-import type { CompletionModel, EmbeddingModel } from "@intric/intric-js";
+import type { CompletionModel, EmbeddingModel } from "@eneo/eneo-js";
 import type { CostFieldValue } from "./formatModelStats";
 
 export interface CostRate {

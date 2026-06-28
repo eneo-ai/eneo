@@ -797,7 +797,7 @@ your public URL.
    # In backend container
    cd backend
    uv run python -c "
-   from src.intric.embedding_models.infrastructure.create_embeddings_service import create_embeddings
+   from src.eneo.embedding_models.infrastructure.create_embeddings_service import create_embeddings
    print('Testing embeddings...')
    "
    ```
@@ -951,7 +951,7 @@ your public URL.
 1. **Verify development mode**:
    ```bash
    cd backend
-   uv run uvicorn src.intric.server.main:app --reload --host 0.0.0.0 --port 8000
+   uv run uvicorn src.eneo.server.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 2. **Check file watching**:

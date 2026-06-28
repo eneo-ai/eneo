@@ -2,10 +2,10 @@
   import { createEventDispatcher } from "svelte";
   import type { FileSystemEntry, FileSystemDirectoryEntry, FileSystemFileEntry } from "./types.js";
   import { Button } from "$lib/Button/index.js";
-  import { IconFile } from "@intric/icons/file";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconUploadCloud } from "@intric/icons/upload-cloud";
-  import { IconDropFile } from "@intric/icons/drop-file";
+  import { IconFile } from "@eneo/icons/file";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconUploadCloud } from "@eneo/icons/upload-cloud";
+  import { IconDropFile } from "@eneo/icons/drop-file";
 
   /** Name of the file input field, defaults to `dropzoneInput` */
   export let name = "dropzoneInput";

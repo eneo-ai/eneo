@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.authentication.api_key_policy import ApiKeyPolicyService
-from intric.authentication.api_key_request_context import resolve_client_ip
-from intric.authentication.api_key_resolver import ApiKeyValidationError
-from intric.authentication.auth_models import (
+from eneo.authentication.api_key_policy import ApiKeyPolicyService
+from eneo.authentication.api_key_request_context import resolve_client_ip
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_models import (
     ApiKeyCreateRequest,
     ApiKeyPermission,
     ApiKeyScopeType,
@@ -14,7 +14,7 @@ from intric.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
 
 
 class DummySpaceService:

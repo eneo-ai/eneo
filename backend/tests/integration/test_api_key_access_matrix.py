@@ -1954,7 +1954,7 @@ async def test_keys_revoked_on_user_deactivation(
 
     # 4. Verify keys are revoked in DB
     async with db_container() as container:
-        from intric.authentication.auth_models import ApiKeyState
+        from eneo.authentication.auth_models import ApiKeyState
 
         api_key_repo = container.api_key_v2_repo()
         user = await container.user_repo().get_user_by_email(email)
@@ -2014,7 +2014,7 @@ async def test_space_keys_revoked_on_member_removal(
 
     # 5. Verify: key_a revoked, key_b untouched
     async with db_container() as container:
-        from intric.authentication.auth_models import ApiKeyState
+        from eneo.authentication.auth_models import ApiKeyState
 
         api_key_repo = container.api_key_v2_repo()
         user = await container.user_repo().get_user_by_email(email)
@@ -2257,7 +2257,7 @@ async def test_assistant_key_revoked_on_member_removal(
 
     # 5. Verify: key_a revoked, key_b untouched
     async with db_container() as container:
-        from intric.authentication.auth_models import ApiKeyState
+        from eneo.authentication.auth_models import ApiKeyState
 
         api_key_repo = container.api_key_v2_repo()
         user = await container.user_repo().get_user_by_email(email)
@@ -2314,7 +2314,7 @@ async def test_invited_user_key_rejected(
 
     # 4. Set user state to INVITED via direct DB update
     async with db_container() as container:
-        from intric.users.user import UserState, UserUpdatePublic
+        from eneo.users.user import UserState, UserUpdatePublic
 
         user_service = container.user_service()
         await user_service.update_user(

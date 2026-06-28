@@ -8,7 +8,7 @@
 -->
 
 <script lang="ts">
-  import { Tooltip } from "@intric/ui";
+  import { Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let label: string;

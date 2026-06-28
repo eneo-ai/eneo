@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Page } from "$lib/components/layout";
-  import { Button, Input } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { Button, Input } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import EditService from "./EditService.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { m } from "$lib/paraglide/messages";
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     state: { currentSpace }
   } = getSpacesManager();
@@ -21,7 +21,7 @@
   async function runService() {
     runningService = true;
     try {
-      const result = await intric.services.run({ service: data.service, input: playgroundInput });
+      const result = await eneo.services.run({ service: data.service, input: playgroundInput });
       if (typeof result === "string") {
         playgroundOutput = result;
       } else {

@@ -206,10 +206,10 @@ Navigate to `https://your-domain.com`
 
     ```bash
     # Development (with uv)
-    uv run python -m intric.cli.generate_encryption_key
+    uv run python -m eneo.cli.generate_encryption_key
 
     # Production (Docker)
-    docker compose run --rm backend python -m intric.cli.generate_encryption_key
+    docker compose run --rm backend python -m eneo.cli.generate_encryption_key
 
     # Alternative (Python)
     python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'

@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { ServiceSparse } from "@intric/intric-js";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconMove } from "@intric/icons/move";
-  import { Button, Dialog, Dropdown, Select } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { ServiceSparse } from "@eneo/eneo-js";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconMove } from "@eneo/icons/move";
+  import { Button, Dialog, Dropdown, Select } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
@@ -19,11 +19,11 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   async function deleteService() {
     isProcessing = true;
     try {
-      await intric.services.delete(service);
+      await eneo.services.delete(service);
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
@@ -37,7 +37,7 @@
     if (!moveDestination) return;
     isProcessing = true;
     try {
-      await intric.services.transfer({
+      await eneo.services.transfer({
         service,
         moveResources: false,
         targetSpace: moveDestination

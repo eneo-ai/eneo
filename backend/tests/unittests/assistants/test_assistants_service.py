@@ -6,20 +6,20 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.api.assistant_models import (
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
-from intric.assistants.assistant_service import AssistantService
-from intric.main.exceptions import (
+from eneo.assistants.assistant_service import AssistantService
+from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
     UnauthorizedException,
 )
-from intric.main.models import ModelId
-from intric.prompts.api.prompt_models import PromptCreate
+from eneo.main.models import ModelId
+from eneo.prompts.api.prompt_models import PromptCreate
 from tests.fixtures import (
     TEST_ASSISTANT,
     TEST_COLLECTION,
@@ -575,7 +575,7 @@ def _mock_file(file_type, parent_file_id=None):
 async def test_vision_derivatives_expand_completion_files_and_attachments(
     setup: Setup,
 ):
-    from intric.files.file_models import FileType
+    from eneo.files.file_models import FileType
 
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
@@ -601,7 +601,7 @@ async def test_vision_derivatives_expand_completion_files_and_attachments(
 
 
 async def test_vision_derivatives_skip_everything_without_vision(setup: Setup):
-    from intric.files.file_models import FileType
+    from eneo.files.file_models import FileType
 
     pdf = _mock_file(FileType.TEXT)
     assistant = MagicMock()
@@ -624,7 +624,7 @@ async def test_vision_derivatives_gate_on_effective_model_not_configured(
 ):
     """Governance can steer to a different model than the assistant's own —
     derived images must follow the model that actually answers."""
-    from intric.files.file_models import FileType
+    from eneo.files.file_models import FileType
 
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
@@ -645,7 +645,7 @@ async def test_vision_derivatives_gate_on_effective_model_not_configured(
 
 
 async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
-    from intric.files.file_models import FileType
+    from eneo.files.file_models import FileType
 
     pdf_one = _mock_file(FileType.TEXT)
     pdf_two = _mock_file(FileType.TEXT)
@@ -668,7 +668,7 @@ async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
 
 
 async def test_history_derivatives_do_not_duplicate_present_images(setup: Setup):
-    from intric.files.file_models import FileType
+    from eneo.files.file_models import FileType
 
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)

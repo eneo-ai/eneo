@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 @pytest.fixture(autouse=True)
 def enable_tenant_credentials(test_settings):
     """Enable tenant credentials feature for all tests in this module."""
-    from intric.main.config import set_settings
+    from eneo.main.config import set_settings
 
     enabled_settings = test_settings.model_copy(
         update={"tenant_credentials_enabled": True}
@@ -77,7 +77,7 @@ async def test_municipality_admin_sets_api_key(
     # Step 2: Verify stored in database
     # Note: The credential is encrypted in the database, so we can't directly compare values
     # We verify it exists and was persisted correctly
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.tenants.tenant_repo import TenantRepository
 
     repo = TenantRepository(async_session)
     tenant = await repo.get(tenant_id)
@@ -182,7 +182,7 @@ async def test_azure_with_data_residency(
     assert azure_cred["config"]["deployment_name"] == "gpt-4-sweden"
 
     # Verify encrypted in database
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.tenants.tenant_repo import TenantRepository
 
     repo = TenantRepository(async_session)
     tenant = await repo.get(tenant_id)
@@ -259,7 +259,7 @@ async def test_multi_provider_configuration(
         assert cred["masked_key"] is not None
 
     # Verify in database
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.tenants.tenant_repo import TenantRepository
 
     repo = TenantRepository(async_session)
     tenant = await repo.get(tenant_id)
@@ -340,9 +340,9 @@ async def test_backward_compatibility(
 
     # Set global API key by directly modifying settings
     # (monkeypatch.setenv won't work because Settings was already instantiated)
-    from intric.main.config import get_settings
-    from intric.settings.credential_resolver import CredentialResolver
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.main.config import get_settings
+    from eneo.settings.credential_resolver import CredentialResolver
+    from eneo.tenants.tenant_repo import TenantRepository
 
     global_key = "sk-global-key-789abc"
     settings = get_settings()
@@ -475,8 +475,8 @@ async def test_strict_error_handling_no_fallback(
         )
 
     # Verify CredentialResolver does NOT fall back (outside the mock context)
-    from intric.settings.credential_resolver import CredentialResolver
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.settings.credential_resolver import CredentialResolver
+    from eneo.tenants.tenant_repo import TenantRepository
 
     repo = TenantRepository(async_session, encryption_service=encryption_service)
     tenant = await repo.get(tenant_id)
@@ -557,8 +557,8 @@ async def test_credential_update_overwrites_existing(
     assert data["set_at"] != initial_set_at, "Timestamp should be updated"
 
     # Verify in database using CredentialResolver to decrypt
-    from intric.settings.credential_resolver import CredentialResolver
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.settings.credential_resolver import CredentialResolver
+    from eneo.tenants.tenant_repo import TenantRepository
 
     repo = TenantRepository(async_session, encryption_service=encryption_service)
     tenant = await repo.get(tenant_id)
@@ -699,7 +699,7 @@ async def test_cross_tenant_credential_isolation(
     """
     from uuid import uuid4
 
-    from intric.transcription_models.infrastructure import (
+    from eneo.transcription_models.infrastructure import (
         enable_transcription_models_service,
     )
 
@@ -763,16 +763,16 @@ async def test_cross_tenant_credential_isolation(
     assert response.status_code == 200
 
     # Verify credential isolation via CredentialResolver
-    from intric.main.config import get_settings
-    from intric.settings.credential_resolver import CredentialResolver
-    from intric.settings.encryption_service import EncryptionService
-    from intric.tenants.tenant_repo import TenantRepository
+    from eneo.main.config import get_settings
+    from eneo.settings.credential_resolver import CredentialResolver
+    from eneo.settings.encryption_service import EncryptionService
+    from eneo.tenants.tenant_repo import TenantRepository
 
     settings = get_settings()
     encryption_service = EncryptionService(settings)
 
     # Use a fresh session to see data committed by HTTP requests
-    from intric.database.database import sessionmanager
+    from eneo.database.database import sessionmanager
 
     async with sessionmanager.session() as session:
         async with session.begin():

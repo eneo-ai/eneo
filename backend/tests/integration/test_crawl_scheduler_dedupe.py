@@ -5,16 +5,16 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.ai_models_table import EmbeddingModels
-from intric.database.tables.job_table import Jobs
-from intric.database.tables.websites_table import CrawlRuns as CrawlRunsTable
-from intric.database.tables.websites_table import Websites as WebsitesTable
-from intric.jobs.job_models import Task
-from intric.main.models import Status
-from intric.websites.domain.crawl_run import CrawlType
-from intric.websites.domain.website import UpdateInterval
-from intric.websites.domain.website_sparse_repo import WebsiteSparseRepository
-from intric.worker.crawl_tasks import _get_primary_active_job_id
+from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+from eneo.database.tables.websites_table import Websites as WebsitesTable
+from eneo.jobs.job_models import Task
+from eneo.main.models import Status
+from eneo.websites.domain.crawl_run import CrawlType
+from eneo.websites.domain.website import UpdateInterval
+from eneo.websites.domain.website_sparse_repo import WebsiteSparseRepository
+from eneo.worker.crawl_tasks import _get_primary_active_job_id
 
 
 @pytest.mark.integration

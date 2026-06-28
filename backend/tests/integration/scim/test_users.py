@@ -12,9 +12,9 @@ import uuid
 
 import pytest
 
-from intric.database.tables.users_table import Users
-from intric.scim.repositories.user_repository import ScimUserRepository
-from intric.scim.schemas.common import ScimFilter, ScimSort
+from eneo.database.tables.users_table import Users
+from eneo.scim.repositories.user_repository import ScimUserRepository
+from eneo.scim.schemas.common import ScimFilter, ScimSort
 
 # ---------------------------------------------------------------------------
 # Repository-level integration tests
@@ -254,7 +254,7 @@ async def test_list_filter_unsupported_attribute_raises_invalid_filter(
     """RFC 7644 §3.4.2.2: unsupported filter attributes must surface as 400
     invalidFilter. Silently returning unfiltered results would mislead IdPs
     that depend on the filter for de-dup."""
-    from intric.scim.domain.errors import ScimInvalidFilterError
+    from eneo.scim.domain.errors import ScimInvalidFilterError
 
     async with db_session() as session:
         repo = ScimUserRepository(session)
@@ -423,8 +423,8 @@ async def test_list_filters_by_tenant(db_session, test_tenant):
     """list() returns only users for the given tenant_id — no cross-tenant leakage."""
     from dependency_injector import providers
 
-    from intric.main.container.container import Container
-    from intric.tenants.tenant import TenantBase
+    from eneo.main.container.container import Container
+    from eneo.tenants.tenant import TenantBase
 
     async with db_session() as session:
         container = Container(session=providers.Object(session))
@@ -645,8 +645,8 @@ async def test_create_logs_warning_when_tenant_has_no_default_role(
 
     from sqlalchemy import update
 
-    from intric.database.tables.tenant_table import Tenants
-    from intric.scim.repositories.user_repository import logger as repo_logger
+    from eneo.database.tables.tenant_table import Tenants
+    from eneo.scim.repositories.user_repository import logger as repo_logger
 
     async with db_session() as session:
         await session.execute(

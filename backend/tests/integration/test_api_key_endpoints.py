@@ -8,11 +8,11 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
-from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.main.config import get_settings, set_settings
-from intric.spaces.api.space_models import SpaceRoleValue
-from intric.users.user import UserAdd, UserState
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.main.config import get_settings, set_settings
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.users.user import UserAdd, UserState
 
 # Authenticated endpoint for guardrail/enforcement tests.
 # Must trigger the full API key auth chain (unlike /version which is public).

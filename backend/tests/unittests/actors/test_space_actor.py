@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intric.actors import SpaceAction, SpaceActor, SpaceResourceType
-from intric.modules.module import Modules
-from intric.roles.permissions import Permission
+from eneo.actors import SpaceAction, SpaceActor, SpaceResourceType
+from eneo.modules.module import Modules
+from eneo.roles.permissions import Permission
 
 # All tenant-level permissions — test users should have these by default
 # so tests focus on space-role logic, not tenant-permission blocking

@@ -6,9 +6,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.domain.action_types import ActionType
-from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
-from intric.authentication.auth_models import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
+from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyStateReasonCode,

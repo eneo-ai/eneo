@@ -17,7 +17,7 @@ class TestWatchdogPhase0ZombieReconciliation:
     @pytest.mark.asyncio
     async def test_reconciles_inflated_redis_counter(self):
         """Should reset Redis counter when it exceeds actual DB active jobs."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         tenant_id = uuid4()
         redis_mock = MagicMock()
@@ -31,7 +31,7 @@ class TestWatchdogPhase0ZombieReconciliation:
         settings_mock.tenant_worker_semaphore_ttl_seconds = 300
 
         with patch(
-            "intric.worker.feeder.watchdog.LuaScripts.reconcile_counter",
+            "eneo.worker.feeder.watchdog.LuaScripts.reconcile_counter",
             new_callable=AsyncMock,
             return_value="ok:5->2",
         ) as mock_reconcile:
@@ -47,7 +47,7 @@ class TestWatchdogPhase0ZombieReconciliation:
     @pytest.mark.asyncio
     async def test_skips_reconciliation_when_counts_match(self):
         """Should not reconcile when Redis counter matches DB."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -63,14 +63,14 @@ class TestWatchdogPhase0ZombieReconciliation:
     @pytest.mark.asyncio
     async def test_handles_cas_mismatch_gracefully(self):
         """Should handle CAS mismatch (concurrent modification) gracefully."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
         settings_mock.tenant_worker_semaphore_ttl_seconds = 300
 
         with patch(
-            "intric.worker.feeder.watchdog.LuaScripts.reconcile_counter",
+            "eneo.worker.feeder.watchdog.LuaScripts.reconcile_counter",
             new_callable=AsyncMock,
             return_value="mismatch:5->3",
         ):
@@ -93,7 +93,7 @@ class TestWatchdogPhase1KillExpired:
     @pytest.mark.asyncio
     async def test_identifies_expired_jobs_by_created_at(self):
         """Should identify jobs where created_at exceeds max_age."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -121,7 +121,7 @@ class TestWatchdogPhase1KillExpired:
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_expired_jobs(self):
         """Should return empty list when no jobs exceed max_age."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -140,7 +140,7 @@ class TestWatchdogPhase1KillExpired:
     @pytest.mark.asyncio
     async def test_tracks_jobs_for_slot_release(self):
         """Should track expired jobs with tenant_id for post-commit slot release."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -172,7 +172,7 @@ class TestWatchdogPhase2RescueStuck:
     @pytest.mark.asyncio
     async def test_identifies_stuck_jobs_by_stale_updated_at(self):
         """Should identify jobs with stale updated_at but fresh created_at."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -212,7 +212,7 @@ class TestWatchdogPhase2RescueStuck:
     @pytest.mark.asyncio
     async def test_excludes_expired_jobs_from_rescue(self):
         """Should NOT rescue jobs that are already expired (created_at > max_age)."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -244,7 +244,7 @@ class TestWatchdogPhase3FailLongRunning:
     @pytest.mark.asyncio
     async def test_identifies_long_running_in_progress_jobs(self):
         """Should identify IN_PROGRESS jobs exceeding timeout."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
@@ -276,7 +276,7 @@ class TestWatchdogSlotRelease:
     @pytest.mark.asyncio
     async def test_releases_slots_after_transaction_commit(self):
         """Should release slots OUTSIDE the DB transaction."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog, SlotReleaseJob
+        from eneo.worker.feeder.watchdog import OrphanWatchdog, SlotReleaseJob
 
         tenant_id = uuid4()
         job_id = uuid4()
@@ -289,7 +289,7 @@ class TestWatchdogSlotRelease:
         settings_mock.tenant_worker_semaphore_ttl_seconds = 300
 
         with patch(
-            "intric.worker.feeder.watchdog.LuaScripts.release_slot",
+            "eneo.worker.feeder.watchdog.LuaScripts.release_slot",
             new_callable=AsyncMock,
         ) as mock_release:
             watchdog = OrphanWatchdog(redis_mock, settings_mock)
@@ -303,14 +303,14 @@ class TestWatchdogSlotRelease:
     @pytest.mark.asyncio
     async def test_slot_release_is_best_effort(self):
         """Should not raise on Redis errors (best effort)."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog, SlotReleaseJob
+        from eneo.worker.feeder.watchdog import OrphanWatchdog, SlotReleaseJob
 
         redis_mock = MagicMock()
         settings_mock = MagicMock()
         settings_mock.tenant_worker_semaphore_ttl_seconds = 300
 
         with patch(
-            "intric.worker.feeder.watchdog.LuaScripts.release_slot",
+            "eneo.worker.feeder.watchdog.LuaScripts.release_slot",
             new_callable=AsyncMock,
             side_effect=Exception("Redis connection lost"),
         ):
@@ -329,7 +329,7 @@ class TestWatchdogOrchestration:
     @pytest.mark.asyncio
     async def test_runs_all_phases_in_order(self):
         """Should execute phases 0, 1, 2, 3.5, 3 in order within transaction."""
-        from intric.worker.feeder.watchdog import OrphanWatchdog
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
 
         redis_mock = MagicMock()
         redis_mock.scan_iter = AsyncMock(return_value=[])
@@ -350,7 +350,7 @@ class TestWatchdogOrchestration:
 
         async def mock_phase1(*args, **kwargs):
             execution_order.append("phase1")
-            from intric.worker.feeder.watchdog import Phase1Result
+            from eneo.worker.feeder.watchdog import Phase1Result
 
             return Phase1Result(
                 expired_job_ids=[], slots_to_release=[], orphaned_job_ids=[]
@@ -358,19 +358,19 @@ class TestWatchdogOrchestration:
 
         async def mock_phase2(*args, **kwargs):
             execution_order.append("phase2")
-            from intric.worker.feeder.watchdog import Phase2Result
+            from eneo.worker.feeder.watchdog import Phase2Result
 
             return Phase2Result(jobs_to_requeue=[], rescued_count=0)
 
         async def mock_phase3_5(*args, **kwargs):
             execution_order.append("phase3.5")
-            from intric.worker.feeder.watchdog import Phase3_5Result
+            from eneo.worker.feeder.watchdog import Phase3_5Result
 
             return Phase3_5Result(failed_job_ids=[], slots_to_release=[])
 
         async def mock_phase3(*args, **kwargs):
             execution_order.append("phase3")
-            from intric.worker.feeder.watchdog import Phase3Result
+            from eneo.worker.feeder.watchdog import Phase3Result
 
             return Phase3Result(failed_job_ids=[], slots_to_release=[])
 
@@ -381,7 +381,7 @@ class TestWatchdogOrchestration:
         watchdog._fail_long_running_jobs = mock_phase3
         watchdog._release_slots_safe = AsyncMock(return_value=0)
 
-        with patch("intric.database.database.sessionmanager") as mock_sm:
+        with patch("eneo.database.database.sessionmanager") as mock_sm:
             mock_session = MagicMock()
             mock_session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
             mock_session.begin = MagicMock(
@@ -404,7 +404,7 @@ class TestWatchdogOrchestration:
     @pytest.mark.asyncio
     async def test_slot_release_happens_after_db_commit(self):
         """Should release slots only AFTER transaction commits."""
-        from intric.worker.feeder.watchdog import (
+        from eneo.worker.feeder.watchdog import (
             OrphanWatchdog,
             Phase1Result,
             Phase2Result,
@@ -463,7 +463,7 @@ class TestWatchdogOrchestration:
         watchdog._fail_long_running_jobs = mock_phase3
         watchdog._release_slots_safe = track_slot_release
 
-        with patch("intric.database.database.sessionmanager") as mock_sm:
+        with patch("eneo.database.database.sessionmanager") as mock_sm:
             mock_session = MagicMock()
             mock_session.execute = AsyncMock(
                 return_value=MagicMock(fetchall=lambda: [], rowcount=0)

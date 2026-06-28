@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import { IconCheck } from "@intric/icons/check";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import type { SecurityClassification } from "@intric/intric-js";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import type { SecurityClassification } from "@eneo/eneo-js";
   import { createSelect } from "@melt-ui/svelte";
   import { m } from "$lib/paraglide/messages";
 

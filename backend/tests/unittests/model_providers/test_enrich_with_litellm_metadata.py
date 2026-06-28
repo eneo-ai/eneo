@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from intric.model_providers.domain import model_provider_service
+from eneo.model_providers.domain import model_provider_service
 
 
 def _patch_cost_map(fake: dict[str, dict[str, Any]]):

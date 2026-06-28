@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from "@intric/ui";
+  import { Button } from "@eneo/ui";
   import CreateAppBackdrop from "./CreateAppBackdrop.svelte";
   import { getTemplateController } from "../../TemplateController";
   import TemplateSmallPreviewGallery from "../gallery/TemplateSmallPreviewGallery.svelte";

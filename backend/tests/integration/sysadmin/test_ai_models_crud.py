@@ -13,7 +13,7 @@ Tests the system-wide AI model management endpoints that require super admin API
 import pytest
 import sqlalchemy as sa
 
-from intric.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
 
 
 @pytest.mark.integration
@@ -31,7 +31,7 @@ async def test_duplicate_display_name_race_returns_409(
         return None
 
     monkeypatch.setattr(
-        "intric.sysadmin.sysadmin_router.validate_unique_display_name", _noop
+        "eneo.sysadmin.sysadmin_router.validate_unique_display_name", _noop
     )
 
     payload = {
@@ -65,7 +65,7 @@ async def test_duplicate_display_name_race_returns_409(
         json=payload,
     )
     assert second.status_code == 409
-    assert second.json().get("intric_error_code") == 9017
+    assert second.json().get("eneo_error_code") == 9017
 
 
 @pytest.mark.integration
@@ -379,7 +379,7 @@ async def test_force_delete_completion_model_with_history_returns_400(
     converts the IntegrityError into MODEL_IN_USE (400) instead of letting
     it surface as a 500.
     """
-    from intric.database.tables.questions_table import Questions
+    from eneo.database.tables.questions_table import Questions
 
     create_data = {
         "name": "model-with-history",
@@ -421,9 +421,9 @@ async def test_force_delete_completion_model_with_history_returns_400(
     )
     assert response.status_code == 400
     body = response.json()
-    from intric.main.exceptions import ErrorCodes
+    from eneo.main.exceptions import ErrorCodes
 
-    assert body["intric_error_code"] == ErrorCodes.MODEL_IN_USE
+    assert body["eneo_error_code"] == ErrorCodes.MODEL_IN_USE
 
     # The model must still exist after the failed delete.
     async with db_container() as container:

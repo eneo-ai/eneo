@@ -43,7 +43,7 @@ repos:
         entry: bash backend/scripts/run_pyright_in_devcontainer.sh
         language: system
         types: [python]
-        files: ^backend/src/intric/
+        files: ^backend/src/eneo/
         pass_filenames: false
         stages: [pre-commit]
 

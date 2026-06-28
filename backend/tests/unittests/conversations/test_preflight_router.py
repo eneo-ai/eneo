@@ -8,18 +8,18 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from intric.audit.infrastructure.rate_limiting import (
+from eneo.audit.infrastructure.rate_limiting import (
     RateLimitExceededError,
     RateLimitResult,
     RateLimitServiceUnavailableError,
 )
-from intric.conversations.application.conversation_service import ConversationService
-from intric.conversations.conversation_models import (
+from eneo.conversations.application.conversation_service import ConversationService
+from eneo.conversations.conversation_models import (
     PreflightRequest,
     PreflightResponse,
 )
-from intric.conversations.conversations_router import preflight_tokens
-from intric.questions.question import ToolAssistant, UseTools
+from eneo.conversations.conversations_router import preflight_tokens
+from eneo.questions.question import ToolAssistant, UseTools
 
 
 def _make_request() -> Request:
@@ -76,11 +76,11 @@ async def test_preflight_router_returns_service_result():
     mock_validate = AsyncMock()
     with (
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=mock_validate,
         ),
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
     ):
@@ -112,11 +112,11 @@ async def test_preflight_router_propagates_session_id():
 
     with (
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
     ):
@@ -146,11 +146,11 @@ async def test_preflight_router_forwards_tool_assistant_id():
 
     with (
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=AsyncMock(),
         ),
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
     ):
@@ -181,11 +181,11 @@ async def test_preflight_router_raises_429_on_rate_limit():
     )
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=limiter,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=AsyncMock(),
         ),
     ):
@@ -213,11 +213,11 @@ async def test_preflight_router_falls_open_when_limiter_unavailable():
     )
     with (
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=limiter,
         ),
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=AsyncMock(),
         ),
     ):
@@ -241,11 +241,11 @@ async def test_preflight_router_propagates_scope_403():
     )
     with (
         patch(
-            "intric.conversations.conversations_router._validate_conversation_scope",
+            "eneo.conversations.conversations_router._validate_conversation_scope",
             new=scope_denied,
         ),
         patch(
-            "intric.conversations.conversations_router.enforce_rate_limit",
+            "eneo.conversations.conversations_router.enforce_rate_limit",
             new=AsyncMock(),
         ),
     ):

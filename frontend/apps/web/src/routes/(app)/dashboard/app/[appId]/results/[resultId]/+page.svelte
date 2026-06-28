@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { IconCopy } from "@intric/icons/copy";
-  import { IconDownload } from "@intric/icons/download";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
-  import { IconPrint } from "@intric/icons/print";
-  import { Button, Markdown, Tooltip } from "@intric/ui";
+  import { IconCopy } from "@eneo/icons/copy";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { IconPrint } from "@eneo/icons/print";
+  import { Button, Markdown, Tooltip } from "@eneo/ui";
   import dayjs from "dayjs";
   import utc from "dayjs/plugin/utc";
   import { getResultTitle } from "$lib/features/apps/getResultTitle.js";
   import AppResultStatus from "$lib/features/apps/components/AppResultStatus.svelte";
   import { onMount } from "svelte";
-  import { getIntricSocket } from "$lib/core/IntricSocket.js";
+  import { getEneoSocket } from "$lib/core/EneoSocket.js";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
-  import type { UploadedFile } from "@intric/intric-js";
+  import type { UploadedFile } from "@eneo/eneo-js";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
-  import { getIntric } from "$lib/core/Intric.js";
+  import { getEneo } from "$lib/core/Eneo.js";
   import { browser } from "$app/environment";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -26,8 +26,8 @@
 
   const { data } = $props();
 
-  const { subscribe } = getIntricSocket();
-  const intric = getIntric();
+  const { subscribe } = getEneoSocket();
+  const eneo = getEneo();
 
   const attachmentUrlService = getAttachmentUrlService();
 
@@ -95,12 +95,12 @@
 
     const unsubscriber = subscribe("app_run_updates", async (update) => {
       if (update.id === data.result.id) {
-        result = await intric.apps.runs.get(result);
+        result = await eneo.apps.runs.get(result);
       }
     });
 
     if (result.status === "queued") {
-      intric.apps.runs.get(result).then((updatedResult) => {
+      eneo.apps.runs.get(result).then((updatedResult) => {
         result = updatedResult;
       });
     }
@@ -248,7 +248,7 @@
         <div class="flex flex-col items-center justify-center gap-4 py-8">
           <span class="text-secondary">{m.app_run_failed_files_list()}</span>
           {#each result.input.files as file (file.id)}
-            {#await intric.files.generateSignedUrl( { fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" } ) then signedFile}
+            {#await eneo.files.generateSignedUrl( { fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" } ) then signedFile}
               <Button href={signedFile.url} variant="outlined">
                 <IconDownload />
                 {m.download()} "{file.name}"

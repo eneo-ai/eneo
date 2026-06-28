@@ -37,7 +37,7 @@ const PATTERNS = [
     messageId: "rawColor",
   },
   {
-    source: String.raw`var\(\s*--color-(?:ui|soil|moss|amethyst|pine|intric|white|black)[\w-]*`,
+    source: String.raw`var\(\s*--color-(?:ui|soil|moss|amethyst|pine|eneo|white|black)[\w-]*`,
     messageId: "rawColor",
   },
   {

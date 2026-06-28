@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from intric.integration.application.oauth2_service import Oauth2Service
-from intric.integration.presentation.models import IntegrationType
-from intric.main.exceptions import BadRequestException
+from eneo.integration.application.oauth2_service import Oauth2Service
+from eneo.integration.presentation.models import IntegrationType
+from eneo.main.exceptions import BadRequestException
 
 
 @pytest.fixture

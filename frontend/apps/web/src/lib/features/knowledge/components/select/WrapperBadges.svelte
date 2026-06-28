@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { IntegrationKnowledge } from "@intric/intric-js";
+  import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getWrapperCountBadges, type WrapperCountBadge } from "./knowledgeIntegration";

@@ -1,4 +1,4 @@
-const dynamicColours = ["intric", "pine", "moss", "amethyst", "blue"] as const;
+const dynamicColours = ["eneo", "pine", "moss", "amethyst", "blue"] as const;
 
 function generateColour(id: string) {
   let sum = 0;

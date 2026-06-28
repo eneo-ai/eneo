@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.main.models import ResourcePermission
-from intric.prompts.api.prompt_assembler import PromptAssembler
-from intric.prompts.prompt import Prompt
+from eneo.main.models import ResourcePermission
+from eneo.prompts.api.prompt_assembler import PromptAssembler
+from eneo.prompts.prompt import Prompt
 from tests.fixtures import TEST_USER
 
 

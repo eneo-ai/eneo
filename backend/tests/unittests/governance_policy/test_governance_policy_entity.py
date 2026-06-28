@@ -2,13 +2,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.governance_policy.domain.governance_policy import (
+from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyCompletionModel,
     PolicyMcpServer,
     PolicyScope,
 )
-from intric.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException
 
 
 def _empty_policy() -> GovernancePolicy:

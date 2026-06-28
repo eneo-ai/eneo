@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from intric.files.file_size_service import FileSizeService
-from intric.jobs.task_service import TaskService
+from eneo.files.file_size_service import FileSizeService
+from eneo.jobs.task_service import TaskService
 from tests.fixtures import TEST_USER
 
 
@@ -16,7 +16,7 @@ def tmp_upload_dir(tmp_path):
 
 @pytest.fixture
 def file_size_service(tmp_upload_dir, monkeypatch):
-    from intric.files import file_size_service as fss_module
+    from eneo.files import file_size_service as fss_module
 
     from types import SimpleNamespace
 

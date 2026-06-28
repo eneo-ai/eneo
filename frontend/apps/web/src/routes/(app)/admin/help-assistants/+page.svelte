@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Input } from "@intric/ui";
+  import { Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import HelpAssistantRow from "./HelpAssistantRow.svelte";
   import AddHelpAssistant from "./AddHelpAssistant.svelte";
@@ -41,7 +41,7 @@
   <Page.Header>
     <Page.Title title={m.admin_help_assistants_page_title()}></Page.Title>
     <Page.Flex>
-      <AddHelpAssistant templates={data.templates} intric={data.intric} />
+      <AddHelpAssistant templates={data.templates} eneo={data.eneo} />
     </Page.Flex>
   </Page.Header>
   <Page.Main>
@@ -79,7 +79,7 @@
                  the grouped-table look of the Models admin page. -->
             <div class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
               {#each filteredRoles as role (role.id)}
-                <HelpAssistantRow {role} intric={data.intric} />
+                <HelpAssistantRow {role} eneo={data.eneo} />
               {/each}
             </div>
           {/if}

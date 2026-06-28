@@ -11,9 +11,9 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import { Button, Tooltip } from "@intric/ui";
-  import { IconSparkles } from "@intric/icons/sparkles";
-  import { IconInfo } from "@intric/icons/info";
+  import { Button, Tooltip } from "@eneo/ui";
+  import { IconSparkles } from "@eneo/icons/sparkles";
+  import { IconInfo } from "@eneo/icons/info";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { fade } from "svelte/transition";
@@ -41,7 +41,7 @@
   } = untrack(() =>
     initAssistantEditor({
       assistant: data.assistant,
-      intric: data.intric,
+      eneo: data.eneo,
       onUpdateDone() {
         // Keep the admin table's displayed name fresh after a rename.
         invalidate("admin:help-assistants:load");
@@ -198,7 +198,7 @@
             <PromptVersionDialog
               title={m.prompt_history_for({ name: $resource.name })}
               loadPromptVersionHistory={() => {
-                return data.intric.assistants.listPrompts({ id: data.assistant.id });
+                return data.eneo.assistants.listPrompts({ id: data.assistant.id });
               }}
               onPromptSelected={(prompt) => {
                 const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
@@ -221,7 +221,7 @@
                   });
                   isModalOpen = false;
                   if (promptGuideRunId) {
-                    data.intric.helpAssistants.runs
+                    data.eneo.helpAssistants.runs
                       .setStatus({ run_id: promptGuideRunId, status: "completed" })
                       .catch(() => {});
                   }

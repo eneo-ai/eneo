@@ -4,11 +4,11 @@ import pytest
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from intric.audit.application.audit_service import AuditService
-from intric.audit.application.retention_service import RetentionService
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.application.retention_service import RetentionService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
 pytestmark = pytest.mark.integration
 
@@ -113,7 +113,7 @@ async def test_purge_old_logs(db_session, test_tenant, test_user):
 
     # Second session: Update old log timestamp
     async with db_session() as session:
-        from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
+        from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
         from sqlalchemy import update
 
         old_timestamp = datetime.utcnow() - timedelta(days=100)

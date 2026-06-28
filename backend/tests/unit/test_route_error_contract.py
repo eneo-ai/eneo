@@ -39,7 +39,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from starlette.routing import Mount
 
-from intric.main.exceptions import EXCEPTION_MAP
+from eneo.main.exceptions import EXCEPTION_MAP
 
 # Dependency __name__ (or require_permission's inner qualname) -> required code.
 # These raise HTTPException/UnauthorizedException/AuthenticationException directly
@@ -104,7 +104,7 @@ def _walk_routes(routes: list[Any], *, prefix: str = "") -> list[DiscoveredRoute
 
 
 def _routes() -> list[DiscoveredRoute]:
-    from intric.server.main import app
+    from eneo.server.main import app
 
     return _walk_routes(list(app.routes))
 

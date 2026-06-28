@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.main.exceptions import NotFoundException
-from intric.scim.services.token_service import ScimTokenService
-from intric.sysadmin.sysadmin_router import (
+from eneo.main.exceptions import NotFoundException
+from eneo.scim.services.token_service import ScimTokenService
+from eneo.sysadmin.sysadmin_router import (
     create_scim_token,
     delete_scim_token,
     delete_user,
@@ -25,7 +25,7 @@ from intric.sysadmin.sysadmin_router import (
     get_user,
     update_user,
 )
-from intric.users.user import UserUpdatePublic
+from eneo.users.user import UserUpdatePublic
 
 
 @pytest.fixture

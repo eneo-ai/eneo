@@ -17,7 +17,7 @@
 
   initTemplateController({
     adapter: createAppTemplateAdapter({
-      intric: data.intric,
+      eneo: data.eneo,
       currentSpaceId: $currentSpace.id
     }),
     allTemplates: data.allTemplates

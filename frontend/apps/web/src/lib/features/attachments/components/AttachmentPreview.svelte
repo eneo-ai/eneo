@@ -1,9 +1,9 @@
 <script lang="ts">
   import { browser } from "$app/environment";
-  import type { UploadedFile } from "@intric/intric-js";
-  import { IconDocument } from "@intric/icons/document";
-  import { Button, Dialog, Markdown } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { UploadedFile } from "@eneo/eneo-js";
+  import { IconDocument } from "@eneo/icons/document";
+  import { Button, Dialog, Markdown } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
 
@@ -15,7 +15,7 @@
   export let isOpen: Dialog.OpenState | undefined = undefined;
   export let children: Snippet<[{ showFile: () => void }]> | undefined = undefined;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let loadedContent: string | undefined = undefined;
   let signedUrl: string | undefined = undefined;
@@ -41,7 +41,7 @@
     loadError = false;
 
     try {
-      const response = await intric.files.generateSignedUrl({
+      const response = await eneo.files.generateSignedUrl({
         fileId: file.id,
         expiresIn: 3600,
         contentDisposition: "inline"
@@ -72,7 +72,7 @@
     if (!browser) return;
 
     try {
-      const response = await intric.files.generateSignedUrl({
+      const response = await eneo.files.generateSignedUrl({
         fileId: file.id,
         expiresIn: 3600,
         contentDisposition: "attachment"

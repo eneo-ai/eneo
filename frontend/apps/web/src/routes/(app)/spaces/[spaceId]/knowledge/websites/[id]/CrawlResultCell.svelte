@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { CrawlRun } from "@intric/intric-js";
-  import { Label } from "@intric/ui";
+  import type { CrawlRun } from "@eneo/eneo-js";
+  import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   export let crawl: CrawlRun;

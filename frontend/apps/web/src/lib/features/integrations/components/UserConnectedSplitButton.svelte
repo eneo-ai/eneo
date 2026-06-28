@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { getIntric } from "$lib/core/Intric";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { type UserIntegration } from "@intric/intric-js";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { IconCancel } from "@eneo/icons/cancel";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { type UserIntegration } from "@eneo/eneo-js";
+  import { Button, Dialog, Dropdown } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -14,7 +14,7 @@
   };
 
   const { integration, onDisconnect }: Props = $props();
-  const intric = getIntric();
+  const eneo = getEneo();
   const showDisconnectDialog = writable(false);
 
   async function disconnect() {
@@ -23,7 +23,7 @@
       toast.warning(m.integration_not_setup_correctly());
       return;
     }
-    await intric.integrations.user.disconnect({ id });
+    await eneo.integrations.user.disconnect({ id });
     onDisconnect?.(integration);
     $showDisconnectDialog = false;
   }

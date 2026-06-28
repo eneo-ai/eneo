@@ -1,16 +1,16 @@
 <script lang="ts">
-  import type { AssistantSparse } from "@intric/intric-js";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconMove } from "@intric/icons/move";
-  import { Button, Dialog, Dropdown, Input, Select } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import type { AssistantSparse } from "@eneo/eneo-js";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconMove } from "@eneo/icons/move";
+  import { Button, Dialog, Dropdown, Input, Select } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived, writable } from "svelte/store";
   import PublishingDialog from "$lib/features/publishing/components/PublishingDialog.svelte";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
+  import { IconArrowUpToLine } from "@eneo/icons/arrow-up-to-line";
+  import { IconArrowDownToLine } from "@eneo/icons/arrow-down-to-line";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -22,12 +22,12 @@
     refreshCurrentSpace
   } = getSpacesManager();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   async function deleteAssistant() {
     isProcessing = true;
     try {
-      await intric.assistants.delete(assistant);
+      await eneo.assistants.delete(assistant);
       refreshCurrentSpace("applications");
       $showDeleteDialog = false;
     } catch (e) {
@@ -41,7 +41,7 @@
     if (!moveDestination) return;
     isProcessing = true;
     try {
-      await intric.assistants.transfer({ assistant, moveResources, targetSpace: moveDestination });
+      await eneo.assistants.transfer({ assistant, moveResources, targetSpace: moveDestination });
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {
@@ -188,7 +188,7 @@
 
 <PublishingDialog
   resource={assistant}
-  endpoints={intric.assistants}
+  endpoints={eneo.assistants}
   openController={showPublishDialog}
   resourceKind="assistant"
   awaitUpdate

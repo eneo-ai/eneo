@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.group_chat.domain.factories.group_chat_factory import GroupChatFactory
+from eneo.group_chat.domain.factories.group_chat_factory import GroupChatFactory
 
 
 def _mapping(assistant_id, user_description="desc"):

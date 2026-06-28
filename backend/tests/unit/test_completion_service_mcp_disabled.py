@@ -16,14 +16,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     Context,
     ResponseType,
 )
-from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
 
 class _DummyContextBuilder:

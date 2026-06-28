@@ -5,12 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from intric.audit.application.audit_config_service import (
+from eneo.audit.application.audit_config_service import (
     AUDIT_CONFIG_CACHE_TTL,
     AuditConfigService,
 )
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.category_mappings import (
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
 )
 
@@ -57,7 +57,7 @@ def mock_redis():
 def config_service(mock_repository, mock_redis):
     """Create AuditConfigService with mocked dependencies."""
     with patch(
-        "intric.audit.application.audit_config_service.get_redis",
+        "eneo.audit.application.audit_config_service.get_redis",
         return_value=mock_redis,
     ):
         service = AuditConfigService(mock_repository)
@@ -282,7 +282,7 @@ class TestUpdateConfig:
         tenant_id = uuid4()
         mock_repository.find_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
+        from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 
         updates = [
             CategoryUpdate(category="admin_actions", enabled=False),
@@ -302,8 +302,8 @@ class TestUpdateConfig:
         tenant_id = uuid4()
         mock_repository.find_by_tenant.return_value = []
 
-        from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
+        from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
+        from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 
         updates = [CategoryUpdate(category="admin_actions", enabled=False)]
 
@@ -335,7 +335,7 @@ class TestUpdateConfig:
         tenant_id = uuid4()
         mock_repository.find_by_tenant.return_value = [("admin_actions", False)]
 
-        from intric.audit.schemas.audit_config_schemas import CategoryUpdate
+        from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 
         updates = [CategoryUpdate(category="admin_actions", enabled=False)]
 
@@ -555,7 +555,7 @@ class TestUpdateActionConfig:
         )
         mock_repository.find_all_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import ActionUpdate
+        from eneo.audit.schemas.audit_config_schemas import ActionUpdate
 
         updates = [ActionUpdate(action="user_created", enabled=False)]
 
@@ -580,7 +580,7 @@ class TestUpdateActionConfig:
         )
         mock_repository.find_all_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import ActionUpdate
+        from eneo.audit.schemas.audit_config_schemas import ActionUpdate
 
         updates = [ActionUpdate(action="user_created", enabled=False)]
 
@@ -602,7 +602,7 @@ class TestUpdateActionConfig:
         )
         mock_repository.find_all_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import ActionUpdate
+        from eneo.audit.schemas.audit_config_schemas import ActionUpdate
 
         updates = [ActionUpdate(action="user_created", enabled=False)]
 
@@ -620,7 +620,7 @@ class TestUpdateActionConfig:
         )
         mock_repository.find_all_by_tenant.return_value = []
 
-        from intric.audit.schemas.audit_config_schemas import ActionUpdate
+        from eneo.audit.schemas.audit_config_schemas import ActionUpdate
 
         updates = [ActionUpdate(action="user_created", enabled=False)]
 

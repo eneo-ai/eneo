@@ -1,4 +1,4 @@
-import { IntricError } from "@intric/intric-js";
+import { EneoError } from "@eneo/eneo-js";
 import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { m } from "$lib/paraglide/messages";
 
@@ -11,7 +11,7 @@ import { m } from "$lib/paraglide/messages";
  * @param error  The caught error
  */
 export function getUploadErrorMessage(error: unknown): string {
-  if (error instanceof IntricError && error.code === 9015) {
+  if (error instanceof EneoError && error.code === 9015) {
     const details = error.response?.details;
     if (details && typeof details === "object") {
       const fileSize = Number(details.file_size_bytes);
@@ -26,7 +26,7 @@ export function getUploadErrorMessage(error: unknown): string {
     return error.getReadableMessage();
   }
 
-  if (error instanceof IntricError) {
+  if (error instanceof EneoError) {
     return error.getReadableMessage();
   }
 

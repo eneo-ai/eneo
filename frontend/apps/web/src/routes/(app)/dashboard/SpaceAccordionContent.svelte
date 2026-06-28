@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createAccordion } from "@melt-ui/svelte";
   import { slide } from "svelte/transition";
-  import { IconChevronRight } from "@intric/icons/chevron-right";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import DashboardTile from "./DashboardTile.svelte";
   import DashboardAppTile from "./DashboardAppTile.svelte";
-  import type { Dashboard } from "@intric/intric-js";
+  import type { Dashboard } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
   type SpaceDashboard = Dashboard["spaces"]["items"][number];

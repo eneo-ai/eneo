@@ -7,7 +7,7 @@
 import type { PageLoad } from "./$types";
 
 export const load: PageLoad = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   event.depends("admin:templates:load");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,25 +20,25 @@ export const load: PageLoad = async (event) => {
   let deletedAppTemplates: any = { items: [] };
 
   try {
-    assistantTemplates = await intric.templates.admin.listAssistants();
+    assistantTemplates = await eneo.templates.admin.listAssistants();
   } catch (error) {
     console.error("Failed to fetch assistant templates:", error);
   }
 
   try {
-    appTemplates = await intric.templates.admin.listApps();
+    appTemplates = await eneo.templates.admin.listApps();
   } catch (error) {
     console.error("Failed to fetch app templates:", error);
   }
 
   try {
-    deletedAssistantTemplates = await intric.templates.admin.listDeletedAssistants();
+    deletedAssistantTemplates = await eneo.templates.admin.listDeletedAssistants();
   } catch (error) {
     console.error("Failed to fetch deleted assistant templates:", error);
   }
 
   try {
-    deletedAppTemplates = await intric.templates.admin.listDeletedApps();
+    deletedAppTemplates = await eneo.templates.admin.listDeletedApps();
   } catch (error) {
     console.error("Failed to fetch deleted app templates:", error);
   }

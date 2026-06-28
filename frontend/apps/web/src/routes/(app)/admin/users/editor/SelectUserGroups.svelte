@@ -5,11 +5,11 @@
 -->
 
 <script lang="ts">
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconSelectedItem } from "@intric/icons/selected-item";
-  import { Button } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
-  import type { UserGroup } from "@intric/intric-js";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconSelectedItem } from "@eneo/icons/selected-item";
+  import { Button } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { UserGroup } from "@eneo/eneo-js";
   import { createCombobox } from "@melt-ui/svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
@@ -19,7 +19,7 @@
   export let userGroups: UserGroup[];
   export let user: { id: string };
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const {
     elements: { menu, input, option },
@@ -32,7 +32,7 @@
 
   async function removeFromGroup(group: UserGroup) {
     try {
-      const success = await intric.userGroups.removeUser({ userGroup: group, user });
+      const success = await eneo.userGroups.removeUser({ userGroup: group, user });
       if (success) {
         const index = selectedGroups.findIndex((current) => current.id === group.id);
         selectedGroups = selectedGroups.toSpliced(index, 1);
@@ -53,7 +53,7 @@
           return;
         }
 
-        const success = await intric.userGroups.addUser({ userGroup: group, user });
+        const success = await eneo.userGroups.addUser({ userGroup: group, user });
         if (success) {
           selectedGroups = [...selectedGroups, group];
           $selected = undefined;

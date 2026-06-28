@@ -34,7 +34,7 @@ sudo chown vscode:vscode /workspace/backend/.venv
 # Use --reinstall-package to ensure the project entry points are up-to-date
 # even when the .venv volume persists across container rebuilds
 cd /workspace/backend
-uv sync --reinstall-package intric
+uv sync --reinstall-package eneo
 
 # Install pre-commit globally and setup hooks
 cd /workspace

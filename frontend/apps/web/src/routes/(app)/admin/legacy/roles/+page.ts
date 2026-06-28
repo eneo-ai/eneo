@@ -7,11 +7,11 @@
 export const load = async (event) => {
   event.depends("admin:roles:load");
 
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   const [roles, permissions, templates] = await Promise.all([
-    intric.roles.list(),
-    intric.roles.listPermissions(),
-    intric.roles.listTemplates()
+    eneo.roles.list(),
+    eneo.roles.listPermissions(),
+    eneo.roles.listTemplates()
   ]);
 
   return { allRoles: [...roles.roles, ...roles.predefined_roles], permissions, templates };

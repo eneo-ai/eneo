@@ -5,20 +5,20 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     Message,
     MessageToolCall,
 )
-from intric.completion_models.infrastructure.context_builder import (
+from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
     count_tokens,
 )
-from intric.completion_models.infrastructure.static_prompts import (
+from eneo.completion_models.infrastructure.static_prompts import (
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
 )
-from intric.files.file_models import File, FileType
-from intric.questions.question import ToolCallInfo
+from eneo.files.file_models import File, FileType
+from eneo.questions.question import ToolCallInfo
 
 QUESTION = "I have a question"
 
@@ -612,8 +612,8 @@ def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
 def test_oversized_attachment_is_truncated_with_notice(
     context_builder: ContextBuilder, monkeypatch: pytest.MonkeyPatch
 ):
-    from intric.completion_models.infrastructure import context_builder as cb_module
-    from intric.completion_models.infrastructure.context_builder import (
+    from eneo.completion_models.infrastructure import context_builder as cb_module
+    from eneo.completion_models.infrastructure.context_builder import (
         ATTACHMENT_TRUNCATION_NOTICE,
         build_files_string,
     )
@@ -633,7 +633,7 @@ def test_oversized_attachment_is_truncated_with_notice(
 
 
 def test_truncation_stays_within_budget_including_notice():
-    from intric.completion_models.infrastructure.context_builder import (
+    from eneo.completion_models.infrastructure.context_builder import (
         ATTACHMENT_TRUNCATION_NOTICE,
         _truncate_to_tokens,
     )

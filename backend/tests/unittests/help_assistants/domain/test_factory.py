@@ -1,15 +1,15 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from intric.help_assistants.domain.assignment_history import AssignmentHistory
-from intric.help_assistants.domain.assignment_history_reason import (
+from eneo.help_assistants.domain.assignment_history import AssignmentHistory
+from eneo.help_assistants.domain.assignment_history_reason import (
     AssignmentHistoryReason,
 )
-from intric.help_assistants.domain.factory import HelperAssistantsFactory
-from intric.help_assistants.domain.helper_kind import HelperKind
-from intric.help_assistants.domain.helper_run import HelperRun
-from intric.help_assistants.domain.helper_run_status import HelperRunStatus
-from intric.help_assistants.domain.role_assignment import RoleAssignment
+from eneo.help_assistants.domain.factory import HelperAssistantsFactory
+from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.help_assistants.domain.helper_run import HelperRun
+from eneo.help_assistants.domain.helper_run_status import HelperRunStatus
+from eneo.help_assistants.domain.role_assignment import RoleAssignment
 
 
 def test_create_role_assignment_returns_entity_with_db_defaults_blank():

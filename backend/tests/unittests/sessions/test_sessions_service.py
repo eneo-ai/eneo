@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.assistants.api.assistant_models import AssistantSparse
-from intric.main.exceptions import NotFoundException, UnauthorizedException
-from intric.sessions.session import SessionInDB, SessionUpdate
-from intric.sessions.session_service import SessionService
+from eneo.assistants.api.assistant_models import AssistantSparse
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.sessions.session import SessionInDB, SessionUpdate
+from eneo.sessions.session_service import SessionService
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_ASSISTANT = AssistantSparse(

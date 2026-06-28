@@ -1,6 +1,6 @@
 <script lang="ts">
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
 
   interface Props {
     message?: string;
@@ -16,7 +16,7 @@
     aria-live="polite"
     aria-busy="true"
   >
-    <EneoWordMark class="text-brand-intric h-8 w-20"></EneoWordMark>
+    <EneoWordMark class="text-brand-eneo h-8 w-20"></EneoWordMark>
     <IconLoadingSpinner class="animate-spin" aria-hidden="true" />
     <p class="text-dimmer text-sm">{message}</p>
   </div>

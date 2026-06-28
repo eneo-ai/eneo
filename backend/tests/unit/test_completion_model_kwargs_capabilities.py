@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.ai_models.completion_models.completion_model import (
+from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
     CompletionModelCreate,
     CompletionModelPublic,
@@ -17,13 +17,13 @@ from intric.ai_models.completion_models.completion_model import (
     CompletionModelUpdate,
     ModelKwargs,
 )
-from intric.completion_models.domain.completion_model import (
+from eneo.completion_models.domain.completion_model import (
     CompletionModel as CompletionModelDomain,
 )
-from intric.completion_models.domain.model_kwargs_capabilities import (
+from eneo.completion_models.domain.model_kwargs_capabilities import (
     snapshot_supported_model_kwargs,
 )
-from intric.completion_models.presentation.completion_model_assembler import (
+from eneo.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
 
@@ -252,7 +252,7 @@ def test_invalid_stored_capability_metadata_falls_back(
 
     with caplog.at_level(
         logging.WARNING,
-        logger="intric.completion_models.domain.model_kwargs_capabilities",
+        logger="eneo.completion_models.domain.model_kwargs_capabilities",
     ):
         model = CompletionModelSparse.model_validate(source_model)
 

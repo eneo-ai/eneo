@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from intric.embedding_models.infrastructure.datastore import Datastore
+from eneo.embedding_models.infrastructure.datastore import Datastore
 from tests.fixtures import TEST_COLLECTION
 
 
@@ -17,7 +17,7 @@ def datastore_with_mocks():
 
 async def test_semantic_search(datastore: Datastore):
     with patch(
-        "intric.embedding_models.infrastructure.datastore.autocut",
+        "eneo.embedding_models.infrastructure.datastore.autocut",
     ) as autocut_mock:
         await datastore.semantic_search(
             search_string="giraffe",

@@ -5,14 +5,14 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { Intric } from "@intric/intric-js";
+  import type { Eneo } from "@eneo/eneo-js";
   import { initAttachmentManager } from "../AttachmentManager";
   import AttachmentUploadIconButton from "./AttachmentUploadIconButton.svelte";
 
-  type Props = { intric: Intric };
-  const { intric }: Props = $props();
+  type Props = { eneo: Eneo };
+  const { eneo }: Props = $props();
 
-  initAttachmentManager({ intric: untrack(() => intric) });
+  initAttachmentManager({ eneo: untrack(() => eneo) });
 </script>
 
 <AttachmentUploadIconButton />

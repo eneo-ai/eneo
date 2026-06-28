@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconCheck } from "@intric/icons/check";
+  import { IconCheck } from "@eneo/icons/check";
   import type { PublishableResource } from "../Publisher";
 
   export let resource: PublishableResource;

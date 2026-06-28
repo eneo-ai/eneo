@@ -21,7 +21,7 @@ import pytest
 from httpx import AsyncClient
 from uuid import uuid4
 
-from intric.tenants.crawler_settings_helper import get_crawler_setting
+from eneo.tenants.crawler_settings_helper import get_crawler_setting
 
 
 @pytest.mark.asyncio

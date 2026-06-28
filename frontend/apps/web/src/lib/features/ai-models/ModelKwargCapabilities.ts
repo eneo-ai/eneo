@@ -3,7 +3,7 @@ import type {
   ModelKwargCapability,
   ModelKwargs,
   SupportedModelKwargs
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 
 export type { ModelKwargCapability, SupportedModelKwargs };
 

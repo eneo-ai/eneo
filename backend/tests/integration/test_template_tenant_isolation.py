@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from intric.database.database import sessionmanager
+from eneo.database.database import sessionmanager
 
 # Helper functions for test setup
 

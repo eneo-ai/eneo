@@ -4,12 +4,12 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import type { SuperApiKeyStatus } from "@intric/intric-js";
+  import type { SuperApiKeyStatus } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let loading = $state(false);
   let errorMessage = $state<string | null>(null);
@@ -19,7 +19,7 @@
     loading = true;
     errorMessage = null;
     try {
-      status = await intric.apiKeys.admin.getSuperKeyStatus();
+      status = await eneo.apiKeys.admin.getSuperKeyStatus();
     } catch (error) {
       console.error(error);
       errorMessage = getErrorMessage(error);

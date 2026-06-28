@@ -3,7 +3,7 @@
   import { CalendarDate, type DateValue } from "@internationalized/date";
   import Button from "$lib/Button/Button.svelte";
   import { Tooltip } from "$lib/Tooltip/index.js";
-  import { IconCalendar } from "@intric/icons/calendar";
+  import { IconCalendar } from "@eneo/icons/calendar";
   import { cva } from "class-variance-authority";
   import { getUIMessage } from "$lib/utils/messages.js";
 

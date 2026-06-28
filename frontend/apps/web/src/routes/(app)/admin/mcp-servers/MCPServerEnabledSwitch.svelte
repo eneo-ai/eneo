@@ -6,8 +6,8 @@
 
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
-  import { Input, Tooltip } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { Input, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -20,14 +20,14 @@
 
   const { mcpServer }: Props = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   async function toggleEnabled() {
     try {
       if (mcpServer.is_org_enabled) {
-        await intric.mcpServers.disable({ mcp_server_id: mcpServer.mcp_server_id });
+        await eneo.mcpServers.disable({ mcp_server_id: mcpServer.mcp_server_id });
       } else {
-        await intric.mcpServers.enable({ mcp_server_id: mcpServer.mcp_server_id, env_vars: {} });
+        await eneo.mcpServers.enable({ mcp_server_id: mcpServer.mcp_server_id, env_vars: {} });
       }
       await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
     } catch (e) {

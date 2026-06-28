@@ -1,14 +1,14 @@
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from intric.governance_policy.application.governance_policy_service import (
+from eneo.governance_policy.application.governance_policy_service import (
     GovernancePolicyService,
 )
-from intric.governance_policy.domain.governance_policy import (
+from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
     PolicyScope,
 )
-from intric.roles.permissions import Permission
+from eneo.roles.permissions import Permission
 
 
 def _admin(tenant_id):

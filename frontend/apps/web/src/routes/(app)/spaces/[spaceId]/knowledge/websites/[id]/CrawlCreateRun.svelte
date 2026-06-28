@@ -1,16 +1,16 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
-  import { IconRefresh } from "@intric/icons/refresh";
-  import type { Website } from "@intric/intric-js";
-  import { Button, Dialog, Tooltip } from "@intric/ui";
+  import { getEneo } from "$lib/core/Eneo";
+  import { IconRefresh } from "@eneo/icons/refresh";
+  import type { Website } from "@eneo/eneo-js";
+  import { Button, Dialog, Tooltip } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   export let website: Website;
   export let isDisabled = false;
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let isProcessing = false;
   let showDialog: Dialog.OpenState;
@@ -18,7 +18,7 @@
   async function createRun() {
     isProcessing = true;
     try {
-      intric.websites.crawlRuns.create(website).then(() => {
+      eneo.websites.crawlRuns.create(website).then(() => {
         isProcessing = false;
         invalidate("crawlruns:list");
       });

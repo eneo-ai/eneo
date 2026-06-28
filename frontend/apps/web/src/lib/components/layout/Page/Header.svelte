@@ -5,7 +5,7 @@
 </div>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   .header-shadow {
     box-shadow: 2rem 0.75rem 4rem 0rem rgba(0, 0, 0, 0.03);
   }

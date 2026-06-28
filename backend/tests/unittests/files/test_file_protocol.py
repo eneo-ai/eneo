@@ -13,9 +13,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import UploadFile
 
-from intric.files import file_protocol as file_protocol_module
-from intric.files.file_protocol import FileProtocol
-from intric.main.exceptions import FileTooLargeException
+from eneo.files import file_protocol as file_protocol_module
+from eneo.files.file_protocol import FileProtocol
+from eneo.main.exceptions import FileTooLargeException
 
 # ── Fake settings ────────────────────────────────────────────────────────
 

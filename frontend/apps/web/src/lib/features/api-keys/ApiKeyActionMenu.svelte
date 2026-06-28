@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, ApiKeyV2 } from "@eneo/eneo-js";
   import {
     AlertCircle,
     Ban,
@@ -13,7 +13,7 @@
     RotateCcw,
     Trash2
   } from "lucide-svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
@@ -31,7 +31,7 @@
   import ExtendExpirationDialog from "$lib/features/api-keys/ExtendExpirationDialog.svelte";
   import RotateApiKeyDialog from "$lib/features/api-keys/RotateApiKeyDialog.svelte";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let {
     apiKey,
@@ -93,9 +93,9 @@
         reason_text: reasonText || undefined
       };
       if (isAdmin) {
-        await intric.apiKeys.admin.revoke({ id: apiKey.id, request });
+        await eneo.apiKeys.admin.revoke({ id: apiKey.id, request });
       } else {
-        await intric.apiKeys.revoke({ id: apiKey.id, request });
+        await eneo.apiKeys.revoke({ id: apiKey.id, request });
       }
       onChanged();
       showRevokeDialog = false;
@@ -119,9 +119,9 @@
         reason_text: reasonText || undefined
       };
       if (isAdmin) {
-        await intric.apiKeys.admin.suspend({ id: apiKey.id, request });
+        await eneo.apiKeys.admin.suspend({ id: apiKey.id, request });
       } else {
-        await intric.apiKeys.suspend({ id: apiKey.id, request });
+        await eneo.apiKeys.suspend({ id: apiKey.id, request });
       }
       onChanged();
       showSuspendDialog = false;
@@ -139,9 +139,9 @@
   async function reactivateKey() {
     try {
       if (isAdmin) {
-        await intric.apiKeys.admin.reactivate({ id: apiKey.id });
+        await eneo.apiKeys.admin.reactivate({ id: apiKey.id });
       } else {
-        await intric.apiKeys.reactivate({ id: apiKey.id });
+        await eneo.apiKeys.reactivate({ id: apiKey.id });
       }
       onChanged();
       if (!isAdmin) toast.success(m.api_keys_action_reactivate());
@@ -155,9 +155,9 @@
     actionPending = true;
     try {
       if (isAdmin) {
-        await intric.apiKeys.admin.purge({ id: apiKey.id });
+        await eneo.apiKeys.admin.purge({ id: apiKey.id });
       } else {
-        await intric.apiKeys.purge({ id: apiKey.id });
+        await eneo.apiKeys.purge({ id: apiKey.id });
       }
       onChanged();
       showPurgeDialog = false;
@@ -174,9 +174,9 @@
     followLoading = true;
     try {
       if (isFollowed) {
-        await unfollowApiKeyNotifications(intric, apiKey.id);
+        await unfollowApiKeyNotifications(eneo, apiKey.id);
       } else {
-        await followApiKeyNotifications(intric, apiKey.id);
+        await followApiKeyNotifications(eneo, apiKey.id);
       }
       await onFollowChanged?.();
     } catch (error) {

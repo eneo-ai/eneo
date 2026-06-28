@@ -5,8 +5,8 @@
 -->
 
 <script lang="ts">
-  import { IconHistory } from "@intric/icons/history";
-  import { Dialog, Button } from "@intric/ui";
+  import { IconHistory } from "@eneo/icons/history";
+  import { Dialog, Button } from "@eneo/ui";
   import { writable } from "svelte/store";
   import InsightsConversationTable from "./InsightsConversationTable.svelte";
   import InsightsConversationPreview from "./InsightsConversationPreview.svelte";

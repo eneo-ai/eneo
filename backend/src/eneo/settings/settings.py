@@ -1,0 +1,42 @@
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
+from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
+from eneo.main.models import InDB
+
+
+class SettingsBase(BaseModel):
+    chatbot_widget: dict[str, object] = Field(default_factory=dict)
+
+
+class SettingsUpsert(SettingsBase):
+    user_id: UUID
+
+
+class SettingsInDB(SettingsUpsert, InDB):
+    pass
+
+
+class SettingsPublic(SettingsBase):
+    using_templates: bool = False  # Feature flag for template management
+    tenant_credentials_enabled: bool = (
+        False  # Global config for tenant credential enforcement
+    )
+    audit_logging_enabled: bool = (
+        True  # Feature flag for audit logging (default enabled for backward compat)
+    )
+    provisioning: bool = False  # JIT provisioning - auto-create users on SSO login
+    api_key_expiry_notifications: bool = (
+        True  # Per-tenant API key expiry notifications toggle
+    )
+
+
+class GetModelsResponse(BaseModel):
+    completion_models: list[CompletionModelPublic]
+    embedding_models: list[EmbeddingModelPublicLegacy]
+
+
+class ToggleSettingUpdate(BaseModel):
+    enabled: bool

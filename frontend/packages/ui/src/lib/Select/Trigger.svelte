@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconChevronDown } from "@intric/icons/chevron-down";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
   import { getSelect } from "./ctx.js";
   import { getUIMessage } from "$lib/utils/messages.js";
   export let placeholder = getUIMessage("ui_select");

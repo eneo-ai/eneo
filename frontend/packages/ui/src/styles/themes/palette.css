@@ -1,4 +1,4 @@
-/* Intric color palette */
+/* Eneo color palette */
 @layer base {
   :root {
     --color-white: oklch(100% 0 0);
@@ -60,13 +60,13 @@
     --color-ui-blue-700: oklch(41.56% 0.215 264.51);
     --color-ui-blue-900: oklch(24.08% 0.03 267.33);
 
-    /* color-intric */
-    --color-intric-50: oklch(95.93% 0.005 286.3);
-    --color-intric-100: oklch(94.1% 0.028 279.36);
-    --color-intric-300: oklch(64.5% 0.12 279.17);
-    --color-intric-500: oklch(32.5% 0.17 278.12);
-    --color-intric-700: oklch(27.06% 0.099 278.31);
-    --color-intric-900: oklch(23.11% 0.019 284.8);
+    /* color-eneo */
+    --color-eneo-50: oklch(95.93% 0.005 286.3);
+    --color-eneo-100: oklch(94.1% 0.028 279.36);
+    --color-eneo-300: oklch(64.5% 0.12 279.17);
+    --color-eneo-500: oklch(32.5% 0.17 278.12);
+    --color-eneo-700: oklch(27.06% 0.099 278.31);
+    --color-eneo-900: oklch(23.11% 0.019 284.8);
 
     /* color-amethyst */
     --color-amethyst-50: oklch(96.41% 0.014 304.14);

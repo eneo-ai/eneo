@@ -1,7 +1,7 @@
 <script lang="ts">
   import TemplateIcon from "../TemplateIcon.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
-  import { Button, Dialog } from "@intric/ui";
+  import { Button, Dialog } from "@eneo/ui";
   import { dynamicColour } from "$lib/core/colours";
   import { getTemplateController } from "../../TemplateController";
   import TemplateLanguageSwitcher from "./TemplateLanguageSwitcher.svelte";
@@ -152,7 +152,7 @@
 </Dialog.Root>
 
 <style lang="postcss">
-  @reference "@intric/ui/styles";
+  @reference "@eneo/ui/styles";
   button[data-selected="true"] {
     @apply focus:outline-offset-4;
   }

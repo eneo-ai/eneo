@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { type IntegrationKnowledge } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { IconTrash } from "@intric/icons/trash";
-  import { IconEdit } from "@intric/icons/edit";
-  import { IconRefresh } from "@intric/icons/refresh";
-  import { Button, Dialog, Dropdown, Input } from "@intric/ui";
+  import { type IntegrationKnowledge } from "@eneo/eneo-js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { IconEdit } from "@eneo/icons/edit";
+  import { IconRefresh } from "@eneo/icons/refresh";
+  import { Button, Dialog, Dropdown, Input } from "@eneo/ui";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
   export let knowledgeItem: IntegrationKnowledge;
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const {
     refreshCurrentSpace,
     state: { currentSpace }
@@ -26,7 +26,7 @@
   async function deleteKnowledge() {
     isDeleting = true;
     try {
-      await intric.integrations.knowledge.delete({
+      await eneo.integrations.knowledge.delete({
         knowledge: knowledgeItem,
         space: $currentSpace
       });
@@ -42,7 +42,7 @@
   async function renameKnowledge() {
     isRenaming = true;
     try {
-      await intric.integrations.knowledge.rename({
+      await eneo.integrations.knowledge.rename({
         knowledge: knowledgeItem,
         space: $currentSpace,
         name: newName
@@ -59,7 +59,7 @@
   async function triggerFullSync() {
     isSyncing = true;
     try {
-      await intric.integrations.knowledge.triggerFullSync({
+      await eneo.integrations.knowledge.triggerFullSync({
         knowledge: knowledgeItem,
         space: $currentSpace
       });

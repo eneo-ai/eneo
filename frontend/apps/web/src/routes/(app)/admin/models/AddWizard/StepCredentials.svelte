@@ -12,7 +12,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
   import { ArrowLeft, Loader2 } from "lucide-svelte";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
@@ -43,7 +43,7 @@
     onBack: () => void;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   // Field definitions resolve eagerly even before capabilities load — the
   // helper provides a sensible fallback so the form mounts immediately.
@@ -98,7 +98,7 @@
         else config[field.name] = value;
       }
 
-      const provider = await intric.modelProviders.create({
+      const provider = await eneo.modelProviders.create({
         name: providerName,
         provider_type: providerType,
         credentials,

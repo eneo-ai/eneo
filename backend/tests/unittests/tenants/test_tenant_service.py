@@ -3,11 +3,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.roles.permissions import Permission
-from intric.roles.role import RoleInDB
-from intric.tenants.tenant import TenantInDB, TenantUpdatePublic
-from intric.tenants.tenant_service import TenantService
+from eneo.main.exceptions import BadRequestException
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleInDB
+from eneo.tenants.tenant import TenantInDB, TenantUpdatePublic
+from eneo.tenants.tenant_service import TenantService
 
 
 def _make_tenant(tenant_id: UUID | None = None) -> TenantInDB:

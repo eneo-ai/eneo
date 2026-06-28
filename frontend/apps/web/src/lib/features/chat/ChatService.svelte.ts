@@ -10,14 +10,14 @@ import {
   type Assistant,
   type Conversation,
   type GroupChat,
-  type Intric,
+  type Eneo,
   type Paginated,
   type UploadedFile,
   type ConversationMessage,
-  IntricError,
+  EneoError,
   type ConversationTools,
   type SSE
-} from "@intric/intric-js";
+} from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 
 export type PendingToolApproval = {
@@ -37,7 +37,7 @@ export class ChatService {
     if ("completion_model" in partner) return this.#partnerEffectiveModel() !== undefined;
     return "tools" in partner && partner.tools?.assistants?.length > 0;
   });
-  #intric: Intric;
+  #eneo: Eneo;
   #toolCallResultCache = new SvelteMap<string, Promise<string | null>>();
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
@@ -173,12 +173,12 @@ export class ChatService {
   #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
 
   constructor(data: Parameters<typeof this.init>[0]) {
-    this.#intric = data.intric;
+    this.#eneo = data.eneo;
     this.init(data);
   }
 
   init(data: {
-    intric: Intric;
+    eneo: Eneo;
     chatPartner: ChatPartner;
     initialConversation?: Promise<Conversation | null> | Conversation | null;
     initialHistory?: Promise<Paginated<ConversationSparse>> | Paginated<ConversationSparse>;
@@ -223,7 +223,7 @@ export class ChatService {
     const cached = this.#toolCallResultCache.get(cacheKey);
     if (cached) return cached;
 
-    const request = this.#intric.conversations
+    const request = this.#eneo.conversations
       .getToolCallResult({ sessionId, toolCallId })
       .then((response) => response.result ?? null)
       .catch((error) => {
@@ -288,7 +288,7 @@ export class ChatService {
 
     this.#preflightDebounce = setTimeout(async () => {
       try {
-        const res = await this.#intric.conversations.preflight({
+        const res = await this.#eneo.conversations.preflight({
           chatPartner: partnerAtStart,
           conversation: conversationAtStart.id ? { id: conversationAtStart.id } : undefined,
           question,
@@ -391,7 +391,7 @@ export class ChatService {
       if (args?.reset) {
         this.#nextCursor = null;
       }
-      const response = await this.#intric.conversations.list({
+      const response = await this.#eneo.conversations.list({
         chatPartner: this.#chatPartner,
         pagination: {
           limit: args?.limit ?? PAGINATION.PAGE_SIZE,
@@ -423,7 +423,7 @@ export class ChatService {
 
   async deleteConversation(conversation: { id: string }) {
     try {
-      await this.#intric.conversations.delete(conversation);
+      await this.#eneo.conversations.delete(conversation);
       this.loadedConversations = this.loadedConversations.filter(
         ({ id }) => id !== conversation.id
       );
@@ -440,7 +440,7 @@ export class ChatService {
     const trimmed = (name ?? "").trim();
     if (!trimmed) return;
 
-    await this.#intric.conversations.rename(conversation, { name: trimmed });
+    await this.#eneo.conversations.rename(conversation, { name: trimmed });
 
     this.loadedConversations = this.loadedConversations.map((c) =>
       c.id === conversation.id ? { ...c, name: trimmed } : c
@@ -453,7 +453,7 @@ export class ChatService {
 
   async loadConversation(conversation: { id: string }) {
     try {
-      const loaded = await this.#intric.conversations.get(conversation);
+      const loaded = await this.#eneo.conversations.get(conversation);
       this.currentConversation = loaded;
       this.#seedLockedFromHistory();
       this.#clearPreflight();
@@ -516,7 +516,7 @@ export class ChatService {
       };
 
       try {
-        await this.#intric.conversations.ask({
+        await this.#eneo.conversations.ask({
           question,
           chatPartner: this.#chatPartner,
           conversation: { id: this.currentConversation.id },
@@ -601,16 +601,16 @@ export class ChatService {
               if (!ensureCurrentSession(image)) return;
               Object.assign(ref, image);
             },
-            onIntricEvent: (event) => {
+            onEneoEvent: (event) => {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
-              if (event.intric_event_type === "generating_image") {
+              if (event.eneo_event_type === "generating_image") {
                 if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              } else if (event.intric_event_type === "token_usage") {
+              } else if (event.eneo_event_type === "token_usage") {
                 // The backend routes token_usage events through the same SSE
-                // channel as intric events. Reflect them on the live message
+                // channel as eneo events. Reflect them on the live message
                 // so reload-from-history matches the in-memory state, then
                 // expose the running context fill for the UI bar.
                 const usage = (
@@ -785,7 +785,7 @@ export class ChatService {
           // so ConversationInput can restore the user's input.
           console.error(error);
           throw error;
-        } else if (error instanceof IntricError && !ref.answer) {
+        } else if (error instanceof EneoError && !ref.answer) {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
           console.error(error);
@@ -793,7 +793,7 @@ export class ChatService {
         } else {
           // Error during streaming — show inline in the conversation
           let message = "We encountered an error processing your request.";
-          if (error instanceof IntricError) {
+          if (error instanceof EneoError) {
             message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
           } else if (error instanceof Object && "message" in error && "name" in error) {
             message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
@@ -834,7 +834,7 @@ export class ChatService {
     }
 
     try {
-      await this.#intric.conversations.approveTools({
+      await this.#eneo.conversations.approveTools({
         approvalId: this.pendingToolApproval.approvalId,
         decisions
       });
@@ -876,7 +876,7 @@ export class ChatService {
     if (!this.pendingToolApproval) return;
 
     // Submit approval for this tool
-    await this.#intric.conversations.approveTools({
+    await this.#eneo.conversations.approveTools({
       approvalId: this.pendingToolApproval.approvalId,
       decisions: [{ tool_call_id: toolCallId, approved: true }]
     });
@@ -903,7 +903,7 @@ export class ChatService {
     if (!this.pendingToolApproval) return;
 
     // Submit denial for this tool
-    await this.#intric.conversations.approveTools({
+    await this.#eneo.conversations.approveTools({
       approvalId: this.pendingToolApproval.approvalId,
       decisions: [{ tool_call_id: toolCallId, approved: false }]
     });

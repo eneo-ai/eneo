@@ -1,7 +1,7 @@
 import pytest
 
-from intric.main.exceptions import ValidationException
-from intric.services.output_parsing.pydantic_model_factory import (
+from eneo.main.exceptions import ValidationException
+from eneo.services.output_parsing.pydantic_model_factory import (
     PydanticModelFactory,
 )
 

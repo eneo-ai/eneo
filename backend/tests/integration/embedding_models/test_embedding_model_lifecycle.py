@@ -14,21 +14,21 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.ai_models_table import EmbeddingModels
-from intric.database.tables.info_blobs_table import InfoBlobs
-from intric.database.tables.model_providers_table import ModelProviders
-from intric.database.tables.spaces_table import SpacesEmbeddingModels
-from intric.embedding_models.domain.embedding_model_repo import (
+from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.spaces_table import SpacesEmbeddingModels
+from eneo.embedding_models.domain.embedding_model_repo import (
     EmbeddingModelRepository,
 )
-from intric.embedding_models.infrastructure.embedding_model_cleanup_worker import (
+from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     cleanup_orphaned_embedding_models,
 )
-from intric.embedding_models.presentation.tenant_embedding_models_router import (
+from eneo.embedding_models.presentation.tenant_embedding_models_router import (
     TenantEmbeddingModelUpdate,
 )
-from intric.main.exceptions import NotFoundException
-from intric.tenant_models.application.tenant_model_service import (
+from eneo.main.exceptions import NotFoundException
+from eneo.tenant_models.application.tenant_model_service import (
     TenantEmbeddingModelService,
 )
 

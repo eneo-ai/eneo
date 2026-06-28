@@ -6,10 +6,10 @@
 
 import { CalendarDate } from "@internationalized/date";
 import { parseDate } from "@internationalized/date";
-import type { Assistant } from "@intric/intric-js";
+import type { Assistant } from "@eneo/eneo-js";
 
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   event.depends("insights:assistant");
 
@@ -43,7 +43,7 @@ export const load = async (event) => {
     }
   })();
 
-  const assistant: Assistant = await intric.assistants.get({ id });
+  const assistant: Assistant = await eneo.assistants.get({ id });
 
   return {
     assistant,

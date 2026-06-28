@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from intric.questions.question import Question, ToolCallInfo
-from intric.questions.question_protocol import to_question_public
-from intric.sessions.session import SessionInDB, SessionMetadataPublic
-from intric.sessions.session_protocol import (
+from eneo.questions.question import Question, ToolCallInfo
+from eneo.questions.question_protocol import to_question_public
+from eneo.sessions.session import SessionInDB, SessionMetadataPublic
+from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_sessions_paginated_response,
 )

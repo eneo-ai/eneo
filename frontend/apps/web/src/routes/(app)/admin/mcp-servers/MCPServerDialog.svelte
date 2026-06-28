@@ -5,9 +5,9 @@
 -->
 
 <script lang="ts">
-  import { Dialog, Button, Select } from "@intric/ui";
+  import { Dialog, Button, Select } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import type { SecurityClassification, components } from "@intric/intric-js";
+  import type { SecurityClassification, components } from "@eneo/eneo-js";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import type { Writable } from "svelte/store";

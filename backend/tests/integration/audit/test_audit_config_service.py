@@ -2,12 +2,12 @@
 
 import pytest
 
-from intric.audit.application.audit_config_service import AuditConfigService
-from intric.audit.infrastructure.audit_config_repository import (
+from eneo.audit.application.audit_config_service import AuditConfigService
+from eneo.audit.infrastructure.audit_config_repository import (
     AuditConfigRepositoryImpl,
 )
-from intric.audit.schemas.audit_config_schemas import CategoryUpdate
-from intric.worker.redis import get_redis
+from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
+from eneo.worker.redis import get_redis
 
 pytestmark = pytest.mark.integration
 

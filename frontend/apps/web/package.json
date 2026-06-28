@@ -1,12 +1,12 @@
 {
-  "name": "@intric/web",
+  "name": "@eneo/web",
   "version": "1.23.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite dev --host",
     "build": "NODE_ENV=production vite build",
-    "build:all": "bun run --filter @intric/web... build",
+    "build:all": "bun run --filter @eneo/web... build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync",
     "test": "bun run test:unit",
@@ -32,8 +32,8 @@
   "devDependencies": {
     "@eslint/js": "^9.24.0",
     "@internationalized/date": "^3.12.0",
-    "@intric/eslint-plugin": "workspace:*",
-    "@intric/intric-js": "workspace:*",
+    "@eneo/eslint-plugin": "workspace:*",
+    "@eneo/eneo-js": "workspace:*",
     "@lucide/svelte": "^1.11.0",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "1.58.2",
@@ -74,7 +74,7 @@
   },
   "dependencies": {
     "@inlang/paraglide-js": "^2.0.13",
-    "@intric/ui": "workspace:*",
+    "@eneo/ui": "workspace:*",
     "dompurify": "^3.2.4",
     "lucide-svelte": "^0.544.0",
     "marked": "^15.0.8"

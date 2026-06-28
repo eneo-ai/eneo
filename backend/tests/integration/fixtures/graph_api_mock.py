@@ -234,28 +234,28 @@ def graph_api_mock(monkeypatch):
             return fake_client
 
         # Monkeypatch aiohttp_client in integration module
-        import intric.main.aiohttp_client as aiohttp_client_module
+        import eneo.main.aiohttp_client as aiohttp_client_module
 
         monkeypatch.setattr(aiohttp_client_module, "aiohttp_client", _client_factory)
 
         # Also patch any integration-specific aiohttp client imports
         monkeypatch.setattr(
-            "intric.integration.infrastructure.auth_service.sharepoint_auth_service.aiohttp_client",
+            "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.aiohttp_client",
             _client_factory,
             raising=False,
         )
         monkeypatch.setattr(
-            "intric.integration.infrastructure.auth_service.tenant_app_auth_service.aiohttp_client",
+            "eneo.integration.infrastructure.auth_service.tenant_app_auth_service.aiohttp_client",
             _client_factory,
             raising=False,
         )
         monkeypatch.setattr(
-            "intric.integration.infrastructure.sharepoint_subscription_service.aiohttp_client",
+            "eneo.integration.infrastructure.sharepoint_subscription_service.aiohttp_client",
             _client_factory,
             raising=False,
         )
         monkeypatch.setattr(
-            "intric.integration.infrastructure.clients.sharepoint_content_client.aiohttp_client",
+            "eneo.integration.infrastructure.clients.sharepoint_content_client.aiohttp_client",
             _client_factory,
             raising=False,
         )

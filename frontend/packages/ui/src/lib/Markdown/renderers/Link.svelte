@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { IconLinkExternal } from "@intric/icons/link-external";
+  import { IconLinkExternal } from "@eneo/icons/link-external";
   import type { Tokens } from "marked";
   import { sanitizeLinkHref } from "../sanitizeUrl.js";
 

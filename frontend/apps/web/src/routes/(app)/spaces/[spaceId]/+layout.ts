@@ -5,14 +5,14 @@
 */
 
 import type { LayoutLoad } from "./$types";
-import type { Space } from "@intric/intric-js";
+import type { Space } from "@eneo/eneo-js";
 
 export const load: LayoutLoad = async (event) => {
   // Register dependency for targeted invalidation when space data changes
   event.depends("spaces:data");
 
   const {
-    intric,
+    eneo,
     user,
     currentSpace: parentSpace,
     organizationSpace,
@@ -27,16 +27,16 @@ export const load: LayoutLoad = async (event) => {
   const isAdmin = user?.roles?.some((role) => role.permissions?.includes("admin"));
 
   if (!spaceId || spaceId === "personal") {
-    currentSpace = loadDelta < 1500 ? parentSpace : await intric.spaces.getPersonalSpace();
+    currentSpace = loadDelta < 1500 ? parentSpace : await eneo.spaces.getPersonalSpace();
   } else if (spaceId === "organization" || spaceId === organizationSpace?.id) {
     currentSpace =
       loadDelta < 1500 && organizationSpace
         ? organizationSpace
         : isAdmin
-          ? await intric.spaces.getOrganizationSpace()
+          ? await eneo.spaces.getOrganizationSpace()
           : parentSpace;
   } else {
-    currentSpace = await intric.spaces.get({ id: spaceId });
+    currentSpace = await eneo.spaces.get({ id: spaceId });
   }
 
   return {

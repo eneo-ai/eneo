@@ -4,10 +4,10 @@ from uuid import uuid4
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.assistant_factory import AssistantFactory
-from intric.templates.app_template.app_template import AppTemplate
-from intric.users.user import UserSparse
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant_factory import AssistantFactory
+from eneo.templates.app_template.app_template import AppTemplate
+from eneo.users.user import UserSparse
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-from intric.allowed_origins.origin_matching import origin_matches_pattern
+from eneo.allowed_origins.origin_matching import origin_matches_pattern
 
 
 def test_origin_matches_exact_scheme_host_and_port():

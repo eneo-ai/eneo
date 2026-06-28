@@ -13,21 +13,21 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.ai_models_table import TranscriptionModels
-from intric.database.tables.transcription_model_migration_history_table import (
+from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.transcription_model_migration_history_table import (
     TranscriptionModelMigrationHistory,
 )
-from intric.main.exceptions import ModelInUseException, NotFoundException
-from intric.tenant_models.application.tenant_model_service import (
+from eneo.main.exceptions import ModelInUseException, NotFoundException
+from eneo.tenant_models.application.tenant_model_service import (
     TenantTranscriptionModelService,
 )
-from intric.transcription_models.domain.transcription_model_repo import (
+from eneo.transcription_models.domain.transcription_model_repo import (
     TranscriptionModelRepository,
 )
-from intric.transcription_models.infrastructure.transcription_model_cleanup_worker import (  # noqa: E501
+from eneo.transcription_models.infrastructure.transcription_model_cleanup_worker import (  # noqa: E501
     cleanup_orphaned_transcription_models,
 )
-from intric.transcription_models.presentation.tenant_transcription_models_router import (
+from eneo.transcription_models.presentation.tenant_transcription_models_router import (
     TenantTranscriptionModelUpdate,
 )
 

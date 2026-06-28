@@ -7,7 +7,7 @@
 import { CalendarDate } from "@internationalized/date";
 
 export const load = async (event) => {
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
 
   const now = new Date();
   const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
@@ -23,10 +23,10 @@ export const load = async (event) => {
   // built once on the page since both TokenOverviewTable and UserTokenTable
   // consume it.
   const [spaces, storageStats, tokenStats, models] = await Promise.all([
-    intric.usage.storage.listSpaces().then((s) => s.sort((a, b) => b.size - a.size)),
-    intric.usage.storage.getSummary(),
-    intric.usage.tokens.getSummary(dateRange),
-    intric.models.list()
+    eneo.usage.storage.listSpaces().then((s) => s.sort((a, b) => b.size - a.size)),
+    eneo.usage.storage.getSummary(),
+    eneo.usage.tokens.getSummary(dateRange),
+    eneo.models.list()
   ]);
 
   return { spaces, storageStats, tokenStats, models };

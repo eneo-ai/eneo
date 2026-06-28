@@ -7,13 +7,13 @@
 export const load = async (event) => {
   event.depends("admin:governance-policy");
   event.depends("admin:prompt-library");
-  const { intric } = await event.parent();
+  const { eneo } = await event.parent();
   const [policy, models, mcpSettings, promptLibrary, modelProviders] = await Promise.all([
-    intric.governancePolicy.get(),
-    intric.models.list(),
-    intric.mcpServers.listSettings(),
-    intric.promptLibrary.list(),
-    intric.modelProviders.list()
+    eneo.governancePolicy.get(),
+    eneo.models.list(),
+    eneo.mcpServers.listSettings(),
+    eneo.promptLibrary.list(),
+    eneo.modelProviders.list()
   ]);
   return { policy, models, mcpSettings, promptLibrary, modelProviders };
 };

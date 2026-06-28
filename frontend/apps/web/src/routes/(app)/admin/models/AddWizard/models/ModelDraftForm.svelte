@@ -13,7 +13,7 @@
   import { Loader2, ListPlus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
@@ -63,7 +63,7 @@
     nameReadOnly?: boolean;
   } = $props();
 
-  const intric = getIntric();
+  const eneo = getEneo();
   const classifications = getSecurityContext().security_classifications;
 
   const FAMILY_OPTIONS = [
@@ -84,7 +84,7 @@
     try {
       // The hand-maintained client typings don't include the cost fields yet,
       // so we read them through an explicit cast.
-      const result = (await intric.modelProviders.getModelDefaults(
+      const result = (await eneo.modelProviders.getModelDefaults(
         draft.name.trim(),
         providerType
       )) as unknown as {

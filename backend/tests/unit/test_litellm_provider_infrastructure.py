@@ -5,25 +5,25 @@ import pytest
 from litellm.exceptions import BadRequestError
 from tenacity import wait_fixed
 
-from intric.embedding_models.infrastructure.adapters.litellm_embeddings import (
+from eneo.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
 )
-from intric.main.exceptions import (
+from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     ProviderRejectedRequestException,
 )
-from intric.model_providers.infrastructure import litellm_transport
-from intric.model_providers.infrastructure.litellm_provider import (
+from eneo.model_providers.infrastructure import litellm_transport
+from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_model_name,
     build_litellm_provider_kwargs,
 )
-from intric.model_providers.infrastructure.litellm_transport import (
+from eneo.model_providers.infrastructure.litellm_transport import (
     INVALID_REQUEST_MESSAGE,
     is_provider_unavailable_error,
     raise_provider_unavailable,
     raise_public_litellm_error,
 )
-from intric.tenants.provider_field_config import get_required_fields
+from eneo.tenants.provider_field_config import get_required_fields
 
 
 def test_build_litellm_model_name_is_canonical():

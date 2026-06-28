@@ -281,7 +281,7 @@ docker compose pull
 docker compose up -d
 
 # 5. Verify the new version is running
-docker compose exec backend python -c "import intric; print(intric.__version__)"
+docker compose exec backend python -c "import eneo; print(eneo.__version__)"
 ```
 
 ### Before You Upgrade
@@ -396,7 +396,7 @@ Enable tenant-specific API keys for isolated billing and compliance:
 ```bash
 # 1. Generate encryption key (required for credential security)
 cd backend
-docker compose exec backend uv run python -m intric.cli.generate_encryption_key
+docker compose exec backend uv run python -m eneo.cli.generate_encryption_key
 
 # 2. Add to env_backend.env
 ENCRYPTION_KEY=<generated-44-char-key>
@@ -443,7 +443,7 @@ curl -X PATCH https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federa
 **⚠️ Important Notes:**
 - Backup your `ENCRYPTION_KEY` securely - lost keys make encrypted data unrecoverable
 - In strict mode (`TENANT_CREDENTIALS_ENABLED=true`), tenants without configured credentials cannot use LLM features
-- Federation requires each tenant to have a unique `slug` - run `uv run python -m intric.cli.backfill_tenant_slugs` if needed
+- Federation requires each tenant to have a unique `slug` - run `uv run python -m eneo.cli.backfill_tenant_slugs` if needed
 
 **Documentation:**
 - [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - Architecture and setup

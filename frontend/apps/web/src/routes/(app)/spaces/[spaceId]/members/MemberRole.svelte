@@ -5,15 +5,15 @@
 -->
 
 <script lang="ts">
-  import { IconChevronDown } from "@intric/icons/chevron-down";
-  import { IconSelectedItem } from "@intric/icons/selected-item";
-  import { IconTrash } from "@intric/icons/trash";
-  import { Button, Dialog } from "@intric/ui";
-  import { getIntric } from "$lib/core/Intric";
+  import { IconChevronDown } from "@eneo/icons/chevron-down";
+  import { IconSelectedItem } from "@eneo/icons/selected-item";
+  import { IconTrash } from "@eneo/icons/trash";
+  import { Button, Dialog } from "@eneo/ui";
+  import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import type { Space, SpaceRole } from "@intric/intric-js";
+  import type { Space, SpaceRole } from "@eneo/eneo-js";
   import { createSelect } from "@melt-ui/svelte";
-  import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
+  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
@@ -27,7 +27,7 @@
   };
 
   let { member }: Props = $props();
-  const intric = getIntric();
+  const eneo = getEneo();
 
   const {
     state: { currentSpace },
@@ -56,7 +56,7 @@
 
   const removeMember = createAsyncState(async () => {
     try {
-      await intric.spaces.members.remove({ spaceId: $currentSpace.id, user: member });
+      await eneo.spaces.members.remove({ spaceId: $currentSpace.id, user: member });
       $showRemoveDialog = false;
       // Will cause an update in the parent page and remove this component instance form the tree
       refreshCurrentSpace();
@@ -68,7 +68,7 @@
 
   const changeRole = createAsyncState(async (newRole: SpaceRole["value"]) => {
     try {
-      await intric.spaces.members.update({
+      await eneo.spaces.members.update({
         spaceId: $currentSpace.id,
         user: { id: member.id, role: newRole }
       });

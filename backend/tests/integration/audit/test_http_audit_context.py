@@ -11,9 +11,9 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import select
 
-from intric.audit.domain.action_types import ActionType
-from intric.database.database import sessionmanager
-from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.audit.domain.action_types import ActionType
+from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 pytestmark = pytest.mark.integration
 

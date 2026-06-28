@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.assistants.assistant import Assistant
-from intric.main.exceptions import BadRequestException
-from intric.main.models import NOT_PROVIDED
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant import Assistant
+from eneo.main.exceptions import BadRequestException
+from eneo.main.models import NOT_PROVIDED
 
 
 @pytest.fixture

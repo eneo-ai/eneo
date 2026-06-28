@@ -12,9 +12,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from intric.ai_models.completion_models.completion_model import ModelKwargs
-from intric.services.service import Service, ServiceBase
-from intric.users.user import UserInDBBase
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.services.service import Service, ServiceBase
+from eneo.users.user import UserInDBBase
 
 
 def _user_payload():

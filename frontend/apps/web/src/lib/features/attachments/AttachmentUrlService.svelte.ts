@@ -1,19 +1,19 @@
 import { browser } from "$app/environment";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
-import { getIntric } from "$lib/core/Intric";
-import type { Intric } from "@intric/intric-js";
+import { getEneo } from "$lib/core/Eneo";
+import type { Eneo } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 
 const EXPIRES_AFTER_SECONDS = 3600;
 
 /** We cache generated Attachment URLs to not constantly regenerate them */
 class AttachmentUrlService {
-  #intric: Intric;
+  #eneo: Eneo;
   #attachmentUrls = new SvelteMap<string, { url: string | undefined; expiresAt: number }>();
   #queuedFiles = new Set<string>();
 
-  constructor({ intric = getIntric() }: { intric: Intric }) {
-    this.#intric = intric;
+  constructor({ eneo = getEneo() }: { eneo: Eneo }) {
+    this.#eneo = eneo;
   }
 
   /**
@@ -38,7 +38,7 @@ class AttachmentUrlService {
   }
 
   async #generateUrl(fileId: string) {
-    const { url, expires_at } = await this.#intric.files.generateSignedUrl({
+    const { url, expires_at } = await this.#eneo.files.generateSignedUrl({
       fileId,
       contentDisposition: "attachment",
       expiresIn: EXPIRES_AFTER_SECONDS + 60

@@ -1,5 +1,5 @@
 """
-Fixtures for transcription models (mirrors src/intric/transcription_models/).
+Fixtures for transcription models (mirrors src/eneo/transcription_models/).
 
 Parallel to the completion_model_factory, used by the transcription migration
 integration tests.
@@ -8,8 +8,8 @@ integration tests.
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.ai_models_table import TranscriptionModels
-from intric.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.model_providers_table import ModelProviders
 
 
 @pytest.fixture

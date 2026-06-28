@@ -8,10 +8,10 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { getIntric } from "$lib/core/Intric";
+  import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
-  import { IntricError } from "@intric/intric-js";
-  import type { ApiKeyCreatedResponse, SpaceSparse, UserSparse } from "@intric/intric-js";
+  import { EneoError } from "@eneo/eneo-js";
+  import type { ApiKeyCreatedResponse, SpaceSparse, UserSparse } from "@eneo/eneo-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import type { AdminApiKey } from "$lib/features/api-keys/apiKeyTableUtils";
   import AdminApiKeyTable from "./AdminApiKeyTable.svelte";
@@ -39,7 +39,7 @@
     type ApiKeyNotificationPolicy
   } from "$lib/features/api-keys/notificationPreferences";
 
-  const intric = getIntric();
+  const eneo = getEneo();
 
   let keys = $state<AdminApiKey[]>([]);
   let loading = $state(false);
@@ -220,7 +220,7 @@
 
       if (reset && searchScope === "entity" && isLikelyFullApiKeySecret(searchQuery)) {
         try {
-          const lookupResponse = await intric.apiKeys.admin.lookup({
+          const lookupResponse = await eneo.apiKeys.admin.lookup({
             secret: searchQuery.trim()
           });
           keys = lookupResponse?.api_key ? [lookupResponse.api_key as AdminApiKey] : [];
@@ -229,7 +229,7 @@
           errorMessage = null;
           return;
         } catch (lookupError) {
-          const isNotFound = lookupError instanceof IntricError && lookupError.status === 404;
+          const isNotFound = lookupError instanceof EneoError && lookupError.status === 404;
           if (isNotFound) {
             // Graceful fallback: if exact secret lookup misses (typo/old secret), still
             // search by key suffix so admins can locate candidate keys quickly.
@@ -244,7 +244,7 @@
       if (forcedSearchFallback) {
         params.search = forcedSearchFallback;
       }
-      const response = await intric.apiKeys.admin.list(params);
+      const response = await eneo.apiKeys.admin.list(params);
       const items = (response.items ?? []) as AdminApiKey[];
       keys = reset ? items : [...keys, ...items];
       nextCursor = response.next_cursor ?? null;
@@ -262,7 +262,7 @@
     try {
       let listedSpaces: SpaceSparse[] = [];
       try {
-        listedSpaces = await intric.spaces.list({
+        listedSpaces = await eneo.spaces.list({
           include_personal: true,
           include_applications: true
         });
@@ -271,7 +271,7 @@
       }
 
       if (listedSpaces.length === 0) {
-        listedSpaces = await intric.spaces.list();
+        listedSpaces = await eneo.spaces.list();
       }
 
       spaces = listedSpaces;
@@ -279,7 +279,7 @@
       const applicationsBySpace = await Promise.all(
         spaces.map(async (space) => {
           try {
-            const applications = await intric.spaces.listApplications({ id: space.id });
+            const applications = await eneo.spaces.listApplications({ id: space.id });
             return { space, applications };
           } catch {
             return { space, applications: space.applications ?? null };
@@ -305,7 +305,7 @@
 
       if (assistantOptions.length === 0) {
         try {
-          const assistants = await intric.assistants.list();
+          const assistants = await eneo.assistants.list();
           assistantOptions = assistants.map((assistant) => ({
             id: assistant.id,
             name: assistant.name
@@ -333,7 +333,7 @@
   }
 
   async function searchUsers(query: string): Promise<UserSparse[]> {
-    const responseByEmail = await intric.users.list({
+    const responseByEmail = await eneo.users.list({
       includeDetails: true,
       search_email: query,
       page: 1,
@@ -344,7 +344,7 @@
       return emailItems;
     }
 
-    const responseByName = await intric.users.list({
+    const responseByName = await eneo.users.list({
       includeDetails: true,
       search_name: query,
       page: 1,
@@ -479,7 +479,7 @@
   async function loadApiKeyTrackingConfig() {
     trackingConfigLoading = true;
     try {
-      const config = await intric.audit.getActionConfig();
+      const config = await eneo.audit.getActionConfig();
       const actions = config?.actions ?? [];
       apiKeyUsedTrackingEnabled =
         actions.find((item) => item.action === "api_key_used")?.enabled ?? false;
@@ -504,7 +504,7 @@
     if (action === "api_key_auth_failed") apiKeyAuthFailedTrackingEnabled = enabled;
 
     try {
-      await intric.audit.updateActionConfig({
+      await eneo.audit.updateActionConfig({
         updates: [{ action, enabled }]
       });
     } catch (error) {
@@ -518,7 +518,7 @@
   async function loadAdminSettings() {
     tenantSettingsLoading = true;
     try {
-      const settings = await intric.settings.get();
+      const settings = await eneo.settings.get();
       expiryNotificationsEnabled = settings.api_key_expiry_notifications ?? true;
     } catch (error) {
       console.error(error);
@@ -542,7 +542,7 @@
   async function loadNotificationPolicy() {
     notificationPolicyLoading = true;
     try {
-      const policy = await getAdminNotificationPolicy(intric);
+      const policy = await getAdminNotificationPolicy(eneo);
       notificationPolicy = policy;
       notificationPolicyDaysInput = String(pickPolicyDefaultDay(policy.default_days_before_expiry));
       notificationPolicyMaxDaysInput = policy.max_days_before_expiry
@@ -558,7 +558,7 @@
   async function toggleExpiryNotifications({ current, next }: { current: boolean; next: boolean }) {
     expiryNotificationsEnabled = next;
     try {
-      const updated = await intric.settings.updateApiKeyExpiryNotifications(next);
+      const updated = await eneo.settings.updateApiKeyExpiryNotifications(next);
       expiryNotificationsEnabled = updated.api_key_expiry_notifications ?? true;
     } catch (error) {
       console.error(error);
@@ -577,7 +577,7 @@
 
     notificationPolicySaving = true;
     try {
-      const updated = await updateAdminNotificationPolicy(intric, {
+      const updated = await updateAdminNotificationPolicy(eneo, {
         enabled: notificationPolicy.enabled,
         default_days_before_expiry: [defaultDay],
         max_days_before_expiry: maxDays,

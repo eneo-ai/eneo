@@ -1,0 +1,58 @@
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy import TIMESTAMP, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.base_class import BasePublic
+
+
+class AppTemplates(BasePublic):
+    name: Mapped[str] = mapped_column()
+    description: Mapped[Optional[str]] = mapped_column()
+    category: Mapped[str] = mapped_column()
+    prompt_text: Mapped[Optional[str]] = mapped_column()
+    input_description: Mapped[Optional[str]] = mapped_column()
+    input_type: Mapped[str] = mapped_column()
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    wizard: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    organization: Mapped[str] = mapped_column(
+        Text, server_default="default", nullable=False
+    )
+
+    completion_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(CompletionModels.id),
+    )
+
+    # New fields for tenant-scoped template management
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True, index=True
+    )
+    original_snapshot: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB, nullable=True
+    )
+
+    # Audit trail fields for delete/restore operations
+    deleted_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    restored_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    restored_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    # Default template configuration field
+    is_default: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+
+    # Icon support - Lucide icon name (e.g., "rocket", "building")
+    icon_name: Mapped[Optional[str]] = mapped_column(nullable=True, index=True)
+
+    completion_model: Mapped[CompletionModels] = relationship()

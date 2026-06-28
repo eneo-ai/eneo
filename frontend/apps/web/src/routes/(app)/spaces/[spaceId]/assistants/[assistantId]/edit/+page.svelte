@@ -2,8 +2,8 @@
   import { Page, Settings } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
-  import { Button, Input, Tooltip } from "@intric/ui";
-  import { IconSparkles } from "@intric/icons/sparkles";
+  import { Button, Input, Tooltip } from "@eneo/ui";
+  import { IconSparkles } from "@eneo/icons/sparkles";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
@@ -53,7 +53,7 @@
   } = untrack(() =>
     initAssistantEditor({
       assistant: data.assistant,
-      intric: data.intric,
+      eneo: data.eneo,
       onUpdateDone() {
         refreshCurrentSpace("applications");
       }
@@ -91,7 +91,7 @@
   let iconError = $state<string | null>(null);
 
   function getIconUrl(id: string | null): string | null {
-    return id ? data.intric.icons.url({ id }) : null;
+    return id ? data.eneo.icons.url({ id }) : null;
   }
 
   let iconUrl = $derived(getIconUrl(currentIconId));
@@ -101,8 +101,8 @@
     iconUploading = true;
     iconError = null;
     try {
-      const newIcon = await data.intric.icons.upload({ file });
-      await data.intric.assistants.update({
+      const newIcon = await data.eneo.icons.upload({ file });
+      await data.eneo.assistants.update({
         assistant: { id: $resource.id },
         update: { icon_id: newIcon.id }
       });
@@ -120,9 +120,9 @@
     iconError = null;
     try {
       if (currentIconId) {
-        await data.intric.icons.delete({ id: currentIconId });
+        await data.eneo.icons.delete({ id: currentIconId });
       }
-      await data.intric.assistants.update({
+      await data.eneo.assistants.update({
         assistant: { id: $resource.id },
         update: { icon_id: null }
       });
@@ -336,7 +336,7 @@
               <PromptVersionDialog
                 title={m.prompt_history_for({ name: $resource.name })}
                 loadPromptVersionHistory={() => {
-                  return data.intric.assistants.listPrompts({ id: data.assistant.id });
+                  return data.eneo.assistants.listPrompts({ id: data.assistant.id });
                 }}
                 onPromptSelected={(prompt) => {
                   const restoredDate = dayjs(prompt.created_at).format("YYYY-MM-DD HH:mm");
@@ -355,7 +355,7 @@
               onApply={(text) => {
                 // Apply only mutates local editor state (PRD §10): the produced
                 // prompt is written into $update.prompt.text and persisted later
-                // through the normal Save button (intric.assistants.update),
+                // through the normal Save button (eneo.assistants.update),
                 // exactly like a manual edit. There is no parallel
                 // apply-and-save path here.
                 $update.prompt.text = text;
@@ -365,7 +365,7 @@
                 isModalOpen = false;
                 // Mark the Q&A run completed — best-effort, must not block Apply.
                 if (promptGuideRunId) {
-                  data.intric.helpAssistants.runs
+                  data.eneo.helpAssistants.runs
                     .setStatus({ run_id: promptGuideRunId, status: "completed" })
                     .catch(() => {});
                 }
@@ -642,7 +642,7 @@
           {#if data.assistant.permissions?.includes("publish")}
             <Settings.Row title={m.status()} description={m.publishing_description()}>
               <PublishingSetting
-                endpoints={data.intric.assistants}
+                endpoints={data.eneo.assistants}
                 resource={data.assistant}
                 hasUnsavedChanges={$currentChanges.hasUnsavedChanges}
               />

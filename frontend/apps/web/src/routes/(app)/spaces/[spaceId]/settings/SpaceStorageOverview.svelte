@@ -48,7 +48,7 @@
     {
       label: m.integrations(),
       items: $currentSpace.knowledge.integrationKnowledge,
-      colour: "chart-intric"
+      colour: "chart-eneo"
     }
   ]);
 </script>

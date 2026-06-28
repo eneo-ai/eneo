@@ -1,5 +1,5 @@
 [project]
-name = "intric"
+name = "eneo"
 version = "0.1.0"
 description = ""
 authors = [{ name = "Sundsvalls Kommun" }]
@@ -62,8 +62,8 @@ dependencies = [
 ]
 
 [project.scripts]
-start = "intric.server.main:start"
-worker = "intric.worker.cli:start"
+start = "eneo.server.main:start"
+worker = "eneo.worker.cli:start"
 
 [dependency-groups]
 dev = [
@@ -93,7 +93,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/intric"]
+packages = ["src/eneo"]
 
 [tool.ruff]
 line-length = 88
@@ -128,7 +128,7 @@ indent-style = "space"
 # Coverage of the shipped package only. Run via `uv run pytest --cov` (CI passes
 # the report flags); the xml report feeds diff-cover, html is the human artifact.
 [tool.coverage.run]
-source = ["src/intric"]
+source = ["src/eneo"]
 branch = true
 omit = [
     "*/tests/*",
@@ -147,7 +147,7 @@ skip_covered = false
 [tool.deptry]
 # example_mcp_server.py is a standalone copy-paste sample (imports fastmcp, which
 # is intentionally not a project dependency), so it is excluded from the scan.
-extend_exclude = ["src/intric/server/example_mcp_server.py"]
+extend_exclude = ["src/eneo/server/example_mcp_server.py"]
 
 # DEP003 (transitive): imported directly but only resolve via transitive deps.
 # Promoting them to direct dependencies is a separate cleanup; ignored here so
@@ -175,7 +175,7 @@ DEP002 = [
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src/intric"]
+paths = ["src/eneo"]
 sort_by_size = true
 # base_adapter.py keeps an intentional `if False: yield` shim so its abstract
 # async-generator signature matches subclass overrides (see the comment there);

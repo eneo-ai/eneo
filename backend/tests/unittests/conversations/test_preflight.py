@@ -3,13 +3,13 @@ from uuid import uuid4
 
 import pytest
 
-from intric.completion_models.infrastructure.context_builder import (
+from eneo.completion_models.infrastructure.context_builder import (
     build_files_string,
     count_tokens,
 )
-from intric.conversations.application.conversation_service import ConversationService
-from intric.files.file_models import FileType
-from intric.main.exceptions import BadRequestException
+from eneo.conversations.application.conversation_service import ConversationService
+from eneo.files.file_models import FileType
+from eneo.main.exceptions import BadRequestException
 
 
 def _make_service(
