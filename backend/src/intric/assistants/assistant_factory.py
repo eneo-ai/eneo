@@ -87,6 +87,16 @@ class AssistantFactory:
             description=description,
         )
 
+    @staticmethod
+    def _attachments_from_db(assistant_in_db: Assistants) -> list[File]:
+        # Reconstruction from persisted rows: attachment validation is a
+        # write-time rule, deliberately not re-applied here so an already-stored
+        # assistant always loads.
+        return [
+            File.model_validate(attachment.file)
+            for attachment in assistant_in_db.attachments
+        ]
+
     def create_assistant_from_db(
         self,
         assistant_in_db: Assistants,
@@ -111,13 +121,7 @@ class AssistantFactory:
                 prompt_in_db=prompt, is_selected=True
             )
 
-        # Reconstruction from persisted rows: attachment validation is a
-        # write-time rule, deliberately not re-applied here so an already-stored
-        # assistant always loads.
-        attachments = [
-            File.model_validate(attachment.file)
-            for attachment in assistant_in_db.attachments
-        ]
+        attachments = self._attachments_from_db(assistant_in_db)
 
         user = UserSparse.model_validate(assistant_in_db.user)
         # `is None` (not truthiness) so corrupt non-None JSONB still raises
@@ -203,13 +207,7 @@ class AssistantFactory:
                 is_selected=True,
             )
 
-        # Reconstruction from persisted rows: attachment validation is a
-        # write-time rule, deliberately not re-applied here so an already-stored
-        # assistant always loads.
-        attachments = [
-            File.model_validate(attachment.file)
-            for attachment in assistant_in_db.attachments
-        ]
+        attachments = self._attachments_from_db(assistant_in_db)
 
         collections = [
             collection for collection in collections if collection.id in collection_ids

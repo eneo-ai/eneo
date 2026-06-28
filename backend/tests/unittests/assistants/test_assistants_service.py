@@ -255,6 +255,27 @@ async def test_update_assistant_skips_prompt_creation_when_field_omitted(setup: 
     setup.service.prompt_service.create_prompt.assert_not_awaited()
 
 
+async def test_update_runs_fit_check_for_prompt_only_change(setup: Setup):
+    # Wiring guard for f961deaca: a prompt-only update must trigger the fit
+    # check, because the prompt counts toward the context ceiling on its own.
+    # If the gate were narrowed back to `attachments is not None`, this fails.
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        prompt=PromptCreate(text="some prompt", description=""),
+    )
+
+    setup.service._validate_attachments_fit.assert_awaited_once()
+
+
+async def test_update_skips_fit_check_for_unrelated_change(setup: Setup):
+    # Counterpart: a rename touches neither prompt, model nor attachments, so the
+    # fit check must not run — it would be wasted work and could spuriously
+    # reject on an edit that can't change the context cost.
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+
+    setup.service._validate_attachments_fit.assert_not_awaited()
+
+
 def configure_personal_default_assistant(
     setup: Setup, *, can_manage_assistants: bool = False
 ):
