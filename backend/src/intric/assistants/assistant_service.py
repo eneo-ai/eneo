@@ -466,11 +466,7 @@ class AssistantService:
         overflows is rejected even with no attachments. Skipped only when no
         model is resolved."""
         model = assistant.completion_model
-        prompt_text = (
-            getattr(assistant.prompt, "text", None)
-            if assistant.prompt is not None
-            else None
-        ) or ""
+        enforced_prompt: str | None = None
 
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
@@ -488,11 +484,16 @@ class AssistantService:
                 effective_config.prompt_enforced
                 and effective_config.enforced_prompt_text
             ):
-                prompt_text = effective_config.enforced_prompt_text
+                enforced_prompt = effective_config.enforced_prompt_text
 
         if model is None:
             return
 
+        prompt_text = (
+            enforced_prompt
+            if enforced_prompt is not None
+            else assistant.get_prompt_text()
+        )
         completion_prompt_files = await self._completion_prompt_files_for_model(
             persistent_attachments=assistant.attachments,
             completion_model=model,
@@ -949,7 +950,7 @@ class AssistantService:
 
     async def get_preflight_baseline(
         self, assistant_id: UUID
-    ) -> tuple[str | None, list[File]]:
+    ) -> tuple[str, list[File]]:
         """The always-present cost of an assistant: its system prompt text and
         its persistent attachments, which ride along on every question.
 
@@ -962,12 +963,7 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         self._authorize_read_assistant(space=space, assistant=assistant)
 
-        prompt_text = (
-            getattr(assistant.prompt, "text", None)
-            if assistant.prompt is not None
-            else None
-        )
-        return prompt_text, assistant.attachments
+        return assistant.get_prompt_text(), assistant.attachments
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.

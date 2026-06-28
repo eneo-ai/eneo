@@ -88,6 +88,7 @@ def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=
         completion_model=model,
         attachments=[_text_attachment() for _ in range(n_attachments)],
         prompt=prompt,
+        get_prompt_text=lambda: prompt_text or "",
     )
 
 

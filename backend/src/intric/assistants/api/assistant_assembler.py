@@ -179,18 +179,15 @@ class AssistantAssembler:
         model_info = None
         if assistant.completion_model:
             prompt_tokens = 0
-            if assistant.prompt:
-                prompt_text = getattr(assistant.prompt, "prompt", None) or getattr(
-                    assistant.prompt, "text", None
-                )
-                if prompt_text:
-                    try:
-                        prompt_tokens = count_assistant_prompt_tokens(
-                            prompt_text, assistant.completion_model.name
-                        )
-                    except Exception:
-                        # If token counting fails, don't break the response
-                        pass
+            prompt_text = assistant.get_prompt_text()
+            if prompt_text:
+                try:
+                    prompt_tokens = count_assistant_prompt_tokens(
+                        prompt_text, assistant.completion_model.name
+                    )
+                except Exception:
+                    # If token counting fails, don't break the response
+                    pass
 
             model_info = ModelInfo(
                 name=assistant.completion_model.name,

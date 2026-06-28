@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
   import * as Popover from "$lib/components/ui/popover/index.js";
+  import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
   import { Info, AlertTriangle, Eye, EyeOff } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "../../ChatService.svelte";
@@ -168,17 +169,15 @@
         aria-valuenow={projectedTotal}
         aria-valuemin="0"
         aria-valuemax={chat.contextLimit}
+        aria-label={m.context_usage()}
       >
         {#each segments as seg (seg.key)}
           {#if seg.widthPct > 0}
-            <div
-              class="absolute top-0 bottom-0 my-auto h-[calc(100%-2px)] rounded-full transition-all duration-300 ease-out {segmentClass(
-                seg.key
-              )}"
-              style:left="{seg.leftPct}%"
-              style:width="max(3px, calc({seg.widthPct}% - 2px))"
-              style:margin-left="1px"
-            ></div>
+            <ContextMeterFill
+              leftPct={seg.leftPct}
+              widthPct={seg.widthPct}
+              class={segmentClass(seg.key)}
+            />
           {/if}
         {/each}
       </div>

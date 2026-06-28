@@ -1,5 +1,6 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
+  import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -118,11 +119,7 @@
       aria-valuemax={limit}
       aria-label={m.config_attachment_meter_aria()}
     >
-      <div
-        class="absolute top-0 bottom-0 my-auto h-[calc(100%-2px)] rounded-full transition-all duration-300 ease-out {barClass}"
-        style:left="1px"
-        style:width="max(3px, calc({Math.min(percent, 100)}% - 2px))"
-      ></div>
+      <ContextMeterFill widthPct={Math.min(percent, 100)} class={barClass} />
     </div>
     {#if tone === "over"}
       <p
