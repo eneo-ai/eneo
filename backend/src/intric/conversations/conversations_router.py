@@ -437,6 +437,7 @@ async def preflight_tokens(
             assistant_id=request.assistant_id,
             group_chat_id=request.group_chat_id,
             tool_assistant_id=tool_assistant_id,
+            assistant_prompt=request.assistant_prompt,
         )
 
 

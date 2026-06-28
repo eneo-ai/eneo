@@ -344,6 +344,25 @@ async def test_empty_assistant_preflight_includes_assistant_baseline():
 
 
 @pytest.mark.asyncio
+async def test_empty_assistant_preflight_uses_unsaved_assistant_prompt_override():
+    service = _make_service(assistant=_make_assistant())
+    service.assistant_service.get_preflight_baseline = AsyncMock(
+        return_value=("saved prompt", [])
+    )
+
+    result = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+        assistant_prompt="unsaved prompt with extra context",
+    )
+
+    assert result.prompt_tokens == count_tokens(
+        "unsaved prompt with extra context", "gpt-4o"
+    )
+
+
+@pytest.mark.asyncio
 async def test_empty_assistant_preflight_baseline_includes_derived_images():
     """Persistent document attachments carry derived vision images too, matching
     the config meter's live-file path and the real request."""

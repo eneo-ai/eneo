@@ -165,31 +165,30 @@ class Assistant(Entity):
         return self._attachments
 
     @staticmethod
-    def validate_attachment_count(attachments: list[File]) -> None:
+    def validate_attachments(attachments: list[File]) -> None:
         # Model-independent guardrail. The binding limit is the token budget
         # (enforced in the service where the model is known); this only stops a
-        # pathological number of files. Lives here so both the setter and the
-        # create-from-template path (which bypasses the setter via __init__) can
-        # share one check.
-        max_files = get_settings().attachment_max_files
+        # pathological number of files. Lives here so all write paths, including
+        # template creation, share the same persisted attachment contract.
+        settings = get_settings()
+        max_files = settings.attachment_max_files
         if len(attachments) > max_files:
             raise BadRequestException(f"Too many attachments (max {max_files}).")
-
-    @attachments.setter
-    def attachments(self, attachments: list[File]):
-        self.validate_attachment_count(attachments)
         for attachment in attachments:
             mimetype = attachment.mimetype or ""
             if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
                 raise BadRequestException("Attachments can only be text files")
 
-        max_size = get_settings().attachment_max_size_bytes
+        max_size = settings.attachment_max_size_bytes
         if sum(attachment.size for attachment in attachments) > max_size:
             raise BadRequestException(
                 f"Attachments exceed the maximum total size of "
                 f"{max_size // (1024 * 1024)} MB."
             )
 
+    @attachments.setter
+    def attachments(self, attachments: list[File]):
+        self.validate_attachments(attachments)
         self._attachments = attachments
 
     @property
@@ -359,6 +358,7 @@ class Assistant(Entity):
         completion_model_override: Optional[CompletionModel] = None,
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
+        completion_prompt_files: list["File"] | None = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -372,8 +372,17 @@ class Assistant(Entity):
             raise NoModelSelectedException()
 
         completion_model = cast("AICompletionModel", effective_model)
+        completion_message_files = files or []
+        prompt_files_for_completion = (
+            completion_prompt_files
+            if completion_prompt_files is not None
+            else self.attachments
+        )
 
-        if any(file.file_type == FileType.IMAGE for file in files or []):
+        if any(
+            file.file_type == FileType.IMAGE
+            for file in completion_message_files + prompt_files_for_completion
+        ):
             if not effective_model.vision:
                 raise BadRequestException(
                     f"Completion model {effective_model.name} do not support vision."
@@ -408,11 +417,11 @@ class Assistant(Entity):
         response = await completion_service.get_response(
             model=completion_model,
             text_input=question,
-            files=files or [],
+            files=completion_message_files,
             prompt=prompt_override
             if prompt_override is not None
             else self.get_prompt_text(),
-            prompt_files=self.attachments,
+            prompt_files=prompt_files_for_completion,
             info_blob_chunks=datastore_result.chunks,
             session=session,
             stream=stream,

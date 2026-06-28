@@ -78,6 +78,7 @@
 <ConfigContextMeter
   assistantId={$resource.id}
   model={selectedModel}
+  prompt={$update.prompt.text}
   attachments={$update.attachments}
 ></ConfigContextMeter>
 

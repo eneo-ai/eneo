@@ -183,6 +183,7 @@ class ConversationService:
         assistant_id: Optional["UUID"] = None,
         group_chat_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
+        assistant_prompt: str | None = None,
     ) -> PreflightResponse:
         """Estimate the tokens this request would add to context, without sending.
 
@@ -231,6 +232,8 @@ class ConversationService:
                 prompt_text,
                 attachments,
             ) = await self.assistant_service.get_preflight_baseline(assistant_id)
+            if assistant_prompt is not None:
+                prompt_text = assistant_prompt
             prompt_tokens = count_tokens(prompt_text or "", model_name)
             assistant_attachment_tokens, _ = await self._count_preflight_files(
                 files=attachments,

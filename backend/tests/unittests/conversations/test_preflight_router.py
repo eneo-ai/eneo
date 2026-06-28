@@ -99,6 +99,7 @@ async def test_preflight_router_returns_service_result():
         assistant_id=request_body.assistant_id,
         group_chat_id=None,
         tool_assistant_id=None,
+        assistant_prompt=None,
     )
 
 

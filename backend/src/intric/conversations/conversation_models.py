@@ -54,12 +54,14 @@ class PreflightRequest(_ConversationTarget):
     its own rule that at least one of `question` or `file_ids` must be
     non-empty, except for a bare assistant target. That empty assistant request
     is useful: it returns the assistant's always-present prompt/attachment
-    baseline for a brand-new chat.
+    baseline for a brand-new chat. `assistant_prompt` is an optional config-time
+    override for that assistant baseline, used before prompt edits are saved.
     """
 
     question: str = ""
     file_ids: list[UUID] = Field(default=[], max_length=_MAX_FILES_PER_PREFLIGHT)
     tools: Optional[UseTools] = None
+    assistant_prompt: Optional[str] = None
 
     @model_validator(mode="after")
     def _require_question_or_files(self) -> "PreflightRequest":

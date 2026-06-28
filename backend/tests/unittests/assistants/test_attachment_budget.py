@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -29,7 +29,37 @@ def _patch_reserve(monkeypatch, reserve):
 
 
 def _text_attachment():
-    return MagicMock(file_type=FileType.TEXT)
+    return MagicMock(file_type=FileType.TEXT, mimetype="text/plain", size=1)
+
+
+def _image_attachment():
+    return MagicMock(file_type=FileType.IMAGE)
+
+
+def _service(file_service=None):
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(),
+        user=MagicMock(),
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=file_service or AsyncMock(),
+        assistant_template_service=AsyncMock(),
+        session_service=AsyncMock(),
+        actor_manager=MagicMock(),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=AsyncMock(),
+        help_assistant_assignment_history_repo=AsyncMock(),
+    )
+    return service
 
 
 def _domain_assistant():
@@ -49,8 +79,10 @@ def _domain_assistant():
     )
 
 
-def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None):
-    model = SimpleNamespace(max_input_tokens=max_input_tokens, name="gpt-4o")
+def _assistant_with(max_input_tokens, n_attachments=1, prompt_text=None, vision=False):
+    model = SimpleNamespace(
+        max_input_tokens=max_input_tokens, name="gpt-4o", vision=vision
+    )
     prompt = SimpleNamespace(text=prompt_text) if prompt_text is not None else None
     return SimpleNamespace(
         completion_model=model,
@@ -73,21 +105,46 @@ def test_attachment_token_ceiling_subtracts_reserve(monkeypatch):
 # --- count cap (domain, abuse guardrail) ---
 
 
-def test_validate_attachment_count_raises_above_cap(monkeypatch):
+def test_validate_attachments_raises_above_count_cap(monkeypatch):
     monkeypatch.setattr(
         "intric.assistants.assistant.get_settings",
         lambda: _settings(attachment_max_files=3),
     )
     with pytest.raises(BadRequestException):
-        Assistant.validate_attachment_count([_text_attachment() for _ in range(4)])
+        Assistant.validate_attachments([_text_attachment() for _ in range(4)])
 
 
-def test_validate_attachment_count_passes_at_cap(monkeypatch):
+def test_validate_attachments_passes_at_count_cap(monkeypatch):
     monkeypatch.setattr(
         "intric.assistants.assistant.get_settings",
         lambda: _settings(attachment_max_files=3),
     )
-    Assistant.validate_attachment_count([_text_attachment() for _ in range(3)])
+    Assistant.validate_attachments([_text_attachment() for _ in range(3)])
+
+
+def test_validate_attachments_rejects_non_text_mimetype(monkeypatch):
+    monkeypatch.setattr(
+        "intric.assistants.assistant.get_settings",
+        lambda: _settings(),
+    )
+    with pytest.raises(BadRequestException, match="text files"):
+        Assistant.validate_attachments(
+            [MagicMock(mimetype="image/png", size=1, file_type=FileType.IMAGE)]
+        )
+
+
+def test_validate_attachments_rejects_total_size_above_cap(monkeypatch):
+    monkeypatch.setattr(
+        "intric.assistants.assistant.get_settings",
+        lambda: _settings(attachment_max_size_bytes=10),
+    )
+    with pytest.raises(BadRequestException, match="maximum total size"):
+        Assistant.validate_attachments(
+            [
+                MagicMock(mimetype="text/plain", size=6, file_type=FileType.TEXT),
+                MagicMock(mimetype="text/plain", size=5, file_type=FileType.TEXT),
+            ]
+        )
 
 
 def test_update_enforces_count_cap_through_setter(monkeypatch):
@@ -110,7 +167,8 @@ def test_update_enforces_count_cap_through_setter(monkeypatch):
 # --- context fit (service, always on): prompt + attachments must fit ---
 
 
-def test_fit_rejects_when_over_ceiling(monkeypatch):
+@pytest.mark.asyncio
+async def test_fit_rejects_when_over_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
         "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 5
@@ -121,12 +179,13 @@ def test_fit_rejects_when_over_ceiling(monkeypatch):
     )
     # ceiling = 100 - 10 = 90; used = prompt 5 + attachments 90 = 95 > 90 -> reject
     with pytest.raises(BadRequestException):
-        AssistantService._validate_attachments_fit(
+        await _service()._validate_attachments_fit(
             _assistant_with(100, prompt_text="x")
         )
 
 
-def test_fit_passes_when_within(monkeypatch):
+@pytest.mark.asyncio
+async def test_fit_passes_when_within(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
         "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 5
@@ -136,10 +195,11 @@ def test_fit_passes_when_within(monkeypatch):
         lambda **k: 80,
     )
     # used = 85 <= ceiling 90 -> ok
-    AssistantService._validate_attachments_fit(_assistant_with(100, prompt_text="x"))
+    await _service()._validate_attachments_fit(_assistant_with(100, prompt_text="x"))
 
 
-def test_fit_passes_at_exact_ceiling(monkeypatch):
+@pytest.mark.asyncio
+async def test_fit_passes_at_exact_ceiling(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
         "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
@@ -149,10 +209,11 @@ def test_fit_passes_at_exact_ceiling(monkeypatch):
         lambda **k: 90,
     )
     # used == ceiling is allowed (block only when strictly over)
-    AssistantService._validate_attachments_fit(_assistant_with(100))
+    await _service()._validate_attachments_fit(_assistant_with(100))
 
 
-def test_fit_skipped_when_no_model(monkeypatch):
+@pytest.mark.asyncio
+async def test_fit_skipped_when_no_model(monkeypatch):
     _patch_reserve(monkeypatch, 10)
     monkeypatch.setattr(
         "intric.assistants.assistant_service.count_attachment_tokens",
@@ -161,7 +222,61 @@ def test_fit_skipped_when_no_model(monkeypatch):
     assistant = SimpleNamespace(
         completion_model=None, attachments=[_text_attachment()], prompt=None
     )
-    AssistantService._validate_attachments_fit(assistant)  # no raise
+    await _service()._validate_attachments_fit(assistant)  # no raise
+
+
+@pytest.mark.asyncio
+async def test_fit_counts_derived_images_for_vision_model(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+
+    def fake_count_attachment_tokens(*, text_files, image_files, model_name):
+        return len(text_files) * 10 + len(image_files) * 90
+
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        fake_count_attachment_tokens,
+    )
+    text_attachment = _text_attachment()
+    derived_image = _image_attachment()
+    file_service = AsyncMock()
+    file_service.with_derived_images = AsyncMock(
+        return_value=[text_attachment, derived_image]
+    )
+
+    # ceiling = 100 - 10 = 90; text 10 + derived image 90 = 100 -> reject
+    with pytest.raises(BadRequestException):
+        await _service(file_service)._validate_attachments_fit(
+            _assistant_with(100, vision=True)
+        )
+
+    file_service.with_derived_images.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fit_does_not_count_derived_images_without_vision(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+
+    def fake_count_attachment_tokens(*, text_files, image_files, model_name):
+        return len(text_files) * 10 + len(image_files) * 90
+
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        fake_count_attachment_tokens,
+    )
+    file_service = AsyncMock()
+    file_service.with_derived_images = AsyncMock(
+        return_value=[_text_attachment(), _image_attachment()]
+    )
+
+    await _service(file_service)._validate_attachments_fit(_assistant_with(100))
+
+    file_service.with_derived_images.assert_not_awaited()
 
 
 # --- assembler advertises the fit ceiling (None when no model) ---

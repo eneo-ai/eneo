@@ -263,10 +263,12 @@ export function initConversations(client) {
      * @param {string} params.question The pending input
      * @param {{id: string}[]} [params.files] Pending file attachments
      * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
+     * @param {string} [params.assistantPrompt] Unsaved assistant prompt override
+     * for config-time baseline estimates
      * @returns {Promise<import('../types/resources').PreflightResponse>}
      * @throws {IntricError}
      */
-    preflight: async ({ chatPartner, conversation, question, files, tools }) => {
+    preflight: async ({ chatPartner, conversation, question, files, tools, assistantPrompt }) => {
       /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
       const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
 
@@ -292,7 +294,8 @@ export function initConversations(client) {
             ...target,
             question,
             file_ids: (files ?? []).map((f) => f.id),
-            tools
+            tools,
+            assistant_prompt: assistantPrompt
           }
         }
       });

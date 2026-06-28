@@ -8,9 +8,10 @@
   type Props = {
     assistantId: string;
     model: Model | undefined;
+    prompt: string;
     attachments: { id: string }[];
   };
-  const { assistantId, model, attachments }: Props = $props();
+  const { assistantId, model, prompt, attachments }: Props = $props();
 
   const intric = getIntric();
 
@@ -37,8 +38,8 @@
 
   $effect(() => {
     // Reads model?.id and attachments below, so Svelte re-runs this whenever the
-    // selected model or the attachment set changes. The denominator uses the
-    // LIVE picked model (see parent), so it stays correct even before saving.
+    // selected model, prompt, or attachment set changes. The denominator uses
+    // the LIVE picked model (see parent), so it stays correct before saving.
     const modelId = model?.id;
 
     if (debounce) clearTimeout(debounce);
@@ -56,7 +57,8 @@
         const res = await intric.conversations.preflight({
           chatPartner: { id: assistantId, type: "assistant" },
           question: "",
-          files: ids
+          files: ids,
+          assistantPrompt: prompt
         });
         if (current !== gen) return;
         used = res.file_tokens + (res.prompt_tokens ?? 0);

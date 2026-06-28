@@ -12,7 +12,9 @@ from intric.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantUpdatePublic,
 )
+from intric.assistants.assistant import Assistant
 from intric.assistants.assistant_service import AssistantService
+from intric.files.file_models import FileType
 from intric.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
@@ -572,52 +574,74 @@ async def test_publish_assistant_unauthorized_has_actionable_message(setup: Setu
 
 
 def _mock_file(file_type, parent_file_id=None):
-    return MagicMock(id=uuid4(), file_type=file_type, parent_file_id=parent_file_id)
+    mimetype = "image/jpeg" if file_type == FileType.IMAGE else "application/pdf"
+    return MagicMock(
+        id=uuid4(),
+        file_type=file_type,
+        parent_file_id=parent_file_id,
+        mimetype=mimetype,
+        size=1,
+    )
 
 
-async def test_vision_derivatives_expand_completion_files_and_attachments(
+def _assistant_with_attachments(attachments):
+    return Assistant(
+        id=None,
+        user=MagicMock(),
+        name="test",
+        space_id=MagicMock(),
+        prompt=None,
+        completion_model=MagicMock(),
+        completion_model_kwargs=ModelKwargs(),
+        logging_enabled=False,
+        websites=[],
+        collections=[],
+        attachments=attachments,
+        published=False,
+    )
+
+
+async def test_completion_file_inputs_include_prompt_derivatives_without_mutating_persistent_attachments(
     setup: Setup,
 ):
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
     attachment = _mock_file(FileType.TEXT)
     attachment_image = _mock_file(FileType.IMAGE, parent_file_id=attachment.id)
-    assistant = MagicMock()
-    assistant.attachments = [attachment]
+    assistant = _assistant_with_attachments([attachment])
     session = MagicMock(questions=[])
     setup.service.file_service.with_derived_images.side_effect = [
         [attachment, attachment_image],
         [pdf, derived],
     ]
 
-    result = await setup.service._with_vision_derivatives(
+    result = await setup.service._build_completion_file_inputs(
         files=[pdf],
         session=session,
         assistant=assistant,
         completion_model=MagicMock(vision=True),
     )
 
-    assert result == [pdf, derived]
-    assert assistant.attachments == [attachment, attachment_image]
+    assert result.completion_message_files == [pdf, derived]
+    assert result.completion_prompt_files == [attachment, attachment_image]
+    assert assistant.attachments == [attachment]
 
 
 async def test_vision_derivatives_skip_everything_without_vision(setup: Setup):
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     assistant = MagicMock()
+    assistant.attachments = []
     session = MagicMock(questions=[])
 
-    result = await setup.service._with_vision_derivatives(
+    result = await setup.service._build_completion_file_inputs(
         files=[pdf],
         session=session,
         assistant=assistant,
         completion_model=MagicMock(vision=False),
     )
 
-    assert result == [pdf]
+    assert result.completion_message_files == [pdf]
+    assert result.completion_prompt_files == []
     setup.service.file_service.with_derived_images.assert_not_awaited()
     setup.service.file_service.get_derived_images.assert_not_awaited()
 
@@ -627,8 +651,6 @@ async def test_vision_derivatives_gate_on_effective_model_not_configured(
 ):
     """Governance can steer to a different model than the assistant's own —
     derived images must follow the model that actually answers."""
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
     assistant = MagicMock()
@@ -637,19 +659,18 @@ async def test_vision_derivatives_gate_on_effective_model_not_configured(
     session = MagicMock(questions=[])
     setup.service.file_service.with_derived_images.return_value = [pdf, derived]
 
-    result = await setup.service._with_vision_derivatives(
+    result = await setup.service._build_completion_file_inputs(
         files=[pdf],
         session=session,
         assistant=assistant,
         completion_model=MagicMock(vision=True),  # policy-enforced model has it
     )
 
-    assert result == [pdf, derived]
+    assert result.completion_message_files == [pdf, derived]
+    assert result.completion_prompt_files == []
 
 
 async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
-    from intric.files.file_models import FileType
-
     pdf_one = _mock_file(FileType.TEXT)
     pdf_two = _mock_file(FileType.TEXT)
     derived_one = _mock_file(FileType.IMAGE, parent_file_id=pdf_one.id)
@@ -671,8 +692,6 @@ async def test_history_derivatives_attach_to_their_own_question(setup: Setup):
 
 
 async def test_history_derivatives_do_not_duplicate_present_images(setup: Setup):
-    from intric.files.file_models import FileType
-
     pdf = _mock_file(FileType.TEXT)
     derived = _mock_file(FileType.IMAGE, parent_file_id=pdf.id)
     question = MagicMock(files=[pdf, derived])
