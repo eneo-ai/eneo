@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -23,6 +25,10 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from intric.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
     KeyDecisionPayload,
@@ -35,7 +41,6 @@ from intric.flows.ai_builder.ai_builder_events import (
 )
 from intric.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
-    PlannerMetadataResolution,
 )
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
@@ -52,6 +57,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
     PendingQuestionResolution,
+)
+from intric.flows.ai_builder.ai_builder_server_decision_dispatch import (
+    ServerDecisionDispatchRequest,
+    ServerDecisionDispatchResult,
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.ai_builder_turn_controller import (
@@ -256,6 +265,72 @@ def _requirements_state_confirmed(
         latest_version=version,
         confirmed_version=version,
     )
+
+
+def _budget_policy() -> AIBuilderBudgetPolicy:
+    return AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=128,
+        minimum_conversation_budget_tokens=256,
+        unknown_model_context_window_tokens=8192,
+    )
+
+
+def _server_output_prepared() -> ServerOutputPrepared:
+    return ServerOutputPrepared(
+        requirements_state=_requirements_state_unconfirmed(),
+        ui_language="sv",
+        slot_classification_metadata=None,
+        server_decision=AskCanonicalQuestion(
+            slot_name="terminal_output",
+            prompt="What should the flow produce?",
+        ),
+        discovery_analysis=DiscoveryAnalysis(issues=()),
+    )
+
+
+def _configure_minimal_send_message(
+    planner: AIBuilderPlanner,
+    monkeypatch: pytest.MonkeyPatch,
+    prepared_request: ProposalPrepared | ServerOutputPrepared,
+) -> None:
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+    )
+    planner.repo.load_planning_state.return_value = None
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
+        AsyncMock(return_value=(None, None)),
+    )
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        AsyncMock(return_value=prepared_request),
+    )
+
+
+async def _collect_send_message_events(
+    planner: AIBuilderPlanner,
+    *,
+    session_id: UUID,
+) -> list[dict[str, str]]:
+    return [
+        encode_ai_builder_stream_event(event)
+        async for event in planner.send_message(
+            session_id=session_id,
+            message="Build a flow",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            attachment_files=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=_budget_policy(),
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -930,6 +1005,205 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
 
 
 @pytest.mark.asyncio
+async def test_send_message_converts_dispatch_lease_lost_exception_to_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+
+    async def fail_with_lease_lost(
+        _: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        raise AIBuilderBadRequestException(
+            "lease lost",
+            code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
+        )
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fail_with_lease_lost,
+    )
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["error", "done"]
+    assert json.loads(events[0]["data"])["code"] == "session_send_lease_lost"
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    refresh_attempted = asyncio.Event()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+    monkeypatch.setattr(
+        AIBuilderPlanner,
+        "_send_lock_refresh_interval_seconds",
+        staticmethod(lambda: 0),
+    )
+
+    async def refresh_fails(**_: object) -> bool:
+        refresh_attempted.set()
+        return False
+
+    async def wait_for_refresh_loss(
+        _: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        await asyncio.wait_for(refresh_attempted.wait(), timeout=12)
+        return ServerDecisionDispatchResult(
+            action_kind="ask_question",
+            events=(build_text_event("server result"),),
+            new_planning_state_version=2,
+        )
+
+    planner.repo.refresh_session_send_lease.side_effect = refresh_fails
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        wait_for_refresh_loss,
+    )
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["error", "done"]
+    assert json.loads(events[0]["data"])["code"] == "session_send_lease_lost"
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    refresh_attempted = asyncio.Event()
+    monkeypatch.setattr(
+        AIBuilderPlanner,
+        "_send_lock_refresh_interval_seconds",
+        staticmethod(lambda: 0),
+    )
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        ProposalPrepared(
+            requirements_state=_requirements_state_confirmed(),
+            ui_language="sv",
+            llm_messages=[{"role": "system", "content": "proposal"}],
+            system_prompt_hash="proposal-hash",
+            prior_plan_for_revision=None,
+            slot_classification_metadata=None,
+            plan_edit_context=None,
+            planning_state=PlanningState.empty(),
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=[],
+                available_kbs=[],
+                prior_bindings=(),
+            ),
+        ),
+    )
+
+    async def refresh_fails(**_: object) -> bool:
+        refresh_attempted.set()
+        return False
+
+    async def fake_propose_plan(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        await asyncio.wait_for(refresh_attempted.wait(), timeout=12)
+        yield build_text_event("proposal result")
+
+    planner.repo.refresh_session_send_lease.side_effect = refresh_fails
+    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["text", "done"]
+    assert events[0]["data"] == '{"text":"proposal result"}'
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_releases_lease_after_server_dispatch_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+
+    async def fail_dispatch(_: ServerDecisionDispatchRequest) -> ServerDecisionDispatchResult:
+        raise RuntimeError("dispatch failed")
+
+    monkeypatch.setattr(
+        "intric.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fail_dispatch,
+    )
+
+    events = await _collect_send_message_events(planner, session_id=session_id)
+
+    assert [event["event"] for event in events] == ["error", "done"]
+    assert json.loads(events[0]["data"])["code"] == "planner_upstream_error"
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_message_releases_lease_when_stream_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planner = _make_planner()
+    session_id = uuid4()
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        ProposalPrepared(
+            requirements_state=_requirements_state_confirmed(),
+            ui_language="sv",
+            llm_messages=[{"role": "system", "content": "proposal"}],
+            system_prompt_hash="proposal-hash",
+            prior_plan_for_revision=None,
+            slot_classification_metadata=None,
+            plan_edit_context=None,
+            planning_state=PlanningState.empty(),
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=[],
+                available_kbs=[],
+                prior_bindings=(),
+            ),
+        ),
+    )
+
+    async def fake_propose_plan(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        yield build_text_event("first chunk")
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
+    stream = planner.send_message(
+        session_id=session_id,
+        message="Build a flow",
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_models=None,
+        available_kbs=None,
+        flow=None,
+        assistant_snapshots=None,
+        attachment_files=None,
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+
+    first = encode_ai_builder_stream_event(await anext(stream))
+    await asyncio.wait_for(stream.aclose(), timeout=1)
+
+    assert first == {"event": "text", "data": '{"text":"first chunk"}'}
+    planner.repo.release_session_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -952,9 +1226,6 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         planning_state_version=1,
     )
     planner.repo.load_planning_state.return_value = None
-
-    async def noop_lease(**_: object) -> None:
-        return None
 
     async def fake_prepare(_: PlannerRequestPreparationInput) -> ProposalPrepared:
         return ProposalPrepared(
@@ -988,21 +1259,9 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
         AsyncMock(return_value=(None, prior_plan)),
     )
     monkeypatch.setattr(
-        planner,
-        "_resolve_message_metadata",
-        AsyncMock(
-            return_value=PlannerMetadataResolution(
-                metadata=None,
-                is_requirements_confirmation=False,
-                used_auxiliary_llm=False,
-            )
-        ),
-    )
-    monkeypatch.setattr(
         "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
         fake_prepare,
     )
-    monkeypatch.setattr(planner, "_maintain_send_lock_lease", noop_lease)
     monkeypatch.setattr(planner.proposal_processor, "propose_plan", fake_propose_plan)
 
     events = [
