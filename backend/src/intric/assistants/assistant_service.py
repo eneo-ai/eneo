@@ -424,7 +424,7 @@ class AssistantService:
         # Validate before persisting: the factory-built assistant already carries
         # the final model + attachments, so a set that doesn't fit is rejected
         # without leaving an invalid row behind.
-        await self._validate_attachments_fit(assistant)
+        await self._validate_attachments_fit(assistant, space=space)
 
         space.add_assistant(assistant)
         refreshed_space = await self.space_repo.update(space)
@@ -446,32 +446,59 @@ class AssistantService:
 
         return await self.file_service.with_derived_images(persistent_attachments)
 
-    async def _validate_attachments_fit(self, assistant: Assistant) -> None:
+    async def _validate_attachments_fit(
+        self, assistant: Assistant, *, space: "Space"
+    ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
 
-        Runtime may add document-derived images to the completion prompt files
-        for vision models, so validation counts the same file set that ask()
-        will send. Attachments are sent whole (never truncated) on every
-        request, so if they don't fit the request can't run — a clear rejection
-        beats silently sending part of a document. Skipped when no model is
-        selected or there are no persistent attachments."""
-        model = assistant.completion_model
-        attachments = assistant.attachments
-        if model is None or not attachments:
-            return
+        Validates the model, prompt and file set that ask() will ACTUALLY send,
+        so the save can't admit a configuration the request would then reject:
+        - Governance: for a governed personal-default assistant, the
+          governance-effective model and enforced prompt — not the assistant's
+          own — mirroring the resolution in ask().
+        - Vision: the persistent attachments expanded with their
+          document-derived images.
 
-        completion_prompt_files = await self._completion_prompt_files_for_model(
-            persistent_attachments=attachments,
-            completion_model=model,
-        )
-        ceiling = attachment_token_ceiling(model.max_input_tokens)
+        Attachments are sent whole (never truncated), so a set that doesn't fit
+        can't run — a clear rejection beats silently sending part of a document.
+        The prompt counts toward the ceiling on its own, so a prompt that alone
+        overflows is rejected even with no attachments. Skipped only when no
+        model is resolved."""
+        model = assistant.completion_model
         prompt_text = (
             getattr(assistant.prompt, "text", None)
             if assistant.prompt is not None
             else None
+        ) or ""
+
+        # Mirror ask()'s governance resolution so the fit check uses the model
+        # and prompt the request will really send, not the assistant's own.
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
         )
-        used = count_tokens(prompt_text or "", model.name) + count_attachment_tokens(
+        if effective_config is not None:
+            if effective_config.models_enforced:
+                resolved_model = select_effective_completion_model(
+                    current_model=model, effective_config=effective_config
+                )
+                if resolved_model is not None:
+                    model = resolved_model  # type: ignore[assignment]
+            if (
+                effective_config.prompt_enforced
+                and effective_config.enforced_prompt_text
+            ):
+                prompt_text = effective_config.enforced_prompt_text
+
+        if model is None:
+            return
+
+        completion_prompt_files = await self._completion_prompt_files_for_model(
+            persistent_attachments=assistant.attachments,
+            completion_model=model,
+        )
+        ceiling = attachment_token_ceiling(model.max_input_tokens)
+        used = count_tokens(prompt_text, model.name) + count_attachment_tokens(
             text_files=[
                 file
                 for file in completion_prompt_files
@@ -819,7 +846,7 @@ class AssistantService:
             or completion_model is not None
             or prompt_obj is not None
         ):
-            await self._validate_attachments_fit(assistant)
+            await self._validate_attachments_fit(assistant, space=space)
 
         refreshed_space = await self.space_repo.update(space)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)

@@ -29,7 +29,7 @@
   // question; past the ceiling the save is rejected, so warn (amber) as it nears.
   const ceiling = $derived(Math.max(limit - reserve, 0));
   const percent = $derived(limit > 0 ? (used / limit) * 100 : 0);
-  const show = $derived(loaded && limit > 0 && attachments.length > 0 && used > 0);
+  const show = $derived(loaded && limit > 0 && used > 0);
   const tone = $derived(
     ceiling > 0 && used > ceiling ? "over" : ceiling > 0 && used > ceiling * 0.8 ? "near" : "ok"
   );
@@ -37,28 +37,33 @@
   const nf = $derived(new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US"));
 
   $effect(() => {
-    // Reads model?.id and attachments below, so Svelte re-runs this whenever the
-    // selected model, prompt, or attachment set changes. The denominator uses
-    // the LIVE picked model (see parent), so it stays correct before saving.
+    // Read model, prompt and attachments synchronously so Svelte re-runs this
+    // whenever any of them changes (the async preflight below is not tracked).
+    // The denominator uses the LIVE picked model (see parent), so it stays
+    // correct before saving.
     const modelId = model?.id;
+    const promptText = prompt ?? "";
+    const fileIds = attachments.map((a) => ({ id: a.id }));
+    // The ceiling covers prompt + attachments, so meter as soon as either has
+    // content: a prompt that alone overflows is surfaced even with no files.
+    const hasContent = fileIds.length > 0 || promptText.trim().length > 0;
 
     if (debounce) clearTimeout(debounce);
 
-    if (!modelId || attachments.length === 0) {
+    if (!modelId || !hasContent) {
       loaded = false;
       used = 0;
       return;
     }
 
     const current = ++gen;
-    const ids = attachments.map((a) => ({ id: a.id }));
     debounce = setTimeout(async () => {
       try {
         const res = await intric.conversations.preflight({
           chatPartner: { id: assistantId, type: "assistant" },
           question: "",
-          files: ids,
-          assistantPrompt: prompt
+          files: fileIds,
+          assistantPrompt: promptText
         });
         if (current !== gen) return;
         used = res.file_tokens + (res.prompt_tokens ?? 0);

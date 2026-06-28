@@ -61,7 +61,7 @@ def setup_fixture():
     mock_assistant.collections = []
     mock_assistant.websites = []
     mock_assistant.integration_knowledge_list = []
-    mock_assistant.attachments = []  # default: no attachments -> fit check no-op
+    mock_assistant.attachments = []
     mock_assistant.has_knowledge.return_value = False
     mock_assistant.has_mcp.return_value = False
     mock_space = MagicMock()
@@ -98,6 +98,12 @@ def setup_fixture():
         org_space_assistant_role_repo=role_repo_mock,
         help_assistant_assignment_history_repo=history_repo_mock,
     )
+
+    # Attachment fit validation needs a real model + token counts; it is
+    # exercised directly in test_attachment_budget.py. Stub it here so these
+    # orchestration tests (update flow, model selection, permissions) aren't
+    # coupled to the token-counting subsystem.
+    service._validate_attachments_fit = AsyncMock()
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())
 

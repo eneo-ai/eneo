@@ -180,7 +180,7 @@ async def test_fit_rejects_when_over_ceiling(monkeypatch):
     # ceiling = 100 - 10 = 90; used = prompt 5 + attachments 90 = 95 > 90 -> reject
     with pytest.raises(BadRequestException):
         await _service()._validate_attachments_fit(
-            _assistant_with(100, prompt_text="x")
+            _assistant_with(100, prompt_text="x"), space=MagicMock()
         )
 
 
@@ -195,7 +195,9 @@ async def test_fit_passes_when_within(monkeypatch):
         lambda **k: 80,
     )
     # used = 85 <= ceiling 90 -> ok
-    await _service()._validate_attachments_fit(_assistant_with(100, prompt_text="x"))
+    await _service()._validate_attachments_fit(
+        _assistant_with(100, prompt_text="x"), space=MagicMock()
+    )
 
 
 @pytest.mark.asyncio
@@ -209,7 +211,7 @@ async def test_fit_passes_at_exact_ceiling(monkeypatch):
         lambda **k: 90,
     )
     # used == ceiling is allowed (block only when strictly over)
-    await _service()._validate_attachments_fit(_assistant_with(100))
+    await _service()._validate_attachments_fit(_assistant_with(100), space=MagicMock())
 
 
 @pytest.mark.asyncio
@@ -222,7 +224,7 @@ async def test_fit_skipped_when_no_model(monkeypatch):
     assistant = SimpleNamespace(
         completion_model=None, attachments=[_text_attachment()], prompt=None
     )
-    await _service()._validate_attachments_fit(assistant)  # no raise
+    await _service()._validate_attachments_fit(assistant, space=MagicMock())  # no raise
 
 
 @pytest.mark.asyncio
@@ -249,7 +251,7 @@ async def test_fit_counts_derived_images_for_vision_model(monkeypatch):
     # ceiling = 100 - 10 = 90; text 10 + derived image 90 = 100 -> reject
     with pytest.raises(BadRequestException):
         await _service(file_service)._validate_attachments_fit(
-            _assistant_with(100, vision=True)
+            _assistant_with(100, vision=True), space=MagicMock()
         )
 
     file_service.with_derived_images.assert_awaited_once()
@@ -274,9 +276,105 @@ async def test_fit_does_not_count_derived_images_without_vision(monkeypatch):
         return_value=[_text_attachment(), _image_attachment()]
     )
 
-    await _service(file_service)._validate_attachments_fit(_assistant_with(100))
+    await _service(file_service)._validate_attachments_fit(
+        _assistant_with(100), space=MagicMock()
+    )
 
     file_service.with_derived_images.assert_not_awaited()
+
+
+# --- context fit: the prompt counts on its own, even with no attachments ---
+
+
+@pytest.mark.asyncio
+async def test_fit_rejects_prompt_only_over_ceiling(monkeypatch):
+    # A system prompt that alone overflows must be rejected even with zero
+    # attachments — the ceiling covers prompt + attachments, not attachments
+    # alone (regression guard: the early-return on empty attachments hid this).
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 95
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens", lambda **k: 0
+    )
+    assistant = _assistant_with(100, n_attachments=0, prompt_text="huge prompt")
+    # ceiling = 90; prompt 95 > 90 -> reject
+    with pytest.raises(BadRequestException):
+        await _service()._validate_attachments_fit(assistant, space=MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_fit_passes_prompt_only_within_ceiling(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 50
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens", lambda **k: 0
+    )
+    assistant = _assistant_with(100, n_attachments=0, prompt_text="ok prompt")
+    # ceiling = 90; prompt 50 <= 90 -> ok
+    await _service()._validate_attachments_fit(assistant, space=MagicMock())
+
+
+# --- context fit: governance validates the model + prompt ask() will send ---
+
+
+@pytest.mark.asyncio
+async def test_fit_uses_governance_effective_model(monkeypatch):
+    # Own model fits (100-token window), but governance steers to a 20-token
+    # model: the save must be rejected against the model ask() will actually use.
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens", lambda **k: 15
+    )
+    small_model = SimpleNamespace(max_input_tokens=20, name="small", vision=False)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.select_effective_completion_model",
+        lambda **k: small_model,
+    )
+    service = _service()
+    service._resolve_effective_config = AsyncMock(
+        return_value=SimpleNamespace(
+            models_enforced=True, prompt_enforced=False, enforced_prompt_text=None
+        )
+    )
+    # own ceiling 90 -> 15 fits; effective ceiling 10 -> 15 over -> reject
+    with pytest.raises(BadRequestException):
+        await service._validate_attachments_fit(
+            _assistant_with(100, prompt_text="x"), space=MagicMock()
+        )
+
+
+@pytest.mark.asyncio
+async def test_fit_uses_governance_enforced_prompt(monkeypatch):
+    # Own prompt is empty (would fit), but governance enforces a long prompt
+    # that ask() will send: the save must be rejected against that prompt.
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens",
+        lambda text, *a, **k: len(text),
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens", lambda **k: 0
+    )
+    service = _service()
+    service._resolve_effective_config = AsyncMock(
+        return_value=SimpleNamespace(
+            models_enforced=False,
+            prompt_enforced=True,
+            enforced_prompt_text="x" * 95,
+        )
+    )
+    # ceiling 90; enforced prompt is 95 chars -> 95 > 90 -> reject
+    with pytest.raises(BadRequestException):
+        await service._validate_attachments_fit(
+            _assistant_with(100, n_attachments=0, prompt_text=None), space=MagicMock()
+        )
 
 
 # --- assembler advertises the fit ceiling (None when no model) ---
