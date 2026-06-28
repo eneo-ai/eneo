@@ -13,13 +13,10 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
-    make_provider_safe_server_tool_call_id,
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT,
     process_create_intent_arguments,
-    process_scoped_step_revision_if_requested,
-    scoped_step_revision_assistant_text,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -132,15 +129,19 @@ class ProposalSubmissionOwner:
         self_correction_bumped_temperature: float,
         forced_proposal_temperature: float,
         quality_retry_warning_codes: frozenset[str],
+        compiled_proposal_finalizer: CompiledProposalFinalizer | None = None,
     ) -> None:
         self.repo = repo
         self.litellm_client = litellm_client
         self.self_correction_temperature = self_correction_temperature
         self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
-        self._compiled_proposal_finalizer = CompiledProposalFinalizer(
-            repo=repo,
-            quality_retry_warning_codes=quality_retry_warning_codes,
+        self._compiled_proposal_finalizer = (
+            compiled_proposal_finalizer
+            or CompiledProposalFinalizer(
+                repo=repo,
+                quality_retry_warning_codes=quality_retry_warning_codes,
+            )
         )
 
     def _active_submission_tool_schemas(
@@ -226,18 +227,6 @@ class ProposalSubmissionOwner:
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )
-        scoped_revision_preflight_result = (
-            await self._preflight_scoped_step_revision_if_requested(ctx=ctx)
-        )
-        if scoped_revision_preflight_result is not None:
-            if scoped_revision_preflight_result.user_message is not None:
-                yield build_text_event(scoped_revision_preflight_result.user_message)
-                return
-            if scoped_revision_preflight_result.events:
-                for event in scoped_revision_preflight_result.events:
-                    yield event
-                return
-
         try:
             response = await call_proposal_completion(
                 litellm_client=self.litellm_client,
@@ -304,69 +293,6 @@ class ProposalSubmissionOwner:
             code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
             phase=AIBuilderErrorPhase.PROPOSAL,
             request_id=request_id,
-        )
-
-    async def _preflight_scoped_step_revision_if_requested(
-        self,
-        *,
-        ctx: ProposalTurnContext,
-    ) -> ToolProcessingResult | None:
-        if ctx.flow is not None:
-            return None
-
-        result = process_scoped_step_revision_if_requested(
-            conversation=ctx.conversation,
-            available_model_refs=ctx.available_model_refs,
-            available_kb_refs=ctx.available_kb_refs,
-            resource_catalog=ctx.resource_catalog,
-            plan_edit_context=ctx.plan_edit_context,
-            prior_plan_for_revision=ctx.prior_plan_for_revision,
-        )
-        if result is None or result.compiled_proposal is None:
-            if result is not None and result.feedback is not None:
-                return ToolProcessingResult(
-                    events=(
-                        build_ai_builder_error_event(
-                            message=(
-                                "The selected step change could not be applied to "
-                                "the current plan. Refresh the plan and try again."
-                            ),
-                            code=AIBuilderErrorCode.BAD_REQUEST,
-                            phase=AIBuilderErrorPhase.PROPOSAL,
-                            request_id=ctx.request_id,
-                            details={
-                                "failure_kind": result.failure_kind or "unknown",
-                            },
-                        ),
-                    )
-                )
-            return result
-
-        return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
-            CompiledProposalFinalizationRequest(
-                turn=ctx.turn,
-                conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-                target_kind=TargetKind.CREATE,
-                arguments={
-                    "plan_rationale": result.compiled_proposal.content.plan_rationale
-                    or "",
-                    "revision_kind": "scoped_step_direct",
-                },
-                assistant_content=scoped_step_revision_assistant_text(ctx.conversation),
-                assistant_metadata=ctx.assistant_metadata,
-                tool_call_id=make_provider_safe_server_tool_call_id(
-                    kind="scoped_step_revision",
-                    stable_key=ctx.request_id,
-                ),
-                metadata_tool_call=None,
-                compiled=result.compiled_proposal,
-                resource_catalog=ctx.resource_catalog,
-                flow=ctx.flow,
-                request_id=ctx.request_id,
-                usage_tracker=ctx.usage_tracker,
-            )
         )
 
     def _proposal_retry_config(

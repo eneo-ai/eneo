@@ -10,9 +10,6 @@ import pytest
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
-    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
-)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
@@ -30,9 +27,6 @@ from intric.flows.ai_builder.ai_builder_litellm_completion import (
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_WITHOUT,
-)
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
@@ -52,13 +46,10 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_tools import PROPOSE_FLOW_TOOL_NAME
-from intric.flows.flow_authoring_spec import OutputType
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
-    _builder_plan,
     _compiled_edit_proposal,
     _compiled_outline_proposal,
     _description_update_advisory,
@@ -73,16 +64,6 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_submission,
     _make_tool_call,
 )
-
-
-def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
-    return {
-        "id": local_id,
-        "ref": local_id,
-        "name": name,
-        "display_name": name,
-        "provider": "test",
-    }
 
 
 def _normalized_tool_call(name: str) -> LLMCompletionToolCall:
@@ -163,142 +144,6 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
     assert response is not None
     assert response.tool_call is tool_call
     assert response.text_content == "Här är planen."
-
-
-@pytest.mark.asyncio
-async def test_scoped_revision_preflight_skips_existing_flow_edit_context() -> None:
-    submission = _make_submission()
-    ctx = _make_context(flow=SimpleNamespace(id=uuid4()))
-
-    result = await submission._preflight_scoped_step_revision_if_requested(
-        ctx=ctx,
-    )
-
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_scoped_revision_preflight_returns_error_event_for_deterministic_failure() -> (
-    None
-):
-    submission = _make_submission()
-    ctx = _make_context(request_id="req-deterministic-failure")
-    deterministic_failure = ToolProcessingResult(
-        feedback="Scoped plan edit target `step_a` disappeared.",
-        failure_kind="quality",
-    )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission."
-        "process_scoped_step_revision_if_requested",
-        return_value=deterministic_failure,
-    ):
-        result = await submission._preflight_scoped_step_revision_if_requested(
-            ctx=ctx,
-    )
-
-    assert result is not None
-    assert len(result.events) == 1
-    payload = json.loads(encode_ai_builder_stream_event(result.events[0])["data"])
-    assert payload["code"] == "bad_request"
-    assert payload["phase"] == "proposal"
-    assert payload["request_id"] == "req-deterministic-failure"
-    assert "selected step change" in payload["message"]
-    assert "selected model change" not in payload["message"]
-    assert payload["details"] == {"failure_kind": "quality"}
-
-
-@pytest.mark.asyncio
-async def test_scoped_revision_preflight_uses_bounded_server_tool_call_id() -> None:
-    submission = _make_submission()
-    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
-    prior_plan = _builder_plan(prior_spec)
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[
-            _model_resource("model-old", "gpt-4o mini"),
-            _model_resource("model-nano", "gpt-5.4-nano"),
-        ],
-        available_kbs=[],
-        available_mcps=[],
-    )
-    plan_event = _plan_stream_event()
-    finalize = AsyncMock(return_value=ToolProcessingResult(events=(plan_event,)))
-    ctx = _make_context(
-        conversation=[
-            ConversationMessage(role="user", content="byt modell till gpt 5.4 nano")
-        ],
-        prior_plan_for_revision=prior_plan,
-        plan_edit_context=AIBuilderPlanEditContext(
-            scope="step",
-            plan_id=prior_plan.id,
-            target_plan_step_ref="step_a",
-        ),
-        resource_catalog=catalog,
-        available_model_refs=catalog.model_refs,
-        request_id="00000000-0000-0000-0000-000000000000",
-    )
-
-    with patch.object(
-        CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
-    ):
-        result = await submission._preflight_scoped_step_revision_if_requested(
-            ctx=ctx,
-        )
-
-    assert result is not None
-    assert result.events == (plan_event,)
-    request = finalize.await_args.args[0]
-    assert request.tool_call_id != f"server_scoped_model_revision:{ctx.request_id}"
-    assert "scoped_step_revision" in request.tool_call_id
-    assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "message",
-    [
-        "kan du ändra så att jag får en pdf fil istället?",
-        "utdatat ska vara pdf fil",
-    ],
-)
-async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision(
-    message: str,
-) -> None:
-    submission = _make_submission()
-    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
-    prior_plan = _builder_plan(prior_spec)
-    plan_event = _plan_stream_event()
-    finalize = AsyncMock(return_value=ToolProcessingResult(events=(plan_event,)))
-    ctx = _make_context(
-        conversation=[
-            ConversationMessage(
-                role="user",
-                content=message,
-            )
-        ],
-        prior_plan_for_revision=prior_plan,
-        plan_edit_context=AIBuilderPlanEditContext(
-            scope="step",
-            plan_id=prior_plan.id,
-            target_plan_step_ref="step_a",
-        ),
-        request_id="00000000-0000-0000-0000-000000000001",
-    )
-
-    with patch.object(
-        CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
-    ):
-        result = await submission._preflight_scoped_step_revision_if_requested(
-            ctx=ctx,
-        )
-
-    assert result is not None
-    assert result.events == (plan_event,)
-    request = finalize.await_args.args[0]
-    assert request.arguments["revision_kind"] == "scoped_step_direct"
-    assert request.assistant_content == "Jag har uppdaterat det valda steget."
-    assert request.compiled.content.spec.steps[0].output_type == OutputType.PDF
-    assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
 @pytest.mark.asyncio

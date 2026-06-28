@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
@@ -24,16 +25,26 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+    CompiledProposalFinalizer,
+)
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
     resolve_ui_language,
 )
 from intric.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
+from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalTurnTelemetry,
+)
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import LLMMessageParam
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
+)
+from intric.flows.ai_builder.ai_builder_scoped_plan_revision import (
+    ScopedPlanRevisionRequest,
+    run_scoped_plan_revision_attempt,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.planning_state import PlanningState
@@ -74,6 +85,11 @@ class AIBuilderProposalProcessor:
         self.self_correction_temperature = self_correction_temperature
         self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
+        quality_retry_warning_code_set = frozenset(quality_retry_warning_codes)
+        self._compiled_proposal_finalizer = CompiledProposalFinalizer(
+            repo=repo,
+            quality_retry_warning_codes=quality_retry_warning_code_set,
+        )
         if proposal_submission is None:
             proposal_submission = ProposalSubmissionOwner(
                 repo=repo,
@@ -81,7 +97,8 @@ class AIBuilderProposalProcessor:
                 self_correction_temperature=self_correction_temperature,
                 self_correction_bumped_temperature=self_correction_bumped_temperature,
                 forced_proposal_temperature=forced_proposal_temperature,
-                quality_retry_warning_codes=frozenset(quality_retry_warning_codes),
+                quality_retry_warning_codes=quality_retry_warning_code_set,
+                compiled_proposal_finalizer=self._compiled_proposal_finalizer,
             )
         self._proposal_submission = proposal_submission
 
@@ -126,6 +143,36 @@ class AIBuilderProposalProcessor:
             for event in mcp_preflight_result.events:
                 yield event
             return
+
+        if flow is None:
+            scoped_revision_result = await run_scoped_plan_revision_attempt(
+                request=ScopedPlanRevisionRequest(
+                    turn=turn,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    available_model_refs=available_model_refs,
+                    available_kb_refs=available_kb_refs,
+                    resource_catalog=resource_catalog,
+                    plan_edit_context=plan_edit_context,
+                    prior_plan_for_revision=prior_plan_for_revision,
+                    request_id=request_id,
+                    usage_tracker=ProposalTurnTelemetry(
+                        request_id=request_id,
+                        model=litellm_model,
+                        target_kind=TargetKind.CREATE,
+                    ),
+                    assistant_metadata=assistant_metadata,
+                    flow=flow,
+                ),
+                finalizer=self._compiled_proposal_finalizer,
+            )
+            if (
+                scoped_revision_result is not None
+                and not scoped_revision_result.fall_through_to_active_submission
+            ):
+                for event in scoped_revision_result.events:
+                    yield event
+                return
 
         async for event in self._proposal_submission.run_active_submission_attempt(
             turn=turn,

@@ -485,6 +485,91 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
 
 
 @pytest.mark.asyncio
+async def test_propose_plan_falls_through_when_scoped_finalization_returns_feedback_only() -> (
+    None
+):
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
+    prior_plan = _builder_plan(prior_spec)
+    outline_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        {
+            "flow_name": "Fallback flow",
+            "plan_rationale": "Use the active submission path.",
+            "steps": [{"name": "Analyze", "instructions": "Analyze the input."}],
+        },
+    )
+    finalize = AsyncMock(
+        side_effect=[
+            ToolProcessingResult(feedback="quality warning", failure_kind="quality"),
+            ToolProcessingResult(events=(_plan_stream_event(),)),
+        ]
+    )
+
+    async def process_outline(**kwargs) -> ToolProcessingResult:
+        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+            new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
+        ) as call_completion,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_create_intent_arguments",
+            new=process_outline,
+        ),
+        patch.object(
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
+        ),
+    ):
+        events = [
+            encode_ai_builder_stream_event(event)
+            async for event in processor.propose_plan(
+                turn=_make_turn(
+                    session_id=prior_plan.session_id,
+                    tenant_id=prior_plan.tenant_id,
+                ),
+                conversation=[
+                    ConversationMessage(
+                        role="user",
+                        content="byt modell från gpt-4o mini till gpt 5.4 nano",
+                    )
+                ],
+                new_messages_start=0,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_model_refs=catalog.model_refs,
+                available_kb_refs=None,
+                resource_catalog=catalog,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-scoped-feedback-fallthrough",
+                plan_edit_context=AIBuilderPlanEditContext(
+                    scope="step",
+                    plan_id=prior_plan.id,
+                    target_plan_step_ref="step_a",
+                ),
+                prior_plan_for_revision=prior_plan,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["plan"]
+    call_completion.assert_awaited_once()
+    assert finalize.await_count == 2
+    scoped_request = finalize.await_args_list[0].args[0]
+    assert scoped_request.arguments["revision_kind"] == "scoped_step_direct"
+
+
+@pytest.mark.asyncio
 async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable() -> (
     None
 ):

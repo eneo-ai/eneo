@@ -35,6 +35,9 @@ PROPOSAL_REPAIR_MODULE = ".".join(
 PROPOSAL_SUBMISSION_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_submission")
 )
+SCOPED_PLAN_REVISION_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_scoped_plan_revision")
+)
 PROPOSAL_TOOL_CONTRACTS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_tool_contracts")
 )
@@ -112,7 +115,6 @@ PROPOSAL_SUBMISSION_METHODS = frozenset(
         "_handle_propose_flow_tool_call",
         "_process_submission_invocation",
         "_proposal_retry_config",
-        "preflight_scoped_model_revision_if_requested",
         "retry_forced_proposal_after_text",
         "_active_submission_tool_schemas",
     }
@@ -139,7 +141,11 @@ PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_MODULES = frozenset(
     }
 )
 PROPOSAL_SUBMISSION_FORBIDDEN_IMPORT_NAMES = frozenset(
-    {"assistant_metadata_with_usage"}
+    {
+        "assistant_metadata_with_usage",
+        "process_scoped_step_revision_if_requested",
+        "scoped_step_revision_assistant_text",
+    }
 )
 PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS = frozenset(
     {
@@ -153,6 +159,7 @@ PROPOSAL_SUBMISSION_STALE_PRIVATE_METHODS = frozenset(
         "_handle_outline_flow_tool_call",
         "_outline_flow_retry_config",
         "_process_retry_invocation",
+        "_preflight_scoped_step_revision_if_requested",
     }
 )
 PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
@@ -244,6 +251,9 @@ PROPOSAL_INTENT_MODULE = ".".join(
 )
 PROPOSAL_INTENT_PATH = Path("src/intric/flows/ai_builder/ai_builder_proposal_intent.py")
 CREATE_PROPOSAL_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_proposal.py")
+SCOPED_PLAN_REVISION_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_scoped_plan_revision.py"
+)
 CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compiler.py")
 CREATE_COMPILER_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_create_compiler")
@@ -1417,7 +1427,7 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         "call_proposal_completion_with_usage",
         "active_submission_tool_name(",
         "active_submission_tool_schemas(",
-        "preflight_scoped_model_revision_if_requested(",
+        "_preflight_scoped_step_revision_if_requested(",
         "retry_forced_proposal_after_text(",
     }:
         if banned_reference in processor_text:
@@ -1508,7 +1518,7 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         finalization_request_call_count = submission_text.count(
             "CompiledProposalFinalizationRequest("
         )
-        if finalization_request_call_count != 2:
+        if finalization_request_call_count != 1:
             violations.append(
                 f"{submission_path}: CompiledProposalFinalizationRequest calls "
                 f"{finalization_request_call_count}"
@@ -1577,6 +1587,81 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
 
     if "Callable[..., Any]" in submission_text:
         violations.append(f"{submission_path}: defines Callable[..., Any]")
+
+    assert violations == []
+
+
+def test_scoped_plan_revision_owns_direct_revision_without_llm_or_repair() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    scoped_path = backend_root / SCOPED_PLAN_REVISION_PATH
+    create_path = backend_root / CREATE_PROPOSAL_PATH
+    submission_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+    )
+    assert importlib.util.find_spec(SCOPED_PLAN_REVISION_MODULE) is not None
+
+    scoped_text = scoped_path.read_text()
+    scoped_tree = ast.parse(scoped_text, filename=str(scoped_path))
+    create_tree = ast.parse(create_path.read_text(), filename=str(create_path))
+    submission_tree = ast.parse(submission_path.read_text(), filename=str(submission_path))
+    violations: list[str] = []
+
+    forbidden_scoped_modules = {
+        "intric.flows.ai_builder.ai_builder_litellm_completion",
+        "intric.flows.ai_builder.ai_builder_proposal_repair",
+    }
+    for module in _imported_modules(scoped_tree):
+        if module in forbidden_scoped_modules:
+            violations.append(f"{scoped_path}: imports {module}")
+
+    forbidden_scoped_names = {
+        "ForcedToolAfterTextRequest",
+        "ProposalSelfCorrectionRequest",
+        "call_proposal_completion",
+        "make_usage_tracked_proposal_completion",
+        "run_forced_tool_retry_after_text",
+        "run_tool_self_correction",
+    }
+    for node in ast.walk(scoped_tree):
+        if isinstance(node, ast.Name) and node.id in forbidden_scoped_names:
+            violations.append(f"{scoped_path}:{node.lineno} references {node.id}")
+        if isinstance(node, ast.Name) and node.id == "Any":
+            violations.append(f"{scoped_path}:{node.lineno} references Any")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == "cast":
+                violations.append(f"{scoped_path}:{node.lineno} casts type contract")
+        if isinstance(node, ast.ImportFrom) and node.module == "typing":
+            imported_names = {alias.name for alias in node.names}
+            if "Any" in imported_names:
+                violations.append(f"{scoped_path}:{node.lineno} imports Any")
+    if "# type: ignore" in scoped_text:
+        violations.append(f"{scoped_path}: contains type ignore")
+
+    direct_revision_owner_names = {
+        "process_scoped_step_revision_if_requested",
+        "scoped_step_revision_assistant_text",
+    }
+    scoped_defs = {
+        node.name
+        for node in ast.walk(scoped_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    missing_defs = sorted(direct_revision_owner_names - scoped_defs)
+    if missing_defs:
+        violations.append(f"{scoped_path}: missing {missing_defs}")
+
+    for path, tree in ((create_path, create_tree), (submission_path, submission_tree)):
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name in direct_revision_owner_names:
+                    violations.append(f"{path}:{node.lineno} defines {node.name}")
+            if isinstance(node, ast.ImportFrom):
+                imported_names = {alias.name for alias in node.names}
+                forbidden_names = imported_names & direct_revision_owner_names
+                if forbidden_names:
+                    violations.append(
+                        f"{path}:{node.lineno} imports {sorted(forbidden_names)}"
+                    )
 
     assert violations == []
 
