@@ -56,16 +56,18 @@ Reserved `input_payload_json` keys stay owned by the backend; do not create form
 
 Before building a UI, inspect the runtime paths and run contract for the published flow version.
 
-1. Call `GET runtime_paths.run_contract` to get required form fields, file inputs, review steps, and final output.
-2. Call `GET runtime_paths.graph` to get the published topology your app can show before a run.
-3. Use `published_flow_version` as the version pin when your app creates a run.
+1. Call `GET /api/v1/flows/{id}/published/` to get runtime-safe paths for service-key or user clients.
+2. Call `GET runtime_paths.run_contract` to get required form fields, file inputs, review steps, and final output.
+3. Call `GET runtime_paths.graph` to get the published topology your app can show before a run.
+4. Use `published_flow_version` as the version pin when your app creates a run.
 
 Endpoint facts:
 
-| Endpoint                           | Method | Success  | Operation               |
-| ---------------------------------- | ------ | -------- | ----------------------- |
-| `/api/v1/flows/{id}/run-contract/` | `GET`  | `200 OK` | `get_flow_run_contract` |
-| `/api/v1/flows/{id}/graph/`        | `GET`  | `200 OK` | `get_flow_graph`        |
+| Endpoint                           | Method | Success  | Operation                    |
+| ---------------------------------- | ------ | -------- | ---------------------------- |
+| `/api/v1/flows/{id}/run-contract/` | `GET`  | `200 OK` | `get_flow_run_contract`      |
+| `/api/v1/flows/{id}/graph/`        | `GET`  | `200 OK` | `get_flow_graph`             |
+| `/api/v1/flows/{id}/published/`    | `GET`  | `200 OK` | `get_published_flow_runtime` |
 
 Contract coverage: These endpoints are contract-tested.
 

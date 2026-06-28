@@ -292,14 +292,21 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
     EndpointSequence(
         slug="robustness",
         title="Robustness",
-        summary="Use idempotency, version pins, polling backoff, and status capabilities for retry-safe clients.",
+        summary="Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients.",
         steps=(
             "Reuse the same `Idempotency-Key` only for the same create-run payload.",
             "Send `expected_flow_version` from the run contract so edited published versions do not surprise clients.",
+            "Call `runtime_paths.cancel_run_template` when the user intentionally abandons a non-terminal run.",
+            "Call `runtime_paths.redispatch_run_template` only for stale queued recovery; `redispatched_count: 0` means no dispatch was needed.",
             "Back off polling when `status_capabilities.should_poll` is false.",
             "Use run and step polling as the source of truth for status changes.",
         ),
-        runtime_path_fields=("create_run", "get_run_template"),
+        runtime_path_fields=(
+            "create_run",
+            "cancel_run_template",
+            "redispatch_run_template",
+            "get_run_template",
+        ),
         run_contract_fields=("published_flow_version",),
         receipts=(
             TestReceipt(
@@ -310,10 +317,19 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
                 OPENAPI_TEST_FILE,
                 "test_openapi_flow_run_status_capabilities_guides_consumer_lifecycle",
             ),
+            TestReceipt(
+                "backend/tests/unittests/flows/test_flow_run_execution_router.py",
+                "test_cancel_flow_run_uses_terminalizer_audit_only",
+            ),
+            TestReceipt(
+                "backend/tests/unittests/flows/test_flow_run_execution_router.py",
+                "test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits",
+            ),
         ),
         error_codes=(
             FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
             FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
+            FlowApiErrorCode.RUN_USER_CANCELLED,
             FlowApiErrorCode.RUN_WORKER_STALLED,
         ),
     ),

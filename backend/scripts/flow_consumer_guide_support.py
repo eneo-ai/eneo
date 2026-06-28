@@ -597,6 +597,23 @@ def endpoint_contracts_for_sequence(
     return tuple(contracts)
 
 
+def documented_consumer_operation_ids(
+    *,
+    sequences: Sequence[EndpointSequence],
+    worked_example_operation_ids: Sequence[str] = (),
+    pitfall_rows: Sequence[EndpointPitfallRow] = (),
+) -> set[str]:
+    documented = set(worked_example_operation_ids)
+    for sequence in sequences:
+        documented.update(
+            contract.operation_id
+            for contract in endpoint_contracts_for_sequence(sequence)
+        )
+    for row in pitfall_rows:
+        documented.update(row.operation_ids)
+    return documented
+
+
 def render_endpoint_contract_table(
     contracts: Sequence[FlowRuntimeEndpointContract],
 ) -> str:

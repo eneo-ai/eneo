@@ -28,6 +28,7 @@ CONSUMER_GUIDE_PAGE_SLUG = "flows-faq"
 FLOW_CONSUMER_GUIDE_DOCS_OUTPUT_PATH = output_path_for(CONSUMER_GUIDE_PAGE_SLUG)
 CAPABILITY_MATRIX_ROWS = ()
 SCENARIOS = ()
+WORKED_EXAMPLE_HOPS = ()
 
 OPENAPI_TEST_FILE = "backend/tests/unit/test_flow_openapi_contract.py"
 

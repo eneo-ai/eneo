@@ -12,17 +12,17 @@ Use this page for flow runtime journeys. Use the reference for full schemas: [Fl
 
 Use this table to choose the right runtime journey before you read the detailed endpoint facts below.
 
-| Journey                             | Use it when                                                                                                    | Key endpoint                                                                                                     |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                 | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
-| Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                         | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
-| Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                         | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
-| Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                  | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
-| Results                             | Drive the UI from run status, step results, result files, and status capabilities.                             | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
-| Reruns                              | Reruns invalidate downstream work and preserve lineage so clients can explain what changed.                    | `POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` (`rerun_flow_run_step`)                           |
-| Robustness                          | Use idempotency, version pins, polling backoff, and status capabilities for retry-safe clients.                | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
-| Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                      | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
-| Service keys and tenancy guarantees | Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
+| Journey                             | Use it when                                                                                                               | Key endpoint                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Quickstart                          | Discover the contract, create a run with idempotency, poll status, then read the final result.                            | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Files                               | Upload files before run creation and bind returned ids to the step that consumes them.                                    | `GET /api/v1/flows/{id}/run-contract/` (`get_flow_run_contract`)                                                 |
+| Human-in-the-loop pause and resume  | Runs pause only at review-marked steps and resume through review checkpoint endpoints.                                    | `GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/` (`get_active_flow_run_review_checkpoint`)      |
+| Sending files mid-run               | Eneo Flows does not accept arbitrary file injection while a run is executing.                                             | `PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` (`edit_flow_run_review_checkpoint`) |
+| Results                             | Drive the UI from run status, step results, result files, and status capabilities.                                        | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
+| Reruns                              | Reruns invalidate downstream work and preserve lineage so clients can explain what changed.                               | `POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` (`rerun_flow_run_step`)                           |
+| Robustness                          | Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients. | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
+| Failures                            | Branch on typed `FlowApiErrorCode` values and show the user the specific recovery action.                                 | `GET /api/v1/flows/{id}/runs/{run_id}/` (`get_flow_run`)                                                         |
+| Service keys and tenancy guarantees | Service keys can drive published runtime paths inside their scope and cannot inspect another principal's runs.            | `POST /api/v1/flows/{id}/runs/` (`create_flow_run`)                                                              |
 
 ## Worked end-to-end example
 
@@ -788,23 +788,27 @@ After the happy path works, add retries and polling rules so the integration beh
 
 ### Robustness
 
-Use idempotency, version pins, polling backoff, and status capabilities for retry-safe clients.
+Use idempotency, version pins, cancellation, redispatch, polling backoff, and status capabilities for retry-safe clients.
 
 1. Reuse the same `Idempotency-Key` only for the same create-run payload.
 2. Send `expected_flow_version` from the run contract so edited published versions do not surprise clients.
-3. Back off polling when `status_capabilities.should_poll` is false.
-4. Use run and step polling as the source of truth for status changes.
+3. Call `runtime_paths.cancel_run_template` when the user intentionally abandons a non-terminal run.
+4. Call `runtime_paths.redispatch_run_template` only for stale queued recovery; `redispatched_count: 0` means no dispatch was needed.
+5. Back off polling when `status_capabilities.should_poll` is false.
+6. Use run and step polling as the source of truth for status changes.
 
 Endpoint facts:
 
-| Endpoint                            | Method | Success       | Operation         |
-| ----------------------------------- | ------ | ------------- | ----------------- |
-| `/api/v1/flows/{id}/runs/`          | `POST` | `201 Created` | `create_flow_run` |
-| `/api/v1/flows/{id}/runs/{run_id}/` | `GET`  | `200 OK`      | `get_flow_run`    |
+| Endpoint                                       | Method | Success       | Operation             |
+| ---------------------------------------------- | ------ | ------------- | --------------------- |
+| `/api/v1/flows/{id}/runs/`                     | `POST` | `201 Created` | `create_flow_run`     |
+| `/api/v1/flows/{id}/runs/{run_id}/cancel/`     | `POST` | `200 OK`      | `cancel_flow_run`     |
+| `/api/v1/flows/{id}/runs/{run_id}/redispatch/` | `POST` | `200 OK`      | `redispatch_flow_run` |
+| `/api/v1/flows/{id}/runs/{run_id}/`            | `GET`  | `200 OK`      | `get_flow_run`        |
 
 Contract coverage: These endpoints are contract-tested.
 
-Errors you must handle: `flow_run_idempotency_conflict`, `flow_run_concurrency_limit_reached`, `flow_worker_stalled`.
+Errors you must handle: `flow_run_idempotency_conflict`, `flow_run_concurrency_limit_reached`, `flow_run_user_cancelled`, `flow_worker_stalled`.
 
 When a run or step fails, branch on typed codes and show the user the next action.
 

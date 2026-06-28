@@ -89,6 +89,7 @@ CAPABILITY_MATRIX_ROWS: tuple[CapabilityMatrixRow, ...] = (
     ),
 )
 ENDPOINT_PITFALL_ROWS = ()
+WORKED_EXAMPLE_HOPS = ()
 
 ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
     EndpointSequence(
@@ -96,11 +97,13 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
         title="Design from the published contract",
         summary="Before building a UI, inspect the runtime paths and run contract for the published flow version.",
         steps=(
+            "Call `GET /api/v1/flows/{id}/published/` to get runtime-safe paths for service-key or user clients.",
             "Call `GET runtime_paths.run_contract` to get required form fields, file inputs, review steps, and final output.",
             "Call `GET runtime_paths.graph` to get the published topology your app can show before a run.",
             "Use `published_flow_version` as the version pin when your app creates a run.",
         ),
         runtime_path_fields=("run_contract", "graph"),
+        endpoint_operation_ids=("get_published_flow_runtime",),
         run_contract_fields=(
             "published_flow_version",
             "form_fields.name",
@@ -116,6 +119,10 @@ ENDPOINT_SEQUENCES: tuple[EndpointSequence, ...] = (
             TestReceipt(
                 "backend/tests/unit/test_flow_openapi_contract.py",
                 "test_openapi_runtime_paths_expose_review_checkpoint_templates",
+            ),
+            TestReceipt(
+                "backend/tests/unittests/flows/test_flow_router_crud.py",
+                "test_get_published_flow_runtime_returns_runtime_projection_for_human_reader",
             ),
         ),
         error_codes=(

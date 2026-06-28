@@ -2610,6 +2610,31 @@ def test_flow_consumer_endpoint_receipts_and_fields_are_typed() -> None:
             assert f"def {receipt.function_name}" in _read(test_file)
 
 
+def test_flow_consumer_docs_cover_every_runtime_endpoint_contract() -> None:
+    generators = _load_flow_consumer_guide_generators()
+    # The generator loader adds backend/scripts to sys.path for support imports.
+    from flow_consumer_guide_support import documented_consumer_operation_ids
+
+    documented_operation_ids: set[str] = set()
+    for generator in generators.values():
+        documented_operation_ids.update(
+            documented_consumer_operation_ids(
+                sequences=generator.ENDPOINT_SEQUENCES,
+                worked_example_operation_ids=tuple(
+                    hop.operation_id for hop in generator.WORKED_EXAMPLE_HOPS
+                ),
+                pitfall_rows=generator.ENDPOINT_PITFALL_ROWS,
+            )
+        )
+
+    expected_operation_ids = {
+        contract.operation_id for contract in FLOW_RUNTIME_ENDPOINT_CONTRACTS
+    }
+
+    assert documented_operation_ids - expected_operation_ids == set()
+    assert expected_operation_ids - documented_operation_ids == set()
+
+
 def test_flow_runtime_endpoint_registry_matches_constants_and_live_routes() -> None:
     registry_route_paths = {
         contract.route_path for contract in FLOW_RUNTIME_ENDPOINT_CONTRACTS
