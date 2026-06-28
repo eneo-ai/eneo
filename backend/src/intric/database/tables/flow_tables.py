@@ -2059,7 +2059,6 @@ BUILDER_PLAN_STATUS_VALUES = (
     "proposed",
     "approved",
     "applied",
-    "rejected",
     "superseded",
 )
 BUILDER_TARGET_KIND_VALUES = ("create", "edit")

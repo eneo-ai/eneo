@@ -6,6 +6,12 @@ Revision ID: 202603121400
 Revises: 579199d395dd
 Create Date: 2026-03-12 14:00:00.000000
 
+Pre-production note:
+The builder plan `rejected` status was removed from this unreleased migration
+on 2026-06-28. Development databases that already applied the older branch
+shape should reset/replay migrations instead of relying on a follow-up
+compatibility migration for never-shipped Flow AI Builder data.
+
 """
 
 import sqlalchemy as sa
@@ -30,7 +36,6 @@ BUILDER_PLAN_STATUS_VALUES = (
     "proposed",
     "approved",
     "applied",
-    "rejected",
     "superseded",
 )
 BUILDER_TARGET_KIND_VALUES = ("create", "edit")

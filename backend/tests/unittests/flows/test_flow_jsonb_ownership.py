@@ -75,16 +75,13 @@ def test_flow_jsonb_owner_registry_has_explicit_deferred_inventory_rows() -> Non
         if owner.storage_category is FlowJsonbStorageCategory.DEFERRED_INVENTORY
     }
 
-    assert deferred_rows == {
-        ("builder_sessions", "conversation"),
-        ("builder_sessions", "planning_state_jsonb"),
-        ("module_registry", "metadata_json"),
-    }
+    assert deferred_rows == {("module_registry", "metadata_json")}
 
 
 def test_builder_plan_proposal_json_has_typed_owner() -> None:
     owner = FLOW_JSONB_COLUMN_OWNERS[("builder_plans", "proposal_json")]
 
+    assert owner.owner_module == "intric.flows.ai_builder.ai_builder_domain_models"
     assert owner.envelope_name == "FlowBuilderProposal"
     assert owner.storage_category is FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT
     assert (
@@ -92,3 +89,29 @@ def test_builder_plan_proposal_json_has_typed_owner() -> None:
         is FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE
     )
     assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE
+
+
+def test_builder_session_conversation_has_typed_owner() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "conversation")]
+
+    assert owner.owner_module == "intric.flows.ai_builder.ai_builder_domain_models"
+    assert owner.envelope_name == "ConversationMessage"
+    assert owner.storage_category is FlowJsonbStorageCategory.BUILDER_SESSION_STATE
+    assert (
+        owner.schema_version_policy
+        is FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE
+    )
+    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD
+
+
+def test_builder_session_planning_state_has_typed_owner() -> None:
+    owner = FLOW_JSONB_COLUMN_OWNERS[("builder_sessions", "planning_state_jsonb")]
+
+    assert owner.owner_module == "intric.flows.ai_builder.planning_state"
+    assert owner.envelope_name == "PlanningState"
+    assert owner.storage_category is FlowJsonbStorageCategory.BUILDER_SESSION_STATE
+    assert (
+        owner.schema_version_policy
+        is FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION
+    )
+    assert owner.corruption_behavior is FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD

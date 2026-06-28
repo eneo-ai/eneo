@@ -21569,7 +21569,7 @@ export interface components {
      * PlanStatus
      * @enum {string}
      */
-    PlanStatus: "proposed" | "approved" | "applied" | "rejected" | "superseded";
+    PlanStatus: "proposed" | "approved" | "applied" | "superseded";
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**

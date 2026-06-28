@@ -13,6 +13,7 @@ class FlowJsonbStorageCategory(StrEnum):
     PROVENANCE_EVIDENCE = "provenance_evidence"
     IMPORT_STATE = "import_state"
     DERIVED_INDEX = "derived_index"
+    BUILDER_SESSION_STATE = "builder_session_state"
     DEFERRED_INVENTORY = "deferred_inventory"
 
 
@@ -28,6 +29,7 @@ class FlowJsonbSchemaVersionPolicy(StrEnum):
 class FlowJsonbCorruptionBehavior(StrEnum):
     REJECT_BEFORE_WRITE = "reject_before_write"
     FAIL_RUN_OR_STEP = "fail_run_or_step"
+    FAIL_SESSION_LOAD = "fail_session_load"
     KEEP_AUDITABLE_FAILURE = "keep_auditable_failure"
     MARK_EVIDENCE_UNAVAILABLE = "mark_evidence_unavailable"
     NORMALIZE_TO_EMPTY = "normalize_to_empty"
@@ -458,33 +460,34 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
     _owner(
         "builder_sessions",
         "conversation",
-        owner_module="intric.flows.ai_builder.ai_builder_repo",
-        envelope_name="AiBuilderConversation",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
+        owner_module="intric.flows.ai_builder.ai_builder_domain_models",
+        envelope_name="ConversationMessage",
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
         rationale=(
-            "Flow AI Builder history is adjacent in flow_tables.py but outside "
-            "this Flow-proper slice; registering it prevents hidden exclusions."
+            "Builder conversation history is stored as a JSON array of "
+            "ConversationMessage entries; persisted rows fail session loading "
+            "when required stable message ids are missing."
         ),
     ),
     _owner(
         "builder_sessions",
         "planning_state_jsonb",
-        owner_module="intric.flows.ai_builder.ai_builder_repo",
-        envelope_name="AiBuilderPlanningState",
-        storage_category=FlowJsonbStorageCategory.DEFERRED_INVENTORY,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.DEFERRED_INVENTORY,
-        corruption_behavior=FlowJsonbCorruptionBehavior.DEFERRED_INVENTORY,
+        owner_module="intric.flows.ai_builder.planning_state",
+        envelope_name="PlanningState",
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
         rationale=(
-            "Planning state already has dedicated AI Builder discipline, but it "
-            "must stay visible to the table-module JSONB inventory."
+            "Builder planning state is a full-snapshot PlanningState document "
+            "with embedded FCM, planner-contract, and builder schema versions."
         ),
     ),
     _owner(
         "builder_plans",
         "proposal_json",
-        owner_module="intric.flows.ai_builder.ai_builder_repo",
+        owner_module="intric.flows.ai_builder.ai_builder_domain_models",
         envelope_name="FlowBuilderProposal",
         storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
         schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,

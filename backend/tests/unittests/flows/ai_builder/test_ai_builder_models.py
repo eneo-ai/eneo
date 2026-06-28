@@ -254,9 +254,13 @@ class TestApiModels:
             SendMessageRequest(message="x" * 50_001)
 
     def test_plan_status_values(self) -> None:
-        assert PlanStatus.PROPOSED.value == "proposed"
-        assert PlanStatus.APPROVED.value == "approved"
-        assert PlanStatus.SUPERSEDED.value == "superseded"
+        assert tuple(status.value for status in PlanStatus) == (
+            "proposed",
+            "approved",
+            "applied",
+            "superseded",
+        )
+        assert "rejected" not in {status.value for status in PlanStatus}
 
     def test_target_kind_values(self) -> None:
         assert TargetKind.CREATE.value == "create"

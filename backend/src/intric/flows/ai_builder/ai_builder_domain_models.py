@@ -9,7 +9,6 @@ from __future__ import annotations
 import enum
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 import uuid_utils
@@ -40,7 +39,6 @@ class PlanStatus(str, enum.Enum):
     PROPOSED = "proposed"
     APPROVED = "approved"
     APPLIED = "applied"
-    REJECTED = "rejected"
     SUPERSEDED = "superseded"
 
 
@@ -106,7 +104,7 @@ class ConversationMessage(BaseModel):
     timestamp: datetime | None = None
 
     @classmethod
-    def from_persisted(cls, data: Mapping[str, Any]) -> "ConversationMessage":
+    def from_persisted(cls, data: Mapping[str, object]) -> "ConversationMessage":
         """Hydrate a ConversationMessage from a DB/JSONB row.
 
         Refuses rows missing `message_id` — migration

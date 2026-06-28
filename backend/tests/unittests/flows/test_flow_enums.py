@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from intric.database.tables.flow_tables import (
+    BUILDER_PLAN_STATUS_VALUES,
     FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_STATUS_VALUES,
     FLOW_STEP_ATTEMPT_STATUS_VALUES,
@@ -17,6 +18,7 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_RESULT_STATUS_VALUES,
     FLOW_TEMPLATE_ASSET_STATUS_VALUES,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import PlanStatus
 from intric.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
@@ -66,6 +68,10 @@ def test_shared_flow_enums_match_current_table_constants() -> None:
         tuple(item.value for item in FlowTemplateAssetStatus)
         == FLOW_TEMPLATE_ASSET_STATUS_VALUES
     )
+
+
+def test_ai_builder_plan_status_enum_matches_table_constant() -> None:
+    assert tuple(item.value for item in PlanStatus) == BUILDER_PLAN_STATUS_VALUES
 
 
 def test_flow_and_ai_builder_enums_are_exported_from_shared_module() -> None:
