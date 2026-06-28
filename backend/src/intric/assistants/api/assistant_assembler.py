@@ -13,7 +13,6 @@ from intric.collections.presentation.collection_models import CollectionPublic
 from intric.completion_models.presentation.completion_model_assembler import (
     CompletionModelAssembler,
 )
-from intric.files.attachment_budget import attachment_token_ceiling
 from intric.files.file_models import (
     AcceptedFileType,
     FilePublic,
@@ -77,16 +76,13 @@ class AssistantAssembler:
             for attachment in assistant.attachments
         ]
 
-    def _get_allowed_attachments(self, completion_model: "CompletionModel | None"):
+    def _get_allowed_attachments(self):
+        # max_files/max_size are abuse + storage guardrails. The binding limit is
+        # the context-fit ceiling (prompt + attachments must fit the model's
+        # window minus a reserve), but that depends on the live-selected model's
+        # window, so the config meter computes it client-side from the preflight
+        # reserve rather than advertising a value here against a stale saved model.
         settings = get_settings()
-        # The binding limit is the fit ceiling (prompt + attachments must stay
-        # under it); it can only be computed once a model is selected. max_files
-        # is only an abuse guardrail.
-        max_tokens = (
-            attachment_token_ceiling(completion_model.max_input_tokens)
-            if completion_model is not None
-            else None
-        )
         max_size = settings.attachment_max_size_bytes
         return FileRestrictions(
             accepted_file_types=[
@@ -96,7 +92,6 @@ class AssistantAssembler:
             limit=Limit(
                 max_files=settings.attachment_max_files,
                 max_size=max_size,
-                max_tokens=max_tokens,
             ),
         )
 
@@ -156,7 +151,7 @@ class AssistantAssembler:
             model=assistant.completion_model
         )
         attachments = self._get_attachments(assistant)
-        allowed_attachments = self._get_allowed_attachments(assistant.completion_model)
+        allowed_attachments = self._get_allowed_attachments()
         tools = UseTools(
             assistants=[
                 ToolAssistant(id=tool_assistant.id, handle=tool_assistant.name)

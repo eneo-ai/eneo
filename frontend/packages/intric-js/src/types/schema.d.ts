@@ -12017,8 +12017,6 @@ export interface components {
       max_files: number;
       /** Max Size */
       max_size: number;
-      /** Max Tokens */
-      max_tokens?: number | null;
     };
     /** Limits */
     Limits: {

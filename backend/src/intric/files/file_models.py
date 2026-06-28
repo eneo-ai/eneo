@@ -71,9 +71,6 @@ class AcceptedFileType(BaseModel):
 class Limit(BaseModel):
     max_files: int
     max_size: int
-    # Token budget for persistent attachments (share of the model's input
-    # window). None when no model is resolved to compute it against.
-    max_tokens: Optional[int] = None
 
 
 class FileRestrictions(BaseModel):

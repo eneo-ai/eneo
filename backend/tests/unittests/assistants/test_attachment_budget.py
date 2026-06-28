@@ -378,27 +378,21 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
         )
 
 
-# --- assembler advertises the fit ceiling (None when no model) ---
+# --- assembler advertises the attachment guardrails (count + size) ---
 
 
-def test_assembler_advertises_fit_ceiling(monkeypatch):
+def test_assembler_advertises_attachment_guardrails(monkeypatch):
+    # The fit ceiling is no longer advertised here — it depends on the live
+    # model window and is derived client-side. The assembler advertises only the
+    # model-independent guardrails (count + byte size).
     from intric.assistants.api.assistant_assembler import AssistantAssembler
 
     monkeypatch.setattr(
         "intric.assistants.api.assistant_assembler.get_settings",
-        lambda: _settings(attachment_max_files=100),
-    )
-    monkeypatch.setattr(
-        "intric.files.attachment_budget.get_settings",
-        lambda: _settings(attachment_context_reserve_tokens=2000),
+        lambda: _settings(attachment_max_files=100, attachment_max_size_bytes=123),
     )
     assembler = AssistantAssembler(user=MagicMock(), prompt_assembler=MagicMock())
 
-    restrictions = assembler._get_allowed_attachments(
-        SimpleNamespace(max_input_tokens=100_000)
-    )
+    restrictions = assembler._get_allowed_attachments()
     assert restrictions.limit.max_files == 100
-    assert restrictions.limit.max_tokens == 98_000
-
-    # No model selected -> ceiling is undefined.
-    assert assembler._get_allowed_attachments(None).limit.max_tokens is None
+    assert restrictions.limit.max_size == 123
