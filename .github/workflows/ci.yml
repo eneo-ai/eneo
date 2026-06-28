@@ -207,6 +207,17 @@ jobs:
       - name: Check all HTTP route decorators
         run: python3 scripts/check_route_metadata.py --repo-root . --all
 
+  no-intric:
+    name: No intric references
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Guard against re-introducing the old product name
+        run: python3 scripts/check_no_intric.py --repo-root .
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -634,6 +645,7 @@ jobs:
       - backend-tests
       - script-tests
       - route-metadata
+      - no-intric
       - frontend
       - frontend-e2e
       - schema-drift
@@ -647,6 +659,7 @@ jobs:
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
+          NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
@@ -674,6 +687,7 @@ jobs:
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
+          check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
