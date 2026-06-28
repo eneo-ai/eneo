@@ -3,7 +3,7 @@
 
 import asyncio
 from sqlalchemy import text
-from intric.database.db import async_engine
+from eneo.database.db import async_engine
 
 
 async def check_columns():

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite dev --host",
     "build": "NODE_ENV=production vite build",
-    "build:all": "bun run --filter @intric/web... build",
+    "build:all": "bun run --filter @eneo/web... build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync",
     "test": "bun run test:integration && bun run test:unit",

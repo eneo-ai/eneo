@@ -41,7 +41,7 @@ cd backend && uv run python init_db.py
 # Start development servers (3 terminals)
 cd backend && uv run start              # Terminal 1
 cd frontend && bun run dev                 # Terminal 2
-cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
+cd backend && uv run arq src.eneo.worker.arq.WorkerSettings  # Terminal 3
 ```
 
 ### 2. Make Your First Contribution
@@ -143,7 +143,7 @@ Eneo follows **Domain-Driven Design** with clear separation of concerns. Underst
 <summary>📁 Click to view domain organization</summary>
 
 ```
-backend/src/intric/
+backend/src/eneo/
 ├── assistants/           # AI Assistant Management
 │   ├── api/             # FastAPI endpoints
 │   ├── assistant.py     # Domain entity
@@ -175,7 +175,7 @@ frontend/
 │   ├── src/lib/         # Reusable components and utilities
 │   └── src/app.html     # Root HTML template
 ├── packages/            # Shared packages
-│   ├── intric-js/       # Type-safe API client
+│   ├── eneo-js/       # Type-safe API client
 │   └── ui/              # Reusable UI components
 └── package.json         # Workspace configuration
 ```

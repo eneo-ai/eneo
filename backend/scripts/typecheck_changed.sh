@@ -20,7 +20,7 @@ cd "$BACKEND_DIR"
 normalize_paths() {
   sed '/^$/d' \
     | sed 's|^backend/||' \
-    | sed -n '/^src\/intric\/.*\.py$/p' \
+    | sed -n '/^src\/eneo\/.*\.py$/p' \
     | sort -u
 }
 
@@ -29,28 +29,28 @@ warm_pyright() {
 }
 FUTURE_CHANGED_FILES=$(
   git -C "$REPO_ROOT" diff --name-only --diff-filter=AMR \
-    "$FUTURE_BASELINE_COMMIT"..HEAD -- "backend/src/intric" || true
+    "$FUTURE_BASELINE_COMMIT"..HEAD -- "backend/src/eneo" || true
 )
 WORKTREE_CHANGED_FILES=$(
   git -C "$REPO_ROOT" diff --name-only --diff-filter=AMR \
-    -- "backend/src/intric" || true
+    -- "backend/src/eneo" || true
 )
 STAGED_CHANGED_FILES=$(
   git -C "$REPO_ROOT" diff --name-only --diff-filter=AMR --cached \
-    -- "backend/src/intric" || true
+    -- "backend/src/eneo" || true
 )
 UNTRACKED_FILES=$(
   git -C "$REPO_ROOT" ls-files --others --exclude-standard \
-    "backend/src/intric" || true
+    "backend/src/eneo" || true
 )
 
 NEW_FILES_BASELINE=$(
   git -C "$REPO_ROOT" diff --name-only --diff-filter=A \
-    "$FUTURE_BASELINE_COMMIT"..HEAD -- "backend/src/intric" || true
+    "$FUTURE_BASELINE_COMMIT"..HEAD -- "backend/src/eneo" || true
 )
 NEW_FILES_STAGED=$(
   git -C "$REPO_ROOT" diff --name-only --diff-filter=A --cached \
-    -- "backend/src/intric" || true
+    -- "backend/src/eneo" || true
 )
 
 ALL_FILES=$(

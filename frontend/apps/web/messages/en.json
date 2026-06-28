@@ -579,8 +579,6 @@
   "input_type_description": "The type of input this app accepts (e.g., text, file, etc.)",
   "insights_description": "Collect insights about this assistant's usage and allow space editors and admins to access the full history of user questions.",
   "integration_not_setup": "Integration not setup correctly",
-  "intric_apps": "Eneo Apps",
-  "intric_assistants": "Eneo Assistants",
   "invalid_email": "Please enter a valid email address",
   "invalid_format": "Invalid format",
   "invitation_resent": "Invitation resent successfully",

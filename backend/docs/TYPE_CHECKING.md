@@ -15,7 +15,7 @@ We use baselines to avoid legacy noise while blocking regressions:
 
 ## What It Checks
 
-- Scope: `backend/src/intric/**/*.py` only.
+- Scope: `backend/src/eneo/**/*.py` only.
 - New files: strict Pyright via `backend/pyrightconfig.strict.json`.
 - Modified existing files: base Pyright via `backend/pyrightconfig.json`, but only new diagnostics fail.
 - CI: uses `.type-check-future-baseline` to decide which tracked files are new/modified on the branch.
@@ -25,7 +25,7 @@ We use baselines to avoid legacy noise while blocking regressions:
 - Unchanged legacy files (no noise from pre-existing issues).
 - Tests and migrations (excluded by config).
 - Warning-level diagnostics (ratchet only gates errors).
-- Frontend or non-`src/intric` Python code.
+- Frontend or non-`src/eneo` Python code.
 - Line-level diffs (ratcheting is file-level, not per-line).
 
 ## Local Commands
@@ -34,7 +34,7 @@ We use baselines to avoid legacy noise while blocking regressions:
 
 ```bash
 cd backend
-AUDIT_FILES=$(git -C .. diff --name-only a7f09f78^..a7f09f78 -- "backend/src/intric/**/*.py")
+AUDIT_FILES=$(git -C .. diff --name-only a7f09f78^..a7f09f78 -- "backend/src/eneo/**/*.py")
 uv run pyright $AUDIT_FILES
 ```
 
@@ -49,7 +49,7 @@ cd backend
 
 ```bash
 cd backend
-uv run pyright src/intric/files/file_router.py
+uv run pyright src/eneo/files/file_router.py
 ```
 
 ## Editor Support

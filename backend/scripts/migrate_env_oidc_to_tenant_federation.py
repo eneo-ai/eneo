@@ -7,9 +7,9 @@ from pathlib import Path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir / "src"))
 
-from intric.database.database import sessionmanager
-from intric.main.config import get_settings
-from intric.tenants.federation_startup_migration import (
+from eneo.database.database import sessionmanager
+from eneo.main.config import get_settings
+from eneo.tenants.federation_startup_migration import (
     run_env_oidc_to_tenant_federation_migration,
 )
 

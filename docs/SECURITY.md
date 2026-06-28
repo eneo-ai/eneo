@@ -64,7 +64,7 @@ Eneo uses Fernet symmetric encryption for tenant-specific sensitive data:
 ```bash
 # Generate encryption key (one-time setup)
 cd backend
-uv run python -m intric.cli.generate_encryption_key
+uv run python -m eneo.cli.generate_encryption_key
 
 # Add to backend/.env
 ENCRYPTION_KEY=<44-character-base64-key>

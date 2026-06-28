@@ -27,8 +27,8 @@ Your environment could look something like this:
 
 ```
 JWT_SECRET="abc123"
-ENEO_BACKEND_URL="https://backend.intric.ai:1234"
-MOBILITY_GUARD_AUTH="https://example.com/mg-local/intric/oauth2/authorize"
+ENEO_BACKEND_URL="https://backend.example.com:1234"
+MOBILITY_GUARD_AUTH="https://example.com/mg-local/eneo/oauth2/authorize"
 ```
 
 ## Local Development
@@ -49,7 +49,7 @@ If you want to work on the client and the UI library at the same time as develop
 
 We do support logging in through MobilityGuard. If the `MOBILITY_GUARD_AUTH` environment variable is set, a new login button will appear on the login screen that will handle the MobilityGuard flow. If the variable does not exist this feature is not enabled. For MobilityGuard to work, a user with the exact matching username and the `"created_with": "mobility_guard"` property needs to exist in the eneo user table, otherwise the login will fail. Depending on the setup it is also necessary that the mobilityguard operator whitelists our deployment domains as redirect URIs.
 
-The callback URI will always be in the format `https://<deployment>.<tld>/login/callback`, e.g. `https://app.intric.ai/login/callback`
+The callback URI will always be in the format `https://<deployment>.<tld>/login/callback`, e.g. `https://app.example.com/login/callback`
 
 ## Formatting
 

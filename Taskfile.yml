@@ -10,7 +10,7 @@ tasks:
 
   worker:
     cmds:
-      - uv run arq src.intric.worker.arq.WorkerSettings
+      - uv run arq src.eneo.worker.arq.WorkerSettings
     dir: ./backend
 
   frontend:
