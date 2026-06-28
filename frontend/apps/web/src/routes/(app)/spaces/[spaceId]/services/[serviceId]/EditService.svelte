@@ -1,11 +1,6 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
-  import {
-    EneoError,
-    type CompletionModel,
-    type ModelKwargs,
-    type Service
-  } from "@eneo/eneo-js";
+  import { EneoError, type CompletionModel, type ModelKwargs, type Service } from "@eneo/eneo-js";
   import { Button, Input, Select } from "@eneo/ui";
   import { makeEditable } from "$lib/core/editable";
   import { getEneo } from "$lib/core/Eneo";

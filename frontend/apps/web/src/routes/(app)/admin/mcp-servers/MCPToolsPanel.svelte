@@ -21,12 +21,7 @@
     eneoClient: Eneo;
   };
 
-  const {
-    mcpServerId,
-    serverName: _serverName,
-    tools: initialTools,
-    eneoClient
-  }: Props = $props();
+  const { mcpServerId, serverName: _serverName, tools: initialTools, eneoClient }: Props = $props();
 
   let tools: MCPTool[] = $state(untrack(() => initialTools));
   let syncing = $state(false);

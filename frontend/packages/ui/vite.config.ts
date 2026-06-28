@@ -4,9 +4,5 @@ import { eneoIcons } from "./src/icons/vite-plugin-eneo-icons";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [
-    tailwindcss() as PluginOption,
-    eneoIcons() as PluginOption,
-    sveltekit() as PluginOption
-  ]
+  plugins: [tailwindcss() as PluginOption, eneoIcons() as PluginOption, sveltekit() as PluginOption]
 });

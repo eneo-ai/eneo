@@ -18,10 +18,7 @@ export const load = async (event) => {
     redirect(302, "/");
   }
 
-  const [auditConfig, settings] = await Promise.all([
-    eneo.audit.getConfig(),
-    eneo.settings.get()
-  ]);
+  const [auditConfig, settings] = await Promise.all([eneo.audit.getConfig(), eneo.settings.get()]);
 
   return {
     auditConfig,

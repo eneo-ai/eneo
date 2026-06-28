@@ -42,9 +42,7 @@ export interface ModelProviderCapabilities {
 let capabilitiesCache: ModelProviderCapabilities | null = null;
 let capabilitiesPromise: Promise<ModelProviderCapabilities> | null = null;
 
-export async function getModelProviderCapabilities(
-  eneo: Eneo
-): Promise<ModelProviderCapabilities> {
+export async function getModelProviderCapabilities(eneo: Eneo): Promise<ModelProviderCapabilities> {
   if (capabilitiesCache) {
     return capabilitiesCache;
   }

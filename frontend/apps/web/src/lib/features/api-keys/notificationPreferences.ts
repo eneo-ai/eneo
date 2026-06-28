@@ -175,9 +175,7 @@ export async function unfollowScopeNotifications(
   });
 }
 
-export async function getAdminNotificationPolicy(
-  eneo: Eneo
-): Promise<ApiKeyNotificationPolicy> {
+export async function getAdminNotificationPolicy(eneo: Eneo): Promise<ApiKeyNotificationPolicy> {
   const response = await eneo.apiKeys.admin.getNotificationPolicy();
   return normalizePolicy(response);
 }

@@ -5,9 +5,7 @@
 import type { EneoSocket } from "@eneo/eneo-js";
 import { createContext } from "./context";
 
-const [getEneoSocket, setEneoSocket] = createContext<EneoSocket>(
-  "Authenticated eneo socket"
-);
+const [getEneoSocket, setEneoSocket] = createContext<EneoSocket>("Authenticated eneo socket");
 
 function initEneoSocket(data: { eneoSocket: EneoSocket }) {
   setEneoSocket(data.eneoSocket);

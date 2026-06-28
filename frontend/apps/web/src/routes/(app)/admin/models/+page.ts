@@ -20,9 +20,7 @@ export const load = async (event) => {
     eneo.modelProviders.getFavorites()
   ]);
 
-  const credentialsResponse = tenantCredentialsEnabled
-    ? await eneo.credentials.list()
-    : undefined;
+  const credentialsResponse = tenantCredentialsEnabled ? await eneo.credentials.list() : undefined;
 
   return {
     securityClassifications,

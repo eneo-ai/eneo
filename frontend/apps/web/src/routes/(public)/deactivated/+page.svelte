@@ -18,10 +18,7 @@
     <h2 class="mb-2 text-2xl font-bold">{m.organisation_deactivated()}</h2>
     <p class="text-secondary max-w-[60ch]">
       {m.access_disabled()}
-      <a
-        href="mailto:{data.salesEmail}"
-        class=" text-brand-eneo hover:bg-hover-default underline"
-      >
+      <a href="mailto:{data.salesEmail}" class=" text-brand-eneo hover:bg-hover-default underline">
         {data.salesEmail}
       </a>
       {m.to_regain_access()}

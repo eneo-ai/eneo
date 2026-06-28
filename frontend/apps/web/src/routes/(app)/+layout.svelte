@@ -89,8 +89,7 @@
       <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/")}>
         <EneoWordMark class="text-brand-eneo hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
-        <IconEneo class="text-brand-eneo -ml-0.5 block md:hidden" viewBox="0 0 330 330"
-        ></IconEneo>
+        <IconEneo class="text-brand-eneo -ml-0.5 block md:hidden" viewBox="0 0 330 330"></IconEneo>
       </a>
       <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <Button
