@@ -31,9 +31,6 @@ class FileBaseWithContent(FileBase):
     text: Optional[str] = None
     blob: Optional[bytes] = None
     transcription: Optional[str] = None
-    # Storage seam (S3 readiness): NULL backend => bytes inline in `blob`.
-    storage_backend: Optional[str] = None
-    storage_key: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_text_or_image(self) -> "FileBaseWithContent":

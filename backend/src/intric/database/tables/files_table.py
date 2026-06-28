@@ -15,11 +15,6 @@ class Files(BasePublic):
     name: Mapped[str] = mapped_column()
     text: Mapped[Optional[str]] = mapped_column(Text)
     blob: Mapped[Optional[bytes]] = mapped_column(BYTEA)
-    # Storage seam (S3 readiness): when storage_backend is NULL the bytes live
-    # inline in `blob` (current behaviour); otherwise they live in the named
-    # backend under `storage_key`. See files/file_content_store.py.
-    storage_backend: Mapped[Optional[str]] = mapped_column(nullable=True)
-    storage_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     checksum: Mapped[str] = mapped_column(index=True)
     size: Mapped[int] = mapped_column()
     mimetype: Mapped[Optional[str]] = mapped_column()

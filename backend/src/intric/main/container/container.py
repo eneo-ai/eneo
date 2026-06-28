@@ -87,7 +87,6 @@ from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
 from intric.feature_flag.feature_flag_service import FeatureFlagService
-from intric.files.file_content_store import DbBlobContentStore
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
 from intric.files.file_service import FileService
@@ -1120,13 +1119,11 @@ class Container(containers.DeclarativeContainer):
         text_extractor=text_extractor,
         image_extractor=image_extractor,
     )
-    file_content_store = providers.Factory(DbBlobContentStore, session=session)
     file_service = providers.Factory(
         FileService,
         user=user,
         repo=file_repo,
         protocol=file_protocol,
-        content_store=file_content_store,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,
