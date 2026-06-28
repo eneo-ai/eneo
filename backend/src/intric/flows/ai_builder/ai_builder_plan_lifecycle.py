@@ -335,23 +335,17 @@ class AIBuilderPlanLifecycle:
             )
             raise
 
-        await self.repo.update_plan_status(
-            plan_id=plan.id,
-            tenant_id=self.user.tenant_id,
-            status=PlanStatus.APPLIED,
+        flow_id_for_create = (
+            authoring_result.flow_id
+            if session.target_kind == TargetKind.CREATE
+            else None
         )
-        await self.repo.update_session_status_without_send_lease(
+        await self.repo.mark_plan_applied(
+            plan_id=plan.id,
             session_id=session.id,
             tenant_id=self.user.tenant_id,
-            status=SessionStatus.APPLIED,
+            flow_id=flow_id_for_create,
         )
-
-        if session.target_kind == TargetKind.CREATE:
-            await self.repo.update_session_flow_id(
-                session_id=session.id,
-                tenant_id=self.user.tenant_id,
-                flow_id=authoring_result.flow_id,
-            )
 
         return ApplyResultResponse(
             flow_id=authoring_result.flow_id,

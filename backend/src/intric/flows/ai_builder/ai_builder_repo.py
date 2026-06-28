@@ -906,6 +906,32 @@ class AIBuilderRepository:
             )
             await self.session.execute(stmt)
 
+    async def mark_plan_applied(
+        self,
+        *,
+        plan_id: UUID,
+        session_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None,
+    ) -> None:
+        async with self.savepoint():
+            await self.update_plan_status(
+                plan_id=plan_id,
+                tenant_id=tenant_id,
+                status=PlanStatus.APPLIED,
+            )
+            await self.update_session_status_without_send_lease(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                status=SessionStatus.APPLIED,
+            )
+            if flow_id is not None:
+                await self.update_session_flow_id(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    flow_id=flow_id,
+                )
+
     async def supersede_existing_plans(
         self,
         *,

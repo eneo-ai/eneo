@@ -473,6 +473,12 @@ class TestAIBuilderPlanLifecycle:
             authoring_service.prepare.await_args.kwargs["origin_policy"],
             AIBuilderAuthoringPolicy,
         )
+        repo.mark_plan_applied.assert_awaited_once_with(
+            plan_id=plan.id,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            flow_id=None,
+        )
 
     @pytest.mark.anyio
     async def test_apply_create_plan_passes_manual_description_override_to_compile(
@@ -512,6 +518,13 @@ class TestAIBuilderPlanLifecycle:
         assert command.origin.session_id == session.id
         assert command.origin.plan_id == plan.id
         assert command.origin.spec_hash == plan.spec_hash
+        authoring_result = authoring_service.apply_prepared.return_value
+        repo.mark_plan_applied.assert_awaited_once_with(
+            plan_id=plan.id,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            flow_id=authoring_result.flow_id,
+        )
 
     @pytest.mark.anyio
     async def test_apply_plan_passes_approved_spec_without_apply_time_repair(
