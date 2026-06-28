@@ -1,12 +1,10 @@
 """Storage-boundary tests for PlanningState persistence.
 
-`builder_sessions.planning_state_jsonb` and its four promoted scalars
-(`planning_state_version`, `planning_phase`, `architecture_hash`,
-`planning_state_updated_at`) are written only through a single typed
-helper, `_planning_state_for_storage`, so the column never drifts out
-of Pydantic's typed world. These tests pin:
+`builder_sessions.planning_state_jsonb` is written only through a single
+typed helper, `_planning_state_for_storage`, so the column never drifts
+out of Pydantic's typed world. These tests pin:
 
-- the helper emits every promoted column the save path needs;
+- the helper emits the JSONB column the save path needs;
 - the jsonb payload is the fully validated Pydantic snapshot, not a
   partial or raw dict;
 - container-level mutations that bypassed Pydantic's validator (list
@@ -80,15 +78,10 @@ def _ready_state() -> PlanningState:
 
 
 class TestPlanningStateForStorage:
-    def test_returns_all_five_promoted_columns(self) -> None:
+    def test_returns_jsonb_column(self) -> None:
         state = _discovering_state()
         values = _planning_state_for_storage(state)
-        assert set(values.keys()) == {
-            "planning_state_jsonb",
-            "planning_phase",
-            "architecture_hash",
-            "planning_state_updated_at",
-        }
+        assert set(values.keys()) == {"planning_state_jsonb"}
 
     def test_jsonb_payload_is_full_validated_snapshot(self) -> None:
         """The jsonb payload must be the full Pydantic dump — partial
@@ -98,29 +91,6 @@ class TestPlanningStateForStorage:
         payload = values["planning_state_jsonb"]
         assert isinstance(payload, dict)
         assert payload == state.validated_snapshot().model_dump(mode="json")
-
-    def test_promoted_phase_mirrors_state_phase(self) -> None:
-        state = _discovering_state()
-        values = _planning_state_for_storage(state)
-        assert values["planning_phase"] == "discovering"
-
-    def test_architecture_hash_is_none_before_commit(self) -> None:
-        state = _discovering_state()
-        values = _planning_state_for_storage(state)
-        assert values["architecture_hash"] is None
-
-    def test_architecture_hash_promoted_after_commit(self) -> None:
-        state = _ready_state()
-        values = _planning_state_for_storage(state)
-        assert values["architecture_hash"] == _VALID_HASH
-
-    def test_updated_at_is_timezone_aware_utc(self) -> None:
-        state = _discovering_state()
-        values = _planning_state_for_storage(state)
-        updated_at = values["planning_state_updated_at"]
-        assert isinstance(updated_at, datetime)
-        assert updated_at.tzinfo is not None
-        assert updated_at.utcoffset() == timezone.utc.utcoffset(updated_at)
 
     def test_container_mutation_that_skips_snapshot_is_rejected(self) -> None:
         """A container-level mutation that bypassed Pydantic's validator
@@ -163,5 +133,3 @@ class TestSaveLoadRoundTrip:
         loaded = PlanningState.model_validate(first["planning_state_jsonb"])
         second = _planning_state_for_storage(loaded)
         assert first["planning_state_jsonb"] == second["planning_state_jsonb"]
-        assert first["planning_phase"] == second["planning_phase"]
-        assert first["architecture_hash"] == second["architecture_hash"]

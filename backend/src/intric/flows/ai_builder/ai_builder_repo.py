@@ -980,11 +980,6 @@ class AIBuilderRepository:
                 .values(
                     planning_state_jsonb=column_values["planning_state_jsonb"],
                     planning_state_version=BuilderSessions.planning_state_version + 1,
-                    planning_phase=column_values["planning_phase"],
-                    architecture_hash=column_values["architecture_hash"],
-                    planning_state_updated_at=column_values[
-                        "planning_state_updated_at"
-                    ],
                     updated_at=datetime.now(timezone.utc),
                 )
                 .returning(BuilderSessions.planning_state_version)
@@ -1286,21 +1281,13 @@ def _plan_from_row(row: Any) -> BuilderPlan:
 
 
 def _planning_state_for_storage(state: PlanningState) -> dict[str, object]:
-    """Return the full column-values map for persisting `state`.
+    """Return the column-values map for persisting `state`.
 
     `validated_snapshot()` re-runs Pydantic's validators so container
     mutations that bypassed the field validator (list appends, dict
     inserts) raise here rather than silently landing in JSONB.
     """
     snapshot = state.validated_snapshot()
-    architecture_hash = (
-        snapshot.architecture_commit.architecture_hash
-        if snapshot.architecture_commit is not None
-        else None
-    )
     return {
         "planning_state_jsonb": snapshot.model_dump(mode="json"),
-        "planning_phase": snapshot.phase,
-        "architecture_hash": architecture_hash,
-        "planning_state_updated_at": datetime.now(timezone.utc),
     }

@@ -2124,19 +2124,6 @@ class BuilderSessions(BasePublic):
         nullable=False,
         server_default="0",
     )
-    planning_phase: Mapped[Optional[str]] = mapped_column(
-        sa.String(32),
-        nullable=True,
-    )
-    architecture_hash: Mapped[Optional[str]] = mapped_column(
-        sa.String(64),
-        nullable=True,
-        index=True,
-    )
-    planning_state_updated_at: Mapped[Optional[datetime]] = mapped_column(
-        sa.DateTime(timezone=True),
-        nullable=True,
-    )
 
     __table_args__ = (
         UniqueConstraint("id", "tenant_id", name="uq_builder_sessions_id_tenant_id"),
