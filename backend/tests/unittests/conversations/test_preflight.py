@@ -314,7 +314,7 @@ async def test_preflight_counts_file_header_for_textless_documents():
 
 
 @pytest.mark.asyncio
-async def test_preflight_includes_assistant_baseline():
+async def test_empty_assistant_preflight_includes_assistant_baseline():
     """A bare assistant target reports the persistent baseline: the system
     prompt and the attachments sent on every question, in their own fields."""
     attachment = MagicMock()
@@ -328,11 +328,12 @@ async def test_preflight_includes_assistant_baseline():
     )
 
     result = await service.preflight_tokens(
-        question="hi",
+        question="",
         file_ids=[],
         assistant_id=uuid4(),
     )
 
+    assert result.input_tokens == 0
     assert result.prompt_tokens == count_tokens(
         "You are a helpful assistant.", "gpt-4o"
     )
@@ -340,6 +341,42 @@ async def test_preflight_includes_assistant_baseline():
         build_files_string([attachment]), "gpt-4o"
     )
     assert result.assistant_attachment_tokens > 0
+
+
+@pytest.mark.asyncio
+async def test_empty_assistant_preflight_baseline_includes_derived_images():
+    """Persistent document attachments carry derived vision images too, matching
+    the config meter's live-file path and the real request."""
+    pdf_file = MagicMock()
+    pdf_file.id = uuid4()
+    pdf_file.file_type = FileType.TEXT
+    pdf_file.text = "persistent report body"
+    pdf_file.name = "report.pdf"
+
+    derived_image = MagicMock()
+    derived_image.id = uuid4()
+    derived_image.file_type = FileType.IMAGE
+    derived_image.parent_file_id = pdf_file.id
+    derived_image.blob = _PNG_1PX
+    derived_image.mimetype = "image/png"
+
+    service = _make_service(assistant=_make_assistant(vision=True))
+    service.assistant_service.get_preflight_baseline = AsyncMock(
+        return_value=(None, [pdf_file])
+    )
+    service.file_service.get_derived_images = AsyncMock(return_value=[derived_image])
+
+    result = await service.preflight_tokens(
+        question="",
+        file_ids=[],
+        assistant_id=uuid4(),
+    )
+
+    text_only_tokens = count_tokens(build_files_string([pdf_file]), "gpt-4o")
+    assert result.assistant_attachment_tokens >= text_only_tokens + 85
+    service.file_service.get_derived_images.assert_awaited_once_with(
+        parent_ids=[pdf_file.id]
+    )
 
 
 @pytest.mark.asyncio

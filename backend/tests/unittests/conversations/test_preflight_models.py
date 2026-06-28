@@ -24,10 +24,25 @@ def test_preflight_request_rejects_no_target():
         PreflightRequest(question="hi")
 
 
-def test_preflight_request_rejects_empty_input():
-    """Empty question with no files is meaningless — must be rejected."""
+def test_preflight_request_accepts_empty_assistant_baseline():
+    """A bare assistant target can ask for its persistent baseline."""
+    assistant_id = uuid4()
+    req = PreflightRequest(assistant_id=assistant_id)
+    assert req.assistant_id == assistant_id
+    assert req.question == ""
+    assert req.file_ids == []
+
+
+def test_preflight_request_rejects_empty_session_input():
+    """Sessions need a pending question or files; baseline is already in history."""
     with pytest.raises(ValidationError):
-        PreflightRequest(assistant_id=uuid4())
+        PreflightRequest(session_id=uuid4())
+
+
+def test_preflight_request_rejects_empty_group_chat_input():
+    """Group chats have no single assistant baseline to report."""
+    with pytest.raises(ValidationError):
+        PreflightRequest(group_chat_id=uuid4())
 
 
 def test_preflight_request_accepts_question_only():

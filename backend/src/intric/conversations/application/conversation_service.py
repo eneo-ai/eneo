@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
+    from intric.files.file_models import File
     from intric.files.file_service import FileService
     from intric.group_chat.application.group_chat_service import GroupChatService
     from intric.sessions.session import SessionInDB
@@ -212,55 +213,11 @@ class ConversationService:
             # User-scoped lookup matches the actual chat endpoint (assistant_service.ask
             # uses get_files_by_ids), so preflight refuses files the user can't send.
             files = await self.file_service.get_files_by_ids(file_ids=file_ids)
-            # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
-            # has no extractable text of its own but still yields derived vision
-            # images, so key derived-image lookup on every document — not only
-            # the ones with inlinable text.
-            document_files = [f for f in files if f.file_type == FileType.TEXT]
-            image_files = (
-                [f for f in files if f.file_type == FileType.IMAGE]
-                if model.vision
-                else []
+            file_tokens, excluded_file_count = await self._count_preflight_files(
+                files=files,
+                model=model,
+                model_name=model_name,
             )
-
-            derived_parent_ids: set[UUID] = set()
-            if model.vision and document_files:
-                # The real request (with_derived_images) carries images derived
-                # from ALL document uploads — rendered PDF pages, embedded
-                # DOCX/PPTX images — regardless of extractable text. Price them
-                # the same way so an image-only PDF isn't reported as ~0 tokens.
-                present = {f.id for f in image_files}
-                derived = [
-                    f
-                    for f in await self.file_service.get_derived_images(
-                        parent_ids=[f.id for f in document_files]
-                    )
-                    if f.id not in present
-                ]
-                image_files += derived
-                derived_parent_ids = {
-                    f.parent_file_id for f in derived if f.parent_file_id is not None
-                }
-
-            # A file is excluded only when it contributes no content: no
-            # inlined text and (for documents on a vision model) no derived
-            # images. Its FILE header block is still sent — and counted below.
-            counted_ids = (
-                {f.id for f in document_files if f.text}
-                | {f.id for f in image_files}
-                | derived_parent_ids
-            )
-            excluded_file_count = sum(1 for f in files if f.id not in counted_ids)
-
-            # The real request inlines every document — textless ones still
-            # cost their FILE header and the shared preamble — so count them
-            # all for parity with context_builder.
-            if document_files or image_files:
-                file_tokens = count_attachment_tokens(
-                    text_files=document_files,
-                    image_files=image_files,
-                    model_name=model_name,
-                )
 
         assistant_attachment_tokens = 0
         prompt_tokens = 0
@@ -275,14 +232,11 @@ class ConversationService:
                 attachments,
             ) = await self.assistant_service.get_preflight_baseline(assistant_id)
             prompt_tokens = count_tokens(prompt_text or "", model_name)
-            baseline_text = [a for a in attachments if a.file_type == FileType.TEXT]
-            baseline_images = [a for a in attachments if a.file_type == FileType.IMAGE]
-            if baseline_text or baseline_images:
-                assistant_attachment_tokens = count_attachment_tokens(
-                    text_files=baseline_text,
-                    image_files=baseline_images,
-                    model_name=model_name,
-                )
+            assistant_attachment_tokens, _ = await self._count_preflight_files(
+                files=attachments,
+                model=model,
+                model_name=model_name,
+            )
 
         return PreflightResponse(
             input_tokens=input_tokens,
@@ -293,6 +247,65 @@ class ConversationService:
             context_reserve_tokens=get_settings().attachment_context_reserve_tokens,
             assistant_attachment_tokens=assistant_attachment_tokens,
             prompt_tokens=prompt_tokens,
+        )
+
+    async def _count_preflight_files(
+        self,
+        files: "list[File]",
+        model: "CompletionModel",
+        model_name: str,
+    ) -> tuple[int, int]:
+        # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
+        # has no extractable text of its own but still yields derived vision
+        # images, so key derived-image lookup on every document — not only the
+        # ones with inlinable text.
+        document_files = [f for f in files if f.file_type == FileType.TEXT]
+        image_files = (
+            [f for f in files if f.file_type == FileType.IMAGE] if model.vision else []
+        )
+
+        derived_parent_ids: set[UUID] = set()
+        if model.vision and document_files:
+            # The real request (with_derived_images) carries images derived
+            # from ALL document uploads — rendered PDF pages, embedded
+            # DOCX/PPTX images — regardless of extractable text. Price them
+            # the same way so an image-only PDF isn't reported as ~0 tokens.
+            present = {f.id for f in image_files}
+            derived = [
+                f
+                for f in await self.file_service.get_derived_images(
+                    parent_ids=[f.id for f in document_files]
+                )
+                if f.id not in present
+            ]
+            image_files += derived
+            derived_parent_ids = {
+                f.parent_file_id for f in derived if f.parent_file_id is not None
+            }
+
+        # A file is excluded only when it contributes no content: no inlined
+        # text and (for documents on a vision model) no derived images. Its
+        # FILE header block is still sent — and counted below.
+        counted_ids = (
+            {f.id for f in document_files if f.text}
+            | {f.id for f in image_files}
+            | derived_parent_ids
+        )
+        excluded_file_count = sum(1 for f in files if f.id not in counted_ids)
+
+        # The real request inlines every document — textless ones still cost
+        # their FILE header and the shared preamble — so count them all for
+        # parity with context_builder.
+        if not document_files and not image_files:
+            return 0, excluded_file_count
+
+        return (
+            count_attachment_tokens(
+                text_files=document_files,
+                image_files=image_files,
+                model_name=model_name,
+            ),
+            excluded_file_count,
         )
 
     async def _resolve_preflight_model(

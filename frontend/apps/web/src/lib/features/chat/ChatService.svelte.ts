@@ -55,7 +55,16 @@ export class ChatService {
   // from the last persisted message on conversation load.
   lockedInputTokens = $state<number>(0);
   lockedOutputTokens = $state<number>(0);
-  contextTokens = $derived(this.lockedInputTokens + this.lockedOutputTokens);
+
+  // Assistant baseline applies only before the first turn of a bare assistant
+  // chat. Once a conversation exists, the provider's prompt_tokens for the last
+  // turn already include prompt + persistent attachments.
+  assistantPromptTokens = $state<number>(0);
+  assistantAttachmentTokens = $state<number>(0);
+  assistantBaselineTokens = $derived(this.assistantPromptTokens + this.assistantAttachmentTokens);
+  contextTokens = $derived(
+    this.assistantBaselineTokens + this.lockedInputTokens + this.lockedOutputTokens
+  );
 
   // Cumulative tokens billed over the entire conversation. Each turn re-sends
   // the full prompt (system + RAG + history), so per-message prompt_tokens
@@ -137,6 +146,18 @@ export class ChatService {
 
   #partnerModelName(): string | undefined {
     return this.#partnerEffectiveModel()?.name ?? undefined;
+  }
+
+  #canRequestAssistantBaseline(
+    partner: ChatPartner | undefined = this.#chatPartner,
+    conversation: Conversation = this.currentConversation
+  ): boolean {
+    if (conversation.id) return false;
+    if (!partner || !("completion_model" in partner)) return false;
+
+    return (
+      selectEffectiveChatModel(partner.completion_model, partner.effective_config) !== undefined
+    );
   }
 
   #latestMessageTokenLimit(): number | undefined {
@@ -255,11 +276,15 @@ export class ChatService {
     this.lockedOutputTokens = 0;
   }
 
-  #clearPreflight() {
+  #clearPreflight(clearAssistantBaseline = true) {
     this.#preflightGen += 1;
     if (this.#preflightDebounce) {
       clearTimeout(this.#preflightDebounce);
       this.#preflightDebounce = null;
+    }
+    if (clearAssistantBaseline) {
+      this.assistantPromptTokens = 0;
+      this.assistantAttachmentTokens = 0;
     }
     this.pendingInputTokens = 0;
     this.pendingFileTokens = 0;
@@ -277,7 +302,10 @@ export class ChatService {
       clearTimeout(this.#preflightDebounce);
     }
 
-    if (!question && fileIds.length === 0) {
+    const canRequestAssistantBaseline =
+      !tools && this.#canRequestAssistantBaseline(this.#chatPartner, this.currentConversation);
+
+    if (!question && fileIds.length === 0 && !canRequestAssistantBaseline) {
       this.#clearPreflight();
       return;
     }
@@ -303,11 +331,20 @@ export class ChatService {
 
         this.pendingInputTokens = res.input_tokens;
         this.pendingFileTokens = res.file_tokens;
+        if (this.#canRequestAssistantBaseline(partnerAtStart, conversationAtStart)) {
+          this.assistantPromptTokens = res.prompt_tokens ?? 0;
+          this.assistantAttachmentTokens = res.assistant_attachment_tokens ?? 0;
+        } else {
+          this.assistantPromptTokens = 0;
+          this.assistantAttachmentTokens = 0;
+        }
         this.pendingModelName = res.model_name;
         this.pendingContextWindow = res.context_window;
       } catch {
         // Silent failure — preflight is best-effort, not a blocker
         if (gen === this.#preflightGen) {
+          this.assistantPromptTokens = 0;
+          this.assistantAttachmentTokens = 0;
           this.pendingInputTokens = 0;
           this.pendingFileTokens = 0;
           this.pendingModelName = "";
@@ -498,7 +535,7 @@ export class ChatService {
       disabledMcpServerIds?: string[]
     ) => {
       // Clear preflight estimate — the message is leaving the input
-      this.#clearPreflight();
+      this.#clearPreflight(false);
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
@@ -625,6 +662,8 @@ export class ChatService {
                 }
                 this.lockedInputTokens = usage.prompt_tokens;
                 this.lockedOutputTokens = usage.completion_tokens;
+                this.assistantPromptTokens = 0;
+                this.assistantAttachmentTokens = 0;
               }
             },
             onToolCall: (event) => {
@@ -949,7 +988,9 @@ function partnerRuntimeSignature(partner: ChatPartner | undefined) {
       available_mcp_server_ids:
         effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
       default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
-      prompt_locked: effectiveConfig?.prompt_locked ?? false
+      prompt_locked: effectiveConfig?.prompt_locked ?? false,
+      prompt_tokens: partner.model_info?.prompt_tokens ?? null,
+      attachment_ids: partner.attachments?.map((attachment) => attachment.id) ?? []
     });
   }
 

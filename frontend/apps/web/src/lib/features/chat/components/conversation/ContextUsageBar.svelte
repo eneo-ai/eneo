@@ -44,11 +44,12 @@
   });
 
   // Bar segments (left to right):
-  //   1. Locked input  — what was sent to the LLM last turn (system + MCP +
+  //   1. Assistant baseline — prompt + fixed attachments before the first turn
+  //   2. Locked input  — what was sent to the LLM last turn (system + MCP +
   //      RAG + history + question, lumped together in provider's prompt_tokens)
-  //   2. Locked output — the model's previous reply
-  //   3. Pending text  — locally estimated tokens for the current input
-  //   4. Pending files — locally estimated multimodal/file tokens
+  //   3. Locked output — the model's previous reply
+  //   4. Pending text  — locally estimated tokens for the current input
+  //   5. Pending files — locally estimated multimodal/file tokens
   const pendingTotal = $derived(chat.pendingInputTokens + chat.pendingFileTokens);
   const projectedTotal = $derived(chat.contextTokens + pendingTotal);
 
@@ -64,6 +65,7 @@
     if (limit <= 0) return [];
 
     const raw = [
+      { key: "assistantBaseline", tokens: chat.assistantBaselineTokens },
       { key: "lockedInput", tokens: chat.lockedInputTokens },
       { key: "lockedOutput", tokens: chat.lockedOutputTokens },
       { key: "pendingText", tokens: chat.pendingInputTokens },
@@ -93,7 +95,7 @@
         : "text-secondary"
   );
 
-  // Four visually distinct hues, all using *-stronger variants so each segment
+  // Five visually distinct hues, all using *-stronger variants so each segment
   // keeps WCAG-grade contrast against the track (and against each other) in
   // both light and dark themes (WCAG 1.4.1 / 1.4.11).
   function segmentClass(key: string): string {
@@ -101,6 +103,8 @@
       return "bg-negative-stronger";
     }
     switch (key) {
+      case "assistantBaseline":
+        return "label-amethyst bg-label-stronger";
       case "lockedInput":
         return "bg-muted-foreground/70";
       case "lockedOutput":
@@ -200,8 +204,48 @@
       </div>
 
       <div class="space-y-3 px-4 py-3 text-xs">
-        {#if chat.lockedInputTokens > 0 || chat.lockedOutputTokens > 0}
+        {#if chat.assistantBaselineTokens > 0}
           <div class="space-y-1.5">
+            <p class="text-tertiary text-[10px] font-medium tracking-wide uppercase">
+              {m.context_usage_section_baseline()}
+            </p>
+            {#if chat.assistantPromptTokens > 0}
+              <div class="flex items-baseline justify-between gap-3">
+                <span class="text-default flex items-center gap-2">
+                  <span
+                    class="label-amethyst bg-label-stronger inline-block h-2.5 w-2.5 rounded-full"
+                  ></span>
+                  {m.context_usage_label_assistant_prompt()}
+                </span>
+                <span class="text-secondary tabular-nums">{fmt(chat.assistantPromptTokens)}</span>
+              </div>
+            {/if}
+            {#if chat.assistantAttachmentTokens > 0}
+              <div class="flex items-baseline justify-between gap-3">
+                <span class="text-default flex items-center gap-2">
+                  <span
+                    class="label-amethyst bg-label-stronger inline-block h-2.5 w-2.5 rounded-full"
+                  ></span>
+                  {m.context_usage_label_assistant_attachments()}
+                </span>
+                <span class="text-secondary tabular-nums"
+                  >{fmt(chat.assistantAttachmentTokens)}</span
+                >
+              </div>
+            {/if}
+            <p class="text-tertiary pl-[18px] text-[10px] leading-snug">
+              {m.context_usage_assistant_baseline_hint()}
+            </p>
+          </div>
+        {/if}
+
+        {#if chat.lockedInputTokens > 0 || chat.lockedOutputTokens > 0}
+          <div
+            class={[
+              "space-y-1.5",
+              chat.assistantBaselineTokens > 0 ? "border-default border-t pt-3" : ""
+            ]}
+          >
             <p class="text-tertiary text-[10px] font-medium tracking-wide uppercase">
               {m.context_usage_section_locked()}
             </p>
