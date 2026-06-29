@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -99,14 +100,19 @@ function HelperCard({ template, role }: { template: HelperTemplate; role?: RoleA
               onCheckedChange={(value) => toggleVisible.mutate(value)}
             />
           </Label>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={uninstall.isPending}
-            onClick={() => uninstall.mutate()}
-          >
-            {t("help_assistant_uninstall")}
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild size="sm" className="flex-1">
+              <Link href={`/admin/help-assistants/${kind}`}>{t("edit")}</Link>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={uninstall.isPending}
+              onClick={() => uninstall.mutate()}
+            >
+              {t("help_assistant_uninstall")}
+            </Button>
+          </div>
         </div>
       ) : (
         <Button size="sm" disabled={install.isPending} onClick={() => install.mutate()}>

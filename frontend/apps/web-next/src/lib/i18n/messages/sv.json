@@ -3463,6 +3463,7 @@
   "admin_help_assistants_delete_button": "Ta bort",
   "admin_help_assistants_delete_confirm": "Ta bort {name}? Detta raderar hjälpassistenten och dess instruktioner. Du kan lägga till den igen från mallen senare.",
   "admin_help_assistants_edit_banner": "Du redigerar en hjälpassistent – den arbetar i bakgrunden för att stödja användarna och hanteras här i admin, inte i ett space.",
+  "admin_help_assistants_edit_prompt_warning": "Att ändra den inbyggda prompten kan ge oväntade resultat. Delar av den består av tekniska instruktioner som den här hjälpassistenten är beroende av, och om de ändras kan de funktioner som assistenten är byggd för att stödja sluta fungera.",
   "chat_history_untitled": "Namnlös",
   "chat_history_rename": "Byt namn",
   "chat_history_rename_description": "Skriv ett nytt namn för konversationen.",

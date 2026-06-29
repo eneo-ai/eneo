@@ -28,3 +28,12 @@ export function helpTemplatesQueryOptions(api: EneoClient) {
     }
   });
 }
+
+/** The installed role for one kind (null when not installed). */
+export function helpRoleQueryOptions(api: EneoClient, kind: HelperKind) {
+  return queryOptions({
+    queryKey: [...ROLES_KEY, kind],
+    queryFn: (): Promise<RoleAssignment | null> =>
+      unwrap(api.GET("/api/v1/admin/help-assistants/roles/{kind}/", { params: { path: { kind } } }))
+  });
+}
