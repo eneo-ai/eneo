@@ -4,7 +4,6 @@ from typing import Annotated, Final, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
-from fastapi.responses import JSONResponse
 
 from intric.audit.domain.action_types import ActionType
 from intric.authentication.auth_models import (
@@ -23,14 +22,11 @@ from intric.flows.api.flow_runtime_paths import (
 from intric.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
-from intric.flows.api.flow_trace_audit import (
-    build_flow_trace_error_payload,
-    log_flow_trace_audit_or_deny,
-)
+from intric.flows.api.flow_trace_audit import log_flow_trace_audit_or_raise
 from intric.flows.flow_access_policy import FlowApiAction
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes
+from intric.main.exceptions import BadRequestException, ErrorCodes
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -134,7 +130,7 @@ async def get_flow_run_evidence(
         run_id=run_id,
         run=run,
     )
-    audit_failure = await log_flow_trace_audit_or_deny(
+    await log_flow_trace_audit_or_raise(
         container=container,
         user=user,
         run=run,
@@ -142,8 +138,6 @@ async def get_flow_run_evidence(
         description=f"Viewed evidence for flow run {run.id}",
         extra={"evidence_detail": "view"},
     )
-    if audit_failure is not None:
-        return audit_failure
     presenter = FlowServicePrincipalActorPresenter(
         api_key_repo=container.api_key_v2_repo(),
         tenant_id=user.tenant_id,
@@ -251,17 +245,13 @@ async def export_flow_run_evidence(
     if detail == "raw" and (
         not export_reason or export_reason == _DEFAULT_EVIDENCE_EXPORT_REASON
     ):
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=build_flow_trace_error_payload(
-                message=_RAW_REASON_REQUIRED_MESSAGE,
-                intric_error_code=ErrorCodes.BAD_REQUEST,
-                code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
-                context={
-                    "detail": "raw",
-                    "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
-                },
-            ),
+        raise BadRequestException(
+            _RAW_REASON_REQUIRED_MESSAGE,
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
+            context={
+                "detail": "raw",
+                "default_reason": _DEFAULT_EVIDENCE_EXPORT_REASON,
+            },
         )
     user = container.user()
     evidence_service = container.flow_run_evidence_service()
@@ -276,7 +266,7 @@ async def export_flow_run_evidence(
         run=run,
         export_reason=export_reason,
     )
-    audit_failure = await log_flow_trace_audit_or_deny(
+    await log_flow_trace_audit_or_raise(
         container=container,
         user=user,
         run=run,
@@ -284,8 +274,6 @@ async def export_flow_run_evidence(
         description=f"Exported evidence JSON for flow run {run.id}",
         extra={"evidence_detail": detail, "export_reason": export_reason},
     )
-    if audit_failure is not None:
-        return audit_failure
     filename = f"flow-run-evidence-{run_id}.json"
     validated_export = FlowRunEvidenceExportResponse.model_validate(export_payload)
     return Response(

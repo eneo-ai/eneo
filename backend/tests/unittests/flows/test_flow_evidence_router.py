@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 import logging
 from datetime import (
     datetime,
     timezone,
 )
 from types import SimpleNamespace
-from typing import cast
+from typing import TypedDict, cast
 from unittest.mock import (
     AsyncMock,
     MagicMock,
@@ -15,6 +14,8 @@ from unittest.mock import (
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import intric.flows.api.flow_trace_audit as flow_trace_audit_module
 from intric.actors.actors.space_actor import SpaceRole
@@ -34,10 +35,14 @@ from intric.flows.application.flow_run_service import FlowRunStepResultWithFiles
 from intric.flows.domain.flow import FlowStepResult
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.exceptions import (
+    AuditLoggingUnavailableException,
+    BadRequestException,
     ErrorCodes,
     UnauthorizedException,
 )
+from intric.main.models import GeneralError
 from intric.roles.permissions import Permission
+from intric.server.exception_handlers import add_exception_handlers
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _evidence_export_payload,
@@ -45,6 +50,99 @@ from tests.unittests.flows.test_flow_router import (
     _result_file,
     _run,
 )
+
+
+class FlowErrorResponse(TypedDict):
+    status_code: int
+    payload: dict[str, object]
+
+
+def _flow_error_response(
+    exc: Exception, *, request_id: str | None = None
+) -> FlowErrorResponse:
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/flow-error")
+    async def _raise_flow_error():
+        raise exc
+
+    headers = {"x-correlation-id": request_id} if request_id is not None else {}
+    with TestClient(app) as client:
+        response = client.get("/flow-error", headers=headers)
+
+    payload = response.json()
+    assert isinstance(payload, dict)
+    return {
+        "status_code": response.status_code,
+        "payload": {str(key): value for key, value in payload.items()},
+    }
+
+
+def test_flow_evidence_raw_reason_error_response_includes_request_id():
+    response = _flow_error_response(
+        BadRequestException(
+            "Raw evidence export requires an explicit non-default reason.",
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
+            context={
+                "detail": "raw",
+                "default_reason": "support_debug",
+            },
+        ),
+        request_id="raw-evidence-reason-required-test",
+    )
+
+    assert response["status_code"] == 400
+    payload = response["payload"]
+    error = GeneralError.model_validate(payload)
+    assert (
+        error.message == "Raw evidence export requires an explicit non-default reason."
+    )
+    assert error.intric_error_code == ErrorCodes.BAD_REQUEST
+    assert error.code == FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value
+    assert error.context == {
+        "detail": "raw",
+        "default_reason": "support_debug",
+    }
+    assert error.request_id == "raw-evidence-reason-required-test"
+
+
+def test_flow_evidence_audit_failure_error_response_includes_request_id():
+    response = _flow_error_response(
+        AuditLoggingUnavailableException(
+            "Evidence audit logging is unavailable.",
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value,
+            context={"audit_required": True},
+        ),
+        request_id="evidence-audit-failure-test",
+    )
+
+    assert response["status_code"] == 503
+    payload = response["payload"]
+    error = GeneralError.model_validate(payload)
+    assert error.message == "Evidence audit logging is unavailable."
+    assert error.intric_error_code == ErrorCodes.INTERNAL_SERVER_ERROR
+    assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+    assert error.context == {"audit_required": True}
+    assert error.request_id == "evidence-audit-failure-test"
+
+
+def test_flow_evidence_error_response_omits_request_id_when_absent():
+    response = _flow_error_response(
+        BadRequestException(
+            "Raw evidence export requires an explicit non-default reason.",
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
+            context={
+                "detail": "raw",
+                "default_reason": "support_debug",
+            },
+        )
+    )
+
+    assert response["status_code"] == 400
+    payload = response["payload"]
+    GeneralError.model_validate(payload)
+    assert "request_id" not in payload
 
 
 @pytest.mark.asyncio
@@ -493,20 +591,18 @@ async def test_get_flow_run_evidence_fails_closed_when_audit_write_fails(monkeyp
         user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
     )
 
-    response = await get_flow_run_evidence(
-        id=flow_id,
-        run_id=run.id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await get_flow_run_evidence(
+            id=flow_id,
+            run_id=run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
 
-    assert response.status_code == 503
-    assert json.loads(response.body.decode("utf-8")) == {
-        "message": "Evidence audit logging is unavailable.",
-        "intric_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
-        "code": "flow_evidence_audit_logging_failed",
-        "context": {"audit_required": True},
-    }
+    error = exc_info.value
+    assert str(error) == "Evidence audit logging is unavailable."
+    assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+    assert error.context == {"audit_required": True}
     logger.exception.assert_called_once()
 
 
@@ -541,23 +637,21 @@ async def test_export_flow_run_evidence_fails_closed_when_audit_write_fails(
         user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
     )
 
-    response = await export_flow_run_evidence(
-        id=flow_id,
-        run_id=run.id,
-        format="json",
-        detail="redacted",
-        reason="support_debug",
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await export_flow_run_evidence(
+            id=flow_id,
+            run_id=run.id,
+            format="json",
+            detail="redacted",
+            reason="support_debug",
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
 
-    assert response.status_code == 503
-    assert json.loads(response.body.decode("utf-8")) == {
-        "message": "Evidence audit logging is unavailable.",
-        "intric_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
-        "code": "flow_evidence_audit_logging_failed",
-        "context": {"audit_required": True},
-    }
+    error = exc_info.value
+    assert str(error) == "Evidence audit logging is unavailable."
+    assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+    assert error.context == {"audit_required": True}
     logger.exception.assert_called_once()
 
 
@@ -644,25 +738,23 @@ async def test_export_flow_run_evidence_rejects_raw_invalid_reason(
         user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
     )
 
-    response = await export_flow_run_evidence(
-        id=flow_id,
-        run_id=run.id,
-        format="json",
-        detail="raw",
-        reason=reason,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
+    with pytest.raises(BadRequestException) as exc_info:
+        await export_flow_run_evidence(
+            id=flow_id,
+            run_id=run.id,
+            format="json",
+            detail="raw",
+            reason=reason,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
 
-    assert response.status_code == 400
-    assert json.loads(response.body.decode("utf-8")) == {
-        "message": "Raw evidence export requires an explicit non-default reason.",
-        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
-        "code": FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value,
-        "context": {
-            "detail": "raw",
-            "default_reason": "support_debug",
-        },
+    error = exc_info.value
+    assert str(error) == "Raw evidence export requires an explicit non-default reason."
+    assert error.code == FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED.value
+    assert error.context == {
+        "detail": "raw",
+        "default_reason": "support_debug",
     }
     run_service.get_run.assert_not_awaited()
     run_service.export_evidence_json.assert_not_awaited()

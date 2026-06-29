@@ -429,6 +429,19 @@ class InternalServerException(Exception):
     pass
 
 
+class AuditLoggingUnavailableException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
 class TenantSuspendedException(Exception):
     pass
 
@@ -550,6 +563,7 @@ EXCEPTION_MAP = {
         "Something went wrong.",
         ErrorCodes.INTERNAL_SERVER_ERROR,
     ),
+    AuditLoggingUnavailableException: (503, None, ErrorCodes.INTERNAL_SERVER_ERROR),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
     # File extraction errors - use None to pass through the exception's own message

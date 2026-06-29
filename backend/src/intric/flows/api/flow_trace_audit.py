@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
-from fastapi import status
-from fastapi.responses import JSONResponse
+from collections.abc import Mapping
+from typing import Protocol
+from uuid import UUID
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
@@ -12,38 +11,25 @@ from intric.flows.api.flow_api_common import audit_actor_kwargs
 from intric.flows.domain.flow import FlowRun
 from intric.flows.flow_api_error_code import FlowApiErrorCode
 from intric.main.container.container import Container
-from intric.main.exceptions import ErrorCodes
+from intric.main.exceptions import AuditLoggingUnavailableException
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def build_flow_trace_error_payload(
-    *,
-    message: str,
-    intric_error_code: ErrorCodes,
-    code: str,
-    context: dict[str, object] | None = None,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "message": message,
-        "intric_error_code": int(intric_error_code),
-        "code": code,
-    }
-    if context is not None:
-        payload["context"] = context
-    return payload
+class FlowTraceAuditActor(Protocol):
+    tenant_id: UUID
 
 
-async def log_flow_trace_audit_or_deny(
+async def log_flow_trace_audit_or_raise(
     *,
     container: Container,
-    user: Any,
+    user: FlowTraceAuditActor,
     run: FlowRun,
     action: ActionType,
     description: str,
-    extra: dict[str, Any] | None = None,
-) -> JSONResponse | None:
+    extra: Mapping[str, object] | None = None,
+) -> None:
     try:
         actor_kwargs = audit_actor_kwargs(user)
         await container.audit_service().log_async(
@@ -57,7 +43,7 @@ async def log_flow_trace_audit_or_deny(
             description=description,
             metadata=AuditMetadata.standard(actor=user, target=run, extra=extra or {}),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Flow trace audit logging failed; denying trace access",
             extra={
@@ -67,13 +53,8 @@ async def log_flow_trace_audit_or_deny(
                 "tenant_id": str(user.tenant_id),
             },
         )
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content=build_flow_trace_error_payload(
-                message="Evidence audit logging is unavailable.",
-                intric_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
-                code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value,
-                context={"audit_required": True},
-            ),
-        )
-    return None
+        raise AuditLoggingUnavailableException(
+            "Evidence audit logging is unavailable.",
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value,
+            context={"audit_required": True},
+        ) from exc

@@ -528,6 +528,56 @@
   - Local validation required matching the repository's existing devcontainer image/volume names to this machine's prefixed Docker image/volume names; no repo change was made for that local environment mismatch.
   - PG-9 proves a deterministic one-step text Flow run through browser/API/Celery/result evidence. It does not cover AI Builder create/apply because the seeded mock model is not tool-call capable and emits no tool calls.
 
+## PG-10a
+
+- Slice id: PG-10a
+- Findings addressed: `verify-api-dx:02` / `missed-consumer-journey:01`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/roadmap-to-9-and-10.md:29` scopes PG-10 to a single `GeneralError` envelope, with `flow_trace_audit.py` explicitly calling out deletion of `build_flow_trace_error_payload`.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:83-85` indexes the app-global `RequestValidationError` gap separately from the two Flow evidence bespoke payload paths.
+  - Before this edit, `backend/src/intric/flows/api/flow_trace_audit.py:21-35` built a Flow-only error payload, `:70-78` returned audit-fail 503 through that builder, and `backend/src/intric/flows/api/flow_run_evidence_router.py:254-265` returned raw evidence reason-required 400 through the same builder.
+  - Before this edit, `backend/src/intric/flows/api/flow_run_evidence_router.py:137-146` and `:279-288` returned the audit helper's direct 503 response instead of letting the FastAPI exception handler own the envelope.
+  - `backend/src/intric/main/models.py:159-199` defines `GeneralError`; `backend/src/intric/server/exception_handlers.py:56-67` owns request-id extraction and `:97-144` owns mapped-exception `GeneralError` responses.
+  - Direct `rg -n "build_flow_trace_error_payload" backend/src backend/tests` showed only the definition in `flow_trace_audit.py`, the audit-fail use in that file, and the raw export caller in `flow_run_evidence_router.py`.
+  - Direct `rg -n "RequestValidationError" backend/src/intric/server backend/src/intric/main backend/src/intric/flows/api backend/tests` found no main-app handler; PG-10b remains app-global because changing FastAPI validation errors affects all endpoints and generated clients.
+- Verification agents used, with verdicts:
+  - CRG `get_minimal_context` was used as a reducer for PG-10a and reported noisy context; direct source and exact `rg` were used for proof.
+  - Claude peer-loop session `pg10a-flow-evidence-general-error` iteration 1 verdict: `changes_required`, `GREEN_LIGHT: no`, `MIN_SCORE: 6`; valid feedback applied by reusing the existing FastAPI exception-handler owner instead of inlining new Flow direct-return `GeneralError` builders.
+  - Claude peer-loop session `pg10a-flow-evidence-general-error` iteration 2 verdict: `green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8`; it confirmed the raise-based owner consolidation, tests, and deleted-helper proof, with only non-blocking commit-hygiene and future typing notes.
+- Files changed:
+  - `backend/src/intric/main/exceptions.py`
+  - `backend/src/intric/flows/api/flow_trace_audit.py`
+  - `backend/src/intric/flows/api/flow_run_evidence_router.py`
+  - `backend/tests/unittests/flows/test_flow_evidence_router.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - Raw evidence export with `detail=raw` and a blank/default reason still fails with HTTP 400, but now raises `BadRequestException` so the existing FastAPI handler returns canonical `GeneralError` with `request_id` when present.
+  - Evidence audit logging failure still denies evidence access fail-closed with HTTP 503, but now raises `AuditLoggingUnavailableException` so the existing FastAPI handler returns canonical `GeneralError` with `request_id` when present.
+  - When no request id/correlation id is present, `request_id` is omitted through the existing `model_dump(exclude_none=True)` handler behavior.
+  - Global FastAPI 422 validation responses are unchanged in PG-10a.
+- Complexity deleted or owner clarified:
+  - Deleted the Flow-only `build_flow_trace_error_payload` envelope builder.
+  - Replaced the `log_flow_trace_audit_or_deny` direct-response branch with `log_flow_trace_audit_or_raise`, leaving one canonical public error envelope owner in `server/exception_handlers.py`.
+- Architecture delta:
+  - Canonical owner before: `server/exception_handlers.py` owned most mapped exception envelopes, but Flow evidence audit failure and raw reason-required 400 owned a second hand-built payload path in `flow_trace_audit.py`.
+  - Canonical owner after: `server/exception_handlers.py` is the public error-envelope owner for these Flow evidence failures; `flow_trace_audit.py` owns only fail-closed audit logging and raises the typed failure.
+  - Duplicate paths remaining: app-global FastAPI validation errors can still return raw `{detail: [...]}` because PG-10b is intentionally deferred; no `build_flow_trace_error_payload` source/test caller remains.
+  - 9/10 follow-up candidate: PG-10b should standardize main-app `RequestValidationError` responses as `GeneralError` only with generated-client validation, broad API contract tests, and an explicit decision for non-Flow endpoints/SCIM blast radius.
+  - Decision or measurement needed: decide the global 422 error code/context contract and whether any non-Flow clients rely on FastAPI's raw validation shape before PG-10b.
+  - What not to preserve: Flow-scoped error-envelope builders, direct-return JSON error responses for mapped application failures, and indefinite coexistence between bespoke evidence payloads and `GeneralError`.
+- Validation commands and results:
+  - Red proof before implementation: `cd backend && uv run pytest tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_fails_closed_when_audit_write_fails tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_rejects_raw_invalid_reason -q` -> failed, 3 failed, because both bespoke payloads omitted the injected request id.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_evidence_router.py::test_flow_evidence_raw_reason_error_response_includes_request_id tests/unittests/flows/test_flow_evidence_router.py::test_flow_evidence_audit_failure_error_response_includes_request_id tests/unittests/flows/test_flow_evidence_router.py::test_flow_evidence_error_response_omits_request_id_when_absent tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_fails_closed_when_audit_write_fails tests/unittests/flows/test_flow_evidence_router.py::test_export_flow_run_evidence_rejects_raw_invalid_reason -q'` -> pass, 6 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/ruff check src/intric/main/exceptions.py src/intric/server/exception_handlers.py src/intric/flows/api/flow_trace_audit.py src/intric/flows/api/flow_run_evidence_router.py tests/unittests/flows/test_flow_evidence_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pyright --pythonpath .venv/bin/python src/intric/main/exceptions.py src/intric/server/exception_handlers.py src/intric/flows/api/flow_trace_audit.py src/intric/flows/api/flow_run_evidence_router.py tests/unittests/flows/test_flow_evidence_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/unit/test_flow_openapi_contract.py'` -> pass, 0 errors.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unittests/flows/test_flow_evidence_router.py -q'` -> pass, 16 passed.
+  - `docker exec eneo-flows-clean_devcontainer-eneo-1 bash -lc 'cd /workspace/backend && .venv/bin/pytest tests/unit/test_flow_openapi_contract.py::test_openapi_flow_consumer_typed_error_schemas -q'` -> pass, 1 passed.
+  - `rg -n "build_flow_trace_error_payload" backend/src backend/tests` -> no matches.
+  - `git diff --check -- backend/src/intric/main/exceptions.py backend/src/intric/flows/api/flow_trace_audit.py backend/src/intric/flows/api/flow_run_evidence_router.py backend/tests/unittests/flows/test_flow_evidence_router.py review-artifacts/implementation-progress-2026-06-29.md` -> pass.
+- Remaining risk / follow-up:
+  - PG-10a deliberately does not change FastAPI's app-global request-validation behavior. PG-10b must handle that as a separate generated-client-visible API contract slice, not as a Flow evidence cleanup.
+  - The new `AuditLoggingUnavailableException` is mapped to 503 with `ErrorCodes.INTERNAL_SERVER_ERROR`, preserving the prior wire type and code while letting the existing handler attach request identity.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
