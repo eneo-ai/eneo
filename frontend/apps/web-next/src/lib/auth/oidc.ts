@@ -40,7 +40,8 @@ export interface AuthorizationStart {
 }
 
 export async function startAuthorization(
-  config?: client.Configuration
+  config?: client.Configuration,
+  options?: { prompt?: string }
 ): Promise<AuthorizationStart> {
   const oidcConfig = config ?? (await getOidcConfig());
   const verifier = client.randomPKCECodeVerifier();
@@ -54,7 +55,10 @@ export async function startAuthorization(
     code_challenge: challenge,
     code_challenge_method: "S256",
     state,
-    nonce
+    nonce,
+    // `prompt=select_account` forces the IdP's account/org chooser (used by the
+    // "switch organisation" flow so SSO doesn't silently re-log the same user).
+    ...(options?.prompt ? { prompt: options.prompt } : {})
   });
 
   return { url: url.href, verifier, state, nonce };

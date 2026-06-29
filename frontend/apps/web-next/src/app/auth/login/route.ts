@@ -13,10 +13,11 @@ export async function GET(request: NextRequest) {
   }
 
   const next = request.nextUrl.searchParams.get("next") ?? undefined;
+  const prompt = request.nextUrl.searchParams.get("prompt") ?? undefined;
 
   let authorization;
   try {
-    authorization = await startAuthorization();
+    authorization = await startAuthorization(undefined, { prompt });
   } catch {
     return NextResponse.redirect(new URL("/login/failed", env.APP_ORIGIN));
   }

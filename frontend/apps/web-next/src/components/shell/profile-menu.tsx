@@ -84,6 +84,11 @@ export function ProfileMenu() {
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <a href="/login/switch-organisation">
+            <Building2 /> {t("oidc_choose_another_org")}
+          </a>
+        </DropdownMenuItem>
         <DropdownMenuItem variant="destructive" asChild>
           <a href="/logout">
             <LogOut /> {t("logout")}
