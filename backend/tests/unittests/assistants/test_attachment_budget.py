@@ -378,6 +378,143 @@ async def test_fit_uses_governance_enforced_prompt(monkeypatch):
         )
 
 
+# --- context fit: per-message ask-time guard (uploads have no save-time gate) ---
+
+
+@pytest.mark.asyncio
+async def test_message_fit_rejects_when_upload_alone_over_ceiling(monkeypatch):
+    # A chat upload big enough to overflow on its own is rejected up front
+    # instead of being inlined whole and failing at the provider.
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        lambda *, text_files, image_files, model_name: len(text_files) * 100,
+    )
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
+    assistant = SimpleNamespace(attachments=[])
+    # ceiling = 90; one uploaded text file = 100 > 90 -> reject
+    with pytest.raises(BadRequestException):
+        await _service()._assert_message_attachments_fit(
+            assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]
+        )
+
+
+@pytest.mark.asyncio
+async def test_message_fit_passes_when_within_ceiling(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        lambda *, text_files, image_files, model_name: len(text_files) * 40,
+    )
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
+    assistant = SimpleNamespace(attachments=[])
+    # ceiling = 90; one uploaded text file = 40 <= 90 -> ok
+    await _service()._assert_message_attachments_fit(
+        assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]
+    )
+
+
+@pytest.mark.asyncio
+async def test_message_fit_includes_persistent_baseline(monkeypatch):
+    # An upload that fits alone is still rejected when the assistant's persistent
+    # attachments leave no room — the request sends both on the same turn.
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        lambda *, text_files, image_files, model_name: len(text_files) * 50,
+    )
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
+    assistant = SimpleNamespace(attachments=[_text_attachment()])
+    # message alone = 50 <= 90; persistent 50 + message 50 = 100 > 90 -> reject
+    with pytest.raises(BadRequestException):
+        await _service()._assert_message_attachments_fit(
+            assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]
+        )
+
+
+@pytest.mark.asyncio
+async def test_message_fit_skips_when_no_uploads(monkeypatch):
+    # The hot text-only chat path does no token work: nothing was uploaded, the
+    # baseline was gated on save, and history is budget-evicted downstream.
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 10**9
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        lambda **k: 10**9,
+    )
+    file_service = AsyncMock()
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=True)
+    assistant = SimpleNamespace(attachments=[_text_attachment()])
+    # Would raise (and touch derived images) if it ran -> proves the early return.
+    await _service(file_service)._assert_message_attachments_fit(
+        assistant=assistant, model=model, prompt_text="x", files=[]
+    )
+    file_service.with_derived_images.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_message_fit_counts_derived_images_for_vision(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        lambda *, text_files, image_files, model_name: len(text_files) * 10
+        + len(image_files) * 90,
+    )
+    text_file = _text_attachment()
+    derived_image = _image_attachment()
+    file_service = AsyncMock()
+    file_service.with_derived_images = AsyncMock(
+        return_value=[text_file, derived_image]
+    )
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=True)
+    # No persistent attachments, so the only derived-image lookup is the upload's.
+    assistant = SimpleNamespace(attachments=[])
+    # ceiling = 90; text 10 + derived image 90 = 100 > 90 -> reject
+    with pytest.raises(BadRequestException):
+        await _service(file_service)._assert_message_attachments_fit(
+            assistant=assistant, model=model, prompt_text="", files=[text_file]
+        )
+    file_service.with_derived_images.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_message_fit_no_derived_images_without_vision(monkeypatch):
+    _patch_reserve(monkeypatch, 10)
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_tokens", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "intric.assistants.assistant_service.count_attachment_tokens",
+        lambda *, text_files, image_files, model_name: len(text_files) * 10
+        + len(image_files) * 90,
+    )
+    file_service = AsyncMock()
+    file_service.with_derived_images = AsyncMock(
+        return_value=[_text_attachment(), _image_attachment()]
+    )
+    model = SimpleNamespace(max_input_tokens=100, name="gpt-4o", vision=False)
+    assistant = SimpleNamespace(attachments=[])
+    # Non-vision: uploaded file used as-is (10 <= 90), no derived-image lookup.
+    await _service(file_service)._assert_message_attachments_fit(
+        assistant=assistant, model=model, prompt_text="", files=[_text_attachment()]
+    )
+    file_service.with_derived_images.assert_not_awaited()
+
+
 # --- assembler advertises the attachment guardrails (count + size) ---
 
 

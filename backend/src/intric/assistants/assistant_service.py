@@ -498,18 +498,29 @@ class AssistantService:
             persistent_attachments=assistant.attachments,
             completion_model=model,
         )
+        self._assert_files_fit_context(
+            model=model,
+            prompt_text=prompt_text,
+            files=completion_prompt_files,
+        )
+
+    def _assert_files_fit_context(
+        self,
+        *,
+        model: "CompletionModel",
+        prompt_text: str,
+        files: list["File"],
+    ) -> None:
+        """Reject when the system prompt + whole files exceed the model's input
+        window with room left to ask. Files are inlined whole (never truncated),
+        so a set that doesn't fit can't run — a clear rejection beats a
+        provider-side context-length error. Pass files already expanded with any
+        document-derived images, since that is what the request sends. Shared by
+        the save-time persistent check and the per-message ask-time check."""
         ceiling = attachment_token_ceiling(model.max_input_tokens)
         used = count_tokens(prompt_text, model.name) + count_attachment_tokens(
-            text_files=[
-                file
-                for file in completion_prompt_files
-                if file.file_type == FileType.TEXT
-            ],
-            image_files=[
-                file
-                for file in completion_prompt_files
-                if file.file_type == FileType.IMAGE
-            ],
+            text_files=[f for f in files if f.file_type == FileType.TEXT],
+            image_files=[f for f in files if f.file_type == FileType.IMAGE],
             model_name=model.name,
         )
         if used > ceiling:
@@ -518,6 +529,39 @@ class AssistantService:
                 f"{ceiling} fit this model's context window. Remove content or "
                 f"choose a model with a larger context."
             )
+
+    async def _assert_message_attachments_fit(
+        self,
+        *,
+        assistant: "Assistant",
+        model: "CompletionModel",
+        prompt_text: str,
+        files: list["File"],
+    ) -> None:
+        """Per-message ask-time guard. Persistent attachments are gated on save,
+        but a chat message's own uploads are not — and they are now inlined whole
+        on the send and on every later replay. Count the persistent baseline plus
+        this message's files (both expanded with derived images, as the request
+        sends them) against the same ceiling, so an upload that can't fit is
+        rejected up front instead of failing at the provider. No uploads this
+        turn means nothing new to check: the baseline was validated on save and
+        history is budget-evicted downstream."""
+        if not files:
+            return
+        persistent_files = await self._completion_prompt_files_for_model(
+            persistent_attachments=assistant.attachments,
+            completion_model=model,
+        )
+        message_files = (
+            await self.file_service.with_derived_images(files)
+            if model.vision
+            else files
+        )
+        self._assert_files_fit_context(
+            model=model,
+            prompt_text=prompt_text,
+            files=persistent_files + message_files,
+        )
 
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""
@@ -1747,6 +1791,20 @@ class AssistantService:
             raise BadRequestException(
                 "No completion model configured for this conversation.",
             )
+
+        # This message's own uploads have no save-time fit gate and are inlined
+        # whole, so reject an upload that can't fit before any session/question
+        # row is created — same "fail before persisting" carve-out as governance.
+        await self._assert_message_attachments_fit(
+            assistant=assistant_to_ask,
+            model=effective_completion_model,
+            prompt_text=(
+                prompt_override
+                if prompt_override is not None
+                else assistant_to_ask.get_prompt_text()
+            ),
+            files=files,
+        )
 
         if session_id is not None:
             if group_chat_id is not None:
