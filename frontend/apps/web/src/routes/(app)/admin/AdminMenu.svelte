@@ -17,7 +17,15 @@
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
   import { IconSparkles } from "@intric/icons/sparkles";
   import { IconKey } from "@intric/icons/key";
-  import { BookText, ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
+  import {
+    BookText,
+    ChartPie,
+    LayoutTemplate,
+    Cloud,
+    Plug,
+    ShieldCheck,
+    Database
+  } from "lucide-svelte";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -64,7 +72,8 @@
           : []),
         navItem("/admin/help-assistants", IconSparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
-        navItem("/admin/integrations", Cloud, m.integrations())
+        navItem("/admin/integrations", Cloud, m.integrations()),
+        navItem("/admin/metadata", Database, m.admin_metadata_nav_label())
       ]
     },
     {

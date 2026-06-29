@@ -7,7 +7,7 @@
 
 import { createContext } from "$lib/core/context";
 import { createResourceEditor } from "$lib/core/editing/ResourceEditor";
-import type { Intric, Space } from "@intric/intric-js";
+import type { Intric, ResourceMetadataJson, Space } from "@intric/intric-js";
 
 const [getSpaceSettingsEditor, setSpaceSettingsEditor] =
   createContext<ReturnType<typeof createSpaceSettingsEditor>>("Space Settings Editor");
@@ -23,7 +23,8 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
     resource: data.space,
     defaults: {
       description: "",
-      data_retention_days: null
+      data_retention_days: null,
+      metadata_json: null as ResourceMetadataJson | null
     },
     updateResource: async (resource, changes) => {
       const updated = await data.intric.spaces.update({
@@ -37,6 +38,7 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
       name: true,
       description: true,
       data_retention_days: true,
+      metadata_json: true,
       icon_id: true
     },
     // Space doesn't have attachments like assistants

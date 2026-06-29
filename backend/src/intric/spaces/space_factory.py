@@ -133,6 +133,7 @@ class SpaceFactory:
             collections=[],
             members={},
             group_members={},
+            metadata_json=None,
         )
 
     def create_space_from_db(
@@ -463,5 +464,6 @@ class SpaceFactory:
             group_members=group_members,
             security_classification=space_security_classification,
             data_retention_days=space_in_db.data_retention_days,
+            metadata_json=space_in_db.metadata_json,
             icon_id=space_in_db.icon_id,
         )

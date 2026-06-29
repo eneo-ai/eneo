@@ -73,6 +73,7 @@ class Space:
         group_chats: list["GroupChat"] | None = None,
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
+        metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
@@ -106,6 +107,7 @@ class Space:
         self.updated_at = updated_at
         self.security_classification = security_classification
         self.data_retention_days = data_retention_days
+        self.metadata_json = metadata_json
         self.icon_id = icon_id
         self.group_members = group_members if group_members is not None else {}
 
@@ -330,6 +332,7 @@ class Space:
             SecurityClassification, NotProvided, None
         ] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
@@ -414,6 +417,9 @@ class Space:
 
         if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
+
+        if is_provided(metadata_json):
+            self.metadata_json = metadata_json
 
         if is_provided(icon_id):
             self.icon_id = icon_id

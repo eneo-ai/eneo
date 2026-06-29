@@ -1363,6 +1363,7 @@ class SpaceRepository:
             .values(
                 name=space.name,
                 description=space.description,
+                metadata_json=space.metadata_json,
                 tenant_id=space.tenant_id,
                 user_id=space.user_id,
                 tenant_space_id=space.tenant_space_id,
@@ -1415,6 +1416,7 @@ class SpaceRepository:
                     else None
                 ),
                 data_retention_days=space.data_retention_days,
+                metadata_json=space.metadata_json,
                 icon_id=space.icon_id,
             )
             .where(Spaces.id == space.id)

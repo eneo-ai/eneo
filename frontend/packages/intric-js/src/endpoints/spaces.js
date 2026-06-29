@@ -1,4 +1,5 @@
 /** @typedef {import('../types/resources').Space} Space */
+/** @typedef {import('../types/resources').SpaceUpdate} SpaceUpdate */
 /** @typedef {import('../client/client').IntricError} IntricError */
 
 /**
@@ -107,7 +108,7 @@ export function initSpaces(client) {
      * Update an existing space.
      * @param {Object} params
      * @param {{id: string}} params.space The space you want to update
-     * @param {import('../types/fetch').JSONRequestBody<"patch", "/api/v1/spaces/{id}/">} params.update - Either provide the updated space or the parameters to update.
+     * @param {SpaceUpdate} params.update - Either provide the updated space or the parameters to update.
      * @returns {Promise<Space>} The updated space
      * @throws {IntricError}
      * */

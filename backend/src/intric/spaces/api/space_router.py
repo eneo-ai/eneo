@@ -205,6 +205,11 @@ async def update_space(
     else:
         data_retention_days = update_space_req.data_retention_days
 
+    if "metadata_json" not in original_request:
+        metadata_json = NOT_PROVIDED
+    else:
+        metadata_json = update_space_req.metadata_json
+
     # Handle icon_id: check if it was provided in the request
     icon_id = NOT_PROVIDED
     if "icon_id" in original_request:
@@ -223,6 +228,7 @@ async def update_space(
         mcp_tools=update_space_req.mcp_tools,
         security_classification=security_classification,
         data_retention_days=data_retention_days,
+        metadata_json=metadata_json,
         icon_id=icon_id,
     )
 
@@ -245,6 +251,11 @@ async def update_space(
         changes["data_retention_days"] = {
             "old": old_space.data_retention_days,
             "new": data_retention_days,
+        }
+    if is_provided(metadata_json) and metadata_json != old_space.metadata_json:
+        changes["metadata_json"] = {
+            "old": old_space.metadata_json,
+            "new": metadata_json,
         }
 
     # Track model changes using SET comparison (avoids false positives from ordering)

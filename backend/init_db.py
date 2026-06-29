@@ -34,7 +34,7 @@ settings = Settings()
 # Alembic command
 def run_alembic_migrations():
     try:
-        subprocess.run(["alembic", "upgrade", "head"], check=True)
+        subprocess.run(["alembic", "upgrade", "heads"], check=True)
         print("Alembic migrations ran successfully.")
     except FileNotFoundError:
         print(

@@ -5,6 +5,11 @@ from pydantic import BaseModel, Field
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from intric.main.models import InDB
+from intric.settings.metadata_fields import TenantMetadataFieldPublic
+
+
+def _default_metadata_fields() -> list[TenantMetadataFieldPublic]:
+    return []
 
 
 class SettingsBase(BaseModel):
@@ -30,6 +35,9 @@ class SettingsPublic(SettingsBase):
     provisioning: bool = False  # JIT provisioning - auto-create users on SSO login
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
+    )
+    metadata_fields: list[TenantMetadataFieldPublic] = Field(
+        default_factory=_default_metadata_fields
     )
 
 

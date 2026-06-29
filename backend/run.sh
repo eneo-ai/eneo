@@ -11,7 +11,7 @@ fi
 
 # Skip Alembic migrations in OpenAPI-only mode
 if [[ "${OPENAPI_ONLY_MODE,,}" != "true" ]]; then
-    alembic upgrade head
+    alembic upgrade heads
 fi
 
 if [[ -z "${NUM_WORKERS}" ]]; then

@@ -34,7 +34,7 @@ def downgrade() -> None:
 
 In order to apply it to the database, use
 
-`alembic upgrade head`
+`alembic upgrade heads`
 
 which applies the migration
 
@@ -47,5 +47,4 @@ You can also downgrade using
 `alembic downgrade base` where base is the initial state
 
 You can also use Relative Migration Identifiers, +2, -1 etc. See more here: https://alembic.sqlalchemy.org/en/latest/tutorial.html
-
 

@@ -3,6 +3,7 @@ import { createIntric, createIntricSocket } from "@intric/intric-js";
 
 export const load = async (event) => {
   event.depends("global:state");
+  event.depends("app:settings");
 
   const { tokens, environment, featureFlags } = event.data;
 

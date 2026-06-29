@@ -7,6 +7,18 @@
 import type { LayoutLoad } from "./$types";
 import type { Space } from "@intric/intric-js";
 
+type UserRole = {
+  permissions?: string[];
+};
+
+type UserWithRoles = {
+  roles?: UserRole[];
+} | null;
+
+function isAdminUser(user: UserWithRoles | undefined) {
+  return user?.roles?.some((role: UserRole) => role.permissions?.includes("admin")) ?? false;
+}
+
 export const load: LayoutLoad = async (event) => {
   // Register dependency for targeted invalidation when space data changes
   event.depends("spaces:data");
@@ -24,7 +36,7 @@ export const load: LayoutLoad = async (event) => {
   const loadDelta = new Date().getTime() - new Date(loadedAt).getTime();
 
   // Check if user is admin before attempting to fetch org space
-  const isAdmin = user?.roles?.some((role) => role.permissions?.includes("admin"));
+  const isAdmin = isAdminUser(user);
 
   if (!spaceId || spaceId === "personal") {
     currentSpace = loadDelta < 1500 ? parentSpace : await intric.spaces.getPersonalSpace();
