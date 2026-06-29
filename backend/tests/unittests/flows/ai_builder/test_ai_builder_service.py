@@ -11,13 +11,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
-from intric.completion_models.infrastructure.tenant_model_capabilities import (
-    StructuredOutputCapabilityDecision,
-    StructuredOutputDecisionSource,
-    StructuredOutputMode,
-    unsupported_structured_output_decision,
-)
-
 
 @asynccontextmanager
 async def _noop_savepoint() -> AsyncIterator[None]:
@@ -226,10 +219,6 @@ def _make_service(
     repo.list_session_file_ids.return_value = []
     repo.load_planning_state.return_value = None
     resolved_completion_service = completion_service or AsyncMock()
-    if isinstance(resolved_completion_service, MagicMock):
-        resolved_completion_service.resolve_structured_output_capability = AsyncMock(
-            return_value=unsupported_structured_output_decision()
-        )
     return AIBuilderService(
         user=user or _make_user(),
         repo=repo,
@@ -495,27 +484,6 @@ def _make_adapter() -> MagicMock:
     adapter.credential_resolver.get_api_key.return_value = "sk-test"
     adapter.credential_resolver.get_credential_field.return_value = None
     return adapter
-
-
-class _CompletionServiceWithStructuredOutput:
-    def __init__(self, decision: StructuredOutputCapabilityDecision) -> None:
-        self.decision = decision
-        self.params_calls = 0
-        self.capability_calls = 0
-
-    async def resolve_litellm_params(
-        self,
-        model: Any,
-    ) -> tuple[str, dict[str, object]]:
-        self.params_calls += 1
-        return "openai/gpt-4o-mini", {"api_key": "sk-test"}
-
-    async def resolve_structured_output_capability(
-        self,
-        model: Any,
-    ) -> StructuredOutputCapabilityDecision:
-        self.capability_calls += 1
-        return self.decision
 
 
 async def _collect_events(gen) -> list[dict[str, str]]:
@@ -1018,51 +986,6 @@ class TestPlannerContextPreparation:
         completion_service.resolve_litellm_params.assert_awaited_once_with(model)
         flow_service.get_flow.assert_awaited_once_with(session.flow_id)
         flow_service.get_flow_assistant_snapshots.assert_awaited_once_with(flow)
-
-    @pytest.mark.anyio
-    async def test_prepare_message_context_carries_one_structured_output_decision(
-        self,
-    ):
-        user = _make_user()
-        repo = AsyncMock()
-        flow_service = AsyncMock()
-        decision = StructuredOutputCapabilityDecision(
-            mode=StructuredOutputMode.STRICT_JSON_SCHEMA,
-            source=StructuredOutputDecisionSource.LITELLM_RESPONSE_SCHEMA,
-            supports_response_schema=True,
-            supports_response_format=True,
-        )
-        completion_service = _CompletionServiceWithStructuredOutput(decision)
-
-        model = _make_model()
-        model.max_input_tokens = 4096
-        model.max_output_tokens = 2048
-        model.provider_type = "openai"
-
-        space = MagicMock()
-        space.completion_models = [model]
-        space.collections = []
-        space.get_default_completion_model.return_value = model
-
-        session = _make_session(tenant_id=user.tenant_id)
-
-        service = _make_service(
-            user=user,
-            repo=repo,
-            flow_service=flow_service,
-            completion_service=completion_service,
-        )
-
-        result = await service.prepare_message_context(
-            session=session,
-            space=space,
-            model_id=model.id,
-            tenant_flow_settings=None,
-        )
-
-        assert result.structured_output_decision is decision
-        assert completion_service.params_calls == 1
-        assert completion_service.capability_calls == 1
 
     @pytest.mark.anyio
     async def test_prepare_message_context_rejects_flow_space_mismatch(self):

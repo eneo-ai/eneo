@@ -3,9 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
 from uuid import UUID
 
-from intric.completion_models.infrastructure.tenant_model_capabilities import (
-    StructuredOutputCapabilityDecision,
-)
 from intric.files.file_models import File
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
@@ -121,7 +118,6 @@ class AIBuilderPlanner:
         ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
-        structured_output_decision: StructuredOutputCapabilityDecision | None = None,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
         available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
@@ -132,7 +128,6 @@ class AIBuilderPlanner:
         max_output_tokens: int | None = None,
         budget_policy: AIBuilderBudgetPolicy | None = None,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-        _ = structured_output_decision
         if budget_policy is None:
             budget_policy = resolve_ai_builder_budget_policy(None)
 

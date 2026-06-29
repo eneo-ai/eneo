@@ -192,6 +192,45 @@
   - No in-repo runtime caller remains. Residual risk is limited to out-of-repo imports of the deleted facade, which is not a compatibility requirement for this pre-production cleanup.
   - Host PDF tests need native WeasyPrint libraries; the devcontainer is the reliable validation environment for PDF rendering.
 
+## PG-3c
+
+- Slice id: PG-3c
+- Findings addressed: `B-DEL-1 / verify-builder-arch:06`
+- Verified evidence before change:
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:47` scopes the deletion to `resolve_planner_structured_output_capability`, the `PreparedMessageContext` field, router forwarding, and the planner parameter while keeping the shared `StructuredOutputCapabilityDecision` type.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/deletion-and-simplification-backlog.md:62-70` lists the keep-carve-outs; this slice kept `StructuredOutputCapabilityDecision`, `CompletionMetadata`, `FlowExecutionBackend`, the JSON-text proposal repair fallback, and the active private-fields migration/test.
+  - `review-artifacts/ultracode-independent-review-2026-06-29/evidence-ledger.md:65` indexes the structured-output resolve/forward/discard chain and the shared type owner.
+  - Before the edit, `backend/src/intric/flows/ai_builder/ai_builder_service.py:364-368` delegated to `completion_service.resolve_structured_output_capability`, `backend/src/intric/flows/ai_builder/ai_builder_service.py:393-397` invoked it per prepared message context, and `backend/src/intric/flows/ai_builder/ai_builder_service.py:442-449` returned it on `PreparedMessageContext`.
+  - Before the edit, `backend/src/intric/flows/ai_builder/ai_builder_router.py:648-666` forwarded the value into `service.send_message`.
+  - Before the edit, `backend/src/intric/flows/ai_builder/ai_builder_planner.py:113-135` accepted `structured_output_decision` and immediately assigned it to `_`.
+  - CRG `callers_of(resolve_planner_structured_output_capability)` returned exactly one caller, `prepare_message_context`.
+  - Claude side-effect verification checked the shared resolver path: `CompletionService.resolve_structured_output_capability` delegates through `TenantModelAdapter.resolve_structured_output_capability` to local LiteLLM capability-table probing; no provider network call or state mutation was found.
+- Verification agents used, with verdicts:
+  - `PG-3c` read-only verifier verdict: `confirmed`; remove only the AI Builder pass-through field/method/forwarding/discarded parameter/test plumbing, keep the shared completion-model capability producer/type and proposal completion behavior.
+  - Claude peer-loop session `eneo-flows-pg3-remaining-2026-06-29`: final pass returned `VERDICT: green`, `GREEN_LIGHT: yes`, `MIN_SCORE: 8` after the side-effect proof and keep-carve-out handling were documented.
+- Files changed:
+  - `backend/src/intric/flows/ai_builder/ai_builder_service.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_router.py`
+  - `backend/src/intric/flows/ai_builder/ai_builder_planner.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py`
+  - `backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py`
+  - `review-artifacts/implementation-progress-2026-06-29.md`
+- Behavior changed:
+  - AI Builder no longer performs a per-message structured-output capability resolution that was never used by the planner.
+  - The planner/service/router API between internal Builder components no longer advertises provider-aware structured-output behavior that the planner ignored.
+- Complexity deleted or owner clarified:
+  - Deleted 106 net lines of dead async plumbing and mock-only tests.
+  - Kept structured-output capability ownership in `intric.completion_models.infrastructure`, outside the AI Builder planner path.
+- Validation commands and results:
+  - `rg -n "resolve_planner_structured_output_capability|structured_output_decision" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder --glob '*.py'` -> no matches.
+  - `rg -n "StructuredOutputCapabilityDecision|resolve_structured_output_capability|unsupported_structured_output_decision" backend/src/intric/completion_models backend/tests/unit/test_tenant_model_capabilities.py --glob '*.py'` -> shared type/resolver retained and tested.
+  - `cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_router.py src/intric/flows/ai_builder/ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
+  - `cd backend && uv run pyright src/intric/flows/ai_builder src/intric/completion_models/infrastructure` -> pass, 0 errors.
+  - `cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unit/test_tenant_model_capabilities.py -q` -> pass, 198 passed.
+  - `git diff --check -- backend/src/intric/flows/ai_builder/ai_builder_service.py backend/src/intric/flows/ai_builder/ai_builder_router.py backend/src/intric/flows/ai_builder/ai_builder_planner.py backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py` -> pass.
+- Remaining risk / follow-up:
+  - Shared `CompletionService.resolve_structured_output_capability` may now be a zero-production-caller capability outside Builder; it is deliberately kept in PG-3c because the backlog protects the shared type/owner. See `PG3-FU-2`.
+
 ## 9/10 Follow-Up Candidates
 
 - Candidate id: PG3-FU-1
@@ -201,3 +240,11 @@
 - Likely canonical owner: whichever Builder prompt/request-preparation owner should expose the Flow capability reference to the planner, if the reference is still product-relevant.
 - Deletion/reuse/merge path if known: either wire `build_structured_reference_payload` into the canonical planner prompt/request preparation path with behavior tests, or delete it and its tests in a later Builder cleanup once product need is disproven.
 - Decision or measurement needed: decide whether the planner still needs an explicit structured Flow capability reference after the current server-owned Builder control-plane changes.
+
+- Candidate id: PG3-FU-2
+- Area: maintainability / clean architecture
+- Source evidence: `backend/src/intric/completion_models/infrastructure/completion_service.py:154-159` exposes `CompletionService.resolve_structured_output_capability`; `backend/src/intric/completion_models/infrastructure/adapters/tenant_model_adapter.py:404-410` adapts the shared resolver; after PG-3c, direct `rg "resolve_structured_output_capability\\(" backend/src backend/tests --glob '*.py'` shows only the shared owner/adapter and `backend/tests/unit/test_tenant_model_capabilities.py` references.
+- Why it is not part of the current PG slice: `B-DEL-1` explicitly keeps the shared `StructuredOutputCapabilityDecision` type, and PG-3c is scoped to AI Builder's dead pass-through plumbing rather than completion-model capability API cleanup.
+- Likely canonical owner: `intric.completion_models.infrastructure.tenant_model_capabilities` if another runtime/API path needs local model capability decisions; otherwise no owner is needed.
+- Deletion/reuse/merge path if known: audit non-Builder product plans for structured-output capability decisions; either wire the shared resolver into a real provider-selection boundary or delete the unused service/adapter pass-through while keeping any independently useful pure capability helpers/tests.
+- Decision or measurement needed: determine whether structured-output capability resolution is part of a shipped completion-model contract outside AI Builder.
