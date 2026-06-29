@@ -20,6 +20,7 @@ import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { availableIntegrationsQueryOptions, type UserIntegration } from "../queries";
 import { VENDOR } from "../vendor";
+import { ConfluenceImportDialog } from "./confluence-import";
 import { SharePointImportDialog } from "./sharepoint-import";
 
 /**
@@ -35,10 +36,12 @@ export function useImportableIntegrations(): {
   const { space } = useSpace();
   const { data, isPending } = useQuery(availableIntegrationsQueryOptions(browserApi, space.id));
 
-  const sharepoint = (data ?? []).filter((entry) => entry.integration_type === "sharepoint");
+  const importable = (data ?? []).filter(
+    (entry) => entry.integration_type === "sharepoint" || entry.integration_type === "confluence"
+  );
   const integrations = space.personal
-    ? sharepoint.filter((entry) => entry.auth_type === "user_oauth" || !entry.connected)
-    : sharepoint.filter((entry) => entry.connected && entry.auth_type === "tenant_app");
+    ? importable.filter((entry) => entry.auth_type === "user_oauth" || !entry.connected)
+    : importable.filter((entry) => entry.connected && entry.auth_type === "tenant_app");
 
   return { integrations, isPending };
 }
@@ -152,17 +155,28 @@ export function ImportKnowledgeDialog({
         </DialogContent>
       </Dialog>
 
-      {selected && (
-        <SharePointImportDialog
-          open={open && step === "import"}
-          onOpenChange={(next) => {
-            if (!next) setStep("select");
-            onOpenChange(next);
-          }}
-          onBack={() => setStep("select")}
-          integration={selected}
-        />
-      )}
+      {selected &&
+        (selected.integration_type === "confluence" ? (
+          <ConfluenceImportDialog
+            open={open && step === "import"}
+            onOpenChange={(next) => {
+              if (!next) setStep("select");
+              onOpenChange(next);
+            }}
+            onBack={() => setStep("select")}
+            integration={selected}
+          />
+        ) : (
+          <SharePointImportDialog
+            open={open && step === "import"}
+            onOpenChange={(next) => {
+              if (!next) setStep("select");
+              onOpenChange(next);
+            }}
+            onBack={() => setStep("select")}
+            integration={selected}
+          />
+        ))}
     </>
   );
 }
