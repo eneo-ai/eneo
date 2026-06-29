@@ -4,7 +4,8 @@ on:
   issue_comment:
     types: [created]
 
-permissions: {}
+permissions:
+  issues: write
 
 concurrency:
   group: eneo-ai-review-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}
@@ -31,6 +32,7 @@ jobs:
 
     steps:
       - name: Authorize requester and send signed review request
+        id: dispatch
         shell: python
         run: |
           import hashlib
@@ -130,3 +132,15 @@ jobs:
               raise SystemExit(f"Eneo {mode} webhook rejected the request: HTTP {error.code} {detail}")
           except urllib.error.URLError as error:
               raise SystemExit(f"Eneo {mode} webhook could not be reached: {error.reason}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("dispatched=true\n")
+
+      - name: Acknowledge receipt with an eyes reaction
+        if: steps.dispatch.outputs.dispatched == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: gh api --method POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes
