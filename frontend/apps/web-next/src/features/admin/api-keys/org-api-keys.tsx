@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Plus, RefreshCw, Settings } from "lucide-react";
+import { MoreHorizontal, Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -47,10 +47,14 @@ import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
 import { NotificationPolicyDialog } from "./notification-policy-dialog";
+import { ApiKeyPolicyDialog } from "./policy-panel";
+import { ApiKeyUsageDialog } from "./usage-dialog";
 
 type ApiKey = Schema<"ApiKeyV2">;
 type ApiKeyState = Schema<"ApiKeyState">;
 type ApiKeyPermission = Schema<"ApiKeyPermission">;
+type ApiKeyScopeType = Schema<"ApiKeyScopeType">;
+type ApiKeyType = Schema<"ApiKeyType">;
 
 const STATES: ApiKeyState[] = ["active", "suspended", "revoked", "expired"];
 const STATE_VARIANT: Record<ApiKeyState, "default" | "secondary" | "destructive" | "outline"> = {
@@ -187,6 +191,7 @@ function KeyActions({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showRevoke, setShowRevoke] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin-api-keys"] });
 
   const rotate = useMutation({
@@ -236,7 +241,7 @@ function KeyActions({
     onError: (error) => toastApiError(error, t)
   });
 
-  if (apiKey.state === "revoked" || apiKey.state === "expired") return null;
+  const canModify = apiKey.state === "active" || apiKey.state === "suspended";
 
   return (
     <>
@@ -247,6 +252,9 @@ function KeyActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setShowUsage(true)}>
+            {t("api_keys_admin_tab_usage")}
+          </DropdownMenuItem>
           {apiKey.state === "active" && (
             <>
               <DropdownMenuItem onSelect={() => rotate.mutate()}>
@@ -262,9 +270,11 @@ function KeyActions({
               {t("api_keys_action_reactivate")}
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem variant="destructive" onSelect={() => setShowRevoke(true)}>
-            {t("api_keys_action_revoke")}
-          </DropdownMenuItem>
+          {canModify && (
+            <DropdownMenuItem variant="destructive" onSelect={() => setShowRevoke(true)}>
+              {t("api_keys_action_revoke")}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       <ConfirmDialogControlled
@@ -276,6 +286,7 @@ function KeyActions({
         pending={revoke.isPending}
         onConfirm={() => revoke.mutate()}
       />
+      <ApiKeyUsageDialog apiKey={apiKey} open={showUsage} onOpenChange={setShowUsage} />
     </>
   );
 }
@@ -283,16 +294,27 @@ function KeyActions({
 export function OrgApiKeysPage() {
   const t = useTranslations();
   const [state, setState] = useState<ApiKeyState>("active");
+  const [scopeType, setScopeType] = useState<ApiKeyScopeType | "all">("all");
+  const [keyType, setKeyType] = useState<ApiKeyType | "all">("all");
   const [secret, setSecret] = useState<string | null>(null);
   const [showPolicy, setShowPolicy] = useState(false);
+  const [showConstraintPolicy, setShowConstraintPolicy] = useState(false);
 
   const { items, hasNextPage, hasPreviousPage, nextPage, previousPage, isPending } =
     usePaginatedQuery<ApiKey>({
-      queryKey: ["admin-api-keys", state],
+      queryKey: ["admin-api-keys", state, scopeType, keyType],
       fetchPage: ({ cursor, limit }) =>
         unwrap(
           browserApi.GET("/api/v1/admin/api-keys", {
-            params: { query: { state, cursor, limit } }
+            params: {
+              query: {
+                state,
+                cursor,
+                limit,
+                scope_type: scopeType === "all" ? undefined : scopeType,
+                key_type: keyType === "all" ? undefined : keyType
+              }
+            }
           })
         )
     });
@@ -300,22 +322,58 @@ export function OrgApiKeysPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <PageHeader title={t("api_keys")}>
+        <Button variant="outline" onClick={() => setShowConstraintPolicy(true)}>
+          <ShieldCheck className="size-4" /> {t("api_keys_admin_tenant_policy")}
+        </Button>
         <Button variant="outline" onClick={() => setShowPolicy(true)}>
           <Settings className="size-4" /> {t("notification_policy")}
         </Button>
         <CreateKeyDialog onCreated={setSecret} />
       </PageHeader>
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
+      <ApiKeyPolicyDialog open={showConstraintPolicy} onOpenChange={setShowConstraintPolicy} />
 
-      <Tabs value={state} onValueChange={(value) => setState(value as ApiKeyState)}>
-        <TabsList>
-          {STATES.map((value) => (
-            <TabsTrigger key={value} value={value}>
-              {t(`api_keys_status_${value}`)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Tabs value={state} onValueChange={(value) => setState(value as ApiKeyState)}>
+          <TabsList>
+            {STATES.map((value) => (
+              <TabsTrigger key={value} value={value}>
+                {t(`api_keys_status_${value}`)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <div className="flex flex-wrap gap-2">
+          <Select
+            value={scopeType}
+            onValueChange={(value) => setScopeType(value as ApiKeyScopeType | "all")}
+          >
+            <SelectTrigger className="w-40" aria-label={t("api_keys_admin_label_scope_type")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("api_keys_admin_scope_all")}</SelectItem>
+              <SelectItem value="tenant">{t("api_keys_admin_scope_tenant")}</SelectItem>
+              <SelectItem value="space">{t("api_keys_admin_scope_space")}</SelectItem>
+              <SelectItem value="assistant">{t("api_keys_admin_scope_assistant")}</SelectItem>
+              <SelectItem value="app">{t("api_keys_admin_scope_app")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={keyType}
+            onValueChange={(value) => setKeyType(value as ApiKeyType | "all")}
+          >
+            <SelectTrigger className="w-40" aria-label={t("api_keys_admin_label_key_type")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("api_keys_admin_key_type_all")}</SelectItem>
+              <SelectItem value="pk_">{t("api_keys_admin_key_type_public")}</SelectItem>
+              <SelectItem value="sk_">{t("api_keys_admin_key_type_secret")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
       {!isPending && items.length === 0 ? (
         <EmptyState title={t("api_keys_no_keys")} />
