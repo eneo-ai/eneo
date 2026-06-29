@@ -4,6 +4,7 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type ModelProvider = Schema<"ModelProviderPublic">;
+export type ModelProviderUpdate = Schema<"ModelProviderUpdate">;
 export type TenantCompletionModelCreate = Schema<"TenantCompletionModelCreate">;
 
 /**
@@ -63,6 +64,25 @@ export function createProvider(
 
 export function createCompletionModel(api: EneoClient, body: TenantCompletionModelCreate) {
   return unwrap(api.POST("/api/v1/admin/tenant-models/completion/", { body }));
+}
+
+/** Update a custom model provider (name / active / credentials). */
+export function updateProvider(api: EneoClient, id: string, body: ModelProviderUpdate) {
+  return unwrap(
+    api.PUT("/api/v1/admin/model-providers/{provider_id}/", {
+      params: { path: { provider_id: id } },
+      body
+    })
+  );
+}
+
+/** Delete a custom model provider (backend 400s if models are still attached). */
+export function deleteProvider(api: EneoClient, id: string) {
+  return unwrap(
+    api.DELETE("/api/v1/admin/model-providers/{provider_id}/", {
+      params: { path: { provider_id: id } }
+    })
+  );
 }
 
 /** Credential/config field definitions for a provider type (with fallback). */

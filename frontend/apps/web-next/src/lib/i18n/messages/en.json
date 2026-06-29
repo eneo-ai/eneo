@@ -2104,6 +2104,7 @@
   "endpoint_optional_generic": "Optional — provide if self-hosted or using a custom endpoint",
   "provider": "Provider",
   "provider_name": "Provider Name",
+  "custom_providers": "Custom providers",
   "provider_name_placeholder": "e.g., My Azure Instance",
   "provider_name_hint": "A unique name to identify this provider instance",
   "current_key": "Current key",

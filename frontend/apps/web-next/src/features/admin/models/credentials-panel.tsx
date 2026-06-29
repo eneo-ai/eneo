@@ -32,6 +32,7 @@ import {
   setCredential
 } from "./credentials";
 import { MODELS_KEY } from "./models";
+import { CustomProvidersSection } from "./provider-management";
 
 function SetCredentialDialog({
   provider,
@@ -201,6 +202,7 @@ export function CredentialsPanel() {
           />
         ))}
       </div>
+      <CustomProvidersSection />
     </div>
   );
 }

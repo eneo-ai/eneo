@@ -2138,6 +2138,7 @@
   "endpoint_optional_generic": "Valfritt — ange om självhostad eller med anpassad endpoint",
   "provider": "Leverantör",
   "provider_name": "Leverantörsnamn",
+  "custom_providers": "Egna leverantörer",
   "provider_name_placeholder": "t.ex. Min Azure-instans",
   "provider_name_hint": "Ett unikt namn för att identifiera denna leverantörsinstans",
   "current_key": "Nuvarande nyckel",
