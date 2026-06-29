@@ -13,7 +13,15 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -39,6 +47,7 @@ export function ExportDialog({
 }) {
   const t = useTranslations();
   const [jobId, setJobId] = useState<string | null>(null);
+  const [format, setFormat] = useState<"csv" | "json" | "jsonl">("csv");
 
   const start = useMutation({
     mutationFn: () =>
@@ -47,7 +56,8 @@ export function ExportDialog({
           body: {
             from_date: filters.from_date || undefined,
             to_date: filters.to_date || undefined,
-            action: filters.actions[0] ?? undefined
+            action: filters.actions[0] ?? undefined,
+            format
           }
         })
       ),
@@ -95,7 +105,7 @@ export function ExportDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("audit_export_csv")}</DialogTitle>
+          <DialogTitle>{t("export")}</DialogTitle>
           <DialogDescription>{t("audit_logs_description")}</DialogDescription>
         </DialogHeader>
 
@@ -111,7 +121,25 @@ export function ExportDialog({
             </p>
           </div>
         ) : (
-          <p className="text-muted-foreground text-sm">{t("audit_export_hint")}</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-muted-foreground text-sm">{t("audit_export_hint")}</p>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="audit-export-format">{t("audit_export_format")}</Label>
+              <Select
+                value={format}
+                onValueChange={(value) => setFormat(value as "csv" | "json" | "jsonl")}
+              >
+                <SelectTrigger id="audit-export-format" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="csv">CSV</SelectItem>
+                  <SelectItem value="json">JSON</SelectItem>
+                  <SelectItem value="jsonl">JSONL</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         )}
 
         <DialogFooter>
@@ -140,7 +168,7 @@ export function ExportDialog({
                 {t("cancel")}
               </Button>
               <Button disabled={start.isPending} onClick={() => start.mutate()}>
-                {t("audit_export_csv")}
+                {t("export")}
               </Button>
             </>
           )}
