@@ -17,6 +17,29 @@
 
 name: eneo-e2e
 
+x-e2e-backend-environment: &e2e-backend-environment
+  POSTGRES_HOST: e2e-db
+  POSTGRES_DB: eneo_test
+  REDIS_HOST: e2e-redis
+  PYTHONDONTWRITEBYTECODE: "1"
+  # No encryption -> seeded provider credentials are read as plaintext (no
+  # real keys involved). Requires tenant credentials disabled.
+  ENCRYPTION_KEY: ""
+  TENANT_CREDENTIALS_ENABLED: "false"
+  # Hard guarantee: no real outbound model calls from the test stack.
+  OPENAI_API_KEY: test-openai-key
+  ANTHROPIC_API_KEY: test-anthropic-key
+  AZURE_API_KEY: test-azure-key
+  MISTRAL_API_KEY: test-mistral-key
+  # Deterministic identity for the seeded login user.
+  DEFAULT_TENANT_NAME: E2ETenant
+  DEFAULT_USER_EMAIL: e2e@example.com
+  DEFAULT_USER_PASSWORD: E2ePassword1!
+
+x-e2e-backend-volumes: &e2e-backend-volumes
+  - .:/workspace
+  - backend_venv:/workspace/backend/.venv:ro
+
 services:
   e2e-db:
     image: pgvector/pgvector:pg13
@@ -70,24 +93,7 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
-    environment:
-      POSTGRES_HOST: e2e-db
-      POSTGRES_DB: eneo_test
-      REDIS_HOST: e2e-redis
-      PYTHONDONTWRITEBYTECODE: "1"
-      # No encryption → seeded provider credentials are read as plaintext (no
-      # real keys involved). Requires tenant credentials disabled.
-      ENCRYPTION_KEY: ""
-      TENANT_CREDENTIALS_ENABLED: "false"
-      # Hard guarantee: no real outbound model calls from the test stack.
-      OPENAI_API_KEY: test-openai-key
-      ANTHROPIC_API_KEY: test-anthropic-key
-      AZURE_API_KEY: test-azure-key
-      MISTRAL_API_KEY: test-mistral-key
-      # Deterministic identity for the seeded login user.
-      DEFAULT_TENANT_NAME: E2ETenant
-      DEFAULT_USER_EMAIL: e2e@example.com
-      DEFAULT_USER_PASSWORD: E2ePassword1!
+    environment: *e2e-backend-environment
     command:
       - bash
       - -lc
@@ -102,9 +108,7 @@ services:
           --bind 0.0.0.0:8000
     ports:
       - "8124:8000"
-    volumes:
-      - .:/workspace
-      - backend_venv:/workspace/backend/.venv:ro
+    volumes: *e2e-backend-volumes
     networks: [e2e]
     healthcheck:
       test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8000"]
@@ -112,6 +116,50 @@ services:
       timeout: 3s
       retries: 40
       start_period: 60s
+
+  celery-worker-flows:
+    image: eneo_devcontainer-eneo
+    user: root
+    working_dir: /workspace/backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_CELERY_WORKER: "true"
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        export PATH="/workspace/backend/.venv/bin:$$PATH"
+        apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg fontconfig fonts-dejavu-core libharfbuzz-subset0 libmagic1 libpango-1.0-0 libpangoft2-1.0-0 >/dev/null
+        exec ./run.sh
+    volumes: *e2e-backend-volumes
+    networks: [e2e]
+
+  celery-beat-flows:
+    image: eneo_devcontainer-eneo
+    working_dir: /workspace/backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_CELERY_BEAT: "true"
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        export PATH="/workspace/backend/.venv/bin:$$PATH"
+        exec ./run.sh
+    volumes: *e2e-backend-volumes
+    networks: [e2e]
 
 networks:
   e2e:

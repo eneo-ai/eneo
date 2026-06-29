@@ -11,6 +11,45 @@
 
 name: eneo-e2e
 
+x-e2e-backend-environment: &e2e-backend-environment
+  # Connections to the isolated services.
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_HOST: e2e-db
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: eneo_test
+  REDIS_HOST: e2e-redis
+  REDIS_PORT: "6379"
+  # No encryption -> seeded provider credentials are plaintext (no real keys).
+  ENCRYPTION_KEY: ""
+  TENANT_CREDENTIALS_ENABLED: "false"
+  OPENAI_API_KEY: test-openai-key
+  ANTHROPIC_API_KEY: test-anthropic-key
+  AZURE_API_KEY: test-azure-key
+  MISTRAL_API_KEY: test-mistral-key
+  # App settings (mirror the CI env). JWT_SECRET must match the frontend.
+  API_PREFIX: /api/v1
+  API_KEY_LENGTH: "64"
+  API_KEY_HEADER_NAME: X-API-Key
+  JWT_AUDIENCE: test
+  JWT_ISSUER: test
+  JWT_EXPIRY_TIME: "3600"
+  JWT_ALGORITHM: HS256
+  JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
+  JWT_TOKEN_PREFIX: Bearer
+  URL_SIGNING_KEY: test_key
+  UPLOAD_FILE_TO_SESSION_MAX_SIZE: "10485760"
+  UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: "10485760"
+  UPLOAD_MAX_FILE_SIZE: "10485760"
+  TRANSCRIPTION_MAX_FILE_SIZE: "10485760"
+  MAX_IN_QUESTION: "1"
+  # Seeded login identity. init_db only seeds when ALL five are set.
+  DEFAULT_TENANT_NAME: E2ETenant
+  DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"
+  DEFAULT_USER_NAME: E2EUser
+  DEFAULT_USER_EMAIL: e2e@example.com
+  DEFAULT_USER_PASSWORD: E2ePassword1!
+
 services:
   e2e-db:
     image: pgvector/pgvector:pg13
@@ -52,6 +91,7 @@ services:
       retries: 40
 
   e2e-backend:
+    image: eneo-e2e-backend
     build:
       context: ./backend
     working_dir: /app
@@ -62,44 +102,7 @@ services:
         condition: service_healthy
       e2e-mock-model:
         condition: service_healthy
-    environment:
-      # Connections to the isolated services.
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_HOST: e2e-db
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: eneo_test
-      REDIS_HOST: e2e-redis
-      REDIS_PORT: "6379"
-      # No encryption → seeded provider credentials are plaintext (no real keys).
-      ENCRYPTION_KEY: ""
-      TENANT_CREDENTIALS_ENABLED: "false"
-      OPENAI_API_KEY: test-openai-key
-      ANTHROPIC_API_KEY: test-anthropic-key
-      AZURE_API_KEY: test-azure-key
-      MISTRAL_API_KEY: test-mistral-key
-      # App settings (mirror the CI env). JWT_SECRET must match the frontend.
-      API_PREFIX: /api/v1
-      API_KEY_LENGTH: "64"
-      API_KEY_HEADER_NAME: X-API-Key
-      JWT_AUDIENCE: test
-      JWT_ISSUER: test
-      JWT_EXPIRY_TIME: "3600"
-      JWT_ALGORITHM: HS256
-      JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
-      JWT_TOKEN_PREFIX: Bearer
-      URL_SIGNING_KEY: test_key
-      UPLOAD_FILE_TO_SESSION_MAX_SIZE: "10485760"
-      UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: "10485760"
-      UPLOAD_MAX_FILE_SIZE: "10485760"
-      TRANSCRIPTION_MAX_FILE_SIZE: "10485760"
-      MAX_IN_QUESTION: "1"
-      # Seeded login identity. init_db only seeds when ALL five are set.
-      DEFAULT_TENANT_NAME: E2ETenant
-      DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"
-      DEFAULT_USER_NAME: E2EUser
-      DEFAULT_USER_EMAIL: e2e@example.com
-      DEFAULT_USER_PASSWORD: E2ePassword1!
+    environment: *e2e-backend-environment
     command:
       # Non-login shell + explicit venv on PATH: a login shell (-l) sources
       # /etc/profile, which resets PATH and drops /app/.venv/bin.
@@ -128,6 +131,26 @@ services:
       timeout: 3s
       retries: 50
       start_period: 60s
+
+  celery-worker-flows:
+    image: eneo-e2e-backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_CELERY_WORKER: "true"
+    networks: [e2e]
+
+  celery-beat-flows:
+    image: eneo-e2e-backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_CELERY_BEAT: "true"
+    networks: [e2e]
 
 networks:
   e2e:
